@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<robot
+  name="box_description">
+    <link
+    name="box">
+    <inertial>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <mass
+        value="1.0" />
+      <inertia
+        ixx="0.01"
+        ixy="0.001"
+        ixz="0.001"
+        iyy="0.01"
+        iyz="0.001"
+        izz="0.01" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>  
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="p1">
+  </link>
+  <joint name="joint_p1_fixed" type="fixed">
+    <origin xyz="0.05 0.05 -0.05" rpy="0.0 0.0 0.0"/>
+    <parent link="box"/>
+    <child link="p1"/>
+  </joint>
+  <link name="p2">
+  </link>
+  <joint name="joint_p2_fixed" type="fixed">
+    <origin xyz="0.05 -0.05 -0.05" rpy="0.0 0.0 0.0"/>
+    <parent link="box"/>
+    <child link="p2"/>
+  </joint>
+  <link name="p3">
+  </link>
+  <joint name="joint_p3_fixed" type="fixed">
+    <origin xyz="-0.05 0.05 -0.05" rpy="0.0 0.0 0.0"/>
+    <parent link="box"/>
+    <child link="p3"/>
+  </joint>
+  <link name="p4">
+  </link>
+  <joint name="joint_p4_fixed" type="fixed">
+    <origin xyz="-0.05 -0.05 -0.05" rpy="0.0 0.0 0.0"/>
+    <parent link="box"/>
+    <child link="p4"/>
+  </joint>
+</robot>
