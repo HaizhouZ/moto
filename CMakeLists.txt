@@ -12,7 +12,7 @@ include_directories(
     ${EIGEN3_INCLUDE_DIR}
     include
 )
-add_executable(manbo main.cpp test.cpp)
+add_executable(manbo main.cpp test.cpp src/expression_base.cpp)
 add_compile_definitions(EIGEN_USE_BLAS)
 add_compile_options(-march=native )
 target_link_libraries(manbo PUBLIC 

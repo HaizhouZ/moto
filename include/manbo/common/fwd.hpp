@@ -8,7 +8,12 @@
 namespace manbo {
 typedef float scalar_t;
 typedef Eigen::Vector<scalar_t, -1> vector;
+typedef const Eigen::Vector<scalar_t, -1> const_vector;
 typedef Eigen::Matrix<scalar_t, -1, -1> matrix;
+
+using mapped_vector = Eigen::Map<vector>;
+using mapped_const_vector = Eigen::Map<const_vector>;
+using mapped_matrix = Eigen::Map<matrix>;
 }  // namespace manbo
 
 #endif /*__FWD_*/

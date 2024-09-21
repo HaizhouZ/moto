@@ -2,66 +2,51 @@
 #define __EXPRESSION_BASE__
 
 #include <manbo/common/fwd.hpp>
+#include <manbo/core/enums.hpp>
+#include <memory>
 
 namespace manbo {
-enum class approxType {
+enum class approx_type {
     zero = 0,
     first,
     second
 };
-enum class sparsity {
-    dense,
-    diag,
-    single,
-};
-struct sparsity_info {
-    std::vector<sparsity> type_;
-    std::vector<double[4]> pos_;
-};
+/**
+ * @brief enum class of field types
+ *
+ */
 
-struct exprBase {
-   protected:
-    approxType approxType_ = approxType::zero;
-    const size_t dim_;
-    const std::string& name_;
+struct expr_base {
+   private:
+    static size_t max_uid;
 
    public:
-    inline approxType type() {
-        return approxType_;
-    }
-    inline const std::string& name() {
-        return name_;
-    }
-    inline size_t dim() {
-        return dim_;
-    }
-    exprBase(const std::string& name, size_t dim)
-        : name_(name), dim_(dim) {}
-};
-struct firstApprox : public exprBase {
-    firstApprox(const std::string& name, size_t dim)
-        : exprBase(name, dim) { approxType_ = approxType::first; }
+    const size_t dim_;
+    const std::string& name_;
+    const size_t uid_;
+    const field_type field_;
 
-    /**
-     * @brief compute jacobian of the approximation w.r.t. x
-     *
-     * @param x stacked variables
-     * @param jac stacked jacobian
-     */
-    virtual void compute_jacobian(Eigen::Ref<vector> x, Eigen::Ref<matrix> jac) {
+    expr_base(const std::string& name, size_t dim, field_type field)
+        : name_(name), dim_(dim), uid_(max_uid++), field_(field) {
     }
+    auto from(scalar_t* ptr) { return mapped_vector(ptr, dim_); }
+
+    auto from(const scalar_t* ptr) { return mapped_const_vector(ptr, dim_); }
+
+    virtual ~expr_base() = default;
 };
-struct secondApprox : public firstApprox {
-    secondApprox(const std::string& name, size_t dim)
-        : firstApprox(name, dim) { approxType_ = approxType::second; }
-    virtual void compute_hessian(Eigen::Ref<vector> x) {
+typedef std::shared_ptr<expr_base> expr_ptr_t;
+
+struct symbolic : public expr_base {
+    static constexpr size_t sym_num = size_t(field_type::p);
+    approx_type type() = delete;
+    symbolic(const std::string& name, size_t dim, field_type type)
+        : expr_base(name, dim, type) {
+        assert(size_t(type) <= sym_num);
     }
-};
-//////////////////////
-struct exprData {
-    
 };
 
+typedef std::shared_ptr<symbolic> sym_ptr_t;
 }  // namespace manbo
 
 #endif /*__EXPRESSION_BASE_*/
