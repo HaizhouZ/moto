@@ -11,21 +11,20 @@ namespace manbo {
  * @brief problem formulation of an OCP stage
  *
  */
-struct problem_t {
+struct problem {
+    static size_t max_uid;
+    const size_t uid_ = 0;
     // std::map<field_type, std::map<size_t, expr_ptr_t>> expr_;
-    std::vector<expr_ptr_t> expr_[field_type::num_field];
+    std::vector<expr_ptr_t> expr_[field::num];
     std::map<size_t, std::pair<size_t, size_t>> idx_;
-    size_t dim_[field_type::num_field] = {0};
+    size_t dim_[field::num] = {0};
+
+    problem()
+        : uid_(max_uid++) {}
 
     const scalar_t* get_data_ptr(const scalar_t* data, expr_ptr_t expr) {
         return data + get_expr_idx(expr).first;
     }
-
-    // void extract_from_matrix(Eigen::Ref<matrix> data,
-    //                          expr_ptr_t expr,
-    //                          Eigen::Ref<matrix> out) {
-    //     out = data.middleRows(get_expr_idx(expr).first, expr->dim_);
-    // }
 
     /**
      * @brief add expr to problem formulation
@@ -58,6 +57,8 @@ struct problem_t {
         }
     }
 };
+
+def_ptr(problem);
 }  // namespace manbo
 
 #endif /*__PROBLEM_FORMULATION_*/

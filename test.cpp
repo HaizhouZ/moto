@@ -4,9 +4,9 @@
 #include <functional>
 #include <iostream>
 void nice() {
-    auto q = std::make_shared<manbo::symbolic>("q", 3, manbo::field_type::x);
+    auto q = std::make_shared<manbo::sym>("q", 3, manbo::field_type::x);
     auto a = manbo::foot_kin_constr("left", q);
     std::cout << magic_enum::enum_name(static_cast<manbo::multivariate*>(&a)->approx_level());
-    auto b = manbo::problem_t();
+    auto b = manbo::problem();
     // std::bind(&manbo::firstApprox::compute_jacobian, &a, std::placeholders::_1, std::placeholders::_2);
 }

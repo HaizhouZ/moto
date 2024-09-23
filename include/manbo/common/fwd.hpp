@@ -3,7 +3,6 @@
 
 #include <Eigen/Core>
 #include <fmt/core.h>
-#include <magic_enum.hpp>
 
 namespace manbo {
 typedef float scalar_t;
