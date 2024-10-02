@@ -1,1 +1,3 @@
-ATRI: A Tailored Robust Implementation of Trajectory Optimization for Rapid Task and Motion Planning.
+<p align="center">
+  <img src="asset/logo.svg" alt="logo"/>
+</p>
