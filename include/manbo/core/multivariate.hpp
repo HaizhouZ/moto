@@ -1,11 +1,11 @@
 #ifndef __MULTIVARIATE__
 #define __MULTIVARIATE__
 
-#include <manbo/core/expression_base.hpp>
-#include <manbo/core/data_types.hpp>
+#include <atri/core/expression_base.hpp>
+#include <atri/core/data_types.hpp>
 #include <functional>
 
-namespace manbo {
+namespace atri {
 
 class multivariate : public expr {
    protected:
@@ -47,6 +47,6 @@ class multivariate : public expr {
     std::map<size_t, size_t> in_idx_;
 };
 def_ptr(multivariate);
-}  // namespace manbo
+}  // namespace atri
 
 #endif /*__group_eval_*/

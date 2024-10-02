@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5.0)
-project(manbo VERSION 0.1.0 LANGUAGES C CXX)
+project(atri VERSION 0.1.0 LANGUAGES C CXX)
 
 find_package(Eigen3 REQUIRED)
 find_package(OpenBLAS REQUIRED)
@@ -12,10 +12,10 @@ include_directories(
     ${EIGEN3_INCLUDE_DIR}
     include
 )
-add_executable(manbo main.cpp test.cpp src/expression_base.cpp)
+add_executable(atri main.cpp test.cpp src/expression_base.cpp)
 add_compile_definitions(EIGEN_USE_BLAS)
 add_compile_options(-march=native )
-target_link_libraries(manbo PUBLIC 
+target_link_libraries(atri PUBLIC 
     OpenBLAS::OpenBLAS 
     magic_enum::magic_enum
     fmt::fmt)

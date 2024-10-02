@@ -1,6 +1,6 @@
-#include <manbo/core/expression_base.hpp>
-#include <manbo/ocp/problem_formulation.hpp>
-namespace manbo {
+#include <atri/core/expression_base.hpp>
+#include <atri/ocp/problem_formulation.hpp>
+namespace atri {
 size_t expr::max_uid = 0;
 size_t problem::max_uid = 0;
-}  // namespace manbo
+}  // namespace atri

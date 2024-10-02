@@ -1,11 +1,11 @@
 #ifndef __EXPRESSION_BASE__
 #define __EXPRESSION_BASE__
 
-#include <manbo/common/fwd.hpp>
-#include <manbo/core/enums.hpp>
+#include <atri/common/fwd.hpp>
+#include <atri/core/enums.hpp>
 #include <memory>
 
-namespace manbo {
+namespace atri {
 enum class approx_type {
     zero = 0,
     first,
@@ -49,6 +49,6 @@ struct sym : public expr {
 };
 
 def_ptr(sym);
-}  // namespace manbo
+}  // namespace atri
 
 #endif /*__EXPRESSION_BASE_*/

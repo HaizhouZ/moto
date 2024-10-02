@@ -8,10 +8,10 @@
 #include <stack>
 #include <array>
 
-#include <manbo/ocp/problem_formulation.hpp>
-#include <manbo/core/approximation.hpp>
+#include <atri/ocp/problem_formulation.hpp>
+#include <atri/core/approximation.hpp>
 
-namespace manbo {
+namespace atri {
 /**
  * @brief for loop shortcut for funcs (dyn,cost,constr...)
  *
@@ -127,6 +127,6 @@ class shooting_node {
     mem_mgr::stacked_approx_ptr approx_;
     primal_data_ptr_t primal_data_;
 };
-}  // namespace manbo
+}  // namespace atri
 
 #endif /*__NODE_*/

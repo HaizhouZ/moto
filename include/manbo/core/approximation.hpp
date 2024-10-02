@@ -1,10 +1,10 @@
 #ifndef __APPROXIMATION__
 #define __APPROXIMATION__
 
-#include <manbo/core/sparsity.hpp>
-#include <manbo/core/multivariate.hpp>
+#include <atri/core/sparsity.hpp>
+#include <atri/core/multivariate.hpp>
 
-namespace manbo {
+namespace atri {
 struct semi_sparse_matrix {
     sparsity_info sp_;
 
@@ -67,6 +67,6 @@ struct second_approx : public first_approx {
     virtual void compute_hessian(Eigen::Ref<vector> x) {
     }
 };
-}  // namespace manbo
+}  // namespace atri
 
 #endif /*__APPROXIMATION_*/

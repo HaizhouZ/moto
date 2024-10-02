@@ -3,7 +3,7 @@
 
 #include <magic_enum.hpp>
 
-namespace manbo {
+namespace atri {
 namespace __details {
 namespace field {
 enum type : size_t {
@@ -24,6 +24,6 @@ constexpr size_t num_func = num - num_sym;
 namespace field = __details::field;
 typedef field::type field_type;
 
-}  // namespace manbo
+}  // namespace atri
 
 #endif /*__ENUMS_*/

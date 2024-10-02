@@ -4,9 +4,9 @@
 #include <vector>
 #include <map>
 
-#include <manbo/core/expression_base.hpp>
+#include <atri/core/expression_base.hpp>
 
-namespace manbo {
+namespace atri {
 /**
  * @brief problem formulation of an OCP stage
  *
@@ -59,6 +59,6 @@ struct problem {
 };
 
 def_ptr(problem);
-}  // namespace manbo
+}  // namespace atri
 
 #endif /*__PROBLEM_FORMULATION_*/

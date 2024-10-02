@@ -1,10 +1,10 @@
 #ifndef __OCP_DATA_TYPES__
 #define __OCP_DATA_TYPES__
-#include <manbo/core/expression_base.hpp>
+#include <atri/core/expression_base.hpp>
 #include <array>
 
-namespace manbo {
+namespace atri {
 typedef std::array<scalar_t*, field::num_sym> primal_data_ptr_t;
-}  // namespace manbo
+}  // namespace atri
 
 #endif /*__OCP_CHAIN_*/

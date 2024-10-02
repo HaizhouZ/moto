@@ -1,3 +1,1 @@
-<center><img src=asset/logo.svg></center>
-
-Minimal Agile Nonlinear Bilevel Optimization (manbo)
+ATRI: A Tailored Robust Implementation of Trajectory Optimization for Rapid Task and Motion Planning.

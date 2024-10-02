@@ -1,10 +1,10 @@
 #ifndef __CASADI_SUPPORT__
 #define __CASADI_SUPPORT__
 
-namespace manbo {
+namespace atri {
 class casadi_interface {
     
 };
-}  // namespace manbo
+}  // namespace atri
 
 #endif /*__CASADI_SUPPORT_*/

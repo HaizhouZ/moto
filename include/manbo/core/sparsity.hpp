@@ -1,9 +1,9 @@
 #ifndef __OPT_SPARSITY__
 #define __OPT_SPARSITY__
 
-#include <manbo/common/fwd.hpp>
+#include <atri/common/fwd.hpp>
 
-namespace manbo {
+namespace atri {
 enum class sparsity {
     dense,
     diag,
@@ -14,6 +14,6 @@ struct sparsity_info {
     std::vector<double[4]> pos_;
     bool empty() { return type_.empty(); }
 };
-}  // namespace manbo
+}  // namespace atri
 
 #endif /*__SPARSITY_*/

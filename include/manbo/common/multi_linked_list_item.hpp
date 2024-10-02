@@ -4,7 +4,7 @@
 #include <vector>
 #include <memory>
 
-namespace manbo {
+namespace atri {
 template <typename value_type>
 class multi_linked_list_item {
     using value_ptr = std::shared_ptr<value_type>;
@@ -31,6 +31,6 @@ class multi_linked_list_item {
     }
 };
 
-}  // namespace manbo
+}  // namespace atri
 
 #endif /*__MULTI_LINKED_LIST_ITEM_*/
