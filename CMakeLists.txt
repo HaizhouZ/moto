@@ -13,9 +13,9 @@ include_directories(
     include
 )
 add_executable(atri main.cpp test.cpp src/expression_base.cpp)
-add_compile_definitions(EIGEN_USE_BLAS)
+# add_compile_definitions(EIGEN_USE_BLAS)
 add_compile_options(-march=native )
 target_link_libraries(atri PUBLIC 
-    OpenBLAS::OpenBLAS 
+    # OpenBLAS::OpenBLAS 
     magic_enum::magic_enum
     fmt::fmt)
