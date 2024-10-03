@@ -1,9 +1,7 @@
 #ifndef __EXPRESSION_BASE__
 #define __EXPRESSION_BASE__
 
-#include <atri/common/fwd.hpp>
-#include <atri/core/enums.hpp>
-#include <memory>
+#include <atri/core/fields.hpp>
 
 namespace atri {
 enum class approx_type {

@@ -6,14 +6,16 @@ find_package(OpenBLAS REQUIRED)
 find_package(magic_enum REQUIRED)
 find_package(fmt REQUIRED)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 
 include_directories(
     ${EIGEN3_INCLUDE_DIR}
     include
 )
 add_compile_options(-march=native)
-add_executable(atri main.cpp test.cpp src/expression_base.cpp)
+add_executable(atri main.cpp test.cpp 
+    src/expression_base.cpp
+    src/shooting_node.cpp)
 # add_compile_definitions(EIGEN_USE_BLAS)
 target_link_libraries(atri PUBLIC 
     # OpenBLAS::OpenBLAS 

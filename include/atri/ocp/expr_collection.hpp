@@ -1,17 +1,17 @@
-#ifndef __PROBLEM_FORMULATION__
-#define __PROBLEM_FORMULATION__
+#ifndef __expr_collection_FORMULATION__
+#define __expr_collection_FORMULATION__
 
 #include <vector>
 #include <unordered_map>
 
-#include <atri/core/expression_base.hpp>
+#include <atri/core/expr.hpp>
 
 namespace atri {
 /**
- * @brief problem formulation of an OCP stage
+ * @brief expr_collection formulation of an OCP stage
  *
  */
-struct problem {
+struct expr_collection {
     static size_t max_uid;
     const size_t uid_ = 0;
     // std::map<field_type, std::map<size_t, expr_ptr_t>> expr_;
@@ -19,7 +19,7 @@ struct problem {
     std::unordered_map<size_t, std::pair<size_t, size_t>> idx_;
     size_t dim_[field::num] = {0};
 
-    problem()
+    expr_collection()
         : uid_(max_uid++) {}
 
     const scalar_t* get_data_ptr(const scalar_t* data, expr_ptr_t expr) {
@@ -27,7 +27,7 @@ struct problem {
     }
 
     /**
-     * @brief add expr to problem formulation
+     * @brief add expr to expr_collection formulation
      *
      * @param expr expression to be added
      * @param field in [field_type]
@@ -58,7 +58,7 @@ struct problem {
     }
 };
 
-def_ptr(problem);
+def_ptr(expr_collection);
 }  // namespace atri
 
-#endif /*__PROBLEM_FORMULATION_*/
+#endif /*__expr_collection_FORMULATION_*/

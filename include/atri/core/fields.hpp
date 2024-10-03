@@ -1,7 +1,7 @@
-#ifndef __OPT_ENUMS__
-#define __OPT_ENUMS__
+#ifndef __OPT_FIELDS__
+#define __OPT_FIELDS__
 
-#include <magic_enum.hpp>
+#include <atri/core/fwd.hpp>
 
 namespace atri {
 namespace __details {
@@ -26,4 +26,4 @@ typedef field::type field_type;
 
 }  // namespace atri
 
-#endif /*__ENUMS_*/
+#endif /*__FIELDS_*/

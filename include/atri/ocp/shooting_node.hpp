@@ -1,35 +1,16 @@
 #ifndef __SHOOTING_NODE__
 #define __SHOOTING_NODE__
 
-#include <vector>
-#include <memory>
-#include <map>
 #include <mutex>
 #include <stack>
 #include <array>
 
-#include <atri/ocp/problem_formulation.hpp>
 #include <atri/ocp/approximation.hpp>
 
 namespace atri {
-/**
- * @brief for loop shortcut for funcs (dyn,cost,constr...)
- *
- * @param problem
- * @param callback [idx of field, idx of expr, pointer to expr]
- */
-inline void for_loop_funcs(problem_ptr_t problem,
-                           std::function<void(size_t, size_t, approximation_ptr_t)> callback) {
-    for (size_t i = 0, field = field_type::dyn; field != field::num; i++, field++) {
-        auto& _exprs = problem->expr_[field];
-        if (_exprs.empty()) {
-            for (size_t j = 0; j < _exprs.size(); j++) {
-                auto _c = std::static_pointer_cast<approximation>(_exprs[j]);
-                callback(i, j, _c);
-            }
-        }
-    }
-}
+
+typedef std::array<std::vector<approx_data_ptr_t>, field::num_func> stacked_approx_ptr;
+
 class mem_mgr {
    private:
     template <typename data_type>
@@ -38,53 +19,29 @@ class mem_mgr {
         std::stack<data_type> data_;
     };
 
+    mem_mgr() = default;
+
    public:
-    typedef std::array<std::vector<approx_data_ptr_t>, field::num_func> stacked_approx_ptr;
-
-    template <typename class_type>
-    void add_problem(problem_ptr_t problem) {
-        problems_[problem->uid_] = problem;
-        approx_[problem->uid_] = lck_data<approx_data>();
+    static auto& get() {
+        static mem_mgr s_;
+        return s_;
     }
 
-    static auto make_approx_data(problem_ptr_t problem) {
-        stacked_approx_ptr d;
-        for_loop_funcs(problem, [&d](size_t i, size_t j, approximation_ptr_t _c) {
-            d[i].push_back(_c->make_approx_data());
-        });
-        return d;
+    void add_expr_collection(expr_collection_ptr_t expr_collection) {
+        expr_collections_[expr_collection->uid_] = expr_collection;
+        approx_[expr_collection->uid_] = std::make_shared<lck_data<stacked_approx_ptr>>();
     }
 
-    void create_data_batch(problem_ptr_t problem, size_t N) {
-        auto& _approx = approx_[problem->uid_];
-        std::lock_guard _lock(_approx.mtx_);
-        for (size_t i = 0; i < N; i++)
-            _approx.data_.push(make_approx_data(problem));
-    }
+    static stacked_approx_ptr make_approx_data(expr_collection_ptr_t expr_collection);
 
-    stacked_approx_ptr acquire_approx(problem_ptr_t problem) {
-        auto& _approx = approx_[problem->uid_];
-        std::lock_guard _lock(_approx.mtx_);
-        if (!_approx.data_.empty()) {
-            auto p = std::move(_approx.data_.top());
-            _approx.data_.pop();
-            return p;
-        } else {
-            return make_approx_data(problem);
-        }
-    }
-
-    void release_approx(problem_ptr_t problem, stacked_approx_ptr&& data) {
-        auto& _approx = approx_[problem->uid_];
-        std::lock_guard _lock(_approx.mtx_);
-        _approx.data_.push(std::move(data));
-    }
+    void create_data_batch(expr_collection_ptr_t expr_collection, size_t N);
+    stacked_approx_ptr acquire_approx(expr_collection_ptr_t expr_collection);
+    void release_approx(expr_collection_ptr_t expr_collection, stacked_approx_ptr&& data);
 
    private:
-    std::map<size_t, problem_ptr_t> problems_;
-    std::map<size_t, lck_data<stacked_approx_ptr>> approx_;
+    std::unordered_map<size_t, expr_collection_ptr_t> expr_collections_;
+    std::unordered_map<size_t, std::shared_ptr<lck_data<stacked_approx_ptr>>> approx_;
 };
-def_ptr(mem_mgr);
 
 /**
  * @brief shooting node in an OCP
@@ -92,35 +49,22 @@ def_ptr(mem_mgr);
  */
 class shooting_node {
    public:
-    shooting_node(problem_ptr_t formulation, mem_mgr_ptr_t mem)
-        : problem_(formulation), mem_(mem) {
-        approx_ = std::move(mem_->acquire_approx(problem_));
+    shooting_node(expr_collection_ptr_t formulation)
+        : expr_collection_(formulation), mem_(mem_mgr::get()) {
+        approx_ = std::move(mem_.acquire_approx(expr_collection_));
     }
 
     ~shooting_node() {
-        mem_->release_approx(problem_, std::move(approx_));
+        mem_.release_approx(expr_collection_, std::move(approx_));
     }
 
-    void swap(shooting_node& p) {
-        problem_.swap(p.problem_);
-        mem_.swap(p.mem_);
-        approx_.swap(p.approx_);
-        primal_data_.swap(p.primal_data_);
-    }
-
-    void collect_data() {
-        auto collect_callback = [this](size_t field, size_t j, approximation_ptr_t _c) {
-            if (_c->approx_level() == approx_type::first) {
-                _c->evaluate<true, true>(problem_, primal_data_, approx_[field][j]);
-            }
-        };
-        for_loop_funcs(problem_, collect_callback);
-    }
+    void swap(shooting_node& p);
+    void collect_data();
 
    private:
-    problem_ptr_t problem_;
-    mem_mgr_ptr_t mem_;
-    mem_mgr::stacked_approx_ptr approx_;
+    expr_collection_ptr_t expr_collection_;
+    mem_mgr& mem_;
+    stacked_approx_ptr approx_;
     primal_data_ptr_t primal_data_;
 };
 }  // namespace atri

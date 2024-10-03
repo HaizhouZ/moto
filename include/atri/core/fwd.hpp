@@ -2,7 +2,9 @@
 #define __FRLQR_FWD__
 
 #include <Eigen/Core>
+#include <memory>
 #include <fmt/core.h>
+#include <magic_enum.hpp>
 
 namespace atri {
 typedef float scalar_t;

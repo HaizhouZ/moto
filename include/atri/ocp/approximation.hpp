@@ -2,8 +2,7 @@
 #define __APPROXIMATION__
 
 #include <atri/core/sparsity.hpp>
-#include <atri/core/data_types.hpp>
-#include <atri/ocp/problem_formulation.hpp>
+#include <atri/ocp/expr_collection.hpp>
 
 namespace atri {
 typedef std::array<scalar_t*, field::num_sym> primal_data_ptr_t;
@@ -36,7 +35,7 @@ class approximation : public expr {  /// todo: change to differentiable for prec
     virtual approx_data_ptr_t make_approx_data() = 0;
 
     template <bool eval_val, bool eval_jac = false, bool eval_hess = false>
-    void evaluate(std::shared_ptr<problem> problem,
+    void evaluate(std::shared_ptr<expr_collection> expr_collection,
                   primal_data_ptr_t raw,
                   approx_data_ptr_t data) {
         // if (eval_jac)
@@ -52,8 +51,8 @@ class approximation : public expr {  /// todo: change to differentiable for prec
         throw std::runtime_error(fmt::format(
             "hessian not implemented for approximation {}", name_));
     };
-    inline auto get_primal(problem_ptr_t problem, primal_data_ptr_t raw, sym_ptr_t sym) {
-        return sym->from(problem->get_data_ptr(raw[sym->field_], sym));
+    inline auto get_primal(expr_collection_ptr_t expr_collection, primal_data_ptr_t raw, sym_ptr_t sym) {
+        return sym->from(expr_collection->get_data_ptr(raw[sym->field_], sym));
     }
 };
 def_ptr(approximation);
