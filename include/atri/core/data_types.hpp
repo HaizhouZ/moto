@@ -4,7 +4,6 @@
 #include <array>
 
 namespace atri {
-typedef std::array<scalar_t*, field::num_sym> primal_data_ptr_t;
 }  // namespace atri
 
 #endif /*__OCP_CHAIN_*/

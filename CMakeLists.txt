@@ -12,10 +12,11 @@ include_directories(
     ${EIGEN3_INCLUDE_DIR}
     include
 )
+add_compile_options(-march=native)
 add_executable(atri main.cpp test.cpp src/expression_base.cpp)
 # add_compile_definitions(EIGEN_USE_BLAS)
-add_compile_options(-march=native )
 target_link_libraries(atri PUBLIC 
     # OpenBLAS::OpenBLAS 
+    "/usr/local/blasfeo/lib/libblasfeo.a"
     magic_enum::magic_enum
     fmt::fmt)

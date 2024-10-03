@@ -2,7 +2,7 @@
 #define __PROBLEM_FORMULATION__
 
 #include <vector>
-#include <map>
+#include <unordered_map>
 
 #include <atri/core/expression_base.hpp>
 
@@ -16,7 +16,7 @@ struct problem {
     const size_t uid_ = 0;
     // std::map<field_type, std::map<size_t, expr_ptr_t>> expr_;
     std::vector<expr_ptr_t> expr_[field::num];
-    std::map<size_t, std::pair<size_t, size_t>> idx_;
+    std::unordered_map<size_t, std::pair<size_t, size_t>> idx_;
     size_t dim_[field::num] = {0};
 
     problem()

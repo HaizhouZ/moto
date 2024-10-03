@@ -9,7 +9,7 @@
 #include <array>
 
 #include <atri/ocp/problem_formulation.hpp>
-#include <atri/core/approximation.hpp>
+#include <atri/ocp/approximation.hpp>
 
 namespace atri {
 /**
@@ -19,12 +19,12 @@ namespace atri {
  * @param callback [idx of field, idx of expr, pointer to expr]
  */
 inline void for_loop_funcs(problem_ptr_t problem,
-                           std::function<void(size_t, size_t, multivariate_ptr_t)> callback) {
+                           std::function<void(size_t, size_t, approximation_ptr_t)> callback) {
     for (size_t i = 0, field = field_type::dyn; field != field::num; i++, field++) {
         auto& _exprs = problem->expr_[field];
         if (_exprs.empty()) {
             for (size_t j = 0; j < _exprs.size(); j++) {
-                auto _c = std::static_pointer_cast<multivariate>(_exprs[j]);
+                auto _c = std::static_pointer_cast<approximation>(_exprs[j]);
                 callback(i, j, _c);
             }
         }
@@ -49,11 +49,8 @@ class mem_mgr {
 
     static auto make_approx_data(problem_ptr_t problem) {
         stacked_approx_ptr d;
-        for_loop_funcs(problem, [&d](size_t i, size_t j, multivariate_ptr_t _c) {
-            if (_c->approx_level() == approx_type::first) {
-                auto c = std::static_pointer_cast<first_approx>(_c);
-                d[i].push_back(c->make_approx_data());
-            }
+        for_loop_funcs(problem, [&d](size_t i, size_t j, approximation_ptr_t _c) {
+            d[i].push_back(_c->make_approx_data());
         });
         return d;
     }
@@ -112,10 +109,9 @@ class shooting_node {
     }
 
     void collect_data() {
-        auto collect_callback = [this](size_t field, size_t j, multivariate_ptr_t _c) {
+        auto collect_callback = [this](size_t field, size_t j, approximation_ptr_t _c) {
             if (_c->approx_level() == approx_type::first) {
-                auto c = std::static_pointer_cast<first_approx>(_c);
-                c->evaluate(problem_, primal_data_, approx_[field][j]);
+                _c->evaluate<true, true>(problem_, primal_data_, approx_[field][j]);
             }
         };
         for_loop_funcs(problem_, collect_callback);
