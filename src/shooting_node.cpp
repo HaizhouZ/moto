@@ -61,12 +61,11 @@ void shooting_node::swap(shooting_node& p) {
 }
 
 void shooting_node::collect_data() {
-    auto collect_callback = [this](size_t field, size_t j, approximation_ptr_t _c) {
+    for_loop_funcs(expr_collection_, [this](size_t field, size_t j, approximation_ptr_t _c) {
         if (_c->approx_level() == approx_type::first) {
             _c->evaluate<true, true>(expr_collection_, primal_data_, approx_[field][j]);
         }
-    };
-    for_loop_funcs(expr_collection_, collect_callback);
+    });
 }
 
 }  // namespace atri
