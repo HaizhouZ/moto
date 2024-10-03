@@ -63,7 +63,6 @@ struct diag_mat final : public sparse_mat {
     diag_mat(size_t x0, size_t y0, size_t nrow, size_t ncol)
         : sparse_mat(x0, y0, nrow, ncol, sparsity::diag) {}
     void diag_inner_product(Eigen::Ref<vector> dense_diag, Eigen::Ref<matrix> out) override {
-        // this way vectorization should still work
         out.diagonal().noalias() += m_.cwiseProduct(dense_diag.cwiseProduct(m_));
     };
     // A.T @ rhs
@@ -83,7 +82,6 @@ struct eye_mat final : public sparse_mat {
     eye_mat(size_t x0, size_t y0, size_t nrow, size_t ncol)
         : sparse_mat(x0, y0, nrow, ncol, sparsity::eye) {}
     void diag_inner_product(Eigen::Ref<vector> dense_diag, Eigen::Ref<matrix> out) override {
-        // this way vectorization should still work
         out.diagonal() += dense_diag;
     };
     // A.T @ rhs
@@ -104,7 +102,6 @@ struct scalar_eye_mat final : public sparse_mat {
     scalar_eye_mat(size_t x0, size_t y0, size_t nrow, size_t ncol)
         : sparse_mat(x0, y0, nrow, ncol, sparsity::scalar_eye) {}
     void diag_inner_product(Eigen::Ref<vector> dense_diag, Eigen::Ref<matrix> out) override {
-        // this way vectorization should still work
         out.diagonal() += m_(0) * dense_diag;
     };
     // A.T @ rhs
