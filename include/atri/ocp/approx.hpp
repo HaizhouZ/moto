@@ -37,21 +37,26 @@ struct approx_data {
     std::vector<matrix> jac_;  // jacobian
     std::vector<matrix> hess_; // hessian
     // std::vector<sparse_mat> jac_;
-    approx_data(primal_data raw, std::vector<sym_ptr_t> in_args, size_t dim) {
+    approx_data(primal_data raw, std::vector<sym_ptr_t> in_args, size_t dim,
+                bool jac = false, bool hess = false) {
         for (size_t i = 0; i < in_args.size(); i++) {
             auto arg = in_args[i];
             in_args_.push_back(raw.get(arg));
         }
         v_.resize(dim);
-        jac_.resize(in_args_.size());
-        for (size_t i = 0; i < in_args_.size(); i++) {
-            jac_[i].resize(dim, in_args[i]->dim_);
-        }
-        if (dim == 1) {
-            hess_.resize(in_args_.size());
+        if (jac) {
+            jac_.resize(in_args_.size());
             for (size_t i = 0; i < in_args_.size(); i++) {
-                hess_[i].resize(in_args[i]->dim_, in_args[i]->dim_);
-                // todo : cross hessian
+                jac_[i].resize(dim, in_args[i]->dim_);
+            }
+        }
+        if (hess) {
+            if (dim == 1) {
+                hess_.resize(in_args_.size());
+                for (size_t i = 0; i < in_args_.size(); i++) {
+                    hess_[i].resize(in_args[i]->dim_, in_args[i]->dim_);
+                    // todo : cross hessian
+                }
             }
         }
     }
@@ -92,7 +97,9 @@ class approx : public expr { /// todo: change to differentiable for precompute
      */
     approx_data_ptr_t make_data(primal_data &raw) {
         auto data = approx_data_ptr_t();
-        data.reset(new approx_data(raw, in_args_, dim_));
+        data.reset(new approx_data(raw, in_args_, dim_,
+                                   order_ >= approx_order::first,
+                                   order_ >= approx_order::second));
         for (size_t i = 0; i < in_args_.size(); i++) {
             auto arg = in_args_[i];
         }
