@@ -9,13 +9,12 @@ typedef std::array<scalar_t *, field::num_sym> primal_data_ptr_t;
 
 struct approx_data {
     std::vector<const scalar_t *> in_ptr_;
-    vector v_; // value
-    std::vector<sparse_mat> jac_;
-    approx_data(size_t n_in) : in_ptr_(n_in, 0) {}
+    vector v_;    // value
+    matrix jac_;  // jacobian
+    matrix hess_; // hessian
+    // std::vector<sparse_mat> jac_;
+    approx_data(size_t n_in) : in_ptr_(n_in, nullptr) {}
     approx_data(const approx_data &rhs) = delete; // disable this
-
-    virtual void AtDA() {} // A^T @ D @ A
-    virtual void AtDv() {} // A^T @ D @ v
 };
 
 def_ptr(approx_data);
