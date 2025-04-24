@@ -10,8 +10,9 @@ namespace atri {
 typedef float scalar_t;
 typedef Eigen::Vector<scalar_t, -1> vector;
 typedef const Eigen::Vector<scalar_t, -1> const_vector;
-typedef Eigen::Matrix<scalar_t, -1, -1> matrix_colmajor;
-typedef Eigen::Matrix<scalar_t, -1, -1, Eigen::AutoAlign | Eigen::RowMajor> matrix;
+typedef Eigen::Matrix<scalar_t, -1, -1> matrix_cm; // column major
+typedef Eigen::Matrix<scalar_t, -1, -1, Eigen::AutoAlign | Eigen::RowMajor> matrix_rm; // row major
+typedef matrix_cm matrix;
 
 using mapped_vector = Eigen::Map<vector>;
 using mapped_const_vector = Eigen::Map<const_vector>;

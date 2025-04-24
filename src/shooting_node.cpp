@@ -4,68 +4,71 @@ namespace atri {
 /**
  * @brief for loop shortcut for funcs (dyn,cost,constr...)
  *
- * @param expr_collection
+ * @param expr_sets
  * @param callback [idx of field, idx of expr, pointer to expr]
  */
 template <typename callback_type>
-inline void for_loop_funcs(expr_collection_ptr_t expr_collection,
-                           callback_type&& callback) {
-    for (size_t i = 0, field = field_type::dyn; field != field::num; i++, field++) {
-        auto& _exprs = expr_collection->expr_[field];
+inline void for_funcs(expr_sets_ptr_t expr_sets, callback_type &&callback) {
+    // loop with two variables due to the difference between idx and field no.
+    for (size_t field = field::type::dyn; field != field::num; field++) {
+        auto &_exprs = expr_sets->expr_[field];
         if (_exprs.empty()) {
-            for (size_t j = 0; j < _exprs.size(); j++) {
-                auto _c = std::static_pointer_cast<approximation>(_exprs[j]);
-                callback(i, j, _c);
+            for (size_t idx_expr = 0; idx_expr < _exprs.size(); idx_expr++) {
+                auto _c = std::static_pointer_cast<approx>(_exprs[idx_expr]);
+                callback(field, idx_expr, _c);
             }
         }
     }
 }
 
-stacked_approx_ptr mem_mgr::make_approx_data(expr_collection_ptr_t expr_collection) {
-    stacked_approx_ptr d;
-    for_loop_funcs(expr_collection, [&d](size_t i, size_t j, approximation_ptr_t _c) {
-        d[i].push_back(_c->make_approx_data());
+approx_sets_data data_mgr::make_data(expr_sets_ptr_t expr_sets) {
+    approx_sets_data d;
+    for_funcs(expr_sets, [&d](size_t field, size_t idx_expr, approx_ptr_t _c) {
+        d[field].push_back(_c->make_data());
     });
     return d;
 }
 
-void mem_mgr::create_data_batch(expr_collection_ptr_t expr_collection, size_t N) {
-    auto& _approx = *approx_[expr_collection->uid_];
+void data_mgr::create_data_batch(expr_sets_ptr_t expr_sets, size_t N) {
+    auto &_approx = *approx_[expr_sets->uid_];
     std::lock_guard _lock(_approx.mtx_);
     for (size_t i = 0; i < N; i++)
-        _approx.data_.push(make_approx_data(expr_collection));
+        _approx.data_.push(make_data(expr_sets));
 }
 
-stacked_approx_ptr mem_mgr::acquire_approx(expr_collection_ptr_t expr_collection) {
-    auto& _approx = *approx_[expr_collection->uid_];
+approx_sets_data data_mgr::acquire_data(expr_sets_ptr_t expr_sets) {
+    auto &_approx = *approx_[expr_sets->uid_];
     std::lock_guard _lock(_approx.mtx_);
     if (!_approx.data_.empty()) {
         auto p = std::move(_approx.data_.top());
         _approx.data_.pop();
         return p;
     } else {
-        return make_approx_data(expr_collection);
+        return make_data(expr_sets);
     }
 }
 
-void mem_mgr::release_approx(expr_collection_ptr_t expr_collection, stacked_approx_ptr&& data) {
-    auto& _approx = *approx_[expr_collection->uid_];
+void data_mgr::release_data(expr_sets_ptr_t expr_sets,
+                            approx_sets_data &&data) {
+    auto &_approx = *approx_[expr_sets->uid_];
     std::lock_guard _lock(_approx.mtx_);
     _approx.data_.push(std::move(data));
 }
 
-void shooting_node::swap(shooting_node& p) {
-    expr_collection_.swap(p.expr_collection_);
+void shooting_node::swap(shooting_node &p) {
+    expr_sets_.swap(p.expr_sets_);
     approx_.swap(p.approx_);
     primal_data_.swap(p.primal_data_);
 }
 
 void shooting_node::collect_data() {
-    for_loop_funcs(expr_collection_, [this](size_t field, size_t j, approximation_ptr_t _c) {
-        if (_c->approx_level() == approx_type::first) {
-            _c->evaluate<true, true>(expr_collection_, primal_data_, approx_[field][j]);
-        }
-    });
+    for_funcs(expr_sets_,
+              [this](size_t field, size_t idx_expr, approx_ptr_t _c) {
+                  if (_c->order() == approx_order::first) {
+                      _c->evaluate<true, true>(expr_sets_, primal_data_,
+                                               approx_[field][idx_expr]);
+                  }
+              });
 }
 
-}  // namespace atri
+} // namespace atri

@@ -1,72 +1,92 @@
 #ifndef __SHOOTING_NODE__
 #define __SHOOTING_NODE__
 
+#include <array>
 #include <mutex>
 #include <stack>
-#include <array>
 
-#include <atri/ocp/approximation.hpp>
+#include <atri/ocp/approx.hpp>
 
 namespace atri {
 
-typedef std::array<std::vector<approx_data_ptr_t>, field::num_func> stacked_approx_ptr;
+/**
+ * @brief stacked approximation data
+ * @note each std::vector contains the approximation data of functions in one
+ * field
+ */
+class approx_sets_data {
+    std::array<std::vector<approx_data_ptr_t>, field::num_func> ptr_;
 
-class mem_mgr {
-   private:
-    template <typename data_type>
-    struct lck_data {
+  public:
+    std::vector<approx_data_ptr_t> &operator[](size_t idx) {
+        return ptr_[idx - field::num_sym];
+    }
+    const std::vector<approx_data_ptr_t> &operator[](size_t idx) const {
+        return ptr_[idx - field::num_sym];
+    }
+    void swap(approx_sets_data &rhs) { ptr_.swap(rhs.ptr_); }
+};
+
+class data_mgr {
+  private:
+    template <typename data_type> struct guarded_data_pool {
         std::mutex mtx_;
         std::stack<data_type> data_;
     };
 
-    mem_mgr() = default;
+    using approx_data_pool = guarded_data_pool<approx_sets_data>;
 
-   public:
-    static auto& get() {
-        static mem_mgr s_;
+    data_mgr() = default;
+
+  public:
+    static auto &get() {
+        static data_mgr s_;
         return s_;
     }
 
-    void add_expr_collection(expr_collection_ptr_t expr_collection) {
-        expr_collections_[expr_collection->uid_] = expr_collection;
-        approx_[expr_collection->uid_] = std::make_shared<lck_data<stacked_approx_ptr>>();
+    void add_expr_sets(expr_sets_ptr_t exprs) {
+        expr_sets_[exprs->uid_] = exprs;
+        approx_[exprs->uid_] = std::make_shared<approx_data_pool>();
     }
 
-    static stacked_approx_ptr make_approx_data(expr_collection_ptr_t expr_collection);
+    // make data for a expression set
+    static approx_sets_data make_data(expr_sets_ptr_t expr_sets);
 
-    void create_data_batch(expr_collection_ptr_t expr_collection, size_t N);
-    stacked_approx_ptr acquire_approx(expr_collection_ptr_t expr_collection);
-    void release_approx(expr_collection_ptr_t expr_collection, stacked_approx_ptr&& data);
+    void create_data_batch(expr_sets_ptr_t expr_sets, size_t N);
+    approx_sets_data acquire_data(expr_sets_ptr_t expr_sets);
+    void release_data(expr_sets_ptr_t expr_sets, approx_sets_data &&data);
 
-   private:
-    std::unordered_map<size_t, expr_collection_ptr_t> expr_collections_;
-    std::unordered_map<size_t, std::shared_ptr<lck_data<stacked_approx_ptr>>> approx_;
+  private:
+    // the following are indexed by the uid of expr_sets
+    // each is a problem formulation, with its own data
+    
+    std::unordered_map<size_t, expr_sets_ptr_t> expr_sets_;
+    std::unordered_map<size_t, std::shared_ptr<approx_data_pool>> approx_;
 };
 
 /**
  * @brief shooting node in an OCP
- * @todo data collection/serialization/deserialization should be finished in this node!
+ * @todo data collection/serialization/deserialization should be finished in
+ * this node!
  */
 class shooting_node {
-   public:
-    shooting_node(expr_collection_ptr_t formulation)
-        : expr_collection_(formulation), mem_(mem_mgr::get()) {
-        approx_ = std::move(mem_.acquire_approx(expr_collection_));
+  public:
+    shooting_node(expr_sets_ptr_t formulation)
+        : expr_sets_(formulation), mem_(data_mgr::get()) {
+        approx_ = std::move(mem_.acquire_data(expr_sets_));
     }
 
-    ~shooting_node() {
-        mem_.release_approx(expr_collection_, std::move(approx_));
-    }
+    ~shooting_node() { mem_.release_data(expr_sets_, std::move(approx_)); }
 
-    void swap(shooting_node& p);
+    void swap(shooting_node &p);
     void collect_data();
 
-   private:
-    expr_collection_ptr_t expr_collection_;
-    mem_mgr& mem_;
-    stacked_approx_ptr approx_;
+  private:
+    expr_sets_ptr_t expr_sets_;
+    data_mgr &mem_;
+    approx_sets_data approx_;
     primal_data_ptr_t primal_data_;
 };
-}  // namespace atri
+} // namespace atri
 
 #endif /*__NODE_*/

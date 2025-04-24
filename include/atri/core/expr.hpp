@@ -4,7 +4,7 @@
 #include <atri/core/fields.hpp>
 
 namespace atri {
-enum class approx_type {
+enum class approx_order {
     zero = 0,
     first,
     second
@@ -16,7 +16,7 @@ enum class approx_type {
  * @brief enum class of field types
  *
  */
-struct expr {
+class expr {
    private:
     static size_t max_uid;
 
@@ -24,14 +24,14 @@ struct expr {
     const size_t dim_;
     const std::string& name_;
     const size_t uid_;
-    const field_type field_;
+    const field::type field_;
 
-    expr(const std::string& name, size_t dim, field_type field)
+    expr(const std::string& name, size_t dim, field::type field)
         : name_(name), dim_(dim), uid_(max_uid++), field_(field) {
     }
-    auto from(scalar_t* ptr) { return mapped_vector(ptr, dim_); }
+    auto make_vec(scalar_t* ptr) { return mapped_vector(ptr, dim_); }
 
-    auto from(const scalar_t* ptr) { return mapped_const_vector(ptr, dim_); }
+    auto make_vec(const scalar_t* ptr) { return mapped_const_vector(ptr, dim_); }
 
     virtual ~expr() = default;
 };
@@ -39,10 +39,10 @@ struct expr {
 def_ptr(expr);
 
 struct sym : public expr {
-    approx_type type() = delete;
-    sym(const std::string& name, size_t dim, field_type type)
+    approx_order type() = delete;
+    sym(const std::string& name, size_t dim, field::type type)
         : expr(name, dim, type) {
-        assert(size_t(type) <= sym_num);
+        assert(size_t(type) <= field::num_sym);
     }
 };
 
