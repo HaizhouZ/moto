@@ -50,6 +50,14 @@ class approx : public expr { /// todo: change to differentiable for precompute
         throw std::runtime_error(
             fmt::format("hessian not implemented for approx {}", name_));
     };
+    /**
+     * @brief Get the primal values of an symbolic expression from raw data
+     * @note deserialization
+     * @param exprs the expression set containing the sym
+     * @param raw the raw data of expr set
+     * @param sym the symbol
+     * @return mapped vector
+     */
     inline auto get_primal(expr_sets_ptr_t exprs, primal_data_ptr_t raw,
                            sym_ptr_t sym) {
         return sym->make_vec(exprs->get_data_ptr(raw[sym->field_], sym));

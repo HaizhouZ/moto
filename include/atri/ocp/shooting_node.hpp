@@ -87,7 +87,7 @@ class shooting_node {
     ~shooting_node() { mem_.release_data(expr_sets_, std::move(approx_)); }
 
     void swap(shooting_node &p);
-    void collect_data();
+    void update_approximation();
 
   private:
     expr_sets_ptr_t expr_sets_;

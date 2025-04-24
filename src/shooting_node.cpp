@@ -61,7 +61,7 @@ void shooting_node::swap(shooting_node &p) {
     primal_data_.swap(p.primal_data_);
 }
 
-void shooting_node::collect_data() {
+void shooting_node::update_approximation() {
     for_funcs(expr_sets_,
               [this](size_t field, size_t idx_expr, approx_ptr_t _c) {
                   if (_c->order() == approx_order::first) {
