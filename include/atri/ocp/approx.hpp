@@ -1,7 +1,8 @@
 #ifndef __approx__
 #define __approx__
 
-#include <atri/core/sparsity.hpp>
+// #include <atri/core/sparsity.hpp>
+#include <atri/core/fwd.hpp>
 #include <atri/ocp/expr_sets.hpp>
 
 namespace atri {
