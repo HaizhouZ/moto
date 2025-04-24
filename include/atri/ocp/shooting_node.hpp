@@ -27,6 +27,9 @@ class approx_sets_data {
     void swap(approx_sets_data &rhs) { ptr_.swap(rhs.ptr_); }
 };
 
+/**
+ * @brief data management. this class controls the data access and allocation.
+ */
 class data_mgr {
   private:
     template <typename data_type> struct guarded_data_pool {
@@ -39,27 +42,32 @@ class data_mgr {
     data_mgr() = default;
 
   public:
+    // singleton
     static auto &get() {
         static data_mgr s_;
         return s_;
     }
+    // make data for a expression set
+    static approx_sets_data make_data(expr_sets_ptr_t expr_sets);
 
     void add_expr_sets(expr_sets_ptr_t exprs) {
         expr_sets_[exprs->uid_] = exprs;
         approx_[exprs->uid_] = std::make_shared<approx_data_pool>();
     }
-
-    // make data for a expression set
-    static approx_sets_data make_data(expr_sets_ptr_t expr_sets);
-
+    /**
+     * @brief create a batch of data
+     * 
+     * @param expr_sets the set of expression to be computed
+     * @param N number of data instances. can be seen as stages
+     */
     void create_data_batch(expr_sets_ptr_t expr_sets, size_t N);
+    // thread-safe data access
     approx_sets_data acquire_data(expr_sets_ptr_t expr_sets);
     void release_data(expr_sets_ptr_t expr_sets, approx_sets_data &&data);
 
   private:
     // the following are indexed by the uid of expr_sets
     // each is a problem formulation, with its own data
-    
     std::unordered_map<size_t, expr_sets_ptr_t> expr_sets_;
     std::unordered_map<size_t, std::shared_ptr<approx_data_pool>> approx_;
 };
