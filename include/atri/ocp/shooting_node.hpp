@@ -27,17 +27,29 @@ class approx_sets_data {
     void swap(approx_sets_data &rhs) { ptr_.swap(rhs.ptr_); }
 };
 
+struct node_data {
+    approx_sets_data approx_;
+    primal_data primal_data_;
+    void swap(node_data &rhs) {
+        approx_.swap(rhs.approx_);
+        primal_data_.swap(rhs.primal_data_);
+    }
+    node_data(approx_sets_data &&a, primal_data &&p)
+        : approx_(std::move(a)), primal_data_(std::move(p)) {}
+};
+
+def_ptr(node_data);
+
 /**
  * @brief data management. this class controls the data access and allocation.
  */
 class data_mgr {
   private:
-    template <typename data_type> struct guarded_data_pool {
+    struct data_pool : std::stack<node_data_ptr_t> {
         std::mutex mtx_;
-        std::stack<data_type> data_;
     };
 
-    using approx_data_pool = guarded_data_pool<approx_sets_data>;
+    def_ptr(data_pool);
 
     data_mgr() = default;
 
@@ -48,28 +60,28 @@ class data_mgr {
         return s_;
     }
     // make data for a expression set
-    static approx_sets_data make_data(expr_sets_ptr_t expr_sets);
+    static node_data_ptr_t make_data(expr_sets_ptr_t expr_sets);
 
     void add_expr_sets(expr_sets_ptr_t exprs) {
         expr_sets_[exprs->uid_] = exprs;
-        approx_[exprs->uid_] = std::make_shared<approx_data_pool>();
+        data_[exprs->uid_] = std::make_shared<data_pool>();
     }
     /**
      * @brief create a batch of data
-     * 
+     *
      * @param expr_sets the set of expression to be computed
      * @param N number of data instances. can be seen as stages
      */
     void create_data_batch(expr_sets_ptr_t expr_sets, size_t N);
     // thread-safe data access
-    approx_sets_data acquire_data(expr_sets_ptr_t expr_sets);
-    void release_data(expr_sets_ptr_t expr_sets, approx_sets_data &&data);
+    node_data_ptr_t acquire_data(expr_sets_ptr_t expr_sets);
+    void release_data(expr_sets_ptr_t expr_sets, node_data_ptr_t data);
 
   private:
     // the following are indexed by the uid of expr_sets
     // each is a problem formulation, with its own data
     std::unordered_map<size_t, expr_sets_ptr_t> expr_sets_;
-    std::unordered_map<size_t, std::shared_ptr<approx_data_pool>> approx_;
+    std::unordered_map<size_t, data_pool_ptr_t> data_;
 };
 
 /**
@@ -81,10 +93,10 @@ class shooting_node {
   public:
     shooting_node(expr_sets_ptr_t formulation)
         : expr_sets_(formulation), mem_(data_mgr::get()) {
-        approx_ = std::move(mem_.acquire_data(expr_sets_));
+        data_ = mem_.acquire_data(expr_sets_);
     }
 
-    ~shooting_node() { mem_.release_data(expr_sets_, std::move(approx_)); }
+    ~shooting_node() { mem_.release_data(expr_sets_, data_); }
 
     void swap(shooting_node &p);
     void update_approximation();
@@ -92,8 +104,7 @@ class shooting_node {
   private:
     expr_sets_ptr_t expr_sets_;
     data_mgr &mem_;
-    approx_sets_data approx_;
-    primal_data_ptr_t primal_data_;
+    node_data_ptr_t data_;
 };
 } // namespace atri
 

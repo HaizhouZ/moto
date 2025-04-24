@@ -4,14 +4,14 @@ namespace atri {
 /**
  * @brief for loop shortcut for funcs (dyn,cost,constr...)
  *
- * @param expr_sets
+ * @param exprs
  * @param callback [idx of field, idx of expr, pointer to expr]
  */
 template <typename callback_type>
-inline void for_funcs(expr_sets_ptr_t expr_sets, callback_type &&callback) {
+inline void for_funcs(expr_sets_ptr_t exprs, callback_type &&callback) {
     // loop with two variables due to the difference between idx and field no.
     for (size_t field = field::type::dyn; field != field::num; field++) {
-        auto &_exprs = expr_sets->expr_[field];
+        auto &_exprs = exprs->expr_[field];
         if (_exprs.empty()) {
             for (size_t idx_expr = 0; idx_expr < _exprs.size(); idx_expr++) {
                 auto _c = std::static_pointer_cast<approx>(_exprs[idx_expr]);
@@ -21,52 +21,51 @@ inline void for_funcs(expr_sets_ptr_t expr_sets, callback_type &&callback) {
     }
 }
 
-approx_sets_data data_mgr::make_data(expr_sets_ptr_t expr_sets) {
+node_data_ptr_t data_mgr::make_data(expr_sets_ptr_t exprs) {
     approx_sets_data d;
-    for_funcs(expr_sets, [&d](size_t field, size_t idx_expr, approx_ptr_t _c) {
-        d[field].push_back(_c->make_data());
+    primal_data p(exprs);
+    for_funcs(exprs, [&](size_t field, size_t idx_expr, approx_ptr_t _c) {
+        d[field].push_back(_c->make_data(p));
     });
-    return d;
+    return std::make_shared<node_data>(std::move(d), std::move(p));
 }
 
-void data_mgr::create_data_batch(expr_sets_ptr_t expr_sets, size_t N) {
-    auto &_approx = *approx_[expr_sets->uid_];
-    std::lock_guard _lock(_approx.mtx_);
+void data_mgr::create_data_batch(expr_sets_ptr_t exprs, size_t N) {
+    auto &pool = *data_[exprs->uid_];
+    std::lock_guard _lock(pool.mtx_);
     for (size_t i = 0; i < N; i++)
-        _approx.data_.push(make_data(expr_sets));
+        pool.push(make_data(exprs));
 }
 
-approx_sets_data data_mgr::acquire_data(expr_sets_ptr_t expr_sets) {
-    auto &_approx = *approx_[expr_sets->uid_];
-    std::lock_guard _lock(_approx.mtx_);
-    if (!_approx.data_.empty()) {
-        auto p = std::move(_approx.data_.top());
-        _approx.data_.pop();
+node_data_ptr_t data_mgr::acquire_data(expr_sets_ptr_t exprs) {
+    auto &pool = *data_[exprs->uid_];
+    std::lock_guard _lock(pool.mtx_);
+    if (!pool.empty()) {
+        auto p = std::move(pool.top());
+        pool.pop();
         return p;
     } else {
-        return make_data(expr_sets);
+        return make_data(exprs);
     }
 }
 
-void data_mgr::release_data(expr_sets_ptr_t expr_sets,
-                            approx_sets_data &&data) {
-    auto &_approx = *approx_[expr_sets->uid_];
-    std::lock_guard _lock(_approx.mtx_);
-    _approx.data_.push(std::move(data));
+void data_mgr::release_data(expr_sets_ptr_t exprs, node_data_ptr_t data) {
+    auto &pool = *data_[exprs->uid_];
+    std::lock_guard _lock(pool.mtx_);
+    pool.push(data);
 }
 
 void shooting_node::swap(shooting_node &p) {
     expr_sets_.swap(p.expr_sets_);
-    approx_.swap(p.approx_);
-    primal_data_.swap(p.primal_data_);
+    data_.swap(p.data_);
 }
 
 void shooting_node::update_approximation() {
     for_funcs(expr_sets_,
               [this](size_t field, size_t idx_expr, approx_ptr_t _c) {
                   if (_c->order() == approx_order::first) {
-                      _c->evaluate<true, true>(expr_sets_, primal_data_,
-                                               approx_[field][idx_expr]);
+                      _c->evaluate<true, true>(expr_sets_,
+                                               data_->approx_[field][idx_expr]);
                   }
               });
 }
