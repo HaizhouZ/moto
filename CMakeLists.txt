@@ -13,13 +13,17 @@ include_directories(
     include
 )
 add_compile_options(-march=native)
-add_executable(atri main.cpp test.cpp 
-    src/expression_base.cpp
-    src/shooting_node.cpp
-    src/approx.cpp)
+add_library(atri SHARED 
+            src/expression_base.cpp
+            src/shooting_node.cpp
+            src/approx.cpp)
+add_executable(atri_test main.cpp test.cpp)
 # add_compile_definitions(EIGEN_USE_BLAS)
 target_link_libraries(atri PUBLIC 
     # OpenBLAS::OpenBLAS 
     "/usr/local/blasfeo/lib/libblasfeo.a"
     magic_enum::magic_enum
     fmt::fmt)
+target_link_libraries(atri_test PUBLIC
+    atri
+)
