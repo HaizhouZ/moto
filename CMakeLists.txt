@@ -15,7 +15,8 @@ include_directories(
 add_compile_options(-march=native)
 add_executable(atri main.cpp test.cpp 
     src/expression_base.cpp
-    src/shooting_node.cpp)
+    src/shooting_node.cpp
+    src/approx.cpp)
 # add_compile_definitions(EIGEN_USE_BLAS)
 target_link_libraries(atri PUBLIC 
     # OpenBLAS::OpenBLAS 

@@ -11,22 +11,18 @@ class primal_data {
     expr_sets_ptr_t exprs_;
 
   public:
-    std::array<std::vector<vector>, field::num_sym> value_;
+    primal_data(expr_sets_ptr_t exprs);
+
     auto &get(sym_ptr_t sym) {
         return value_[sym->field_][exprs_->idx_[sym->uid_]];
-    }
-    primal_data(expr_sets_ptr_t exprs) : exprs_(exprs) {
-        for (size_t i = 0; i < field::num_sym; i++) {
-            auto &v = value_[i];
-            for (auto &e : exprs_->expr_[i]) {
-                v.push_back(vector(e->dim_));
-            }
-        }
     }
     void swap(primal_data &rhs) {
         this->exprs_.swap(rhs.exprs_);
         this->value_.swap(rhs.value_);
     }
+
+  public:
+    std::array<std::vector<vector>, field::num_sym> value_;
 };
 
 /////////////////////////////////////////////////////////////////////
@@ -38,28 +34,7 @@ struct approx_data {
     std::vector<matrix> hess_; // hessian
     // std::vector<sparse_mat> jac_;
     approx_data(primal_data raw, std::vector<sym_ptr_t> in_args, size_t dim,
-                bool jac = false, bool hess = false) {
-        for (size_t i = 0; i < in_args.size(); i++) {
-            auto arg = in_args[i];
-            in_args_.push_back(raw.get(arg));
-        }
-        v_.resize(dim);
-        if (jac) {
-            jac_.resize(in_args_.size());
-            for (size_t i = 0; i < in_args_.size(); i++) {
-                jac_[i].resize(dim, in_args[i]->dim_);
-            }
-        }
-        if (hess) {
-            if (dim == 1) {
-                hess_.resize(in_args_.size());
-                for (size_t i = 0; i < in_args_.size(); i++) {
-                    hess_[i].resize(in_args[i]->dim_, in_args[i]->dim_);
-                    // todo : cross hessian
-                }
-            }
-        }
-    }
+                bool jac = false, bool hess = false);
     approx_data(const approx_data &rhs) = delete; // disable this
 };
 
@@ -95,17 +70,7 @@ class approx : public expr { /// todo: change to differentiable for precompute
      * @param raw space shoud have been allocated
      * @return approx_data_ptr_t
      */
-    approx_data_ptr_t make_data(primal_data &raw) {
-        auto data = approx_data_ptr_t();
-        data.reset(new approx_data(raw, in_args_, dim_,
-                                   order_ >= approx_order::first,
-                                   order_ >= approx_order::second));
-        for (size_t i = 0; i < in_args_.size(); i++) {
-            auto arg = in_args_[i];
-        }
-        setup_sparsity(data);
-        return data;
-    }
+    approx_data_ptr_t make_data(primal_data &raw);
 
     /**
      * @brief evaluate the approx
