@@ -61,13 +61,16 @@ void shooting_node::swap(shooting_node &p) {
 }
 
 void shooting_node::update_approximation() {
-    for_funcs(expr_sets_,
-              [this](size_t field, size_t idx_expr, approx_ptr_t _c) {
-                  if (_c->order() == approx_order::first) {
-                      _c->evaluate<true, true>(expr_sets_,
-                                               data_->approx_[field][idx_expr]);
-                  }
-              });
+    for_funcs(
+        expr_sets_, [this](size_t field, size_t idx_expr, approx_ptr_t _c) {
+            if (_c->order() == approx_order::first) {
+                _c->evaluate<false, true>(expr_sets_,
+                                          data_->approx_[field][idx_expr]);
+            } else if (_c->order() == approx_order::second) {
+                _c->evaluate<false, true, true>(expr_sets_,
+                                          data_->approx_[field][idx_expr]);
+            }
+        });
 }
 
 } // namespace atri

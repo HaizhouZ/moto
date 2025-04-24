@@ -11,7 +11,7 @@ primal_data::primal_data(expr_sets_ptr_t exprs) : exprs_(exprs) {
     }
 }
 
-approx_data::approx_data(primal_data raw, std::vector<sym_ptr_t> in_args,
+approx_data::approx_data(primal_data &raw, std::vector<sym_ptr_t> in_args,
                          size_t dim, bool jac, bool hess) {
     for (size_t i = 0; i < in_args.size(); i++) {
         auto arg = in_args[i];

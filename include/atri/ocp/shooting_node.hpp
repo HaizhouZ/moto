@@ -30,10 +30,6 @@ class approx_sets_data {
 struct node_data {
     approx_sets_data approx_;
     primal_data primal_data_;
-    void swap(node_data &rhs) {
-        approx_.swap(rhs.approx_);
-        primal_data_.swap(rhs.primal_data_);
-    }
     node_data(approx_sets_data &&a, primal_data &&p)
         : approx_(std::move(a)), primal_data_(std::move(p)) {}
 };
@@ -100,12 +96,14 @@ class shooting_node {
 
     void swap(shooting_node &p);
     void update_approximation();
+    node_data_ptr_t data_;
 
   private:
     expr_sets_ptr_t expr_sets_;
     data_mgr &mem_;
-    node_data_ptr_t data_;
 };
+
+def_ptr(shooting_node);
 } // namespace atri
 
 #endif /*__NODE_*/

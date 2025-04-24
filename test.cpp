@@ -2,6 +2,7 @@
 #include <atri/ocp/shooting_node.hpp>
 #include <functional>
 #include <iostream>
+#include <atri/solver/cslq.hpp>
 void nice() {
     auto q = std::make_shared<atri::sym>("q", 3, atri::field::type::x);
     auto a = atri::foot_kin_constr("left", q);

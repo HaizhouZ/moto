@@ -16,6 +16,7 @@ add_compile_options(-march=native)
 add_library(atri SHARED 
             src/expression_base.cpp
             src/shooting_node.cpp
+            src/cslq.cpp
             src/approx.cpp)
 add_executable(atri_test main.cpp test.cpp)
 # add_compile_definitions(EIGEN_USE_BLAS)

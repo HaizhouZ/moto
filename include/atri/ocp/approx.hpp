@@ -34,7 +34,7 @@ struct approx_data {
     std::vector<matrix> jac_;  // jacobian
     std::vector<matrix> hess_; // hessian
     // std::vector<sparse_mat> jac_;
-    approx_data(primal_data raw, std::vector<sym_ptr_t> in_args, size_t dim,
+    approx_data(primal_data &raw, std::vector<sym_ptr_t> in_args, size_t dim,
                 bool jac = false, bool hess = false);
     approx_data(const approx_data &rhs) = delete; // disable this
 };
