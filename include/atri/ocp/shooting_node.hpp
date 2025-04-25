@@ -28,8 +28,8 @@ class approx_sets_data {
 };
 
 struct node_data {
-    approx_sets_data approx_;
     primal_data primal_data_;
+    approx_sets_data approx_;
     node_data(approx_sets_data &&a, primal_data &&p)
         : approx_(std::move(a)), primal_data_(std::move(p)) {}
 };

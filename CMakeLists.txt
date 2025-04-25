@@ -17,7 +17,9 @@ add_library(atri SHARED
             src/expression_base.cpp
             src/shooting_node.cpp
             src/cslq.cpp
-            src/approx.cpp)
+            src/approx.cpp
+            src/constr.cpp
+        )
 add_executable(atri_test main.cpp test.cpp)
 # add_compile_definitions(EIGEN_USE_BLAS)
 target_link_libraries(atri PUBLIC 

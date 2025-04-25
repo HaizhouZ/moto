@@ -29,6 +29,7 @@ class primal_data {
 /////////////////////////////////////////////////////////////////////
 
 struct approx_data {
+    // reference bound to the primal data
     std::vector<vector_ref> in_args_;
     vector v_;                 // value
     std::vector<matrix> jac_;  // jacobian
@@ -37,6 +38,12 @@ struct approx_data {
     approx_data(primal_data &raw, std::vector<sym_ptr_t> in_args, size_t dim,
                 bool jac = false, bool hess = false);
     approx_data(const approx_data &rhs) = delete; // disable this
+    approx_data(approx_data &&rhs) {
+		in_args_ = std::move(rhs.in_args_);
+		v_ = std::move(rhs.v_);
+		jac_ = std::move(rhs.jac_);
+		hess_ = std::move(rhs.hess_);
+	}
 };
 
 def_ptr(approx_data);
@@ -71,7 +78,7 @@ class approx : public expr { /// todo: change to differentiable for precompute
      * @param raw space shoud have been allocated
      * @return approx_data_ptr_t
      */
-    approx_data_ptr_t make_data(primal_data &raw);
+    virtual approx_data_ptr_t make_data(primal_data &raw);
 
     /**
      * @brief evaluate the approx
@@ -99,7 +106,7 @@ class foot_kin_constr : public approx {
 
   public:
     foot_kin_constr(const std::string &frame, sym_ptr_t q)
-        : approx(frame, 3, field::type::constr, approx_order::first), q_(q) {
+        : approx(frame, 3, field::type::eq_constr, approx_order::first), q_(q) {
         in_args_.push_back(q_);
     }
 };

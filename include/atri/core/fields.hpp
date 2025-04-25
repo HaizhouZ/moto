@@ -12,7 +12,8 @@ enum type : size_t {
     p,
     dyn,    // dynamic model
     cost,   // "running cost"
-    constr, // "constraints"
+    eq_constr, // "equality constraints"
+    ineq_constr, // "inequality constraints"
 };
 constexpr size_t num_sym = p + 1;
 constexpr size_t num = magic_enum::enum_count<type>();

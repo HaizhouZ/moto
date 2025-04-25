@@ -24,3 +24,6 @@
 2. dynamics gap
 3. CasADi supports
 4. OCP graph
+
+Maybe
+1. memory pool
