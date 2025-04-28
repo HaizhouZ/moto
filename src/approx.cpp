@@ -4,10 +4,11 @@ namespace atri {
 
 primal_data::primal_data(expr_sets_ptr_t exprs) : exprs_(exprs) {
     for (size_t i = 0; i < field::num_sym; i++) {
-        auto &v = value_[i];
-        for (auto &e : exprs_->expr_[i]) {
-            v.push_back(vector(e->dim_));
-        }
+        // auto &v = value_[i];
+        // for (auto &e : exprs_->expr_[i]) {
+        //     v.push_back(vector(e->dim_));
+        // }
+        value_[i].resize(exprs_->dim_[i]);
     }
 }
 

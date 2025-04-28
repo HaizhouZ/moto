@@ -29,6 +29,9 @@ class expr {
     expr(const std::string& name, size_t dim, field::type field)
         : name_(name), dim_(dim), uid_(max_uid++), field_(field) {
     }
+    auto make_vec(scalar_t* ptr) { return mapped_vector(ptr, dim_); }
+
+    auto make_vec(const scalar_t* ptr) { return mapped_const_vector(ptr, dim_); }
 
     virtual ~expr() = default;
 };

@@ -14,23 +14,25 @@ class primal_data {
   public:
     primal_data(expr_sets_ptr_t exprs);
 
-    auto &get(sym_ptr_t sym) {
-        return value_[sym->field_][exprs_->idx_[sym->uid_]];
+    auto get(sym_ptr_t sym) {
+        return sym->make_vec(
+            exprs_->get_data_ptr(value_[sym->field_].data(), sym));
     }
+
     void swap(primal_data &rhs) {
         this->exprs_.swap(rhs.exprs_);
         this->value_.swap(rhs.value_);
     }
 
   public:
-    std::array<std::vector<vector>, field::num_sym> value_;
+    std::array<vector, field::num_sym> value_;
 };
 
 /////////////////////////////////////////////////////////////////////
 
 struct approx_data {
     // reference bound to the primal data
-    std::vector<vector_ref> in_args_;
+    std::vector<mapped_vector> in_args_;
     vector v_;                 // value
     std::vector<matrix> jac_;  // jacobian
     std::vector<matrix> hess_; // hessian
@@ -39,11 +41,11 @@ struct approx_data {
                 bool jac = false, bool hess = false);
     approx_data(const approx_data &rhs) = delete; // disable this
     approx_data(approx_data &&rhs) {
-		in_args_ = std::move(rhs.in_args_);
-		v_ = std::move(rhs.v_);
-		jac_ = std::move(rhs.jac_);
-		hess_ = std::move(rhs.hess_);
-	}
+        in_args_ = std::move(rhs.in_args_);
+        v_ = std::move(rhs.v_);
+        jac_ = std::move(rhs.jac_);
+        hess_ = std::move(rhs.hess_);
+    }
 };
 
 def_ptr(approx_data);
