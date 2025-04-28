@@ -16,7 +16,7 @@ add_compile_options(-march=native)
 add_library(atri SHARED 
             src/expression_base.cpp
             src/shooting_node.cpp
-            src/cslq.cpp
+            src/csqp.cpp
             src/approx.cpp
             src/constr.cpp
         )

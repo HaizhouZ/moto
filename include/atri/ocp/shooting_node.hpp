@@ -27,14 +27,16 @@ class approx_sets_data {
     void swap(approx_sets_data &rhs) { ptr_.swap(rhs.ptr_); }
 };
 
+struct node_data;
+def_ptr(node_data);
+
 struct node_data {
     primal_data primal_data_;
     approx_sets_data approx_;
     node_data(approx_sets_data &&a, primal_data &&p)
         : approx_(std::move(a)), primal_data_(std::move(p)) {}
+    node_data(expr_sets_ptr_t exprs);
 };
-
-def_ptr(node_data);
 
 /**
  * @brief data management. this class controls the data access and allocation.
@@ -44,15 +46,28 @@ class data_mgr {
     struct data_pool : std::stack<node_data_ptr_t> {
         std::mutex mtx_;
     };
+    using data_maker_func = std::function<node_data_ptr_t(expr_sets_ptr_t)>;
 
     def_ptr(data_pool);
 
     data_mgr() = default;
+    data_mgr(data_mgr &) = delete;
+    data_mgr(data_maker_func maker) : maker_(maker) {}
 
   public:
     // singleton
-    static auto &get() {
-        static data_mgr s_;
+    template <typename data_type> static data_mgr &get() {
+        static_assert(std::is_base_of<node_data, data_type>::value,
+                      "data_type must be derived from node_data");
+        static_assert(
+            std::is_constructible<data_type, expr_sets_ptr_t>::value,
+            "data_type must have a constructor that accepts expr_sets_ptr_t");
+
+        data_maker_func maker = [](expr_sets_ptr_t exprs) {
+            return std::static_pointer_cast<node_data>(
+                std::make_shared<data_type>(exprs));
+        };
+        static data_mgr s_(maker);
         return s_;
     }
     // make data for a expression set
@@ -74,6 +89,7 @@ class data_mgr {
     void release_data(expr_sets_ptr_t expr_sets, node_data_ptr_t data);
 
   private:
+    data_maker_func maker_;
     // the following are indexed by the uid of expr_sets
     // each is a problem formulation, with its own data
     std::unordered_map<size_t, expr_sets_ptr_t> expr_sets_;
@@ -87,8 +103,8 @@ class data_mgr {
  */
 class shooting_node {
   public:
-    shooting_node(expr_sets_ptr_t formulation)
-        : expr_sets_(formulation), mem_(data_mgr::get()) {
+    shooting_node(expr_sets_ptr_t formulation, data_mgr &mem)
+        : expr_sets_(formulation), mem_(mem) {
         data_ = mem_.acquire_data(expr_sets_);
     }
 

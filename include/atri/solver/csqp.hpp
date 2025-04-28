@@ -1,5 +1,5 @@
-#ifndef __CLSQ__
-#define __CLSQ__
+#ifndef __CSQP__
+#define __CSQP__
 
 #include <atri/ocp/shooting_node.hpp>
 #include <list>
@@ -31,7 +31,22 @@ class solver_base {
     }
 };
 
+struct value_func_data {};
 
+struct nullspace_riccati_data : public node_data {
+    value_func_data value_func_;
+    nullspace_riccati_data(expr_sets_ptr_t exprs) : node_data(exprs) {}
+};
+
+def_ptr(nullspace_riccati_data);
+
+class nullspace_riccati_solver {
+    data_mgr &mem_;
+
+  public:
+    nullspace_riccati_solver()
+        : mem_(data_mgr::get<nullspace_riccati_data>()) {}
+};
 
 } // namespace atri
 

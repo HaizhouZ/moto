@@ -21,20 +21,17 @@ inline void for_funcs(expr_sets_ptr_t exprs, callback_type &&callback) {
     }
 }
 
-node_data_ptr_t data_mgr::make_data(expr_sets_ptr_t exprs) {
-    approx_sets_data d;
-    primal_data p(exprs);
+node_data::node_data(expr_sets_ptr_t exprs) : primal_data_(exprs) {
     for_funcs(exprs, [&](size_t field, size_t idx_expr, approx_ptr_t _c) {
-        d[field].push_back(_c->make_data(p));
+        approx_[field].push_back(_c->make_data(primal_data_));
     });
-    return std::make_shared<node_data>(std::move(d), std::move(p));
 }
 
 void data_mgr::create_data_batch(expr_sets_ptr_t exprs, size_t N) {
     auto &pool = *data_[exprs->uid_];
     std::lock_guard _lock(pool.mtx_);
     for (size_t i = 0; i < N; i++)
-        pool.push(make_data(exprs));
+        pool.push(maker_(exprs));
 }
 
 node_data_ptr_t data_mgr::acquire_data(expr_sets_ptr_t exprs) {
@@ -45,7 +42,7 @@ node_data_ptr_t data_mgr::acquire_data(expr_sets_ptr_t exprs) {
         pool.pop();
         return p;
     } else {
-        return make_data(exprs);
+        return maker_(exprs);
     }
 }
 
@@ -61,16 +58,16 @@ void shooting_node::swap(shooting_node &p) {
 }
 
 void shooting_node::update_approximation() {
-    for_funcs(
-        expr_sets_, [this](size_t field, size_t idx_expr, approx_ptr_t _c) {
-            if (_c->order() == approx_order::first) {
-                _c->evaluate<false, true>(expr_sets_,
-                                          data_->approx_[field][idx_expr]);
-            } else if (_c->order() == approx_order::second) {
-                _c->evaluate<false, true, true>(expr_sets_,
-                                          data_->approx_[field][idx_expr]);
-            }
-        });
+    for_funcs(expr_sets_, [this](size_t field, size_t idx_expr,
+                                 approx_ptr_t _c) {
+        if (_c->order() == approx_order::first) {
+            _c->evaluate<false, true>(expr_sets_,
+                                      data_->approx_[field][idx_expr]);
+        } else if (_c->order() == approx_order::second) {
+            _c->evaluate<false, true, true>(expr_sets_,
+                                            data_->approx_[field][idx_expr]);
+        }
+    });
 }
 
 } // namespace atri
