@@ -7,24 +7,20 @@
 
 namespace atri {
 
-class primal_data {
-  private:
-    expr_sets_ptr_t exprs_;
-
-  public:
-    primal_data(expr_sets_ptr_t exprs);
-
-    auto get(sym_ptr_t sym) {
-        return sym->make_vec(
-            exprs_->get_data_ptr(value_[sym->field_].data(), sym));
+struct primal_data {
+  primal_data(expr_sets_ptr_t exprs);
+  
+  auto get(sym_ptr_t sym) {
+    return sym->make_vec(
+      exprs_->get_data_ptr(value_[sym->field_].data(), sym));
     }
-
+    
     void swap(primal_data &rhs) {
-        this->exprs_.swap(rhs.exprs_);
-        this->value_.swap(rhs.value_);
+      this->exprs_.swap(rhs.exprs_);
+      this->value_.swap(rhs.value_);
     }
-
-  public:
+    
+    expr_sets_ptr_t exprs_;
     std::array<vector, field::num_sym> value_;
 };
 
@@ -108,7 +104,7 @@ class foot_kin_constr : public approx {
 
   public:
     foot_kin_constr(const std::string &frame, sym_ptr_t q)
-        : approx(frame, 3, field::type::eq_constr, approx_order::first), q_(q) {
+        : approx(frame, 3, field::type::eq_constr_s, approx_order::first), q_(q) {
         in_args_.push_back(q_);
     }
 };

@@ -20,13 +20,13 @@ struct constr : public approx {
     constr(const std::string &name, size_t dim, field::type field,
            approx_order order = approx_order::first)
         : approx(name, dim, field, order) {
-        assert(field == field::dyn || field == field::eq_constr ||
-               field == field::ineq_constr);
-    };
+        assert(field == field::dyn || magic_enum::enum_name(field).find(
+                                          "constr") != std::string::npos);
+    }
     approx_data_ptr_t make_data(primal_data &raw) override {
         return constr_data_ptr_t(
             new constr_data(std::move(*approx::make_data(raw))));
-    };
+    }
 };
 
 } // namespace atri

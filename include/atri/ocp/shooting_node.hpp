@@ -101,8 +101,7 @@ class data_mgr {
  * @todo data collection/serialization/deserialization should be finished in
  * this node!
  */
-class shooting_node {
-  public:
+struct shooting_node {
     shooting_node(expr_sets_ptr_t formulation, data_mgr &mem)
         : expr_sets_(formulation), mem_(mem) {
         data_ = mem_.acquire_data(expr_sets_);
@@ -114,7 +113,6 @@ class shooting_node {
     void update_approximation();
     node_data_ptr_t data_;
 
-  private:
     expr_sets_ptr_t expr_sets_;
     data_mgr &mem_;
 };

@@ -1,6 +1,6 @@
 #include <atri/core/expr.hpp>
 #include <atri/ocp/shooting_node.hpp>
-#include <atri/solver/csqp.hpp>
+#include <atri/solver/ns_sqp.hpp>
 #include <functional>
 #include <iostream>
 void nice() {
