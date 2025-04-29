@@ -7,19 +7,12 @@
 #include <list>
 
 namespace atri {
-struct value_func_data {
-    row_vector Q_x, Q_u;
-    matrix Q_xx, Q_ux, Q_uu;
-    row_vector Q_y;
-    matrix Q_yy;
-
-    value_func_data(size_t nx, size_t nu)
-        : Q_x(nx), Q_u(nu), Q_xx(nx, nx), Q_ux(nu, nx), Q_uu(nu, nu), Q_y(nx),
-          Q_yy(nx, nx) {}
-};
 
 struct nullspace_riccati_data : public node_data {
-    value_func_data value_func_;
+    // value function
+    row_vector_ref Q_x, Q_u, Q_y;
+    matrix_ref Q_xx, Q_xu, Q_uu, Q_xy, Q_yy;
+    // nullspace
     matrix U;       // projected u hessian
     matrix U_z;     // nullspace u hessian
     matrix Z;       // nullspace basis
@@ -27,12 +20,15 @@ struct nullspace_riccati_data : public node_data {
     vector u_y_k;   // u_y psuedo u
     vector u_z_k;   // u_z nullspace coefficient
     vector u_0_p_k; // u_0 projected
+    vector s_0_p_k; // s_0 - s_y F 0
     matrix z_u_K;
     matrix u_y_K;
     matrix u_z_K;
     matrix u_0_p_K;
+    vector s_0_p_K; // s_0 - s_y F 0
     vector k_u;
     matrix K_u;
+    matrix s_u;
     matrix F_u;
     vector u_0_k;
     vector y_0_k;
@@ -40,25 +36,19 @@ struct nullspace_riccati_data : public node_data {
     matrix u_0_K;
     matrix y_0_K;
     matrix F_0_K;
+    matrix s_c_stacked;
+    vector s_c_stacked_0_k;
+    matrix s_c_stacked_0_K;
     matrix P_k;
     matrix P_K;
     matrix S_k;
     matrix S_K;
     Eigen::FullPivLU<matrix> lu_;
     Eigen::LLT<matrix> llt_;
-    size_t nx, nu;
+    Eigen::LLT<matrix> llt_dyn_;
+    size_t nx, nu, ns, nc;
     size_t nz;
-    nullspace_riccati_data(expr_sets_ptr_t exprs)
-        : node_data(exprs), nx(exprs->dim_[field::x]),
-          nu(exprs->dim_[field::u]), value_func_(nx, nu), K_u(nu, nx), k_u(nu),
-          F_u(nx, nu) {
-        size_t rank = raw_data_.exprs_->dim_[field::eq_constr_c] +
-                      raw_data_.exprs_->dim_[field::eq_constr_s];
-        nz = nu - rank;
-        z_u_k.resize(nu);
-        z_u_K.resize(nu, nx);
-        U_z.resize(nz, nz);
-    }
+    nullspace_riccati_data(expr_sets_ptr_t exprs);
 };
 
 def_ptr(nullspace_riccati_data);

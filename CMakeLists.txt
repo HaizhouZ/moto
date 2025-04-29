@@ -18,7 +18,9 @@ add_library(atri SHARED
             src/shooting_node.cpp
             src/approx.cpp
             src/constr.cpp
-            src/ns_sqp.cpp
+            src/solver/presolve.cpp
+            src/solver/backward.cpp
+            src/solver/ns_sqp.cpp
         )
 add_executable(atri_test main.cpp test.cpp)
 # add_compile_definitions(EIGEN_USE_BLAS)

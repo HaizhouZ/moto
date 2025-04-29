@@ -1,0 +1,56 @@
+#include <atri/solver/ns_sqp.hpp>
+
+namespace atri {
+void nullspace_riccati_solver::pre_solving_steps() {
+#pragma omp parallel
+    for (int i = 0; i < nodes_.size(); i++) {
+        // collect constraint residuals and jacobians
+        auto cur = nodes_[i];
+        auto &d = get_data(cur);
+        for (auto m : {d.Q_x, d.Q_u, d.Q_y}) {
+            m.setZero();
+        }
+        for (auto m : {d.Q_xx, d.Q_xu, d.Q_uu, d.Q_xy, d.Q_yy}) {
+            m.setZero();
+        }
+        auto &_approx = d.raw_data_.approx_;
+        // update everything
+        cur->update_approximation();
+        // nullspace computation
+        auto &F = _approx[field::dyn].jac_;
+        /// @todo sparse F_y inverse
+        d.llt_dyn_.compute(F[field::y]);
+        d.F_u = F[field::u];
+        d.llt_dyn_.solveInPlace(d.F_u);
+        d.F_0_k = _approx[field::dyn].v_;
+        d.llt_dyn_.solveInPlace(d.F_0_k);
+        d.F_0_K = F[field::x];
+        d.llt_dyn_.solveInPlace(d.F_0_K);
+        d.s_0_p_k.noalias() =
+            _approx[field::eq_cstr_s].v_ -
+            _approx[field::eq_cstr_s].jac_[field::y] * d.F_0_k;
+        d.s_0_p_K.noalias() =
+            _approx[field::eq_cstr_s].jac_[field::x] -
+            _approx[field::eq_cstr_s].jac_[field::y] * d.F_0_K;
+        d.s_u.noalias() = -_approx[field::eq_cstr_s].jac_[field::y] * d.F_u;
+        // solve pseudo inverse
+        d.s_c_stacked << d.s_u, _approx[field::eq_cstr_c].jac_[field::u];
+        d.s_c_stacked_0_k << d.s_0_p_k, _approx[field::eq_cstr_c].v_;
+        d.s_c_stacked_0_K << d.s_0_p_K,
+            _approx[field::eq_cstr_c].jac_[field::x];
+        d.lu_.compute(d.s_c_stacked);
+        d.u_y_k = d.lu_.solve(d.s_c_stacked_0_k);
+        d.u_y_K = d.lu_.solve(d.s_c_stacked_0_K);
+    }
+    // these two cannot merge
+#pragma omp parallel
+    for (int i = 0; i < nodes_.size(); i++) {
+        auto cur = nodes_[i];
+        auto &d = get_data(cur);
+        d.Q_y.noalias() +=
+            d.y_0_k.transpose() * d.F_0_K + d.F_0_k.transpose() * d.y_0_K;
+        d.Q_yy.noalias() +=
+            d.y_0_K.transpose() * d.F_0_K + d.F_0_K.transpose() * d.y_0_K;
+    }
+}
+} // namespace atri

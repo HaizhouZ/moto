@@ -23,6 +23,7 @@ raw_data::raw_data(expr_sets_ptr_t exprs) : exprs_(exprs) {
     }
     // cost hessian(store only half)
     for (size_t i = 0; i < field::num_sym; i++) {
+        jac_[i].resize(exprs_->dim_[i]);
         for (size_t j = i; j < field::num_sym; j++) {
             hessian_[i][j].resize(exprs_->dim_[i], exprs_->dim_[j]);
         }

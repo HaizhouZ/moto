@@ -26,6 +26,8 @@ struct raw_data {
         vector v_;                               // value
         std::array<matrix, field::num_sym> jac_; // jacobian
     } approx_[field::num_func];
+    // cost
+    row_vector jac_[field::num_sym];
     matrix hessian_[field::num_sym][field::num_sym]; // cost hessian
 };
 
@@ -114,7 +116,7 @@ class foot_kin_constr : public approx {
 
   public:
     foot_kin_constr(const std::string &frame, sym_ptr_t q)
-        : approx(frame, 3, field::type::eq_constr_s, approx_order::first),
+        : approx(frame, 3, field::type::eq_cstr_s, approx_order::first),
           q_(q) {
         in_args_.push_back(q_);
     }
