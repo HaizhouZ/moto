@@ -30,11 +30,7 @@ struct nullspace_riccati_data : public node_data {
     matrix K_u;
     matrix s_u;
     matrix F_u;
-    vector u_0_k;
-    vector y_0_k;
     vector F_0_k;
-    matrix u_0_K;
-    matrix y_0_K;
     matrix F_0_K;
     matrix s_c_stacked;
     vector s_c_stacked_0_k;

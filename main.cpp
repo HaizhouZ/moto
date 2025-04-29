@@ -1,10 +1,13 @@
+#include <Eigen/Cholesky>
 #include <atri/core/fwd.hpp>
 #include <chrono>
-#include <Eigen/Cholesky>
 #include <iostream>
 extern void nice();
-int main(int, char**) {
-    nice();
+int main(int, char **) {
+    // nice();
+    atri::matrix m(3, 3);
+    atri::matrix g;
+    m.setRandom();
     // using namespace Eigen;
     // using namespace std;
     // // typedef bfloat16 scalar_t;
@@ -14,7 +17,7 @@ int main(int, char**) {
     // for (int i = 0; i < 100; i ++){
     //     a.push_back(decltype(a)::value_type::Random());
     // }
-    // Matrix<scalar_t, 72, 72> b; 
+    // Matrix<scalar_t, 72, 72> b;
     // Matrix<scalar_t, 72, 36> c;
     // c.setRandom();
     // LDLT<Matrix<scalar_t, 72, 72>> ldlt;
@@ -28,6 +31,7 @@ int main(int, char**) {
     //     }
     // }
     // auto end = chrono::high_resolution_clock::now();
-    // cout << chrono::duration_cast<chrono::microseconds>(end - start).count() / N << " us";
+    // cout << chrono::duration_cast<chrono::microseconds>(end - start).count()
+    // / N << " us";
     return 0;
 }
