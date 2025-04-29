@@ -15,13 +15,17 @@ struct expr_sets {
     static size_t max_uid;
     const size_t uid_ = 0;
     std::vector<expr_ptr_t> expr_[field::num];
-    std::unordered_map<size_t, std::pair<size_t, size_t>> idx_;
+    std::unordered_map<size_t, std::pair<size_t, size_t>> d_idx_;
     size_t dim_[field::num] = {0};
 
     expr_sets() : uid_(max_uid++) {}
 
     scalar_t *get_data_ptr(scalar_t *data, expr_ptr_t expr) const {
-        return data + get_expr_idx(expr).first;
+        return data + get_expr_start(expr);
+    }
+    scalar_t *get_data_ptr(scalar_t *data, expr_ptr_t expr,
+                           size_t offset) const {
+        return data + get_expr_start(expr) * offset;
     }
     /**
      * @brief add expr to expr_sets formulation
@@ -34,8 +38,8 @@ struct expr_sets {
         size_t &n0 = dim_[expr->field_];
         size_t n1 = n0 + expr->dim_;
         expr_[expr->field_].push_back(expr);
-        idx_[_uid] = std::make_pair(n0, n1);
-        n0 = idx_[_uid].second;
+        d_idx_[_uid] = std::make_pair(n0, n1);
+        n0 = d_idx_[_uid].second;
     }
 
     /**
@@ -43,10 +47,13 @@ struct expr_sets {
      *
      * @param expr expression to look up
      * @param field type of the expression
-     * @return std::pair<size_t, size_t> [start, end) of the expression
+     * @return std::pair<size_t, size_t> [start, length) of the expression
      */
-    std::pair<size_t, size_t> get_expr_idx(expr_ptr_t expr) const {
-        return idx_.at(expr->uid_);
+    size_t get_expr_start(expr_ptr_t expr) const {
+        return d_idx_.at(expr->uid_).first;
+    }
+    size_t get_expr_start(expr &expr) const {
+        return d_idx_.at(expr.uid_).first;
     }
 };
 

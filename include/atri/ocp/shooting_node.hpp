@@ -15,13 +15,13 @@ namespace atri {
  * field
  */
 class approx_sets_data {
-    std::array<std::vector<approx_data_ptr_t>, field::num_func> ptr_;
+    std::array<std::vector<sparse_approx_data_ptr_t>, field::num_func> ptr_;
 
   public:
-    std::vector<approx_data_ptr_t> &operator[](size_t idx) {
+    std::vector<sparse_approx_data_ptr_t> &operator[](size_t idx) {
         return ptr_[idx - field::num_sym];
     }
-    const std::vector<approx_data_ptr_t> &operator[](size_t idx) const {
+    const std::vector<sparse_approx_data_ptr_t> &operator[](size_t idx) const {
         return ptr_[idx - field::num_sym];
     }
     void swap(approx_sets_data &rhs) { ptr_.swap(rhs.ptr_); }
@@ -31,10 +31,10 @@ struct node_data;
 def_ptr(node_data);
 
 struct node_data {
-    primal_data primal_data_;
+    raw_data raw_data_;
     approx_sets_data approx_;
-    node_data(approx_sets_data &&a, primal_data &&p)
-        : approx_(std::move(a)), primal_data_(std::move(p)) {}
+    node_data(approx_sets_data &&a, raw_data &&p)
+        : approx_(std::move(a)), raw_data_(std::move(p)) {}
     node_data(expr_sets_ptr_t exprs);
 };
 
@@ -105,6 +105,7 @@ struct shooting_node {
     shooting_node(expr_sets_ptr_t formulation, data_mgr &mem)
         : expr_sets_(formulation), mem_(mem) {
         data_ = mem_.acquire_data(expr_sets_);
+        dim_primal = expr_sets_->dim_[field::x] + expr_sets_->dim_[field::u];
     }
 
     ~shooting_node() { mem_.release_data(expr_sets_, data_); }
@@ -115,6 +116,7 @@ struct shooting_node {
 
     expr_sets_ptr_t expr_sets_;
     data_mgr &mem_;
+    size_t dim_primal;
 };
 
 def_ptr(shooting_node);

@@ -2,46 +2,20 @@
 #define __NS_SQP__
 
 #include <Eigen/Cholesky>
-#include <Eigen/QR>
+#include <Eigen/LU>
 #include <atri/ocp/shooting_node.hpp>
 #include <list>
 
 namespace atri {
-/// @todo replace with a graph
-// using ocp_graph = std::vector<shooting_node_ptr_t>;
-
-// class solver_base {
-//   protected:
-//     std::shared_ptr<ocp_graph> graph_;
-
-//   public:
-//     virtual ~solver_base() = default;
-
-//     solver_base(std::shared_ptr<ocp_graph> graph) : graph_(graph) {}
-
-//     virtual void backward_pass() {}
-//     // update primal variables
-//     virtual void forward_pass() {}
-
-//     // update the derivatives of the primal variables
-//     void update_derivatives() {
-// #pragma omp parallel for
-//         for (int i = 0; i < graph_->size(); i++) {
-//             auto s = graph_->at(i);
-//             s->update_approximation();
-//         }
-//     }
-// };
-
 struct value_func_data {
     row_vector Q_x, Q_u;
     matrix Q_xx, Q_ux, Q_uu;
-    matrix Q_yy, V_yy;
-    row_vector Q_y, V_y;
+    row_vector Q_y;
+    matrix Q_yy;
 
     value_func_data(size_t nx, size_t nu)
-        : Q_x(nx), Q_u(nu), Q_xx(nx, nx), Q_ux(nu, nx), Q_uu(nu, nu), V_y(nx),
-          V_yy(nx, nx), Q_yy(nx, nx), Q_y(nx) {}
+        : Q_x(nx), Q_u(nu), Q_xx(nx, nx), Q_ux(nu, nx), Q_uu(nu, nu), Q_y(nx),
+          Q_yy(nx, nx) {}
 };
 
 struct nullspace_riccati_data : public node_data {
@@ -66,20 +40,23 @@ struct nullspace_riccati_data : public node_data {
     matrix u_0_K;
     matrix y_0_K;
     matrix F_0_K;
-    Eigen::HouseholderQR<matrix> qr_;
-    matrix qr_Q;
+    matrix P_k;
+    matrix P_K;
+    matrix S_k;
+    matrix S_K;
+    Eigen::FullPivLU<matrix> lu_;
     Eigen::LLT<matrix> llt_;
     size_t nx, nu;
     size_t nz;
     nullspace_riccati_data(expr_sets_ptr_t exprs)
         : node_data(exprs), nx(exprs->dim_[field::x]),
           nu(exprs->dim_[field::u]), value_func_(nx, nu), K_u(nu, nx), k_u(nu),
-          F_u(nx, nu), qr_Q(nu, nu) {
-        size_t rank = primal_data_.exprs_->dim_[field::eq_constr_c] +
-                      primal_data_.exprs_->dim_[field::eq_constr_s];
+          F_u(nx, nu) {
+        size_t rank = raw_data_.exprs_->dim_[field::eq_constr_c] +
+                      raw_data_.exprs_->dim_[field::eq_constr_s];
         nz = nu - rank;
-        z_u_k.resize(nz);
-        z_u_K.resize(nz, nx);
+        z_u_k.resize(nu);
+        z_u_K.resize(nu, nx);
         U_z.resize(nz, nz);
     }
 };
@@ -94,6 +71,9 @@ class nullspace_riccati_solver {
     nullspace_riccati_solver()
         : mem_(data_mgr::get<nullspace_riccati_data>()) {}
     void set_horizon(size_t N) { nodes_.resize(N); }
+    static auto &get_data(shooting_node_ptr_t node) {
+        return *std::static_pointer_cast<nullspace_riccati_data>(node->data_);
+    }
 
   private:
     void pre_solving_steps();

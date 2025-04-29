@@ -14,16 +14,16 @@ inline void for_funcs(expr_sets_ptr_t exprs, callback_type &&callback) {
         auto &_exprs = exprs->expr_[field];
         if (_exprs.empty()) {
             for (size_t idx_expr = 0; idx_expr < _exprs.size(); idx_expr++) {
-                auto _c = std::static_pointer_cast<approx>(_exprs[idx_expr]);
-                callback(field, idx_expr, _c);
+                auto _f = std::static_pointer_cast<approx>(_exprs[idx_expr]);
+                callback(field, idx_expr, _f);
             }
         }
     }
 }
 
-node_data::node_data(expr_sets_ptr_t exprs) : primal_data_(exprs) {
-    for_funcs(exprs, [&](size_t field, size_t idx_expr, approx_ptr_t _c) {
-        approx_[field].push_back(_c->make_data(primal_data_));
+node_data::node_data(expr_sets_ptr_t exprs) : raw_data_(exprs) {
+    for_funcs(exprs, [&](size_t field, size_t idx_expr, approx_ptr_t _f) {
+        approx_[field].push_back(_f->make_data(raw_data_));
     });
 }
 
@@ -58,16 +58,13 @@ void shooting_node::swap(shooting_node &p) {
 }
 
 void shooting_node::update_approximation() {
-    for_funcs(expr_sets_, [this](size_t field, size_t idx_expr,
-                                 approx_ptr_t _c) {
-        if (_c->order() == approx_order::first) {
-            _c->evaluate<false, true>(expr_sets_,
-                                      data_->approx_[field][idx_expr]);
-        } else if (_c->order() == approx_order::second) {
-            _c->evaluate<false, true, true>(expr_sets_,
-                                            data_->approx_[field][idx_expr]);
-        }
-    });
+    /// @todo: always eval residual?
+    for_funcs(expr_sets_,
+              [this](size_t field, size_t idx_expr, approx_ptr_t _f) {
+                  _f->evaluate(expr_sets_, data_->approx_[field][idx_expr],
+                               true, _f->order() >= approx_order::first,
+                               _f->order() >= approx_order::second);
+              });
 }
 
 } // namespace atri

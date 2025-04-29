@@ -4,10 +4,10 @@
 #include <atri/ocp/approx.hpp>
 
 namespace atri {
-struct constr_data : public approx_data {
+struct constr_data : public sparse_approx_data {
     vector multiplier_;
     vector slack_;
-    constr_data(approx_data &&d) : approx_data(std::move(d)) {
+    constr_data(sparse_approx_data &&d) : sparse_approx_data(std::move(d)) {
         multiplier_.resize(d.v_.size());
         slack_.resize(d.v_.size());
     }
@@ -23,7 +23,7 @@ struct constr : public approx {
         assert(field == field::dyn || magic_enum::enum_name(field).find(
                                           "constr") != std::string::npos);
     }
-    approx_data_ptr_t make_data(primal_data &raw) override {
+    sparse_approx_data_ptr_t make_data(raw_data &raw) override {
         return constr_data_ptr_t(
             new constr_data(std::move(*approx::make_data(raw))));
     }
