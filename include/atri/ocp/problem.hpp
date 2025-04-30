@@ -42,6 +42,14 @@ struct problem {
         n0 = d_idx_[_uid].second;
     }
 
+    template <typename derived>
+    void add(const std::vector<std::shared_ptr<derived>> &exprs) {
+        static_assert(std::is_base_of_v<expr, derived>);
+        for (auto expr_ : exprs) {
+            add(expr_);
+        }
+    }
+
     /**
      * @brief get the idx of an expr named by [name]
      *

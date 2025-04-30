@@ -59,10 +59,10 @@ def_ptr(sparse_approx_data);
 class approx : public expr { /// todo: change to differentiable for precompute
   private:
     approx_order order_;
+    std::vector<sym_ptr_t> in_args_;
     virtual void setup_sparsity(sparse_approx_data_ptr_t data) {}
 
   protected:
-    std::vector<sym_ptr_t> in_args_;
     virtual void jacobian_impl(sparse_approx_data_ptr_t data) {
         throw std::runtime_error(
             fmt::format("jacobian not implemented for approx {}", name_));
@@ -71,10 +71,13 @@ class approx : public expr { /// todo: change to differentiable for precompute
         throw std::runtime_error(
             fmt::format("hessian not implemented for approx {}", name_));
     };
+    void add_argument(sym_ptr_t in) { in_args_.push_back(in); }
+    void add_arguments(std::initializer_list<sym_ptr_t> args) {
+        in_args_.insert(in_args_.end(), args.begin(), args.end());
+    }
 
   public:
     const auto &in_args() { return in_args_; }
-
     inline approx_order order() { return order_; }
 
     approx(const std::string &name, size_t dim, field_t field,

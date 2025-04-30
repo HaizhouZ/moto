@@ -4,11 +4,9 @@
 #include <atri/core/fields.hpp>
 
 namespace atri {
-enum class approx_order {
-    zero = 0,
-    first,
-    second
-};
+enum class approx_order { zero = 0,
+                          first,
+                          second };
 
 #define def_ptr(name) typedef std::shared_ptr<name> name##_ptr_t;
 
@@ -17,21 +15,20 @@ enum class approx_order {
  *
  */
 class expr {
-   private:
+  private:
     static size_t max_uid;
 
-   public:
+  public:
     const size_t dim_;
-    const std::string& name_;
+    const std::string name_;
     const size_t uid_;
     const field_t field_;
 
-    expr(const std::string& name, size_t dim, field_t field)
-        : name_(name), dim_(dim), uid_(max_uid++), field_(field) {
-    }
-    auto make_vec(scalar_t* ptr) { return mapped_vector(ptr, dim_); }
+    expr(const std::string &name, size_t dim, field_t field)
+        : name_(name), dim_(dim), uid_(max_uid++), field_(field) {}
+    auto make_vec(scalar_t *ptr) { return mapped_vector(ptr, dim_); }
 
-    auto make_vec(const scalar_t* ptr) { return mapped_const_vector(ptr, dim_); }
+    auto make_vec(const scalar_t *ptr) { return mapped_const_vector(ptr, dim_); }
 
     virtual ~expr() = default;
 };
@@ -40,13 +37,18 @@ def_ptr(expr);
 
 struct sym : public expr {
     approx_order type() = delete;
-    sym(const std::string& name, size_t dim, field_t type)
+    sym(const std::string &name, size_t dim, field_t type)
         : expr(name, dim, type) {
         assert(size_t(type) <= field::num_sym);
+    }
+    // for dynamics
+    auto make_next() {
+        assert(field_ == __x);
+        return std::make_shared<sym>(name_ + "_nxt", dim_, __y);
     }
 };
 
 def_ptr(sym);
-}  // namespace atri
+} // namespace atri
 
 #endif /*__EXPRESSION_BASE_*/

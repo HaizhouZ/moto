@@ -24,8 +24,9 @@ add_library(atri SHARED
             src/solver/postsolve.cpp
             src/solver/rollout.cpp
             src/ns_sqp.cpp
+            src/utils/print.cpp
         )
-add_executable(atri_test main.cpp test.cpp)
+add_executable(atri_test main.cpp)
 # add_compile_definitions(EIGEN_USE_BLAS)
 target_link_libraries(atri PUBLIC 
     # OpenBLAS::OpenBLAS 
@@ -35,3 +36,5 @@ target_link_libraries(atri PUBLIC
 target_link_libraries(atri_test PUBLIC
     atri
 )
+
+add_subdirectory(example/double_integrator)
