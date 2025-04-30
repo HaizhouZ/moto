@@ -105,22 +105,6 @@ class approx : public expr { /// todo: change to differentiable for precompute
     }
 };
 def_ptr(approx);
-
-// example
-class foot_kin_constr : public approx {
-  private:
-    sym_ptr_t q_;
-    void jacobian_impl(sparse_approx_data_ptr_t data) override {
-        auto q = data->in_args_[0];
-    }
-
-  public:
-    foot_kin_constr(const std::string &frame, sym_ptr_t q)
-        : approx(frame, 3, __eq_cstr_s, approx_order::first), q_(q) {
-        in_args_.push_back(q_);
-    }
-};
-
 } // namespace atri
 
 #endif /*__approx_*/
