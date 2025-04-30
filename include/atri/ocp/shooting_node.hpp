@@ -1,14 +1,16 @@
 #ifndef __SHOOTING_NODE__
 #define __SHOOTING_NODE__
 
+#include <atri/ocp/node_data.hpp>
 #include <mutex>
 #include <stack>
-#include <atri/ocp/node_data.hpp>
 
 namespace atri {
 
 /**
  * @brief data management. this class controls the data access and allocation.
+ * 1. each data_mgr controls a node_data type
+ * 2. data instances of same node_data type can have different exprs
  */
 class data_mgr {
   private:
@@ -42,10 +44,6 @@ class data_mgr {
     // make data for a expression set
     static node_data_ptr_t make_data(expr_sets_ptr_t expr_sets);
 
-    void add_expr_sets(expr_sets_ptr_t exprs) {
-        expr_sets_[exprs->uid_] = exprs;
-        data_[exprs->uid_] = std::make_shared<data_pool>();
-    }
     /**
      * @brief create a batch of data
      *
@@ -61,7 +59,6 @@ class data_mgr {
     data_maker_func maker_;
     // the following are indexed by the uid of expr_sets
     // each is a problem formulation, with its own data
-    std::unordered_map<size_t, expr_sets_ptr_t> expr_sets_;
     std::unordered_map<size_t, data_pool_ptr_t> data_;
 };
 
