@@ -20,8 +20,9 @@ add_library(atri SHARED
             src/constr.cpp
             src/solver/presolve.cpp
             src/solver/backward.cpp
-            src/solver/ns_sqp.cpp
+            src/solver/ns_riccati_data.cpp
             src/solver/postsolve.cpp
+            src/solver/rollout.cpp
         )
 add_executable(atri_test main.cpp test.cpp)
 # add_compile_definitions(EIGEN_USE_BLAS)

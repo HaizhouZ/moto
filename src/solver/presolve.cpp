@@ -38,18 +38,18 @@ void nullspace_riccati_solver::pre_solving_steps() {
             d.s_c_stacked_0_k << d.s_0_p_k, -_approx[field::eq_cstr_c].v_;
             d.s_c_stacked_0_K << d.s_0_p_K,
                 -_approx[field::eq_cstr_c].jac_[field::x];
-            d.lu_.compute(d.s_c_stacked);
-            size_t rank = d.lu_.rank();
+            d.lu_eq_.compute(d.s_c_stacked);
+            size_t rank = d.lu_eq_.rank();
             if (rank == 0)
                 d.rank_status_ = rank_status::unconstrained;
             else if (rank == d.ncstr) {
                 d.rank_status_ = rank_status::fully_constrained;
             } else {
-                d.Z = d.lu_.kernel();
+                d.Z = d.lu_eq_.kernel();
                 d.rank_status_ = rank_status::constrained;
             }
-            d.u_y_k.noalias() = d.lu_.solve(d.s_c_stacked_0_k);
-            d.u_y_K.noalias() = d.lu_.solve(d.s_c_stacked_0_K);
+            d.u_y_k.noalias() = d.lu_eq_.solve(d.s_c_stacked_0_k);
+            d.u_y_K.noalias() = d.lu_eq_.solve(d.s_c_stacked_0_K);
         }
     }
     // these two cannot merge, because Q_y/yy should first be updated with

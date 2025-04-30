@@ -17,14 +17,14 @@ raw_data::raw_data(expr_sets_ptr_t exprs) : exprs_(exprs) {
         }
         size_t dim = (i == field::cost) ? 1 : exprs_->dim_[i];
         approx_[i].v_.resize(dim);
-        for (size_t j = 0; j < field::num_sym; j++) {
+        for (size_t j = 0; j < field::num_prim; j++) {
             approx_[i].jac_[j].resize(dim, exprs_->dim_[j]);
         }
     }
     // cost hessian(store only half)
-    for (size_t i = 0; i < field::num_sym; i++) {
+    for (size_t i = 0; i < field::num_prim; i++) {
         jac_[i].resize(exprs_->dim_[i]);
-        for (size_t j = i; j < field::num_sym; j++) {
+        for (size_t j = i; j < field::num_prim; j++) {
             hessian_[i][j].resize(exprs_->dim_[i], exprs_->dim_[j]);
         }
     }

@@ -20,8 +20,8 @@ void nullspace_riccati_solver::backward_pass() {
             d.z_u_k = d.u_0_p_k;
             d.z_u_K = d.u_0_p_K;
             d.d_u.K = d.z_u_K;
-            d.llt_.compute(d.U);
-            d.llt_.solveInPlace(d.d_u.K);
+            d.llt_ns_.compute(d.U);
+            d.llt_ns_.solveInPlace(d.d_u.K);
         } else {
             // constr rank > 0
             d.z_u_k.noalias() = d.u_0_p_k - d.U * d.u_y_k;
@@ -34,8 +34,8 @@ void nullspace_riccati_solver::backward_pass() {
                 d.U_z.noalias() = d.Z.transpose() * d.U * d.Z;
                 /// todo: what if d.u_z_K size is wrong
                 d.u_z_K.noalias() = d.Z.transpose() * d.z_u_K;
-                d.llt_.compute(d.U_z);
-                d.llt_.solveInPlace(d.u_z_K);
+                d.llt_ns_.compute(d.U_z);
+                d.llt_ns_.solveInPlace(d.u_z_K);
                 d.d_u.K.noalias() = d.u_y_K + d.Z * d.u_z_K;
             }
         }
