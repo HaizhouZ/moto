@@ -1,3 +1,4 @@
+#include <atri/solver/data/nullspace_data.hpp>
 #include <atri/solver/ns_riccati_solver.hpp>
 
 namespace atri {
@@ -7,6 +8,7 @@ void nullspace_riccati_solver::pre_solving_steps() {
         // collect constraint residuals and jacobians
         auto cur = nodes_[i];
         auto &d = get_data(cur);
+        auto &nsp = *d.nsp_;
         for (auto m : {d.Q_x, d.Q_u, d.Q_y}) {
             m.setZero();
         }
@@ -18,38 +20,37 @@ void nullspace_riccati_solver::pre_solving_steps() {
         cur->update_approximation();
         /// @todo sparse F_y inverse
         auto &F = _approx[__dyn].jac_;
-        d.llt_dyn_.compute(F[__y]);
-        d.F_u = F[__u];
-        d.llt_dyn_.solveInPlace(d.F_u);
-        d.F_0_k = -_approx[__dyn].v_;
-        d.llt_dyn_.solveInPlace(d.F_0_k);
-        d.F_0_K = -F[__x];
-        d.llt_dyn_.solveInPlace(d.F_0_K);
+        nsp.llt_dyn_.compute(F[__y]);
+        nsp.F_u = F[__u];
+        nsp.llt_dyn_.solveInPlace(nsp.F_u);
+        nsp.F_0_k = -_approx[__dyn].v_;
+        nsp.llt_dyn_.solveInPlace(nsp.F_0_k);
+        nsp.F_0_K = -F[__x];
+        nsp.llt_dyn_.solveInPlace(nsp.F_0_K);
         // nullspace computation
         d.rank_status_ = rank_status::unconstrained;
         if (d.nc + d.ns > 0) {
-            d.s_0_p_k.noalias() =
-                -_approx[__eq_cstr_s].v_ - d.s_y * d.F_0_k;
-            d.s_0_p_K.noalias() =
-                -_approx[__eq_cstr_s].jac_[__x] - d.s_y * d.F_0_K;
-            d.s_u.noalias() = -d.s_y * d.F_u;
+            nsp.s_0_p_k.noalias() =
+                -_approx[__eq_cstr_s].v_ - nsp.s_y * nsp.F_0_k;
+            nsp.s_0_p_K.noalias() =
+                -_approx[__eq_cstr_s].jac_[__x] - nsp.s_y * nsp.F_0_K;
+            nsp.s_u.noalias() = -nsp.s_y * nsp.F_u;
             // solve pseudo inverse
-            d.s_c_stacked << d.s_u, _approx[__eq_cstr_c].jac_[__u];
-            d.s_c_stacked_0_k << d.s_0_p_k, -_approx[__eq_cstr_c].v_;
-            d.s_c_stacked_0_K << d.s_0_p_K,
-                -_approx[__eq_cstr_c].jac_[__x];
-            d.lu_eq_.compute(d.s_c_stacked);
-            size_t rank = d.lu_eq_.rank();
+            nsp.s_c_stacked << nsp.s_u, _approx[__eq_cstr_c].jac_[__u];
+            nsp.s_c_stacked_0_k << nsp.s_0_p_k, -_approx[__eq_cstr_c].v_;
+            nsp.s_c_stacked_0_K << nsp.s_0_p_K, -_approx[__eq_cstr_c].jac_[__x];
+            nsp.lu_eq_.compute(nsp.s_c_stacked);
+            size_t rank = nsp.lu_eq_.rank();
             if (rank == 0)
                 d.rank_status_ = rank_status::unconstrained;
             else if (rank == d.ncstr) {
                 d.rank_status_ = rank_status::fully_constrained;
             } else {
-                d.Z = d.lu_eq_.kernel();
+                nsp.Z = nsp.lu_eq_.kernel();
                 d.rank_status_ = rank_status::constrained;
             }
-            d.u_y_k.noalias() = d.lu_eq_.solve(d.s_c_stacked_0_k);
-            d.u_y_K.noalias() = d.lu_eq_.solve(d.s_c_stacked_0_K);
+            nsp.u_y_k.noalias() = nsp.lu_eq_.solve(nsp.s_c_stacked_0_k);
+            nsp.u_y_K.noalias() = nsp.lu_eq_.solve(nsp.s_c_stacked_0_K);
         }
     }
     // these two cannot merge, because Q_y/yy should first be updated with
@@ -60,12 +61,13 @@ void nullspace_riccati_solver::pre_solving_steps() {
         auto &d = get_data(cur);
         auto pre = nodes_[i - 1];
         auto &d_pre = get_data(cur);
+        auto &nsp = *d.nsp_;
         // add P part of V_x/V_xx to Q_y/Q_yy of previous node
-        d_pre.Q_y.noalias() += d.F_0_k.transpose() * -d.Q_xy.transpose();
+        d_pre.Q_y.noalias() += nsp.F_0_k.transpose() * -d.Q_xy.transpose();
         // +d.Q_y * d.F_0_K is done in backward pass
         // because Q_y has V_y in it
         d_pre.Q_yy.noalias() +=
-            -d.Q_xy * d.F_0_K + d.F_0_K.transpose() * -d.Q_xy.transpose();
+            -d.Q_xy * nsp.F_0_K + nsp.F_0_K.transpose() * -d.Q_xy.transpose();
     }
     /// @todo set terminal Q_y, Q_yy
 }

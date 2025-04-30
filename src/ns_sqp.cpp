@@ -8,4 +8,8 @@ void nullspace_sqp::update() {
     forward_rollout();
     post_rollout_steps();
 }
+template <typename data_type>
+nullspace_riccati_solver create(){
+    // static_assert(std::is_base_of_v(data_type, nullspace_riccati_data));
+};
 } // namespace atri
