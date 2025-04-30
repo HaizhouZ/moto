@@ -8,10 +8,17 @@
 
 namespace atri {
 
+enum rank_status : int { unconstrained = 0, constrained, fully_constrained };
+
 struct nullspace_riccati_data : public node_data {
+    // dim
+    size_t nx, nu, ns, nc, ncstr;
+    size_t nz;
     // value function
     row_vector_ref Q_x, Q_u, Q_y;
     matrix_ref Q_xx, Q_xu, Q_uu, Q_xy, Q_yy;
+    // jacobian
+    matrix_ref s_y;
     // nullspace
     matrix U;       // projected u hessian
     matrix U_z;     // nullspace u hessian
@@ -26,8 +33,11 @@ struct nullspace_riccati_data : public node_data {
     matrix u_z_K;
     matrix u_0_p_K;
     vector s_0_p_K; // s_0 - s_y F 0
-    vector k_u;
-    matrix K_u;
+    struct sensitivity {
+        vector k;
+        matrix K;
+        sensitivity(size_t n, size_t nx) : k(n), K(n, nx) {}
+    } d_u, d_y, d_lbd_f, d_lbd_s_c;
     matrix s_u;
     matrix F_u;
     vector F_0_k;
@@ -35,16 +45,10 @@ struct nullspace_riccati_data : public node_data {
     matrix s_c_stacked;
     vector s_c_stacked_0_k;
     matrix s_c_stacked_0_K;
-    matrix P_k;
-    matrix P_K;
-    matrix S_k;
-    matrix S_K;
     Eigen::FullPivLU<matrix> lu_;
     Eigen::LLT<matrix> llt_;
     Eigen::LLT<matrix> llt_dyn_;
-    size_t lu_rank_;
-    size_t nx, nu, ns, nc;
-    size_t nz;
+    rank_status rank_status_;
     nullspace_riccati_data(expr_sets_ptr_t exprs);
 };
 
