@@ -23,6 +23,7 @@ add_library(atri SHARED
             src/solver/ns_riccati_data.cpp
             src/solver/postsolve.cpp
             src/solver/rollout.cpp
+            src/solver/ns_sqp.cpp
         )
 add_executable(atri_test main.cpp test.cpp)
 # add_compile_definitions(EIGEN_USE_BLAS)

@@ -2,7 +2,7 @@
 
 namespace atri {
 
-raw_data::raw_data(expr_sets_ptr_t exprs) : exprs_(exprs) {
+raw_data::raw_data(problem_ptr_t exprs) : exprs_(exprs) {
     for (size_t i = 0; i < field::num_sym; i++) {
         // auto &v = value_[i];
         // for (auto &e : exprs_->expr_[i]) {

@@ -53,7 +53,7 @@ struct nullspace_riccati_data : public node_data {
         vector prim_[field::num_sym];
         vector dual_[field::num_constr]; // exclude cost
     } rollout_;
-    nullspace_riccati_data(expr_sets_ptr_t exprs);
+    nullspace_riccati_data(problem_ptr_t exprs);
 };
 def_ptr(nullspace_riccati_data);
 

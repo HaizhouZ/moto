@@ -1,5 +1,5 @@
-#ifndef __expr_sets_FORMULATION__
-#define __expr_sets_FORMULATION__
+#ifndef __problem_FORMULATION__
+#define __problem_FORMULATION__
 
 #include <unordered_map>
 #include <vector>
@@ -8,17 +8,17 @@
 
 namespace atri {
 /**
- * @brief expr_sets formulation of an OCP stage
+ * @brief problem formulation of an OCP stage
  *
  */
-struct expr_sets {
+struct problem {
     static size_t max_uid;
     const size_t uid_ = 0;
     std::vector<expr_ptr_t> expr_[field::num];
     std::unordered_map<size_t, std::pair<size_t, size_t>> d_idx_;
     size_t dim_[field::num] = {0};
 
-    expr_sets() : uid_(max_uid++) {}
+    problem() : uid_(max_uid++) {}
 
     scalar_t *get_data_ptr(scalar_t *data, expr_ptr_t expr) const {
         return data + get_expr_start(expr);
@@ -28,7 +28,7 @@ struct expr_sets {
         return data + get_expr_start(expr) * offset;
     }
     /**
-     * @brief add expr to expr_sets formulation
+     * @brief add expr to problem formulation
      *
      * @param expr expression to be added
      * @param field in [field_t]
@@ -57,7 +57,7 @@ struct expr_sets {
     }
 };
 
-def_ptr(expr_sets);
+def_ptr(problem);
 } // namespace atri
 
-#endif /*__expr_sets_FORMULATION_*/
+#endif /*__problem_FORMULATION_*/

@@ -33,7 +33,7 @@ struct node_data {
     approx_sets_data approx_;
     node_data(approx_sets_data &&a, raw_data &&p)
         : approx_(std::move(a)), raw_data_(std::move(p)) {}
-    node_data(expr_sets_ptr_t exprs);
+    node_data(problem_ptr_t exprs);
 };
 } // namespace atri
 

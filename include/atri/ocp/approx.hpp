@@ -3,12 +3,12 @@
 
 // #include <atri/core/sparsity.hpp>
 #include <atri/core/fwd.hpp>
-#include <atri/ocp/expr_sets.hpp>
+#include <atri/ocp/problem.hpp>
 
 namespace atri {
 
 struct raw_data {
-    raw_data(expr_sets_ptr_t exprs);
+    raw_data(problem_ptr_t exprs);
 
     auto get(sym_ptr_t sym) {
         return sym->make_vec(
@@ -20,7 +20,7 @@ struct raw_data {
         this->value_.swap(rhs.value_);
     }
 
-    expr_sets_ptr_t exprs_;
+    problem_ptr_t exprs_;
     std::array<vector, field::num_sym> value_;
     struct raw_approx {
         vector v_;                                // value
@@ -96,7 +96,7 @@ class approx : public expr { /// todo: change to differentiable for precompute
      * @tparam eval_jac evaluate jacobian if true
      * @tparam eval_hess evaluate hessian if true
      */
-    void evaluate(expr_sets_ptr_t expr_sets, sparse_approx_data_ptr_t data,
+    void evaluate(problem_ptr_t problem, sparse_approx_data_ptr_t data,
                   bool eval_val, bool eval_jac = false,
                   bool eval_hess = false) {
         // if (eval_jac)

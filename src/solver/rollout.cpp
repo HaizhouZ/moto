@@ -1,4 +1,4 @@
-#include <atri/solver/ns_sqp.hpp>
+#include <atri/solver/ns_riccati_solver.hpp>
 namespace atri {
 void nullspace_riccati_solver::forward_rollout() {
     get_data(nodes_.front()).rollout_.prim_[__x].setZero();

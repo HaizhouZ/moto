@@ -8,7 +8,7 @@ namespace atri {
  * @param callback [idx of field, idx of expr, pointer to expr]
  */
 template <typename callback_type>
-inline void for_funcs(expr_sets_ptr_t exprs, callback_type &&callback) {
+inline void for_funcs(problem_ptr_t exprs, callback_type &&callback) {
     // loop with two variables due to the difference between idx and field no.
     for (size_t field = __dyn; field != field::num; field++) {
         auto &_exprs = exprs->expr_[field];
@@ -21,20 +21,20 @@ inline void for_funcs(expr_sets_ptr_t exprs, callback_type &&callback) {
     }
 }
 
-node_data::node_data(expr_sets_ptr_t exprs) : raw_data_(exprs) {
+node_data::node_data(problem_ptr_t exprs) : raw_data_(exprs) {
     for_funcs(exprs, [&](size_t field, size_t idx_expr, approx_ptr_t _f) {
         approx_[field].push_back(_f->make_data(raw_data_));
     });
 }
 
-void data_mgr::create_data_batch(expr_sets_ptr_t exprs, size_t N) {
+void data_mgr::create_data_batch(problem_ptr_t exprs, size_t N) {
     auto &pool = *data_[exprs->uid_];
     std::lock_guard _lock(pool.mtx_);
     for (size_t i = 0; i < N; i++)
         pool.push(maker_(exprs));
 }
 
-node_data_ptr_t data_mgr::acquire_data(expr_sets_ptr_t exprs) {
+node_data_ptr_t data_mgr::acquire_data(problem_ptr_t exprs) {
     auto &pool = *data_[exprs->uid_];
     std::lock_guard _lock(pool.mtx_);
     if (!pool.empty()) {
@@ -46,22 +46,22 @@ node_data_ptr_t data_mgr::acquire_data(expr_sets_ptr_t exprs) {
     }
 }
 
-void data_mgr::release_data(expr_sets_ptr_t exprs, node_data_ptr_t data) {
+void data_mgr::release_data(problem_ptr_t exprs, node_data_ptr_t data) {
     auto &pool = *data_[exprs->uid_];
     std::lock_guard _lock(pool.mtx_);
     pool.push(data);
 }
 
 void shooting_node::swap(shooting_node &p) {
-    expr_sets_.swap(p.expr_sets_);
+    problem_.swap(p.problem_);
     data_.swap(p.data_);
 }
 
 void shooting_node::update_approximation() {
     /// @todo: always eval residual?
-    for_funcs(expr_sets_,
+    for_funcs(problem_,
               [this](size_t field, size_t idx_expr, approx_ptr_t _f) {
-                  _f->evaluate(expr_sets_, data_->approx_[field][idx_expr],
+                  _f->evaluate(problem_, data_->approx_[field][idx_expr],
                                true, _f->order() >= approx_order::first,
                                _f->order() >= approx_order::second);
               });

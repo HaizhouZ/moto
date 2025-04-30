@@ -2,7 +2,7 @@
 
 namespace atri {
 
-nullspace_riccati_data::nullspace_riccati_data(expr_sets_ptr_t exprs)
+nullspace_riccati_data::nullspace_riccati_data(problem_ptr_t exprs)
     : node_data(exprs), nx(exprs->dim_[__x]), nu(exprs->dim_[__u]),
       ns(raw_data_.exprs_->dim_[__eq_cstr_s]),
       nc(raw_data_.exprs_->dim_[__eq_cstr_c]), ncstr(ns + nc), d_u(nu, nx),

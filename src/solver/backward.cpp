@@ -1,4 +1,4 @@
-#include <atri/solver/ns_sqp.hpp>
+#include <atri/solver/ns_riccati_solver.hpp>
 
 namespace atri {
 
