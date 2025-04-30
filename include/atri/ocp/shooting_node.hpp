@@ -10,7 +10,7 @@ namespace atri {
 /**
  * @brief data management. this class controls the data access and allocation.
  * 1. each data_mgr controls a node_data type
- * 2. data instances of same node_data type can have different exprs
+ * 2. data instances of same node_data type can have different prob
  */
 class data_mgr {
   private:
@@ -34,15 +34,13 @@ class data_mgr {
             std::is_constructible<data_type, problem_ptr_t>::value,
             "data_type must have a constructor that accepts problem_ptr_t");
 
-        data_maker_func maker = [](problem_ptr_t exprs) {
+        data_maker_func maker = [](problem_ptr_t prob) {
             return std::static_pointer_cast<node_data>(
-                std::make_shared<data_type>(exprs));
+                std::make_shared<data_type>(prob));
         };
         static data_mgr s_(maker);
         return s_;
     }
-    // make data for a expression set
-    static node_data_ptr_t make_data(problem_ptr_t problem);
 
     /**
      * @brief create a batch of data

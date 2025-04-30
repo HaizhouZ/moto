@@ -20,11 +20,7 @@
 2. For AMD Ryzen ZEN4 AVX512, please use `GCC >= 13.2`.
 
 # Todo list
-2. map y
-3. configuration (such as weights)
-4. dynamics gap
-5. CasADi supports
-6. OCP graph
-
-Maybe
-1. memory pool
+1. cost, dynamics, constraints
+2. configuration (such as weights)
+3. dynamics gap
+4. CasADi supports

@@ -8,19 +8,19 @@
 namespace atri {
 
 struct raw_data {
-    raw_data(problem_ptr_t exprs);
+    raw_data(problem_ptr_t prob);
 
     auto get(sym_ptr_t sym) {
         return sym->make_vec(
-            exprs_->get_data_ptr(value_[sym->field_].data(), sym));
+            prob_->get_data_ptr(value_[sym->field_].data(), sym));
     }
 
     void swap(raw_data &rhs) {
-        this->exprs_.swap(rhs.exprs_);
+        this->prob_.swap(rhs.prob_);
         this->value_.swap(rhs.value_);
     }
 
-    problem_ptr_t exprs_;
+    problem_ptr_t prob_;
     std::array<vector, field::num_sym> value_;
     struct raw_approx {
         vector v_;                                // value

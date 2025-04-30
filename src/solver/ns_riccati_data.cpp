@@ -4,10 +4,10 @@
 
 namespace atri {
 
-nullspace_riccati_data::nullspace_riccati_data(problem_ptr_t exprs)
-    : node_data(exprs), nx(exprs->dim_[__x]), nu(exprs->dim_[__u]),
-      ns(raw_data_.exprs_->dim_[__eq_cstr_s]),
-      nc(raw_data_.exprs_->dim_[__eq_cstr_c]), ncstr(ns + nc), d_u(nu, nx),
+nullspace_riccati_data::nullspace_riccati_data(problem_ptr_t prob)
+    : node_data(prob), nx(prob->dim_[__x]), nu(prob->dim_[__u]),
+      ns(raw_data_.prob_->dim_[__eq_cstr_s]),
+      nc(raw_data_.prob_->dim_[__eq_cstr_c]), ncstr(ns + nc), d_u(nu, nx),
       d_y(nx, nx), d_lbd_f(nx, nx), d_lbd_s_c(ncstr, nx),
       Q_x(raw_data_.jac_[__x]), Q_u(raw_data_.jac_[__u]),
       Q_y(raw_data_.jac_[__y]), Q_xx(raw_data_.hessian_[__x][__x]),

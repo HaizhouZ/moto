@@ -2,30 +2,30 @@
 
 namespace atri {
 
-raw_data::raw_data(problem_ptr_t exprs) : exprs_(exprs) {
+raw_data::raw_data(problem_ptr_t prob) : prob_(prob) {
     for (size_t i = 0; i < field::num_sym; i++) {
         // auto &v = value_[i];
-        // for (auto &e : exprs_->expr_[i]) {
+        // for (auto &e : prob_->expr_[i]) {
         //     v.push_back(vector(e->dim_));
         // }
-        value_[i].resize(exprs_->dim_[i]);
+        value_[i].resize(prob_->dim_[i]);
     }
 
     for (size_t i = __dyn; i < field::num_constr; i++) {
-        if (exprs_->expr_[i].empty()) {
+        if (prob_->expr_[i].empty()) {
             continue;
         }
-        size_t dim = exprs_->dim_[i];
+        size_t dim = prob_->dim_[i];
         approx_[i].v_.resize(dim);
         for (size_t j = 0; j < field::num_prim; j++) {
-            approx_[i].jac_[j].resize(dim, exprs_->dim_[j]);
+            approx_[i].jac_[j].resize(dim, prob_->dim_[j]);
         }
     }
     // cost hessian(store only half)
     for (size_t i = 0; i < field::num_prim; i++) {
-        jac_[i].resize(exprs_->dim_[i]);
+        jac_[i].resize(prob_->dim_[i]);
         for (size_t j = i; j < field::num_prim; j++) {
-            hessian_[i][j].resize(exprs_->dim_[i], exprs_->dim_[j]);
+            hessian_[i][j].resize(prob_->dim_[i], prob_->dim_[j]);
         }
     }
 }
@@ -33,17 +33,17 @@ raw_data::raw_data(problem_ptr_t exprs) : exprs_(exprs) {
 sparse_approx_data::sparse_approx_data(raw_data &raw,
                                        std::vector<sym_ptr_t> in_args,
                                        approx &f)
-    : v_(raw.approx_[f.field_].v_.segment(raw.exprs_->get_expr_start(f),
+    : v_(raw.approx_[f.field_].v_.segment(raw.prob_->get_expr_start(f),
                                           f.dim_)) {
     for (size_t i = 0; i < in_args.size(); i++) {
         auto arg = in_args[i];
         in_args_.push_back(raw.get(arg));
     }
-    size_t f_st = raw.exprs_->get_expr_start(f);
+    size_t f_st = raw.prob_->get_expr_start(f);
     if (f.order() >= approx_order::first) {
         for (size_t i = 0; i < in_args_.size(); i++) {
             jac_.push_back(raw.approx_[f.field_].jac_[in_args[i]->field_].block(
-                f_st, raw.exprs_->get_expr_start(in_args[i]), f.dim_,
+                f_st, raw.prob_->get_expr_start(in_args[i]), f.dim_,
                 in_args[i]->dim_));
         }
         assert(jac_.size() == in_args_.size());
@@ -60,8 +60,8 @@ sparse_approx_data::sparse_approx_data(raw_data &raw,
                 field_2 = in_args[j]->field_;
                 if (field_1 <= field_2) {
                     hess_[i].push_back(raw.hessian_[field_1][field_2].block(
-                        raw.exprs_->get_expr_start(in_args[i]),
-                        raw.exprs_->get_expr_start(in_args[j]),
+                        raw.prob_->get_expr_start(in_args[i]),
+                        raw.prob_->get_expr_start(in_args[j]),
                         in_args[i]->dim_, in_args[j]->dim_));
                 } else {
                     // this should be empty

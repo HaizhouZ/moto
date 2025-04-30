@@ -30,7 +30,7 @@ struct nullspace_riccati_data : public node_data {
     } d_u, d_y, d_lbd_f, d_lbd_s_c;
     // linear rollout
     rollout_data *rollout_;
-    nullspace_riccati_data(problem_ptr_t exprs);
+    nullspace_riccati_data(problem_ptr_t prob);
     ~nullspace_riccati_data();
 };
 def_ptr(nullspace_riccati_data);
