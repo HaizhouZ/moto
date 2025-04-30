@@ -25,7 +25,7 @@ struct raw_data {
     struct raw_approx {
         vector v_;                                // value
         std::array<matrix, field::num_prim> jac_; // jacobian
-    } approx_[field::num_func];
+    } approx_[field::num_constr];
     // cost
     row_vector jac_[field::num_prim];
     matrix hessian_[field::num_prim][field::num_prim]; // cost hessian
@@ -77,7 +77,7 @@ class approx : public expr { /// todo: change to differentiable for precompute
 
     inline approx_order order() { return order_; }
 
-    approx(const std::string &name, size_t dim, field::type field,
+    approx(const std::string &name, size_t dim, field_t field,
            approx_order order)
         : expr(name, dim, field), order_(order) {}
 
@@ -116,7 +116,7 @@ class foot_kin_constr : public approx {
 
   public:
     foot_kin_constr(const std::string &frame, sym_ptr_t q)
-        : approx(frame, 3, field::type::eq_cstr_s, approx_order::first), q_(q) {
+        : approx(frame, 3, __eq_cstr_s, approx_order::first), q_(q) {
         in_args_.push_back(q_);
     }
 };

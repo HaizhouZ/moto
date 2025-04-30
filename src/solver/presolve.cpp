@@ -17,27 +17,27 @@ void nullspace_riccati_solver::pre_solving_steps() {
         // update everything
         cur->update_approximation();
         /// @todo sparse F_y inverse
-        auto &F = _approx[field::dyn].jac_;
-        d.llt_dyn_.compute(F[field::y]);
-        d.F_u = F[field::u];
+        auto &F = _approx[__dyn].jac_;
+        d.llt_dyn_.compute(F[__y]);
+        d.F_u = F[__u];
         d.llt_dyn_.solveInPlace(d.F_u);
-        d.F_0_k = -_approx[field::dyn].v_;
+        d.F_0_k = -_approx[__dyn].v_;
         d.llt_dyn_.solveInPlace(d.F_0_k);
-        d.F_0_K = -F[field::x];
+        d.F_0_K = -F[__x];
         d.llt_dyn_.solveInPlace(d.F_0_K);
         // nullspace computation
         d.rank_status_ = rank_status::unconstrained;
         if (d.nc + d.ns > 0) {
             d.s_0_p_k.noalias() =
-                -_approx[field::eq_cstr_s].v_ - d.s_y * d.F_0_k;
+                -_approx[__eq_cstr_s].v_ - d.s_y * d.F_0_k;
             d.s_0_p_K.noalias() =
-                -_approx[field::eq_cstr_s].jac_[field::x] - d.s_y * d.F_0_K;
+                -_approx[__eq_cstr_s].jac_[__x] - d.s_y * d.F_0_K;
             d.s_u.noalias() = -d.s_y * d.F_u;
             // solve pseudo inverse
-            d.s_c_stacked << d.s_u, _approx[field::eq_cstr_c].jac_[field::u];
-            d.s_c_stacked_0_k << d.s_0_p_k, -_approx[field::eq_cstr_c].v_;
+            d.s_c_stacked << d.s_u, _approx[__eq_cstr_c].jac_[__u];
+            d.s_c_stacked_0_k << d.s_0_p_k, -_approx[__eq_cstr_c].v_;
             d.s_c_stacked_0_K << d.s_0_p_K,
-                -_approx[field::eq_cstr_c].jac_[field::x];
+                -_approx[__eq_cstr_c].jac_[__x];
             d.lu_eq_.compute(d.s_c_stacked);
             size_t rank = d.lu_eq_.rank();
             if (rank == 0)

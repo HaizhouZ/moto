@@ -11,11 +11,11 @@ raw_data::raw_data(expr_sets_ptr_t exprs) : exprs_(exprs) {
         value_[i].resize(exprs_->dim_[i]);
     }
 
-    for (size_t i = field::dyn; i < field::num_func; i++) {
+    for (size_t i = __dyn; i < field::num_constr; i++) {
         if (exprs_->expr_[i].empty()) {
             continue;
         }
-        size_t dim = (i == field::cost) ? 1 : exprs_->dim_[i];
+        size_t dim = exprs_->dim_[i];
         approx_[i].v_.resize(dim);
         for (size_t j = 0; j < field::num_prim; j++) {
             approx_[i].jac_[j].resize(dim, exprs_->dim_[j]);

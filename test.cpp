@@ -4,7 +4,7 @@
 #include <functional>
 #include <iostream>
 void nice() {
-    auto q = std::make_shared<atri::sym>("q", 3, atri::field::type::x);
+    auto q = std::make_shared<atri::sym>("q", 3, atri::__x);
     auto a = atri::foot_kin_constr("left", q);
     std::cout << magic_enum::enum_name(
         static_cast<atri::approx *>(&a)->order());

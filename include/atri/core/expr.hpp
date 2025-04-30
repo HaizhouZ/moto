@@ -24,9 +24,9 @@ class expr {
     const size_t dim_;
     const std::string& name_;
     const size_t uid_;
-    const field::type field_;
+    const field_t field_;
 
-    expr(const std::string& name, size_t dim, field::type field)
+    expr(const std::string& name, size_t dim, field_t field)
         : name_(name), dim_(dim), uid_(max_uid++), field_(field) {
     }
     auto make_vec(scalar_t* ptr) { return mapped_vector(ptr, dim_); }
@@ -40,7 +40,7 @@ def_ptr(expr);
 
 struct sym : public expr {
     approx_order type() = delete;
-    sym(const std::string& name, size_t dim, field::type type)
+    sym(const std::string& name, size_t dim, field_t type)
         : expr(name, dim, type) {
         assert(size_t(type) <= field::num_sym);
     }

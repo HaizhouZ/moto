@@ -4,24 +4,25 @@
 #include <atri/core/fwd.hpp>
 
 namespace atri {
-namespace field {
-enum type : size_t {
-    x = 0,
-    u,
-    y,
-    p,
-    dyn,       // dynamic model
-    eq_cstr_s, // "state equality constraints"
-    eq_cstr_c, // "input-state equality constraints"
-    cost,      // "running cost"
+enum field_t : size_t {
+    __x = 0,
+    __u,
+    __y,
+    __p,
+    __dyn,       // dynamic model
+    __eq_cstr_s, // "state equality constraints"
+    __eq_cstr_c, // "input-state equality constraints"
+    __cost,      // "running cost"
     // ineq_cstr_x, // "state inequality constraints"
     // ineq_cstr_u, // "state-input inequality constraints"
 };
-constexpr size_t num_sym = p + 1; // number of symbolic fields
-constexpr size_t num_prim = p; // number of primal fields
-constexpr size_t num = magic_enum::enum_count<type>();
+namespace field {
+constexpr size_t num_sym = __p + 1; // number of symbolic fields
+constexpr size_t num_prim = __p;    // number of primal fields
+constexpr size_t num = magic_enum::enum_count<field_t>();
 constexpr size_t num_func = num - num_sym;
-constexpr size_t num_constr = num_func - 1;;
+constexpr size_t num_constr = num_func - 1;
+;
 } // namespace field
 
 } // namespace atri

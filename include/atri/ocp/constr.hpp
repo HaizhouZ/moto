@@ -17,10 +17,10 @@ def_ptr(constr_data);
  * @brief constraint approximation with multipliers (and slack variables)
  */
 struct constr : public approx {
-    constr(const std::string &name, size_t dim, field::type field,
+    constr(const std::string &name, size_t dim, field_t field,
            approx_order order = approx_order::first)
         : approx(name, dim, field, order) {
-        assert(field == field::dyn || magic_enum::enum_name(field).find(
+        assert(field == __dyn || magic_enum::enum_name(field).find(
                                           "constr") != std::string::npos);
     }
     sparse_approx_data_ptr_t make_data(raw_data &raw) override {
