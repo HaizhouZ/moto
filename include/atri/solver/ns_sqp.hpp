@@ -42,6 +42,7 @@ struct nullspace_riccati_data : public node_data {
     Eigen::FullPivLU<matrix> lu_;
     Eigen::LLT<matrix> llt_;
     Eigen::LLT<matrix> llt_dyn_;
+    size_t lu_rank_;
     size_t nx, nu, ns, nc;
     size_t nz;
     nullspace_riccati_data(expr_sets_ptr_t exprs);

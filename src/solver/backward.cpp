@@ -16,14 +16,22 @@ void nullspace_riccati_solver::backward_pass() {
             d.Q_xu.transpose() -
             d.F_u.transpose() * (d.Q_xy.transpose() - d.Q_yy * d.F_0_K);
         // compute z_u
-        if (d.nc + d.ns > 0) {
+        if (d.lu_rank_ == 0) {
+            d.z_u_k = d.u_0_p_k;
+            d.z_u_K = d.u_0_p_K;
+            d.u_z_K.noalias() = d.z_u_K;
+            d.llt_.compute(d.U);
+            d.llt_.solveInPlace(d.u_z_K);
+            d.K_u.noalias() = d.u_z_K;
+        } else {
+            // constr rank > 0
             d.z_u_k.noalias() = d.u_0_p_k - d.U * d.u_y_k;
             d.z_u_K.noalias() = d.u_0_p_K - d.U * d.u_y_K;
-            // solve nullspace system
             if (d.lu_.rank() == d.U.rows()) {
                 // fully constrained
                 d.K_u.noalias() = d.u_y_K;
             } else {
+                // solve nullspace system
                 auto &Z = d.lu_.kernel();
                 d.U_z.noalias() = Z.transpose() * d.U * Z;
                 /// todo: what if d.u_z_K size is wrong
@@ -32,13 +40,6 @@ void nullspace_riccati_solver::backward_pass() {
                 d.llt_.solveInPlace(d.u_z_K);
                 d.K_u.noalias() = d.u_y_K + Z * d.u_z_K;
             }
-        } else {
-            d.z_u_k = d.u_0_p_k;
-            d.z_u_K = d.u_0_p_K;
-            d.u_z_K.noalias() = d.z_u_K;
-            d.llt_.compute(d.U);
-            d.llt_.solveInPlace(d.u_z_K);
-            d.K_u.noalias() = d.u_z_K;
         }
 
         // update value function derivatives of previous node

@@ -26,6 +26,7 @@ void nullspace_riccati_solver::pre_solving_steps() {
         d.F_0_K = F[field::x];
         d.llt_dyn_.solveInPlace(d.F_0_K);
         // nullspace computation
+        d.lu_rank_ = 0;
         if (d.nc + d.ns > 0) {
             d.s_0_p_k.noalias() =
                 _approx[field::eq_cstr_s].v_ -
@@ -40,8 +41,9 @@ void nullspace_riccati_solver::pre_solving_steps() {
             d.s_c_stacked_0_K << d.s_0_p_K,
                 _approx[field::eq_cstr_c].jac_[field::x];
             d.lu_.compute(d.s_c_stacked);
-            d.u_y_k = d.lu_.solve(d.s_c_stacked_0_k);
-            d.u_y_K = d.lu_.solve(d.s_c_stacked_0_K);
+            d.lu_rank_ = d.lu_.rank();
+            d.u_y_k.noalias() = d.lu_.solve(d.s_c_stacked_0_k);
+            d.u_y_K.noalias() = d.lu_.solve(d.s_c_stacked_0_K);
         }
     }
     // these two cannot merge, because Q_y/yy should first be updated with
