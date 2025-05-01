@@ -12,7 +12,7 @@ namespace atri {
  * @note each std::vector contains the approximation data of functions in one
  * field
  */
-class approx_sets_data {
+class stacked_approx_data {
     std::array<std::vector<sparse_approx_data_ptr_t>, field::num_func> ptr_;
 
   public:
@@ -22,7 +22,7 @@ class approx_sets_data {
     const std::vector<sparse_approx_data_ptr_t> &operator[](size_t idx) const {
         return ptr_[idx - field::num_sym];
     }
-    void swap(approx_sets_data &rhs) { ptr_.swap(rhs.ptr_); }
+    void swap(stacked_approx_data &rhs) { ptr_.swap(rhs.ptr_); }
 };
 
 struct node_data;
@@ -30,8 +30,8 @@ def_ptr(node_data);
 
 struct node_data {
     raw_data raw_data_;
-    approx_sets_data approx_;
-    node_data(approx_sets_data &&a, raw_data &&p)
+    stacked_approx_data approx_;
+    node_data(stacked_approx_data &&a, raw_data &&p)
         : approx_(std::move(a)), raw_data_(std::move(p)) {}
     node_data(problem_ptr_t prob);
 };
