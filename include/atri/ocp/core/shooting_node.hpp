@@ -14,12 +14,11 @@ namespace atri {
  */
 class data_mgr {
   private:
-    struct data_pool : std::stack<node_data_ptr_t> {
+    struct data_pool : public std::stack<node_data_ptr_t> {
         std::mutex mtx_;
+        data_pool() = default;
     };
     using data_maker_func = std::function<node_data_ptr_t(problem_ptr_t)>;
-
-    def_ptr(data_pool);
 
     data_mgr() = default;
     data_mgr(data_mgr &) = delete;
@@ -27,7 +26,8 @@ class data_mgr {
 
   public:
     // singleton
-    template <typename data_type> static data_mgr &get() {
+    template <typename data_type>
+    static data_mgr &get() {
         static_assert(std::is_base_of<node_data, data_type>::value,
                       "data_type must be derived from node_data");
         static_assert(
@@ -57,7 +57,7 @@ class data_mgr {
     data_maker_func maker_;
     // the following are indexed by the uid of problem
     // each is a problem formulation, with its own data
-    std::unordered_map<size_t, data_pool_ptr_t> data_;
+    std::unordered_map<size_t, data_pool> data_;
 };
 
 /**

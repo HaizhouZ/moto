@@ -34,14 +34,16 @@ node_data::~node_data() {
 }
 
 void data_mgr::create_data_batch(problem_ptr_t prob, size_t N) {
-    auto &pool = *data_[prob->uid_];
+    data_.try_emplace(prob->uid_);
+    auto &pool = data_[prob->uid_];
     std::lock_guard _lock(pool.mtx_);
-    for (size_t i = 1; i < N; i++)
+    for (size_t i = 0; i < N; i++) {
         pool.push(maker_(prob));
+    }
 }
 
 node_data_ptr_t data_mgr::acquire_data(problem_ptr_t prob) {
-    auto &pool = *data_[prob->uid_];
+    auto &pool = data_[prob->uid_];
     std::lock_guard _lock(pool.mtx_);
     if (!pool.empty()) {
         auto p = std::move(pool.top());
@@ -53,7 +55,7 @@ node_data_ptr_t data_mgr::acquire_data(problem_ptr_t prob) {
 }
 
 void data_mgr::release_data(problem_ptr_t prob, node_data_ptr_t data) {
-    auto &pool = *data_[prob->uid_];
+    auto &pool = data_[prob->uid_];
     std::lock_guard _lock(pool.mtx_);
     pool.push(data);
 }

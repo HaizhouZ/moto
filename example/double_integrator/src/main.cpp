@@ -12,6 +12,7 @@ int main() {
     utils::print_problem(prob);
 
     auto &mem = data_mgr::get<node_data>();
+    mem.create_data_batch(prob, 100);
 
     return 0;
 }
