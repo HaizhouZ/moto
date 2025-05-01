@@ -49,7 +49,7 @@ class doubleIntegratorDyn : dynamics, public expr_collection {
         void jacobian_impl(sparse_approx_data_ptr_t data) override {
             data->jac_[0].diagonal().setConstant(-1);
             data->jac_[1].setIdentity();
-            data->jac_[2].diagonal().setConstant(0.01);
+            data->jac_[2].diagonal().setConstant(-0.01);
         };
     };
     struct vel : public constr {
@@ -57,7 +57,7 @@ class doubleIntegratorDyn : dynamics, public expr_collection {
         void jacobian_impl(sparse_approx_data_ptr_t data) override {
             data->jac_[0].diagonal().setConstant(-1);
             data->jac_[1].setIdentity();
-            data->jac_[2].diagonal().setConstant(0.01);
+            data->jac_[2].diagonal().setConstant(-0.01);
         };
     };
     doubleIntegratorDyn()

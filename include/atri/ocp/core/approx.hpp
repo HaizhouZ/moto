@@ -79,6 +79,8 @@ class approx : public expr { /// todo: change to differentiable for precompute
         // if (eval_jac)
         if (eval_jac)
             jacobian_impl(data);
+        if (eval_hess)
+            hessian_impl(data);
     }
 };
 def_ptr(approx);

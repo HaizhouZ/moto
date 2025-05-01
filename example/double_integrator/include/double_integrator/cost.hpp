@@ -8,13 +8,31 @@ namespace atri {
 struct cost : public approx {
     cost(const std::string &name, approx_order order = approx_order::second) : approx(name, 1, __cost, order) {}
 };
-template <typename T>
-struct shared : public std::shared_ptr<T> {
-    shared() : std::shared_ptr<T>(std::make_shared<T>()) {}
-};
-
+/**
+ * @brief simple quadratic cost
+ *
+ */
 struct doubleIntegratorCost : public cost {
-    doubleIntegratorCost() : cost("doubleIntegratorCost") {}
+    vector d_r, d_v, d_a;
+    doubleIntegratorCost(sym_ptr_t r, sym_ptr_t v, sym_ptr_t a) : cost("doubleIntegratorCost") {
+        d_r.resize(3);
+        d_r.setConstant(10);
+        d_v.resize(3);
+        d_v.setConstant(0.1);
+        d_a.resize(3);
+        d_a.setConstant(1e-3);
+
+        add_arguments({r, v, a});
+    }
+    void jacobian_impl(sparse_approx_data_ptr_t data) override { // make sure use +=
+        data->jac_[0].noalias() += data->in_args_[0].transpose() * d_r.asDiagonal();
+        data->jac_[1].noalias() += data->in_args_[1].transpose() * d_v.asDiagonal();
+        data->jac_[2].noalias() += data->in_args_[2].transpose() * d_a.asDiagonal();
+    }
+    void hessian_impl(sparse_approx_data_ptr_t data) override {
+        data->hess_[0][0].diagonal() += d_r + d_v;
+        data->hess_[2][2].diagonal() += d_a;
+    }
 };
 
 } // namespace atri

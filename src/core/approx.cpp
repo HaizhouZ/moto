@@ -37,22 +37,31 @@ sparse_approx_data::sparse_approx_data(problem_data *raw,
         in_args_.push_back(raw->get(arg));
     }
     size_t f_st = raw->prob_->get_expr_start(*f);
-    if (f->order() >= approx_order::first) {
-        for (size_t i = 0; i < in_args_.size(); i++) {
-            jac_.push_back(raw->approx_[f->field_].jac_[in_args[i]->field_].block(
-                f_st, raw->prob_->get_expr_start(in_args[i]),
-                f->dim_, in_args[i]->dim_));
+    // for non-cost
+    if (f->field_ - __dyn < field::num_constr) {
+        if (f->order() >= approx_order::first) {
+            for (size_t i = 0; i < in_args_.size(); i++) {
+                jac_.push_back(raw->approx_[f->field_].jac_[in_args[i]->field_].block(
+                    f_st, raw->prob_->get_expr_start(in_args[i]),
+                    f->dim_, in_args[i]->dim_));
+            }
+            assert(jac_.size() == in_args_.size());
         }
-        assert(jac_.size() == in_args_.size());
+    } else { // for cost
+        for (size_t i = 0; i < in_args_.size(); i++) {
+            jac_.push_back(raw->jac_[in_args[i]->field_].segment(
+                raw->prob_->get_expr_start(in_args[i]), in_args[i]->dim_));
+        }
     }
+
     if (f->order() >= approx_order::second) {
         size_t field_1, field_2;
         hess_.resize(in_args_.size());
         for (size_t i = 0; i < in_args_.size(); i++) {
-            for (size_t j = i; j < in_args_.size(); j++) {
+            for (size_t j = 0; j < in_args_.size(); j++) {
                 /// @note order matches problem_data
-                /// h[i][j] = h[j][i] if i, j in the same field or i < j
-                /// otherwise only keep h[i][j], the other is empty
+                /// h[i][j] = h[j][i] if i, j in the same field or field(i) < field(j)
+                /// otherwise only keep h[i][j] (empty)
                 field_1 = in_args[i]->field_;
                 field_2 = in_args[j]->field_;
                 if (field_1 <= field_2) {
