@@ -30,7 +30,8 @@ struct doubleIntegratorCost : public cost {
         data->jac_[2].noalias() += data->in_args_[2].transpose() * d_a.asDiagonal();
     }
     void hessian_impl(sparse_approx_data_ptr_t data) override {
-        data->hess_[0][0].diagonal() += d_r + d_v;
+        data->hess_[0][0].diagonal() += d_r;
+        data->hess_[1][1].diagonal() += d_v;
         data->hess_[2][2].diagonal() += d_a;
     }
 };

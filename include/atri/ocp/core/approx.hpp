@@ -15,7 +15,10 @@ struct approx;
 struct sparse_approx_data {
     // use ref to exploit sparsity (avoid copy)
     std::vector<mapped_vector> in_args_;
-    vector_ref v_;                              // value
+    vector_ref v_; // value
+    // derivatives; index corresponds to in_args_
+    /// @note in hess_ only the upper block triangular part are stored!(blocked by field)
+    /// @example Q_xu is store instead of Q_ux;
     std::vector<matrix_ref> jac_;               // jacobian, idx correspond to in_args_
     std::vector<std::vector<matrix_ref>> hess_; // hessian for cost
     // std::vector<sparse_mat> jac_;

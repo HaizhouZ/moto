@@ -20,7 +20,8 @@
 2. For AMD Ryzen ZEN4 AVX512, please use `GCC >= 13.2`.
 
 # Todo list
-1. cost, dynamics, constraints
-2. configuration (such as weights)
-3. dynamics gap
-4. CasADi supports
+
+1. multipler jacobian product
+2. terminal cost handling (nodes of different problem!)
+
+3. CasADi supports
