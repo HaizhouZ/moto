@@ -52,6 +52,9 @@ struct problem {
         }
     }
 
+    template <typename derived>
+    void add(std::shared_ptr<derived> rhs) { add(std::static_pointer_cast<expr>(rhs)); }
+
     /**
      * @brief general add interface.
      * T must have method get_expr that returns either vector of expr (or derived) pointers or

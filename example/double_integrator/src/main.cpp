@@ -1,12 +1,16 @@
 #include <atri/ocp/core/shooting_node.hpp>
 #include <atri/utils/print.hpp>
+#include <double_integrator/cost.hpp>
 #include <double_integrator/dynamics.hpp>
 
 int main() {
     using namespace atri;
     doubleIntegratorDyn dyn;
+    // auto cost = std::make_shared<doubleIntegratorCost>();
+    wrapper<doubleIntegratorCost> cost;
     auto prob = std::make_shared<problem>();
     prob->add(dyn);
+    prob->add(cost);
 
     utils::print_problem(prob);
 
