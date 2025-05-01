@@ -1,3 +1,4 @@
+#include <atri/ocp/core/problem_data.hpp>
 #include <atri/solver/data/nullspace_data.hpp>
 #include <atri/solver/ns_riccati_solver.hpp>
 
@@ -15,7 +16,7 @@ void nullspace_riccati_solver::pre_solving_steps() {
         for (auto m : {d.Q_xx, d.Q_xu, d.Q_uu, d.Q_xy, d.Q_yy}) {
             m.setZero();
         }
-        auto &_approx = d.raw_data_.approx_;
+        auto &_approx = d.raw_->approx_;
         // update everything
         cur->update_approximation();
         /// @todo sparse F_y inverse

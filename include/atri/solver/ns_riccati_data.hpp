@@ -2,7 +2,7 @@
 #define __NS_RICCATI_DATA__
 
 
-#include <atri/ocp/node_data.hpp>
+#include <atri/ocp/core/node_data.hpp>
 
 namespace atri {
 enum rank_status : int { unconstrained = 0, constrained, fully_constrained };

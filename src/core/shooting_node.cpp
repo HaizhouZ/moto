@@ -1,4 +1,6 @@
-#include <atri/ocp/shooting_node.hpp>
+#include <atri/ocp/core/problem_data.hpp>
+#include <atri/ocp/core/shooting_node.hpp>
+
 namespace atri {
 
 /**
@@ -21,16 +23,20 @@ inline void for_funcs(problem_ptr_t prob, callback_type &&callback) {
     }
 }
 
-node_data::node_data(problem_ptr_t prob) : raw_data_(prob) {
+node_data::node_data(problem_ptr_t prob) : raw_(new problem_data(prob)) {
     for_funcs(prob, [&](size_t field, size_t idx_expr, approx_ptr_t _f) {
-        approx_[field].push_back(_f->make_data(raw_data_));
+        approx_[field].push_back(_f->make_data(raw_));
     });
+}
+
+node_data::~node_data() {
+    delete raw_;
 }
 
 void data_mgr::create_data_batch(problem_ptr_t prob, size_t N) {
     auto &pool = *data_[prob->uid_];
     std::lock_guard _lock(pool.mtx_);
-    for (size_t i = 0; i < N; i++)
+    for (size_t i = 1; i < N; i++)
         pool.push(maker_(prob));
 }
 

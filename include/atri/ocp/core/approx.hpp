@@ -1,35 +1,11 @@
 #ifndef __approx__
 #define __approx__
 
-// #include <atri/core/sparsity.hpp>
-#include <atri/core/fwd.hpp>
-#include <atri/ocp/problem.hpp>
+#include <atri/ocp/core/problem.hpp>
 
 namespace atri {
 
-struct raw_data {
-    raw_data(problem_ptr_t prob);
-
-    auto get(sym_ptr_t sym) {
-        return sym->make_vec(
-            prob_->get_data_ptr(value_[sym->field_].data(), sym));
-    }
-
-    void swap(raw_data &rhs) {
-        this->prob_.swap(rhs.prob_);
-        this->value_.swap(rhs.value_);
-    }
-
-    problem_ptr_t prob_;
-    std::array<vector, field::num_sym> value_;
-    struct raw_approx {
-        vector v_;                                // value
-        std::array<matrix, field::num_prim> jac_; // jacobian
-    } approx_[field::num_constr];
-    // cost
-    row_vector jac_[field::num_prim];
-    matrix hessian_[field::num_prim][field::num_prim]; // cost hessian
-};
+struct problem_data; // fwd declaration
 
 /////////////////////////////////////////////////////////////////////
 
@@ -39,12 +15,11 @@ struct approx;
 struct sparse_approx_data {
     // use ref to exploit sparsity (avoid copy)
     std::vector<mapped_vector> in_args_;
-    vector_ref v_;                // value
-    std::vector<matrix_ref> jac_; // jacobian, idx correspond to in_args_
+    vector_ref v_;                              // value
+    std::vector<matrix_ref> jac_;               // jacobian, idx correspond to in_args_
     std::vector<std::vector<matrix_ref>> hess_; // hessian for cost
     // std::vector<sparse_mat> jac_;
-    sparse_approx_data(raw_data &raw, std::vector<sym_ptr_t> in_args,
-                       approx &f);
+    sparse_approx_data(problem_data *raw, std::vector<sym_ptr_t> in_args, approx *f);
     sparse_approx_data(const sparse_approx_data &rhs) = delete; // disable this
     sparse_approx_data(sparse_approx_data &&rhs) : v_(rhs.v_) {
         in_args_ = std::move(rhs.in_args_);
@@ -90,7 +65,7 @@ class approx : public expr { /// todo: change to differentiable for precompute
      * @param raw space shoud have been allocated
      * @return sparse_approx_data_ptr_t
      */
-    virtual sparse_approx_data_ptr_t make_data(raw_data &raw);
+    virtual sparse_approx_data_ptr_t make_data(problem_data *raw);
 
     /**
      * @brief evaluate the approx
@@ -100,8 +75,7 @@ class approx : public expr { /// todo: change to differentiable for precompute
      * @tparam eval_hess evaluate hessian if true
      */
     void evaluate(problem_ptr_t problem, sparse_approx_data_ptr_t data,
-                  bool eval_val, bool eval_jac = false,
-                  bool eval_hess = false) {
+                  bool eval_val, bool eval_jac = false, bool eval_hess = false) {
         // if (eval_jac)
         if (eval_jac)
             jacobian_impl(data);

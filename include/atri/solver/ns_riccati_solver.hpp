@@ -1,7 +1,7 @@
 #ifndef __NS_RICCATI_SOLVER__
 #define __NS_RICCATI_SOLVER__
 
-#include <atri/ocp/shooting_node.hpp>
+#include <atri/ocp/core/shooting_node.hpp>
 #include <atri/solver/ns_riccati_data.hpp>
 #include <list>
 

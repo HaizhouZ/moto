@@ -13,19 +13,10 @@ include_directories(
     include
 )
 add_compile_options(-march=native)
-add_library(atri SHARED 
-            src/expression_base.cpp
-            src/shooting_node.cpp
-            src/approx.cpp
-            src/constr.cpp
-            src/solver/presolve.cpp
-            src/solver/backward.cpp
-            src/solver/ns_riccati_data.cpp
-            src/solver/postsolve.cpp
-            src/solver/rollout.cpp
-            src/ns_sqp.cpp
-            src/utils/print.cpp
-        )
+
+file(GLOB SRC_FILES src/*.cpp src/core/*.cpp src/solver/*.cpp src/utils/*.cpp)
+add_library(atri SHARED ${SRC_FILES})
+
 add_executable(atri_test main.cpp)
 # add_compile_definitions(EIGEN_USE_BLAS)
 target_link_libraries(atri PUBLIC 

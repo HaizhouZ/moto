@@ -1,7 +1,7 @@
 #ifndef __CONSTR__
 #define __CONSTR__
 
-#include <atri/ocp/approx.hpp>
+#include <atri/ocp/core/approx.hpp>
 
 namespace atri {
 struct constr_data : public sparse_approx_data {
@@ -23,7 +23,7 @@ struct constr : public approx {
         assert(field == __dyn || magic_enum::enum_name(field).find(
                                           "constr") != std::string::npos);
     }
-    sparse_approx_data_ptr_t make_data(raw_data &raw) override {
+    sparse_approx_data_ptr_t make_data(problem_data *raw) override {
         return constr_data_ptr_t(
             new constr_data(std::move(*approx::make_data(raw))));
     }

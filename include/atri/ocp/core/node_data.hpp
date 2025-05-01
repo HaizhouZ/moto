@@ -3,7 +3,7 @@
 
 #include <array>
 
-#include <atri/ocp/approx.hpp>
+#include <atri/ocp/core/approx.hpp>
 
 namespace atri {
 
@@ -22,18 +22,18 @@ class stacked_approx_data {
     const std::vector<sparse_approx_data_ptr_t> &operator[](size_t idx) const {
         return ptr_[idx - field::num_sym];
     }
-    void swap(stacked_approx_data &rhs) { ptr_.swap(rhs.ptr_); }
+    stacked_approx_data() = default;
+    stacked_approx_data(stacked_approx_data &&rhs) : ptr_(std::move(rhs.ptr_)) {}
 };
 
 struct node_data;
 def_ptr(node_data);
 
 struct node_data {
-    raw_data raw_data_;
+    problem_data *raw_;
     stacked_approx_data approx_;
-    node_data(stacked_approx_data &&a, raw_data &&p)
-        : approx_(std::move(a)), raw_data_(std::move(p)) {}
     node_data(problem_ptr_t prob);
+    ~node_data();
 };
 } // namespace atri
 

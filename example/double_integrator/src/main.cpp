@@ -1,4 +1,4 @@
-#include <atri/ocp/shooting_node.hpp>
+#include <atri/ocp/core/shooting_node.hpp>
 #include <atri/utils/print.hpp>
 #include <double_integrator/dynamics.hpp>
 

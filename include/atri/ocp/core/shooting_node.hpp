@@ -1,7 +1,7 @@
 #ifndef __SHOOTING_NODE__
 #define __SHOOTING_NODE__
 
-#include <atri/ocp/node_data.hpp>
+#include <atri/ocp/core/node_data.hpp>
 #include <mutex>
 #include <stack>
 
