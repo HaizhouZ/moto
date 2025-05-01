@@ -36,15 +36,9 @@ class expr {
 def_ptr(expr);
 
 struct sym : public expr {
-    approx_order type() = delete;
     sym(const std::string &name, size_t dim, field_t type)
         : expr(name, dim, type) {
         assert(size_t(type) <= field::num_sym);
-    }
-    // for dynamics
-    auto make_next() {
-        assert(field_ == __x);
-        return std::make_shared<sym>(name_ + "_nxt", dim_, __y);
     }
 };
 

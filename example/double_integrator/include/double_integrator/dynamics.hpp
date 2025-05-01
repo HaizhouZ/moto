@@ -13,7 +13,8 @@ struct dynamics {
     }
     static auto make_state(const std::string &name, size_t dim) {
         auto temp = std::make_shared<sym>(name, dim, __x);
-        return std::make_pair(temp, temp->make_next());
+        auto next = std::make_shared<sym>(name + "_nxt", dim, __y);
+        return std::make_pair(temp, next);
     }
 };
 
@@ -32,6 +33,8 @@ class doubleIntegratorDyn : dynamics, public constr {
   private:
     // Add private members or helper functions if needed
 };
+
+
 
 } // namespace atri
 
