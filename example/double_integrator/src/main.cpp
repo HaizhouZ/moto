@@ -14,5 +14,16 @@ int main() {
     auto &mem = data_mgr::get<node_data>();
     mem.create_data_batch(prob, 100);
 
+    std::vector<shooting_node> nodes;
+    for (int i = 0; i < 200; i++) {
+        nodes.emplace_back(prob, mem);
+    }
+
+    for (auto &n : nodes) {
+        n.update_approximation();
+    }
+
+    fmt::print("good!\n");
+
     return 0;
 }

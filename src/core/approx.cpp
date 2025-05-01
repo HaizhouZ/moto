@@ -8,7 +8,7 @@ problem_data::problem_data(problem_ptr_t prob) : prob_(prob) {
         value_[i].resize(prob_->dim_[i]);
     }
 
-    for (size_t i = __dyn; i < field::num_constr; i++) {
+    for (size_t i = __dyn, cnt = 0; cnt < field::num_constr; i++, cnt++) {
         if (prob_->expr_[i].empty()) {
             continue;
         }
@@ -20,10 +20,10 @@ problem_data::problem_data(problem_ptr_t prob) : prob_(prob) {
     }
     // cost hessian(store only half)
     for (size_t i = 0; i < field::num_prim; i++) {
-        jac_[i].resize(prob_->dim_[i]);
         for (size_t j = i; j < field::num_prim; j++) {
             hessian_[i][j].resize(prob_->dim_[i], prob_->dim_[j]);
         }
+        jac_[i].resize(prob_->dim_[i]);
     }
 }
 

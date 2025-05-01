@@ -14,7 +14,7 @@ inline void for_funcs(problem_ptr_t prob, callback_type &&callback) {
     // loop with two variables due to the difference between idx and field no.
     for (size_t field = __dyn; field != field::num; field++) {
         auto &_prob = prob->expr_[field];
-        if (_prob.empty()) {
+        if (!_prob.empty()) {
             for (size_t idx_expr = 0; idx_expr < _prob.size(); idx_expr++) {
                 auto _f = std::static_pointer_cast<approx>(_prob[idx_expr]);
                 callback(field, idx_expr, _f);

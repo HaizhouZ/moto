@@ -1,9 +1,11 @@
 #ifndef ATRI_OCP_PROBLEM_DATA_HPP
 #define ATRI_OCP_PROBLEM_DATA_HPP
 
+#include <atri/core/offset_array.hpp>
 #include <atri/ocp/core/problem.hpp>
 
 namespace atri {
+
 struct problem_data {
     problem_data(problem_ptr_t prob);
 
@@ -22,10 +24,11 @@ struct problem_data {
     struct raw_approx {
         vector v_;                                // value
         std::array<matrix, field::num_prim> jac_; // jacobian
-    } approx_[field::num_constr];
+    };
+    offset_array<raw_approx, field::num_constr, __dyn> approx_;
     // cost
     row_vector jac_[field::num_prim];
-    matrix hessian_[field::num_prim][field::num_prim]; // cost hessian
+    std::array<std::array<matrix, field::num_prim>, field::num_prim> hessian_; // cost hessian
 };
 
 } // namespace atri
