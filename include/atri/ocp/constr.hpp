@@ -28,7 +28,7 @@ struct constr : public approx {
             new constr_data(std::move(*approx::make_data(raw))));
     }
 };
-
+def_ptr(constr);
 } // namespace atri
 
 #endif

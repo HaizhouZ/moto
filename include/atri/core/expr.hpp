@@ -19,6 +19,7 @@ class expr {
     static size_t max_uid;
 
   public:
+
     const size_t dim_;
     const std::string name_;
     const size_t uid_;

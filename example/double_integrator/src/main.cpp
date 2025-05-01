@@ -4,10 +4,9 @@
 
 int main() {
     using namespace atri;
-    auto dyn = std::make_shared<doubleIntegratorDyn>();
+    doubleIntegratorDyn dyn;
     auto prob = std::make_shared<problem>();
     prob->add(dyn);
-    prob->add(dyn->in_args());
 
     utils::print_problem(prob);
 

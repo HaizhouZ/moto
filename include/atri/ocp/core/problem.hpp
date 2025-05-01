@@ -35,11 +35,13 @@ struct problem {
      */
     void add(expr_ptr_t expr) {
         size_t _uid = expr->uid_;
-        size_t &n0 = dim_[expr->field_];
-        size_t n1 = n0 + expr->dim_;
-        expr_[expr->field_].push_back(expr);
-        d_idx_[_uid] = std::make_pair(n0, n1);
-        n0 = d_idx_[_uid].second;
+        if (d_idx_.find(_uid) == d_idx_.end()) { // skip repeated
+            size_t &n0 = dim_[expr->field_];
+            size_t n1 = n0 + expr->dim_;
+            expr_[expr->field_].push_back(expr);
+            d_idx_[_uid] = std::make_pair(n0, n1);
+            n0 = d_idx_[_uid].second;
+        }
     }
 
     template <typename derived>
@@ -49,6 +51,16 @@ struct problem {
             add(expr_);
         }
     }
+
+    /**
+     * @brief general add interface.
+     * T must have method get_expr that returns either vector of expr (or derived) pointers or
+     * a pointer convertible to expr_ptr_t
+     * @tparam T
+     * @param rhs
+     */
+    template <typename T>
+    void add(T &rhs) { add(rhs.get_expr()); }
 
     /**
      * @brief get the idx of an expr named by [name]

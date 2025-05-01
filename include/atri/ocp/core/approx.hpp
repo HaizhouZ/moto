@@ -46,12 +46,12 @@ class approx : public expr { /// todo: change to differentiable for precompute
         throw std::runtime_error(
             fmt::format("hessian not implemented for approx {}", name_));
     };
+
+  public:
     void add_argument(sym_ptr_t in) { in_args_.push_back(in); }
     void add_arguments(std::initializer_list<sym_ptr_t> args) {
         in_args_.insert(in_args_.end(), args.begin(), args.end());
     }
-
-  public:
     const auto &in_args() { return in_args_; }
     inline approx_order order() { return order_; }
 
