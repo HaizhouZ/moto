@@ -1,13 +1,10 @@
 #ifndef DOUBLE_INTEGRATOR_COST_HPP
 #define DOUBLE_INTEGRATOR_COST_HPP
 
-#include <atri/ocp/core/approx.hpp>
+#include <atri/ocp/cost.hpp>
 
 namespace atri {
 
-struct cost : public approx {
-    cost(const std::string &name, approx_order order = approx_order::second) : approx(name, 1, __cost, order) {}
-};
 /**
  * @brief simple quadratic cost
  *

@@ -3,30 +3,6 @@
 
 namespace atri {
 
-problem_data::problem_data(problem_ptr_t prob) : prob_(prob) {
-    for (size_t i = 0; i < field::num_sym; i++) {
-        value_[i].resize(prob_->dim_[i]);
-    }
-
-    for (size_t i = __dyn, cnt = 0; cnt < field::num_constr; i++, cnt++) {
-        if (prob_->expr_[i].empty()) {
-            continue;
-        }
-        size_t dim = prob_->dim_[i];
-        approx_[i].v_.resize(dim);
-        for (size_t j = 0; j < field::num_prim; j++) {
-            approx_[i].jac_[j].resize(dim, prob_->dim_[j]);
-        }
-    }
-    // cost hessian(store only half)
-    for (size_t i = 0; i < field::num_prim; i++) {
-        for (size_t j = i; j < field::num_prim; j++) {
-            hessian_[i][j].resize(prob_->dim_[i], prob_->dim_[j]);
-        }
-        jac_[i].resize(prob_->dim_[i]);
-    }
-}
-
 sparse_approx_data::sparse_approx_data(problem_data *raw,
                                        std::vector<sym_ptr_t> in_args,
                                        approx *f)
@@ -78,6 +54,7 @@ sparse_approx_data::sparse_approx_data(problem_data *raw,
     }
 }
 sparse_approx_data_ptr_t approx::make_data(problem_data *raw) {
+    assert(!in_args_.empty());
     auto data = sparse_approx_data_ptr_t();
     data.reset(new sparse_approx_data(raw, in_args_, this));
     for (size_t i = 0; i < in_args_.size(); i++) {

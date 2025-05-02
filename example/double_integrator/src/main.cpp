@@ -7,9 +7,11 @@ int main() {
     using namespace atri;
     doubleIntegratorDyn dyn;
     auto cost = std::make_shared<doubleIntegratorCost>(dyn.r, dyn.v, dyn.a);
+    auto cost2 = std::make_shared<doubleIntegratorCost>(dyn.r, dyn.v, dyn.a);
     auto prob = std::make_shared<problem>();
     prob->add(dyn);
     prob->add(cost);
+    prob->add(cost2);
 
     utils::print_problem(prob);
 
