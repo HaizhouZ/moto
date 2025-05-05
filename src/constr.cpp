@@ -23,4 +23,9 @@ void constr::jacobian_impl(sparse_approx_data_ptr_t data) {
         d->vjp_[i].noalias() += d->multiplier_.transpose() * d->jac_[i];
     }
 }
+void constr::hessian_impl(sparse_approx_data_ptr_t data) {
+    // do not compute the whole hessian
+    // preferred: first do multipler.T * jac then use auto-differentiation
+    hessian(std::static_pointer_cast<constr_data>(data));
+}
 } // namespace atri
