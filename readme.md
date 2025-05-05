@@ -23,5 +23,5 @@
 
 1. multipler jacobian product
 2. terminal cost handling (nodes of different problem!)
-
-3. CasADi supports
+3. double integrator test
+4. CasADi supports

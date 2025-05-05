@@ -26,6 +26,7 @@ struct problem_data {
         std::array<matrix, field::num_prim> jac_; // jacobian
     };
     offset_array<raw_approx, field::num_constr, __dyn> approx_;
+    offset_array<vector, field::num_constr, __dyn> dual_;
     // cost
     row_vector jac_[field::num_prim];
     std::array<std::array<matrix, field::num_prim>, field::num_prim> hessian_; // cost hessian

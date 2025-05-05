@@ -16,6 +16,8 @@ problem_data::problem_data(problem_ptr_t prob) : prob_(prob) {
         for (size_t j = 0; j < field::num_prim; j++) {
             approx_[i].jac_[j].resize(dim, prob_->dim_[j]);
         }
+        // dual variables
+        dual_[i].resize(prob_->dim_[i]);
     }
     // cost hessian(store only half)
     for (size_t i = 0; i < field::num_prim; i++) {
@@ -25,4 +27,4 @@ problem_data::problem_data(problem_ptr_t prob) : prob_(prob) {
         jac_[i].resize(prob_->dim_[i]);
     }
 }
-}
+} // namespace atri
