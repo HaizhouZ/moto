@@ -7,7 +7,7 @@ namespace atri {
 struct constr; // fwd
 
 struct constr_data : public sparse_approx_data {
-    vector_ref multiplier_; 
+    vector_ref multiplier_;
     // vector_ref slack_;      /// @todo: add this to raw
     std::vector<row_vector_ref> vjp_;
     constr_data(problem_data *raw, sparse_approx_data &&d, constr *cstr);
@@ -31,6 +31,8 @@ struct constr : public approx {
         return constr_data_ptr_t(
             new constr_data(raw, std::move(*approx::make_data(raw)), this));
     }
+
+  private:
     void jacobian_impl(sparse_approx_data_ptr_t data) override final;
 
   protected:
