@@ -21,7 +21,6 @@
 
 # Todo list
 
-1. multipler jacobian product
-2. terminal cost handling (nodes of different problem!)
-3. double integrator test
-4. CasADi supports
+1. terminal cost handling (nodes of different problem!)
+2. double integrator test
+3. CasADi supports

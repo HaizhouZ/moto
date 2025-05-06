@@ -1,4 +1,4 @@
-#include <atri/ocp/constr.hpp>
+#include <atri/ocp/func/constr.hpp>
 #include <atri/ocp/core/problem_data.hpp>
 
 namespace atri {

@@ -19,7 +19,6 @@ class expr {
     static size_t max_uid;
 
   public:
-
     const size_t dim_;
     const std::string name_;
     const size_t uid_;
@@ -42,8 +41,33 @@ struct sym : public expr {
         assert(size_t(type) <= field::num_sym);
     }
 };
-
 def_ptr(sym);
+
+/**
+ * @brief protected vector of expressions
+ * @note when get() is called it must not be empty
+ */
+struct collection {
+  private:
+    std::vector<expr_ptr_t> expr_;
+
+  protected:
+    void add(std::initializer_list<expr_ptr_t> exprs) { expr_.insert(expr_.end(), exprs); }
+
+  public:
+    collection(std::initializer_list<expr_ptr_t> exprs) : expr_(exprs) {}
+    collection(std::initializer_list<expr *> exprs) {
+        for (auto expr : exprs) {
+            expr_.emplace_back(expr);
+        }
+    }
+    collection() = default;
+    const auto &get() const {
+        assert(!expr_.empty());
+        return expr_;
+    }
+};
+
 } // namespace atri
 
 #endif /*__EXPRESSION_BASE_*/

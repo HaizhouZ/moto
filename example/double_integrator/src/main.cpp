@@ -6,12 +6,12 @@
 int main() {
     using namespace atri;
     doubleIntegratorDyn dyn;
-    auto cost = std::make_shared<doubleIntegratorCost>(dyn.r, dyn.v, dyn.a);
-    auto cost2 = std::make_shared<doubleIntegratorCost>(dyn.r, dyn.v, dyn.a);
+    doubleIntegratorCosts costs;
+    // auto cost = std::make_shared<doubleIntegratorCost>(dyn.r, dyn.v, dyn.a);
     auto prob = std::make_shared<problem>();
     prob->add(dyn);
-    prob->add(cost);
-    prob->add(cost2);
+    prob->add(costs.running(dyn.r, dyn.v, dyn.a));
+    // prob->add(cost2);
 
     utils::print_problem(prob);
 
@@ -23,8 +23,16 @@ int main() {
         nodes.emplace_back(prob, mem);
     }
 
-    for (auto &n : nodes) {
-        n.update_approximation();
+    // virtual terminal node?
+    // copy problem -> add terminal cost
+    auto prob_terminal = prob->copy();
+    prob_terminal->add(costs.terminal(dyn.r_next, dyn.v_next));
+
+    shooting_node terminal_node(prob_terminal, mem);
+    nodes.back().swap(terminal_node);
+
+    for (size_t n = 0; n < nodes.size(); n++) {
+        nodes[n].update_approximation();
     }
 
     fmt::print("good!\n");

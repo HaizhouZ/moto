@@ -15,10 +15,13 @@ struct problem {
     static size_t max_uid;
     const size_t uid_ = 0;
     std::vector<expr_ptr_t> expr_[field::num];
-    std::unordered_map<size_t, std::pair<size_t, size_t>> d_idx_;
-    size_t dim_[field::num] = {0};
+    std::unordered_map<size_t, std::pair<size_t, size_t>> d_idx_; // data index
+    std::array<size_t, field::num> dim_{};
 
     problem() : uid_(max_uid++) {}
+    problem(const problem &rhs) : uid_(max_uid++), expr_(rhs.expr_), d_idx_(rhs.d_idx_), dim_(rhs.dim_) {}
+
+    auto copy() { return std::make_shared<problem>(*this); }
 
     scalar_t *get_data_ptr(scalar_t *data, expr_ptr_t expr) const {
         return data + get_expr_start(expr);
@@ -55,15 +58,7 @@ struct problem {
     template <typename derived>
     void add(std::shared_ptr<derived> rhs) { add(std::static_pointer_cast<expr>(rhs)); }
 
-    /**
-     * @brief general add interface.
-     * T must have method get_expr that returns either vector of expr (or derived) pointers or
-     * a pointer convertible to expr_ptr_t
-     * @tparam T
-     * @param rhs
-     */
-    template <typename T>
-    void add(T &rhs) { add(rhs.get_expr()); }
+    void add(const collection &rhs) { add(rhs.get()); }
 
     /**
      * @brief get the idx of an expr named by [name]

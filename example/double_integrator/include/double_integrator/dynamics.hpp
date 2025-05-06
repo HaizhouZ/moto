@@ -1,45 +1,17 @@
 #ifndef DOUBLE_INTEGRATOR_DYNAMICS_HPP
 #define DOUBLE_INTEGRATOR_DYNAMICS_HPP
 
-#include <atri/ocp/constr.hpp>
+#include <atri/ocp/func/constr.hpp>
+#include <atri/ocp/func/dynamics.hpp>
 
 namespace atri {
-/**
- * @brief expression collection trait
- * expr_ can only be accessed via get() which requires an setup() must be called
- */
-struct expr_collection {
-  private:
-    std::vector<expr_ptr_t> expr_;
 
-  protected:
-    void add(std::initializer_list<expr_ptr_t> exprs) { expr_.insert(expr_.end(), exprs); }
-
-  public:
-    auto get_expr() {
-        assert(!expr_.empty());
-        return expr_;
-    }
-};
-
-// trait
-struct dynamics {
-  protected:
-    static auto make_input(const std::string &name, size_t dim) {
-        return std::make_shared<sym>(name, dim, __u);
-    }
-    static auto make_state(const std::string &name, size_t dim) {
-        auto temp = std::make_shared<sym>(name, dim, __x);
-        auto next = std::make_shared<sym>(name + "_nxt", dim, __y);
-        return std::make_pair(temp, next);
-    }
-};
 /**
  * @brief double integrator dynamics
  * v_next - v - a * dt = 0
  * r_next - r - v_next * dt = 0
  */
-class doubleIntegratorDyn : dynamics, public expr_collection {
+class doubleIntegratorDyn : public dynamics, public collection {
   public:
     // position, velocity, acceleration, position, velocity
     sym_ptr_t r, v, a, r_next, v_next;
@@ -68,11 +40,12 @@ class doubleIntegratorDyn : dynamics, public expr_collection {
         a = make_input("acc", 3);
         dyn_pos->add_arguments({r, r_next, v_next});
         dyn_vel->add_arguments({v, v_next, a});
-        expr_collection::add({r, v, a, r_next, v_next, dyn_pos, dyn_vel});
+        add({r, v, a, r_next, v_next, dyn_pos, dyn_vel});
     }
 };
 // another way
 // class doubleIntegrator : dynamics, public constr
+// or just implement a method returning a func::collection
 } // namespace atri
 
 #endif // DOUBLE_INTEGRATOR_DYNAMICS_HPP
