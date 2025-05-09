@@ -22,6 +22,9 @@ using vector_const_ref = Eigen::Ref<const_vector>;
 using mapped_vector = Eigen::Map<vector>;
 using mapped_const_vector = Eigen::Map<const_vector>;
 using mapped_matrix = Eigen::Map<matrix>;
+
+#define def_ptr(name) typedef std::shared_ptr<name> name##_ptr_t;
+
 }  // namespace atri
 
 #endif /*__FWD_*/

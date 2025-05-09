@@ -73,6 +73,7 @@ struct shooting_node {
 
     ~shooting_node() { mem_.release_data(problem_, data_); }
 
+    shooting_node(const shooting_node &p) : shooting_node(p.problem_, p.mem_) {}
     void swap(shooting_node &p);
     void update_approximation();
     auto get(sym_ptr_t sym) { return data_->sym_->get(sym); }

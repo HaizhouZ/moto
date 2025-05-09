@@ -8,8 +8,6 @@ enum class approx_order { zero = 0,
                           first,
                           second };
 
-#define def_ptr(name) typedef std::shared_ptr<name> name##_ptr_t;
-
 /**
  * @brief enum class of field types
  *
