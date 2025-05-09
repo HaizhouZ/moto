@@ -75,6 +75,7 @@ struct shooting_node {
 
     void swap(shooting_node &p);
     void update_approximation();
+    auto get(sym_ptr_t sym) { return data_->sym_->get(sym); }
     node_data_ptr_t data_;
 
     problem_ptr_t problem_;

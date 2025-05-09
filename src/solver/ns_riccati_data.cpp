@@ -1,7 +1,7 @@
 #include <atri/solver/data/nullspace_data.hpp>
 #include <atri/solver/data/rollout_data.hpp>
 #include <atri/solver/ns_riccati_data.hpp>
-#include <atri/ocp/core/problem_data.hpp>
+#include <atri/ocp/core/approx_data.hpp>
 
 namespace atri {
 

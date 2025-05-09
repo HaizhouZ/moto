@@ -31,6 +31,9 @@ int main() {
     shooting_node terminal_node(prob_terminal, mem);
     nodes.back().swap(terminal_node);
 
+    // set initial condition
+    nodes.front().get(dyn.r).setOnes();
+
     for (size_t n = 0; n < nodes.size(); n++) {
         nodes[n].update_approximation();
     }

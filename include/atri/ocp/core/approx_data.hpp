@@ -6,21 +6,10 @@
 
 namespace atri {
 
-struct problem_data {
-    problem_data(problem_ptr_t prob);
-
-    auto get(sym_ptr_t sym) {
-        return sym->make_vec(
-            prob_->get_data_ptr(value_[sym->field_].data(), sym));
-    }
-
-    void swap(problem_data &rhs) {
-        this->prob_.swap(rhs.prob_);
-        this->value_.swap(rhs.value_);
-    }
+struct approx_data {
+    approx_data(problem_ptr_t prob);
 
     problem_ptr_t prob_;
-    std::array<vector, field::num_sym> value_;
     struct raw_approx {
         vector v_;                                // value
         std::array<matrix, field::num_prim> jac_; // jacobian

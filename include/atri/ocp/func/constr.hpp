@@ -10,7 +10,7 @@ struct constr_data : public sparse_approx_data {
     vector_ref multiplier_;
     // vector_ref slack_;      /// @todo: add this to raw
     std::vector<row_vector_ref> vjp_;
-    constr_data(problem_data *raw, sparse_approx_data &&d, constr *cstr);
+    constr_data(approx_data *raw, sparse_approx_data &&d, constr *cstr);
 };
 def_ptr(constr_data);
 /**
@@ -27,9 +27,9 @@ struct constr : public approx {
         // if (enable_slack) {
         // }
     }
-    sparse_approx_data_ptr_t make_data(problem_data *raw) override {
+    sparse_approx_data_ptr_t make_data(sym_data *primal, approx_data *raw) override {
         return constr_data_ptr_t(
-            new constr_data(raw, std::move(*approx::make_data(raw)), this));
+            new constr_data(raw, std::move(*approx::make_data(primal, raw)), this));
     }
 
   private:

@@ -1,4 +1,4 @@
-#include <atri/ocp/core/problem_data.hpp>
+#include <atri/ocp/core/approx_data.hpp>
 #include <atri/ocp/core/shooting_node.hpp>
 
 namespace atri {
@@ -23,9 +23,10 @@ inline void for_funcs(problem_ptr_t prob, callback_type &&callback) {
     }
 }
 
-node_data::node_data(problem_ptr_t prob) : raw_(new problem_data(prob)) {
+node_data::node_data(problem_ptr_t prob)
+    : sym_(new sym_data(prob)), raw_(new approx_data(prob)) {
     for_funcs(prob, [&](size_t field, size_t idx_expr, approx_ptr_t _f) {
-        approx_[field].push_back(_f->make_data(raw_));
+        approx_[field].push_back(_f->make_data(sym_, raw_));
     });
 }
 

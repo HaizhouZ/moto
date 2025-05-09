@@ -1,16 +1,18 @@
 #include <atri/ocp/core/approx.hpp>
-#include <atri/ocp/core/problem_data.hpp>
+#include <atri/ocp/core/approx_data.hpp>
+#include <atri/ocp/core/sym_data.hpp>
 
 namespace atri {
 
-sparse_approx_data::sparse_approx_data(problem_data *raw,
+sparse_approx_data::sparse_approx_data(sym_data *primal,
+                                       approx_data *raw,
                                        std::vector<sym_ptr_t> in_args,
                                        approx *f)
     : v_(raw->approx_[f->field_].v_.segment(raw->prob_->get_expr_start(*f),
                                             f->dim_)) {
     for (size_t i = 0; i < in_args.size(); i++) {
         auto arg = in_args[i];
-        in_args_.push_back(raw->get(arg));
+        in_args_.push_back(primal->get(arg));
     }
     size_t f_st = raw->prob_->get_expr_start(*f);
     // for non-cost
@@ -35,7 +37,7 @@ sparse_approx_data::sparse_approx_data(problem_data *raw,
         hess_.resize(in_args_.size());
         for (size_t i = 0; i < in_args_.size(); i++) {
             for (size_t j = 0; j < in_args_.size(); j++) {
-                /// @note order matches problem_data
+                /// @note order matches approx_data
                 /// h[i][j] = h[j][i] if i, j in the same field or field(i) < field(j)
                 /// otherwise only keep h[i][j] (empty)
                 field_1 = in_args[i]->field_;
@@ -53,10 +55,10 @@ sparse_approx_data::sparse_approx_data(problem_data *raw,
         }
     }
 }
-sparse_approx_data_ptr_t approx::make_data(problem_data *raw) {
+sparse_approx_data_ptr_t approx::make_data(sym_data *primal, approx_data *raw) {
     assert(!in_args_.empty());
     auto data = sparse_approx_data_ptr_t();
-    data.reset(new sparse_approx_data(raw, in_args_, this));
+    data.reset(new sparse_approx_data(primal, raw, in_args_, this));
     for (size_t i = 0; i < in_args_.size(); i++) {
         auto arg = in_args_[i];
     }

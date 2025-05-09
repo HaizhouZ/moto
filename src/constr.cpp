@@ -1,8 +1,8 @@
 #include <atri/ocp/func/constr.hpp>
-#include <atri/ocp/core/problem_data.hpp>
+#include <atri/ocp/core/approx_data.hpp>
 
 namespace atri {
-constr_data::constr_data(problem_data *raw,
+constr_data::constr_data(approx_data *raw,
                          sparse_approx_data &&d,
                          constr *f)
     : sparse_approx_data(std::move(d)),

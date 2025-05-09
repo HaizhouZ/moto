@@ -4,6 +4,7 @@
 #include <array>
 #include <atri/core/offset_array.hpp>
 #include <atri/ocp/core/approx.hpp>
+#include <atri/ocp/core/sym_data.hpp>
 
 namespace atri {
 
@@ -21,7 +22,8 @@ struct node_data;
 def_ptr(node_data);
 
 struct node_data {
-    problem_data *raw_;
+    sym_data *sym_;
+    approx_data *raw_;
     stacked_approx_data approx_;
     node_data(problem_ptr_t prob);
     ~node_data();

@@ -1,12 +1,8 @@
-#include <atri/ocp/core/problem_data.hpp>
+#include <atri/ocp/core/approx_data.hpp>
 
 namespace atri {
 
-problem_data::problem_data(problem_ptr_t prob) : prob_(prob) {
-    for (size_t i = 0; i < field::num_sym; i++) {
-        value_[i].resize(prob_->dim_[i]);
-    }
-
+approx_data::approx_data(problem_ptr_t prob) : prob_(prob) {
     for (size_t i = __dyn, cnt = 0; cnt < field::num_constr; i++, cnt++) {
         if (prob_->expr_[i].empty()) {
             continue;

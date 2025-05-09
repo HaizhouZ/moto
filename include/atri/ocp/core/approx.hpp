@@ -5,7 +5,8 @@
 
 namespace atri {
 
-struct problem_data; // fwd declaration
+struct approx_data; // fwd declaration
+struct sym_data; // fwd declaration
 
 /////////////////////////////////////////////////////////////////////
 
@@ -22,7 +23,7 @@ struct sparse_approx_data {
     std::vector<matrix_ref> jac_;               // jacobian, idx correspond to in_args_
     std::vector<std::vector<matrix_ref>> hess_; // hessian for cost
     // std::vector<sparse_mat> jac_;
-    sparse_approx_data(problem_data *raw, std::vector<sym_ptr_t> in_args, approx *f);
+    sparse_approx_data(sym_data *primal, approx_data *raw, std::vector<sym_ptr_t> in_args, approx *f);
     sparse_approx_data(const sparse_approx_data &rhs) = delete; // disable this
     sparse_approx_data(sparse_approx_data &&rhs) : v_(rhs.v_) {
         in_args_ = std::move(rhs.in_args_);
@@ -68,7 +69,7 @@ class approx : public expr { /// todo: change to differentiable for precompute
      * @param raw space shoud have been allocated
      * @return sparse_approx_data_ptr_t
      */
-    virtual sparse_approx_data_ptr_t make_data(problem_data *raw);
+    virtual sparse_approx_data_ptr_t make_data(sym_data *primal, approx_data *raw);
 
     /**
      * @brief evaluate the approx
