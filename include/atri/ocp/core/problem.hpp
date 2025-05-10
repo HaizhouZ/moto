@@ -44,28 +44,29 @@ struct problem {
             expr_[expr->field_].push_back(expr);
             d_idx_[_uid] = std::make_pair(n0, n1);
             n0 = d_idx_[_uid].second;
+            const auto &aux = expr->get_aux();
+            if (!aux.empty()) {
+                add(aux);
+            }
         }
     }
 
-    template <typename derived>
+    template <typename derived, typename std::enable_if_t<std::is_base_of_v<expr, derived>, int> = 0>
     void add(const std::vector<std::shared_ptr<derived>> &exprs) {
-        static_assert(std::is_base_of_v<expr, derived>);
         for (auto expr_ : exprs) {
             add(expr_);
         }
     }
 
-    template <typename derived>
-    void add(std::shared_ptr<derived> rhs) { add(std::static_pointer_cast<expr>(rhs)); }
+    template <typename derived, typename std::enable_if_t<std::is_base_of_v<expr, derived>, int> = 0>
+    void add(std::shared_ptr<derived> rhs) {
+        add(std::static_pointer_cast<expr>(rhs));
+    }
 
     void add(const collection &rhs) { add(rhs.get()); }
 
     /**
-     * @brief get the idx of an expr named by [name]
-     *
-     * @param expr expression to look up
-     * @param field type of the expression
-     * @return std::pair<size_t, size_t> [start, length) of the expression
+     * @brief get start index of expr in its field
      */
     size_t get_expr_start(expr_ptr_t expr) const {
         return d_idx_.at(expr->uid_).first;

@@ -31,6 +31,7 @@ node_data::node_data(problem_ptr_t prob)
 }
 
 node_data::~node_data() {
+    delete sym_;
     delete raw_;
 }
 

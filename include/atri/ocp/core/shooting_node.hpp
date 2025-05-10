@@ -9,8 +9,8 @@ namespace atri {
 
 /**
  * @brief data management. this class controls the data access and allocation.
- * 1. each data_mgr controls a node_data type
- * 2. data instances of same node_data type can have different prob
+ * 1. each data_mgr controls a data_type
+ * 2. data instances of same data_type can have different prob
  */
 class data_mgr {
   private:
@@ -55,30 +55,57 @@ class data_mgr {
 
   private:
     data_maker_func maker_;
-    // the following are indexed by the uid of problem
-    // each is a problem formulation, with its own data
+    // mapping [uid of problem, data pool]
     std::unordered_map<size_t, data_pool> data_;
 };
 
 /**
  * @brief shooting node in an OCP
- * @todo data collection/serialization/deserialization should be finished in
- * this node!
+ * it will acquire data from data_mgr and release it back on destruction
  */
 struct shooting_node {
+    /**
+     * @brief Construct a new shooting node object
+     *
+     * @param formulation problem formulation of this shootin gnode
+     * @param mem data management, make sure the data_type is correct
+     */
     shooting_node(problem_ptr_t formulation, data_mgr &mem)
         : problem_(formulation), mem_(mem) {
         data_ = mem_.acquire_data(problem_);
     }
+    /**
+     * @brief Construct a new shooting node sharing the same problem and data_mgr as rhs
+     * @note it will not copy the data of rhs but get a new one
+     * @param rhs the shooting ndoe to be copied
+     */
+    shooting_node(const shooting_node &rhs) : shooting_node(rhs.problem_, rhs.mem_) {}
+    /**
+     * @brief Construct a new shooting node object by moving
+     * @note data will be moved to the new one
+     * @param rhs the shooting ndoe to be moved
+     */
+    shooting_node(shooting_node &&rhs)
+        : problem_(std::move(rhs.problem_)), mem_(rhs.mem_), data_(std::move(rhs.data_)) {
+        rhs.data_ = nullptr;
+    }
 
-    ~shooting_node() { mem_.release_data(problem_, data_); }
-
-    shooting_node(const shooting_node &p) : shooting_node(p.problem_, p.mem_) {}
+    ~shooting_node() {
+        if (data_)
+            mem_.release_data(problem_, data_);
+    }
+    /**
+     * @brief swap two nodes, use when you want to replace nodes
+     * data, problem and mem will all be swapped
+     * @param p
+     */
     void swap(shooting_node &p);
+    // update the approximation
     void update_approximation();
-    auto get(sym_ptr_t sym) { return data_->sym_->get(sym); }
-    node_data_ptr_t data_;
+    // get value of the sym variable
+    auto get(sym sym) { return data_->sym_->get(sym); }
 
+    node_data_ptr_t data_;
     problem_ptr_t problem_;
     data_mgr &mem_;
 };

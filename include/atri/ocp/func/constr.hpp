@@ -4,51 +4,78 @@
 #include <atri/ocp/core/approx.hpp>
 
 namespace atri {
-struct constr; // fwd
-
+struct constr_impl; // fwd
+/**
+ * @brief constraint data
+ * derived from sparse_approx_data with multipler and vjp (for cost) mapping in addition
+ */
 struct constr_data : public sparse_approx_data {
-    vector_ref multiplier_;
     // vector_ref slack_;      /// @todo: add this to raw
+    vector_ref multiplier_;
     std::vector<row_vector_ref> vjp_;
-    constr_data(approx_data *raw, sparse_approx_data &&d, constr *cstr);
+    constr_data(approx_data *raw, sparse_approx_data &&d, constr_impl *cstr);
 };
 def_ptr(constr_data);
 /**
  * @brief constraint approximation with multipliers (and slack variables)
  */
-struct constr : public approx {
-    constr(const std::string &name, size_t dim, field_t field,
-           approx_order order = approx_order::first,
-           bool enable_slack = false)
+struct constr_impl : public approx {
+    constr_impl(const std::string &name, size_t dim, field_t field,
+                approx_order order = approx_order::first,
+                bool enable_slack = false)
         : approx(name, dim, field, order) {
         assert(field == __dyn || magic_enum::enum_name(field).find(
-                                     "constr") != std::string::npos);
+                                     "cstr") != std::string::npos);
         /// @todo : make dual variables
         // if (enable_slack) {
         // }
+        value = [this](auto &d) { approx::value_impl(d); };
+        jacobian = [this](auto &d) { approx::jacobian_impl(d); };
+        hessian = [this](auto &d) { approx::hessian_impl(d); };
     }
+
+    constr_impl(constr_impl &&rhs)
+        : approx(std::move(rhs)),
+          value(std::move(rhs.value)),
+          jacobian(std::move(rhs.jacobian)),
+          hessian(std::move(rhs.hessian)) {}
+
+    /**
+     * @brief wrapped data maker for constr
+     *
+     * @param primal ptr to primal data
+     * @param raw ptr to approximation data
+     * @return sparse_approx_data_ptr_t
+     */
     sparse_approx_data_ptr_t make_data(sym_data *primal, approx_data *raw) override {
         return constr_data_ptr_t(
             new constr_data(raw, std::move(*approx::make_data(primal, raw)), this));
     }
 
   private:
-    void value_impl(sparse_approx_data& data) override final { value(data); }
-    void jacobian_impl(sparse_approx_data& data) override final;
-    void hessian_impl(sparse_approx_data& data) override final;
+    void value_impl(sparse_approx_data &data) override final { value(data); }
+    void jacobian_impl(sparse_approx_data &data) override final;
+    void hessian_impl(sparse_approx_data &data) override final;
 
-  protected:
-    virtual void value(sparse_approx_data& data) {
-        approx::value_impl(data);
-    }
-    virtual void jacobian(sparse_approx_data& data) {
-        approx::jacobian_impl(data);
-    };
-    virtual void hessian(constr_data& data) {
-        approx::hessian_impl(data);
-    };
+  public:
+    std::function<void(sparse_approx_data &)> value;
+    std::function<void(sparse_approx_data &)> jacobian;
+    std::function<void(constr_data &)> hessian;
 };
-def_ptr(constr);
+def_ptr(constr_impl);
+/**
+ * @brief wrapper of constr_impl, in fact a pointer
+ *
+ */
+struct constr : public constr_impl_ptr_t {
+    constr(const std::string &name, size_t dim, field_t field,
+           approx_order order = approx_order::first,
+           bool enable_slack = false)
+        : constr_impl_ptr_t(new constr_impl(name, dim, field, order)) {
+    }
+    constr(constr_impl &&impl) : constr_impl_ptr_t(new constr_impl(std::move(impl))) {}
+    constr(const constr &rhs) = default;
+};
 } // namespace atri
 
 #endif

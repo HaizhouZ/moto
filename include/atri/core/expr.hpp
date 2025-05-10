@@ -4,17 +4,14 @@
 #include <atri/core/fields.hpp>
 
 namespace atri {
-enum class approx_order { zero = 0,
-                          first,
-                          second };
-
+class expr;
+def_ptr(expr);
 /**
- * @brief enum class of field types
- *
+ * @brief general expression base class
  */
 class expr {
   private:
-    static size_t max_uid;
+    static size_t max_uid; // uid used to index global expressions
 
   public:
     const size_t dim_;
@@ -24,22 +21,34 @@ class expr {
 
     expr(const std::string &name, size_t dim, field_t field)
         : name_(name), dim_(dim), uid_(max_uid++), field_(field) {}
+
+    expr(expr &&rhs)
+        : dim_(rhs.dim_), name_(std::move(rhs.name_)), uid_(rhs.uid_), field_(rhs.field_) {}
+        
     auto make_vec(scalar_t *ptr) { return mapped_vector(ptr, dim_); }
 
     auto make_vec(const scalar_t *ptr) { return mapped_const_vector(ptr, dim_); }
 
+    /**
+     * @brief get other variables related to this expression, by default will return empty
+     * @return std::vector<expr_ptr_t> list of expressions
+     */
+    virtual std::vector<expr_ptr_t> get_aux() { return {}; }
+
     virtual ~expr() = default;
 };
 
-def_ptr(expr);
-
-struct sym : public expr {
+/**
+ * @brief wrapper of symbolic expressions like primal variables or parameters
+ * @note in fact a pointer!
+ */
+struct sym : public expr_ptr_t {
     sym(const std::string &name, size_t dim, field_t type)
-        : expr(name, dim, type) {
+        : expr_ptr_t(new expr(name, dim, type)) {
         assert(size_t(type) <= field::num_sym);
     }
+    sym() = default;
 };
-def_ptr(sym);
 
 /**
  * @brief protected vector of expressions

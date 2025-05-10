@@ -10,8 +10,7 @@ namespace atri {
 
 /**
  * @brief stacked approximation data
- * @note each std::vector contains the approximation data of functions in one
- * field
+ * @note each std::vector contains the approximation data of functions in one field
  */
 
 typedef offset_array<std::vector<sparse_approx_data_ptr_t>,
@@ -21,6 +20,11 @@ typedef offset_array<std::vector<sparse_approx_data_ptr_t>,
 struct node_data;
 def_ptr(node_data);
 
+/**
+ * @brief node data class
+ * stores the shooting node data including symbolics, raw approximation and its sparse mapping
+ * @note to use your own data class with data_mgr, inherit this class and implement constructor C(problem_ptr_t)
+ */
 struct node_data {
     sym_data *sym_;
     approx_data *raw_;

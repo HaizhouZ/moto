@@ -7,11 +7,11 @@ namespace atri {
 struct dynamics {
   protected:
     static auto make_input(const std::string &name, size_t dim) {
-        return std::make_shared<sym>(name, dim, __u);
+        return sym(name, dim, __u);
     }
     static auto make_state(const std::string &name, size_t dim) {
-        auto temp = std::make_shared<sym>(name, dim, __x);
-        auto next = std::make_shared<sym>(name + "_nxt", dim, __y);
+        auto temp = sym(name, dim, __x);
+        auto next = sym(name + "_nxt", dim, __y);
         return std::make_pair(temp, next);
     }
 };

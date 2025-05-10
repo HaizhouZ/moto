@@ -48,12 +48,17 @@ class directed_graph {
             out_cnt = out_edges.size();
         }
         node(const value_type &n) : value_type(n) {}
+        node(value_type &&n) : value_type(std::move(n)) {}
         node(const node &n) : node(static_cast<value_type>(n)) {}
     };
 
     // Add a node to the graph
     node_ptr_t add(const value_type &d) {
         nodes_.emplace_back(new node(d));
+        return nodes_.back();
+    }
+    node_ptr_t add(value_type &&d) {
+        nodes_.emplace_back(new node(std::move(d)));
         return nodes_.back();
     }
 

@@ -6,11 +6,11 @@ namespace atri {
 
 sparse_approx_data::sparse_approx_data(sym_data *primal,
                                        approx_data *raw,
-                                       std::vector<sym_ptr_t> in_args,
                                        approx *f)
     : v_(raw->approx_[f->field_].v_.segment(raw->prob_->get_expr_start(*f),
                                             f->dim_)),
       sym_uid_idx_(f->sym_uid_idx_) {
+    auto &in_args = f->in_args();
     for (size_t i = 0; i < in_args.size(); i++) {
         auto arg = in_args[i];
         in_args_.push_back(primal->get(arg));
@@ -57,9 +57,10 @@ sparse_approx_data::sparse_approx_data(sym_data *primal,
     }
 }
 sparse_approx_data_ptr_t approx::make_data(sym_data *primal, approx_data *raw) {
-    assert(!in_args_.empty());
+    if (in_args_.empty())
+        throw std::runtime_error(fmt::format("in args unset for approx {} in field {}", name_, magic_enum::enum_name(field_)));
     auto data = sparse_approx_data_ptr_t();
-    data.reset(new sparse_approx_data(primal, raw, in_args_, this));
+    data.reset(new sparse_approx_data(primal, raw, this));
     for (size_t i = 0; i < in_args_.size(); i++) {
         auto arg = in_args_[i];
     }

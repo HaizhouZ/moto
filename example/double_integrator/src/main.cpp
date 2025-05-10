@@ -5,8 +5,16 @@
 #include <double_integrator/cost.hpp>
 #include <double_integrator/dynamics.hpp>
 
+using namespace atri;
+
+// struct sym : public expr_ptr_t {
+//     sym(const std::string &name, size_t dim, field_t type)
+//         : expr_ptr_t(new expr(name, dim, type)) {
+//         assert(size_t(type) <= field::num_sym);
+//     }
+// };
+
 int main() {
-    using namespace atri;
     doubleIntegratorDyn dyn;
     doubleIntegratorCosts costs;
     // auto cost = std::make_shared<doubleIntegratorCost>(dyn.r, dyn.v, dyn.a);

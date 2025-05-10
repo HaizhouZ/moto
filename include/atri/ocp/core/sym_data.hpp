@@ -12,7 +12,7 @@ struct sym_data {
         }
     }
 
-    auto get(sym_ptr_t sym) {
+    auto get(sym sym) {
         return sym->make_vec(
             prob_->get_data_ptr(value_[sym->field_].data(), sym));
     }
