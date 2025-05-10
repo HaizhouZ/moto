@@ -2,3 +2,5 @@
 build
 *.json
 *.so
+html
+latex

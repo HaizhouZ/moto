@@ -34,7 +34,6 @@ struct problem {
      * @brief add expr to problem formulation
      *
      * @param expr expression to be added
-     * @param field in [field_t]
      */
     void add(expr_ptr_t expr) {
         size_t _uid = expr->uid_;
