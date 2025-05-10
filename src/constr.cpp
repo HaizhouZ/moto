@@ -14,18 +14,18 @@ constr_data::constr_data(approx_data *raw,
             raw->prob_->get_expr_start(in_args[i]), in_args[i]->dim_));
     }
 }
-void constr::jacobian_impl(sparse_approx_data_ptr_t data) {
+void constr::jacobian_impl(sparse_approx_data& data) {
     // compute jacobian first
     jacobian(data);
     // update multiplier - jacobian product
-    auto d = std::static_pointer_cast<constr_data>(data);
-    for (size_t i = 0; i < data->in_args_.size(); i++) {
-        d->vjp_[i].noalias() += d->multiplier_.transpose() * d->jac_[i];
+    auto& d = static_cast<constr_data&>(data);
+    for (size_t i = 0; i < d.in_args_.size(); i++) {
+        d.vjp_[i].noalias() += d.multiplier_.transpose() * d.jac_[i];
     }
 }
-void constr::hessian_impl(sparse_approx_data_ptr_t data) {
+void constr::hessian_impl(sparse_approx_data& data) {
     // do not compute the whole hessian
     // preferred: first do multipler.T * jac then use auto-differentiation
-    hessian(std::static_pointer_cast<constr_data>(data));
+    hessian(static_cast<constr_data&>(data));
 }
 } // namespace atri

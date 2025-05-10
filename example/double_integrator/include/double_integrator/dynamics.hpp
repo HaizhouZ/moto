@@ -18,24 +18,24 @@ class doubleIntegratorDyn : public dynamics, public collection {
     constr_ptr_t dyn_pos, dyn_vel;
     struct pos : public constr {
         pos() : constr("doubleIntegratorDynamics_pos", 3, __dyn, approx_order::first) {}
-        void value(sparse_approx_data_ptr_t data) override {
-            data->v_ = -data->in_args_[0] + data->in_args_[2] - 0.01 * data->in_args_[1];
+        void value(sparse_approx_data& data) override {
+            data.v_ = -data.in_args_[0] + data.in_args_[2] - 0.01 * data.in_args_[1];
         };
-        void jacobian(sparse_approx_data_ptr_t data) override {
-            data->jac_[0].diagonal().setConstant(-1);
-            data->jac_[1].setIdentity();
-            data->jac_[2].diagonal().setConstant(-0.01);
+        void jacobian(sparse_approx_data& data) override {
+            data.jac_[0].diagonal().setConstant(-1);
+            data.jac_[1].setIdentity();
+            data.jac_[2].diagonal().setConstant(-0.01);
         };
     };
     struct vel : public constr {
         vel() : constr("doubleIntegratorDynamics_vel", 3, __dyn, approx_order::first) {}
-        void value(sparse_approx_data_ptr_t data) override {
-            data->v_ = -data->in_args_[0] + data->in_args_[2] - 0.01 * data->in_args_[1];
+        void value(sparse_approx_data& data) override {
+            data.v_ = -data.in_args_[0] + data.in_args_[2] - 0.01 * data.in_args_[1];
         };
-        void jacobian(sparse_approx_data_ptr_t data) override {
-            data->jac_[0].diagonal().setConstant(-1);
-            data->jac_[1].setIdentity();
-            data->jac_[2].diagonal().setConstant(-0.01);
+        void jacobian(sparse_approx_data& data) override {
+            data.jac_[0].diagonal().setConstant(-1);
+            data.jac_[1].setIdentity();
+            data.jac_[2].diagonal().setConstant(-0.01);
         };
     };
     doubleIntegratorDyn()

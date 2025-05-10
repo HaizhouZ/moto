@@ -22,13 +22,18 @@ struct sparse_approx_data {
     /// @example Q_xu is store instead of Q_ux;
     std::vector<matrix_ref> jac_;               // jacobian, idx correspond to in_args_
     std::vector<std::vector<matrix_ref>> hess_; // hessian for cost
+    std::unordered_map<size_t, size_t> &sym_uid_idx_;
     // std::vector<sparse_mat> jac_;
     sparse_approx_data(sym_data *primal, approx_data *raw, std::vector<sym_ptr_t> in_args, approx *f);
     sparse_approx_data(const sparse_approx_data &rhs) = delete; // disable this
-    sparse_approx_data(sparse_approx_data &&rhs) : v_(rhs.v_) {
+    sparse_approx_data(sparse_approx_data &&rhs) : v_(rhs.v_), sym_uid_idx_(rhs.sym_uid_idx_) {
         in_args_ = std::move(rhs.in_args_);
         jac_ = std::move(rhs.jac_);
         hess_ = std::move(rhs.hess_);
+    }
+
+    auto &operator()(sym_ptr_t in) {
+        return in_args_[sym_uid_idx_[in->uid_]];
     }
 };
 
@@ -40,18 +45,20 @@ class approx : public expr { /// todo: change to differentiable for precompute
     approx_order order_;
     std::vector<sym_ptr_t> in_args_;
     std::unordered_map<size_t, size_t> sym_uid_idx_;
-    virtual void setup_sparsity(sparse_approx_data_ptr_t data) {}
+    virtual void setup_sparsity(sparse_approx_data& data) {}
+
+    friend struct sparse_approx_data;
 
   protected:
-    virtual void value_impl(sparse_approx_data_ptr_t data) {
+    virtual void value_impl(sparse_approx_data& data) {
         throw std::runtime_error(
             fmt::format("value not implemented for approx {}", name_));
     };
-    virtual void jacobian_impl(sparse_approx_data_ptr_t data) {
+    virtual void jacobian_impl(sparse_approx_data& data) {
         throw std::runtime_error(
             fmt::format("jacobian not implemented for approx {}", name_));
     };
-    virtual void hessian_impl(sparse_approx_data_ptr_t data) {
+    virtual void hessian_impl(sparse_approx_data& data) {
         throw std::runtime_error(
             fmt::format("hessian not implemented for approx {}", name_));
     };
@@ -66,7 +73,6 @@ class approx : public expr { /// todo: change to differentiable for precompute
             add_argument(in);
         }
     }
-    auto& get(sym_ptr_t in, sparse_approx_data_ptr_t d) { return d->in_args_[sym_uid_idx_[in->uid_]]; }
     const auto &in_args() { return in_args_; }
     inline approx_order order() { return order_; }
 
@@ -93,11 +99,11 @@ class approx : public expr { /// todo: change to differentiable for precompute
                   bool eval_val, bool eval_jac = false, bool eval_hess = false) {
         // if (eval_jac)
         if (eval_val)
-            value_impl(data);
+            value_impl(*data);
         if (eval_jac)
-            jacobian_impl(data);
+            jacobian_impl(*data);
         if (eval_hess)
-            hessian_impl(data);
+            hessian_impl(*data);
     }
 };
 def_ptr(approx);

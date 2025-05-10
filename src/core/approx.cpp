@@ -9,7 +9,8 @@ sparse_approx_data::sparse_approx_data(sym_data *primal,
                                        std::vector<sym_ptr_t> in_args,
                                        approx *f)
     : v_(raw->approx_[f->field_].v_.segment(raw->prob_->get_expr_start(*f),
-                                            f->dim_)) {
+                                            f->dim_)),
+      sym_uid_idx_(f->sym_uid_idx_) {
     for (size_t i = 0; i < in_args.size(); i++) {
         auto arg = in_args[i];
         in_args_.push_back(primal->get(arg));
@@ -62,7 +63,7 @@ sparse_approx_data_ptr_t approx::make_data(sym_data *primal, approx_data *raw) {
     for (size_t i = 0; i < in_args_.size(); i++) {
         auto arg = in_args_[i];
     }
-    setup_sparsity(data);
+    setup_sparsity(*data);
     return data;
 }
 } // namespace atri
