@@ -6,7 +6,7 @@
 namespace atri {
 
 struct approx_data; // fwd declaration
-struct sym_data; // fwd declaration
+struct sym_data;    // fwd declaration
 
 /////////////////////////////////////////////////////////////////////
 
@@ -39,9 +39,14 @@ class approx : public expr { /// todo: change to differentiable for precompute
   private:
     approx_order order_;
     std::vector<sym_ptr_t> in_args_;
+    std::unordered_map<size_t, size_t> sym_uid_idx_;
     virtual void setup_sparsity(sparse_approx_data_ptr_t data) {}
 
   protected:
+    virtual void value_impl(sparse_approx_data_ptr_t data) {
+        throw std::runtime_error(
+            fmt::format("value not implemented for approx {}", name_));
+    };
     virtual void jacobian_impl(sparse_approx_data_ptr_t data) {
         throw std::runtime_error(
             fmt::format("jacobian not implemented for approx {}", name_));
@@ -52,10 +57,16 @@ class approx : public expr { /// todo: change to differentiable for precompute
     };
 
   public:
-    void add_argument(sym_ptr_t in) { in_args_.push_back(in); }
-    void add_arguments(std::initializer_list<sym_ptr_t> args) {
-        in_args_.insert(in_args_.end(), args.begin(), args.end());
+    void add_argument(sym_ptr_t in) {
+        in_args_.push_back(in);
+        sym_uid_idx_[in->uid_] = sym_uid_idx_.size();
     }
+    void add_arguments(std::initializer_list<sym_ptr_t> args) {
+        for (auto in : args) {
+            add_argument(in);
+        }
+    }
+    auto& get(sym_ptr_t in, sparse_approx_data_ptr_t d) { return d->in_args_[sym_uid_idx_[in->uid_]]; }
     const auto &in_args() { return in_args_; }
     inline approx_order order() { return order_; }
 
@@ -81,6 +92,8 @@ class approx : public expr { /// todo: change to differentiable for precompute
     void evaluate(problem_ptr_t problem, sparse_approx_data_ptr_t data,
                   bool eval_val, bool eval_jac = false, bool eval_hess = false) {
         // if (eval_jac)
+        if (eval_val)
+            value_impl(data);
         if (eval_jac)
             jacobian_impl(data);
         if (eval_hess)

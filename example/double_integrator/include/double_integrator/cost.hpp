@@ -20,11 +20,15 @@ struct doubleIntegratorCosts {
 
             add_arguments({r, v});
         }
-        void jacobian_impl(sparse_approx_data_ptr_t data) override { // make sure use +=
+        void value(sparse_approx_data_ptr_t data) override {
+            data->v_.noalias() += d_r.transpose() * data->in_args_[0].cwiseAbs2();
+            data->v_.noalias() += d_v.transpose() * data->in_args_[1].cwiseAbs2();
+        }
+        void jacobian(sparse_approx_data_ptr_t data) override { // make sure use +=
             data->jac_[0].noalias() += data->in_args_[0].transpose() * d_r.asDiagonal();
             data->jac_[1].noalias() += data->in_args_[1].transpose() * d_v.asDiagonal();
         }
-        void hessian_impl(sparse_approx_data_ptr_t data) override {
+        void hessian(sparse_approx_data_ptr_t data) override {
             data->hess_[0][0].diagonal() += d_r;
             data->hess_[1][1].diagonal() += d_v;
         }
@@ -37,10 +41,13 @@ struct doubleIntegratorCosts {
 
             add_arguments({a});
         }
-        void jacobian_impl(sparse_approx_data_ptr_t data) override { // make sure use +=
+        void value(sparse_approx_data_ptr_t data) override {
+            data->v_.noalias() += d_a.transpose() * data->in_args_[0].cwiseAbs2();
+        }
+        void jacobian(sparse_approx_data_ptr_t data) override { // make sure use +=
             data->jac_[0].noalias() += data->in_args_[0].transpose() * d_a.asDiagonal();
         }
-        void hessian_impl(sparse_approx_data_ptr_t data) override {
+        void hessian(sparse_approx_data_ptr_t data) override {
             data->hess_[0][0].diagonal() += d_a;
         }
     };

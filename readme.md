@@ -21,6 +21,7 @@
 
 # Todo list
 
-1. terminal cost handling (nodes of different problem!)
-2. double integrator test
-3. CasADi supports
+1. residual impl
+2. refactor solver
+3. double integrator test
+4. CasADi supports

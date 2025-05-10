@@ -33,10 +33,14 @@ struct constr : public approx {
     }
 
   private:
+    void value_impl(sparse_approx_data_ptr_t data) override final { value(data); }
     void jacobian_impl(sparse_approx_data_ptr_t data) override final;
     void hessian_impl(sparse_approx_data_ptr_t data) override final;
 
   protected:
+    virtual void value(sparse_approx_data_ptr_t data) {
+        approx::value_impl(data);
+    }
     virtual void jacobian(sparse_approx_data_ptr_t data) {
         approx::jacobian_impl(data);
     };
