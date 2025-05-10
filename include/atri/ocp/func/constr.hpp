@@ -1,5 +1,5 @@
-#ifndef __CONSTR__
-#define __CONSTR__
+#ifndef ATRI_CONSTR_HPP
+#define ATRI_CONSTR_HPP
 
 #include <atri/ocp/core/approx.hpp>
 
@@ -10,7 +10,8 @@ struct constr_impl; // fwd
  * derived from sparse_approx_data with multipler and vjp (for cost) mapping in addition
  */
 struct constr_data : public sparse_approx_data {
-    // vector_ref slack_;      /// @todo: add this to raw
+    /// @todo: add this to raw
+    // vector_ref slack_;      
     vector_ref multiplier_;
     std::vector<row_vector_ref> vjp_;
     constr_data(approx_data *raw, sparse_approx_data &&d, constr_impl *cstr);
@@ -78,4 +79,4 @@ struct constr : public constr_impl_ptr_t {
 };
 } // namespace atri
 
-#endif
+#endif // ATRI_CONSTR_HPP

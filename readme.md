@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="asset/logo.svg" alt="logo"/>
-</p>
-
 **Atri** is a high-performance multi-threaded trajectory optimizer. It exploits the temporal and spatial sparisty of implicit multiple-shooting formulation and the highly efficient `BLASFEO`.
 
 # Requirements
@@ -21,7 +17,6 @@
 
 # Todo list
 
-1. residual impl
-2. refactor solver
-3. double integrator test
-4. CasADi supports
+1. refactor solver
+2. double integrator test
+3. CasADi supports

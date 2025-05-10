@@ -55,15 +55,16 @@ def_ptr(sparse_approx_data);
 /////////////////////////////////////////////////////////////////////
 /**
  * @brief approximation class for generic functions
+ * @todo: change to differentiable for precompute
  */
-class approx : public expr { /// todo: change to differentiable for precompute
+class approx : public expr {
   private:
     approx_order order_;
     std::vector<sym> in_args_;
     std::unordered_map<size_t, size_t> sym_uid_idx_;
     friend struct sparse_approx_data;
 
-    /// @todo
+    /// @todo to be implemented
     virtual void setup_sparsity(sparse_approx_data &data) {}
 
   public:

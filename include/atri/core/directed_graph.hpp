@@ -144,7 +144,8 @@ class directed_graph {
 
   private:
     node_ptr_t head_;
-    node_ptr_t tail_;               // todo: multiple tail
+    /// @todo: multiple tail
+    node_ptr_t tail_;               
     std::vector<node_ptr_t> nodes_; // key nodes used to describe the graph
     std::vector<edge_ptr_t> edges_;
 };

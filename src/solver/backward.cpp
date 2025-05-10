@@ -35,7 +35,7 @@ void nullspace_riccati_solver::backward_pass() {
             } else {
                 // solve nullspace system
                 nsp.U_z.noalias() = nsp.Z.transpose() * nsp.U * nsp.Z;
-                /// todo: what if nsp.u_z_K size is wrong
+                /// @todo: what if nsp.u_z_K size is wrong
                 nsp.u_z_K.noalias() = nsp.Z.transpose() * nsp.z_u_K;
                 nsp.llt_ns_.compute(nsp.U_z);
                 nsp.llt_ns_.solveInPlace(nsp.u_z_K);
