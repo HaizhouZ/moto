@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <atri/core/fwd.hpp>
+#include <ranges>
 #include <set>
 #include <vector>
 
@@ -10,7 +11,7 @@ namespace atri {
 template <typename value_type>
 class directed_graph {
   public:
-    using value_ptr_t = std::shared_ptr<value_type>;
+    using value_ptr_t = std::unique_ptr<value_type>;
     struct node;
     def_ptr(node);
 
@@ -25,7 +26,7 @@ class directed_graph {
             st->out_edges.emplace(this);
             ed->in_edges.emplace(this);
             while (--length) { // exclude ed node
-                nodes.emplace_back(std::make_shared<value_type>(*st));
+                nodes.push_back(std::make_unique<value_type>(*st));
             }
         }
         ~edge() {
@@ -33,10 +34,10 @@ class directed_graph {
             ed->in_edges.erase(this);
         }
     };
-    def_ptr(edge);
+    def_unique_ptr(edge);
 
     void add_edge(node_ptr_t st, node_ptr_t ed, size_t len) {
-        edges_.emplace_back(new edge(st, ed, len));
+        edges_.push_back(std::make_unique<edge>(st, ed, len));
     }
     // Sparse iterator
     struct node : public value_type {
@@ -68,17 +69,19 @@ class directed_graph {
 
     // return unordered flatten node list
     auto flatten() {
-        std::vector<value_ptr_t> out;
+        std::vector<value_type *> out;
         for (auto cur : nodes_) {
-            out.push_back(cur);
+            out.push_back(cur.get());
             for (auto e : cur->out_edges) {
-                out.insert(out.end(), e->nodes.begin(), e->nodes.end());
+                for (auto &p : e->nodes) {
+                    out.emplace_back(p.get());
+                }
             }
         }
         return out;
     }
 
-    void apply_all_unary(std::function<void(value_ptr_t)> callback) {
+    void apply_all_unary(std::function<void(value_type &)> callback) {
 #pragma omp parallel
         for (auto cur : flatten())
             callback(cur);
@@ -88,21 +91,21 @@ class directed_graph {
      *
      * @param callback function [d, d+1]
      */
-    void apply_all_binary_forward(std::function<void(value_ptr_t, value_ptr_t)> callback) {
-        std::for_each(nodes_.begin(), nodes_.end(), [](node_ptr_t p) { p->reset_cnt(); });
+    void apply_all_binary_forward(std::function<void(value_type &, value_type &)> callback) {
+        std::ranges::for_each(nodes_, [](node_ptr_t p) { p->reset_cnt(); });
         std::vector<edge *> cur_edges(head_->out_edges.begin(), head_->out_edges.end()); // st nodes for this round
         std::vector<edge *> next_edges;                                                  // st nodes for next round
         while (!cur_edges.empty()) {
 #pragma omp parallel
             for (auto e : cur_edges) {
                 // edge forward
-                value_ptr_t cur = e->st;
-                for (auto next : e->nodes) {
-                    callback(cur, next);
-                    cur = next;
+                value_type *cur = e->st.get();
+                for (auto &next : e->nodes) {
+                    callback(*cur, *next);
+                    cur = next.get();
                 }
                 // last segment
-                callback(cur, e->ed);
+                callback(*cur, *e->ed);
                 if ((--e->ed->in_cnt) == 0 && !e->ed->out_edges.empty()) { // append ed to the list if no more in edges
                     next_edges.insert(next_edges.end(), e->ed->out_edges.begin(), e->ed->out_edges.end());
                 }
@@ -117,7 +120,7 @@ class directed_graph {
      *
      * @param callback function [d, d-1]
      */
-    void apply_all_binary_backward(std::function<void(value_ptr_t, value_ptr_t)> callback) {
+    void apply_all_binary_backward(std::function<void(value_type &, value_type &)> callback) {
         std::for_each(nodes_.begin(), nodes_.end(), [](node_ptr_t p) { p->reset_cnt(); });
         std::vector<edge *> cur_edges(tail_->in_edges.begin(), tail_->in_edges.end()); // st nodes for this round
         std::vector<edge *> next_edges;                                                // st nodes for next round
@@ -125,13 +128,13 @@ class directed_graph {
 #pragma omp parallel
             for (auto e : cur_edges) {
                 // edge forward
-                value_ptr_t cur = e->ed;
-                for (auto next = e->nodes.rbegin(); next != e->nodes.rend(); ++next) {
-                    callback(cur, *next);
-                    cur = *next;
+                value_type *cur = e->ed.get();
+                for (auto &next : e->nodes | std::views::reverse) {
+                    callback(*cur, *next);
+                    cur = next.get();
                 }
                 // last segment
-                callback(cur, e->st);
+                callback(*cur, *e->st);
                 if ((--e->st->out_cnt) == 0 && !e->st->in_edges.empty()) { // append st to the list if no more out edges
                     next_edges.insert(next_edges.end(), e->st->in_edges.begin(), e->st->in_edges.end());
                 }
@@ -145,7 +148,7 @@ class directed_graph {
   private:
     node_ptr_t head_;
     /// @todo: multiple tail
-    node_ptr_t tail_;               
+    node_ptr_t tail_;
     std::vector<node_ptr_t> nodes_; // key nodes used to describe the graph
     std::vector<edge_ptr_t> edges_;
 };

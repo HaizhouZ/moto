@@ -51,7 +51,7 @@ struct sparse_approx_data {
     std::unordered_map<size_t, size_t> &sym_uid_idx_;
 };
 
-def_ptr(sparse_approx_data);
+def_unique_ptr(sparse_approx_data);
 /////////////////////////////////////////////////////////////////////
 /**
  * @brief approximation class for generic functions
@@ -127,15 +127,15 @@ class approx : public expr {
      * @tparam eval_jac evaluate jacobian if true
      * @tparam eval_hess evaluate hessian if true
      */
-    void evaluate(problem_ptr_t problem, sparse_approx_data_ptr_t data,
+    void evaluate(problem_ptr_t problem, sparse_approx_data& data,
                   bool eval_val, bool eval_jac = false, bool eval_hess = false) {
         // if (eval_jac)
         if (eval_val)
-            value_impl(*data);
+            value_impl(data);
         if (eval_jac)
-            jacobian_impl(*data);
+            jacobian_impl(data);
         if (eval_hess)
-            hessian_impl(*data);
+            hessian_impl(data);
     }
 };
 def_ptr(approx);

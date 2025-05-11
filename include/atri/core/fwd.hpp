@@ -24,6 +24,7 @@ using mapped_const_vector = Eigen::Map<const_vector>;
 using mapped_matrix = Eigen::Map<matrix>;
 
 #define def_ptr(name) typedef std::shared_ptr<name> name##_ptr_t;
+#define def_unique_ptr(name) typedef std::unique_ptr<name> name##_ptr_t;
 
 }  // namespace atri
 

@@ -16,7 +16,7 @@ struct constr_data : public sparse_approx_data {
     std::vector<row_vector_ref> vjp_;
     constr_data(approx_data *raw, sparse_approx_data &&d, constr_impl *cstr);
 };
-def_ptr(constr_data);
+def_unique_ptr(constr_data);
 /**
  * @brief constraint approximation with multipliers (and slack variables)
  */

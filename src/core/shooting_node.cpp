@@ -71,7 +71,7 @@ void shooting_node::update_approximation() {
     /// @todo: always eval residual?
     for_funcs(problem_,
               [this](size_t field, size_t idx_expr, approx_ptr_t _f) {
-                  _f->evaluate(problem_, data_->approx_[field][idx_expr],
+                  _f->evaluate(problem_, *data_->approx_[field][idx_expr],
                                true, _f->order() >= approx_order::first,
                                _f->order() >= approx_order::second);
               });

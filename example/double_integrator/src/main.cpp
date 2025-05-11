@@ -71,10 +71,10 @@ int main() {
     graph.set_tail(end_node);
     std::atomic<size_t> cnt = 0;
 
-    graph.apply_all_binary_forward([&cnt](shooting_node_ptr_t a, shooting_node_ptr_t b) { cnt++; });
+    graph.apply_all_binary_forward([&cnt](shooting_node& a, shooting_node& b) { cnt++; });
     fmt::print("forward {}\n", cnt.load());
     cnt = 0;
-    graph.apply_all_binary_backward([&cnt](shooting_node_ptr_t a, shooting_node_ptr_t b) { cnt++; });
+    graph.apply_all_binary_backward([&cnt](shooting_node& a, shooting_node& b) { cnt++; });
     fmt::print("backward {}\n", cnt.load());
 
     fmt::print("nice!\n");
