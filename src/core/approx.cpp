@@ -19,7 +19,7 @@ sparse_approx_data::sparse_approx_data(sym_data *primal,
     // for non-cost
     if (f->field_ - __dyn < field::num_constr) {
         if (f->order() >= approx_order::first) {
-            for (size_t i = 0; i < in_args_.size(); i++) {
+            for (size_t i : range(in_args_.size())) {
                 jac_.push_back(raw->approx_[f->field_].jac_[in_args[i]->field_].block(
                     f_st, raw->prob_->get_expr_start(in_args[i]),
                     f->dim_, in_args[i]->dim_));
@@ -27,7 +27,7 @@ sparse_approx_data::sparse_approx_data(sym_data *primal,
             assert(jac_.size() == in_args_.size());
         }
     } else { // for cost
-        for (size_t i = 0; i < in_args_.size(); i++) {
+        for (size_t i : range(in_args_.size())) {
             jac_.push_back(raw->jac_[in_args[i]->field_].segment(
                 raw->prob_->get_expr_start(in_args[i]), in_args[i]->dim_));
         }
@@ -36,8 +36,8 @@ sparse_approx_data::sparse_approx_data(sym_data *primal,
     if (f->order() >= approx_order::second) {
         size_t field_1, field_2;
         hess_.resize(in_args_.size());
-        for (size_t i = 0; i < in_args_.size(); i++) {
-            for (size_t j = 0; j < in_args_.size(); j++) {
+        for (size_t i : range(in_args_.size())) {
+            for (size_t j : range(in_args_.size())) {
                 /// @note order matches approx_data
                 /// h[i][j] = h[j][i] if i, j in the same field or field(i) < field(j)
                 /// otherwise only keep h[i][j] (empty)
@@ -61,7 +61,7 @@ sparse_approx_data_ptr_t approx::make_data(sym_data *primal, approx_data *raw) {
         throw std::runtime_error(fmt::format("in args unset for approx {} in field {}", name_, magic_enum::enum_name(field_)));
     auto data = sparse_approx_data_ptr_t();
     data.reset(new sparse_approx_data(primal, raw, this));
-    for (size_t i = 0; i < in_args_.size(); i++) {
+    for (size_t i : range(in_args_.size())) {
         auto arg = in_args_[i];
     }
     setup_sparsity(*data);

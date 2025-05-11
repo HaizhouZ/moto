@@ -5,6 +5,7 @@
 #include <memory>
 #include <fmt/core.h>
 #include <magic_enum.hpp>
+#include <ranges>
 
 namespace atri {
 typedef float scalar_t;
@@ -26,6 +27,15 @@ using mapped_matrix = Eigen::Map<matrix>;
 #define def_ptr(name) typedef std::shared_ptr<name> name##_ptr_t;
 #define def_unique_ptr(name) typedef std::unique_ptr<name> name##_ptr_t;
 
+inline auto range(size_t st, size_t ed) {
+    return std::views::iota(st, ed);
+}
+inline auto range(size_t n) {
+    return std::views::iota(size_t(0), n);
+}
+inline auto range_n(size_t st, size_t n) {
+    return std::views::iota(st, st + n);
+}
 }  // namespace atri
 
 #endif /*__FWD_*/

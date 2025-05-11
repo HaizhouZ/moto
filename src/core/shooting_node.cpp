@@ -1,5 +1,6 @@
 #include <atri/ocp/core/approx_data.hpp>
 #include <atri/ocp/core/shooting_node.hpp>
+#include <ranges>
 
 namespace atri {
 
@@ -9,23 +10,21 @@ namespace atri {
  * @param prob
  * @param callback [idx of field, idx of expr, pointer to expr]
  */
-template <typename callback_type>
-inline void for_funcs(problem_ptr_t prob, callback_type &&callback) {
+template <typename Callback>
+inline void for_funcs(problem_ptr_t prob, Callback &&callback) {
     // loop with two variables due to the difference between idx and field no.
-    for (size_t field = __dyn; field != field::num; field++) {
-        auto &_prob = prob->expr_[field];
-        if (!_prob.empty()) {
-            for (size_t idx_expr = 0; idx_expr < _prob.size(); idx_expr++) {
-                auto _f = std::static_pointer_cast<approx>(_prob[idx_expr]);
-                callback(field, idx_expr, _f);
-            }
+    for (size_t field : range_n(__dyn, field::num_func)) {
+        auto &exprs = prob->expr_[field];
+        size_t idx = 0;
+        for (auto &expr : exprs) {
+            callback(field, idx++, std::static_pointer_cast<approx>(expr));
         }
     }
 }
 
 node_data::node_data(problem_ptr_t prob)
     : sym_(new sym_data(prob)), raw_(new approx_data(prob)) {
-    for_funcs(prob, [&](size_t field, size_t idx_expr, approx_ptr_t _f) {
+    for_funcs(prob, [&](size_t field, size_t idx, approx_ptr_t _f) {
         approx_[field].push_back(_f->make_data(sym_, raw_));
     });
 }
