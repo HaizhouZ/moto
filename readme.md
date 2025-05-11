@@ -8,7 +8,7 @@
 4. OpenMP
 5. libfmt
 6. magic_enum
-7. CXX compiler that supports `>C++17`
+7. CXX compiler that supports `>= C++20`
 
 ## Compilation Notes
 
