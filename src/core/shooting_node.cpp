@@ -58,7 +58,7 @@ node_data_ptr_t data_mgr::acquire_data(problem_ptr_t prob) {
 void data_mgr::release_data(problem_ptr_t prob, node_data_ptr_t data) {
     auto &pool = data_[prob->uid_];
     std::lock_guard _lock(pool.mtx_);
-    pool.push(data);
+    pool.push(std::move(data));
 }
 
 void shooting_node::swap(shooting_node &p) {

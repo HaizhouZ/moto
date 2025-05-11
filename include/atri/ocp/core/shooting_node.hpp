@@ -35,8 +35,7 @@ class data_mgr {
             "data_type must have a constructor that accepts problem_ptr_t");
 
         data_maker_func maker = [](problem_ptr_t prob) {
-            return std::static_pointer_cast<node_data>(
-                std::make_shared<data_type>(prob));
+            return std::unique_ptr<node_data>(new data_type(prob));
         };
         static data_mgr s_(maker);
         return s_;
@@ -92,7 +91,7 @@ struct shooting_node {
 
     ~shooting_node() {
         if (data_)
-            mem_.release_data(problem_, data_);
+            mem_.release_data(problem_, std::move(data_));
     }
     /**
      * @brief swap two nodes, use when you want to replace nodes

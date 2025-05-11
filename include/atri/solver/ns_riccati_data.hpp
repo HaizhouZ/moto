@@ -33,7 +33,7 @@ struct nullspace_riccati_data : public node_data {
     nullspace_riccati_data(problem_ptr_t prob);
     ~nullspace_riccati_data();
 };
-def_ptr(nullspace_riccati_data);
+def_unique_ptr(nullspace_riccati_data);
 
 } // namespace atri
 

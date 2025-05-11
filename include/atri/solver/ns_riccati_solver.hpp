@@ -14,7 +14,7 @@ class nullspace_riccati_solver {
         : mem_(data_mgr::get<nullspace_riccati_data>()) {}
     void set_horizon(size_t N) { nodes_.resize(N); }
     static auto &get_data(shooting_node_ptr_t node) {
-        return *std::static_pointer_cast<nullspace_riccati_data>(node->data_);
+        return *static_cast<nullspace_riccati_data *>(node->data_.get());
     }
 
   protected:

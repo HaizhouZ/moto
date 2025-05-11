@@ -18,7 +18,7 @@ typedef offset_array<std::vector<sparse_approx_data_ptr_t>,
     stacked_approx_data;
 
 struct node_data;
-def_ptr(node_data);
+def_unique_ptr(node_data);
 
 /**
  * @brief node data class
