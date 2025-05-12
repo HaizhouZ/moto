@@ -20,3 +20,5 @@
 1. refactor solver
 2. double integrator test
 3. CasADi supports
+4. precompute interface
+5. quadruped test
