@@ -6,27 +6,17 @@
 #include <list>
 
 namespace atri {
-
-class nullspace_riccati_solver {
-
-  public:
-    nullspace_riccati_solver()
-        : mem_(data_mgr::get<nullspace_riccati_data>()) {}
-    void set_horizon(size_t N) { nodes_.resize(N); }
-    static auto &get_data(shooting_node_ptr_t node) {
-        return *static_cast<nullspace_riccati_data *>(node->data_.get());
-    }
-
-  protected:
-    void pre_solving_steps();
-    void backward_pass();
-    void post_solving_steps();
-    void forward_rollout();
-    void post_rollout_steps();
-
-    data_mgr &mem_;
-    std::vector<shooting_node_ptr_t> nodes_;
-};
+namespace ns_riccati_solver {
+inline auto &get_data(shooting_node *node) {
+    return *static_cast<nullspace_riccati_data *>(node->data_.get());
+}
+void pre_solving_steps_1(shooting_node *cur);
+void pre_solving_steps_2(shooting_node *cur, shooting_node *prev);
+void backward_pass(shooting_node *cur, shooting_node *prev);
+void post_solving_steps(shooting_node *cur);
+void forward_rollout(shooting_node *cur, shooting_node *next);
+void post_rollout_steps(shooting_node *cur);
+} // namespace ns_riccati_solver
 
 } // namespace atri
 

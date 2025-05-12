@@ -81,38 +81,63 @@ class directed_graph {
         return out;
     }
 
-    void apply_all_unary(std::function<void(value_type &)> callback) {
+    void apply_all_unary_parallel(std::function<void(value_type *)> callback) {
 #pragma omp parallel
         for (auto cur : flatten())
             callback(cur);
     }
     /**
-     * @brief apply binary function for all shooting nodes sequentially
+     * @brief apply binary function for all shooting nodes sequentially or in parallel
      *
      * @param callback function [d, d+1]
      */
-    void apply_all_binary_forward(std::function<void(value_type &, value_type &)> callback) {
+    template <bool parallel = false, bool tail_null_edge = false, typename callback_t>
+        requires std::invocable<callback_t, value_type *, value_type *>
+    void apply_all_binary_forward(callback_t &&callback) {
         std::ranges::for_each(nodes_, [](node_ptr_t p) { p->reset_cnt(); });
         std::vector<edge *> cur_edges(head_->out_edges.begin(), head_->out_edges.end()); // st nodes for this round
         std::vector<edge *> next_edges;                                                  // st nodes for next round
         while (!cur_edges.empty()) {
-#pragma omp parallel
-            for (auto e : cur_edges) {
-                // edge forward
-                value_type *cur = e->st.get();
-                for (auto &next : e->nodes) {
-                    callback(*cur, *next);
-                    cur = next.get();
+            if constexpr (parallel) { // parallel by segments
+                std::vector<std::pair<value_type *, value_type *>> in_;
+                for (auto e : cur_edges) {
+                    // edge forward
+                    value_type *cur = e->ed.get();
+                    for (auto &next : e->nodes | std::views::reverse) {
+                        in_.emplace_back(cur, next.get());
+                        cur = next.get();
+                    }
                 }
-                // last segment
-                callback(*cur, *e->ed);
-                if ((--e->ed->in_cnt) == 0 && !e->ed->out_edges.empty()) { // append ed to the list if no more in edges
-                    next_edges.insert(next_edges.end(), e->ed->out_edges.begin(), e->ed->out_edges.end());
+#pragma omp parallel
+                for (auto [cur, prev] : in_) {
+                    callback(cur, prev);
+                }
+                for (auto e : cur_edges) {
+                    if ((--e->ed->in_cnt) == 0 && !e->ed->out_edges.empty()) { // append ed to the list if no more in edges
+                        next_edges.insert(next_edges.end(), e->ed->out_edges.begin(), e->ed->out_edges.end());
+                    }
+                }
+            } else { // parallel by edges
+#pragma omp parallel
+                for (auto e : cur_edges) {
+                    // edge forward
+                    value_type *cur = e->st.get();
+                    for (auto &next : e->nodes) {
+                        callback(cur, next.get());
+                        cur = next.get();
+                    }
+                    // last segment
+                    callback(cur, e->ed.get());
+                    if ((--e->ed->in_cnt) == 0 && !e->ed->out_edges.empty()) { // append ed to the list if no more in edges
+                        next_edges.insert(next_edges.end(), e->ed->out_edges.begin(), e->ed->out_edges.end());
+                    }
                 }
             }
-
             cur_edges.swap(next_edges);
             next_edges.clear();
+        }
+        if constexpr (tail_null_edge) {
+            callback(tail_.get(), nullptr);
         }
     }
     /**
@@ -120,22 +145,25 @@ class directed_graph {
      *
      * @param callback function [d, d-1]
      */
-    void apply_all_binary_backward(std::function<void(value_type &, value_type &)> callback) {
+    template <bool head_null_edge = true, typename callback_t>
+        requires std::invocable<callback_t, value_type *, value_type *>
+    void apply_all_binary_backward(callback_t &&callback) {
         std::for_each(nodes_.begin(), nodes_.end(), [](node_ptr_t p) { p->reset_cnt(); });
         std::vector<edge *> cur_edges(tail_->in_edges.begin(), tail_->in_edges.end()); // st nodes for this round
         std::vector<edge *> next_edges;                                                // st nodes for next round
         while (!cur_edges.empty()) {
+
 #pragma omp parallel
             for (auto e : cur_edges) {
                 // edge forward
                 value_type *cur = e->ed.get();
                 for (auto &next : e->nodes | std::views::reverse) {
-                    callback(*cur, *next);
+                    callback(cur, next.get());
                     cur = next.get();
                 }
                 // last segment
-                callback(*cur, *e->st);
-                if ((--e->st->out_cnt) == 0 && !e->st->in_edges.empty()) { // append st to the list if no more out edges
+                callback(cur, e->st.get());
+                if ((--e->st->out_cnt) == 0 && !e->st->in_edges.empty()) [[likely]] { // append st to the list if no more out edges
                     next_edges.insert(next_edges.end(), e->st->in_edges.begin(), e->st->in_edges.end());
                 }
             }
@@ -143,12 +171,15 @@ class directed_graph {
             cur_edges.swap(next_edges);
             next_edges.clear();
         }
+        if constexpr (head_null_edge) {
+            callback(head_.get(), nullptr);
+        }
     }
 
   private:
-    node_ptr_t head_;
+    node_ptr_t head_ = nullptr;
     /// @todo: multiple tail
-    node_ptr_t tail_;
+    node_ptr_t tail_ = nullptr;
     std::vector<node_ptr_t> nodes_; // key nodes used to describe the graph
     std::vector<edge_ptr_t> edges_;
 };

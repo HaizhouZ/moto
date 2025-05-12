@@ -27,7 +27,7 @@ struct nullspace_data {
     matrix u_y_K;                    ///< same as @ref u_y_k
     matrix u_z_K;                    ///< same as @ref u_z_k
     matrix u_0_p_K;                  ///< same as @ref u_0_p_k
-    vector s_0_p_K;                  ///< same as @ref s_0_p_k
+    matrix s_0_p_K;                  ///< same as @ref s_0_p_k
     matrix s_u;                      ///< \f$s_yF_u\f$
     matrix F_u;                      ///< \f$f_y^{-1}f_u\f$
     vector F_0_k;                    ///< \f$s_yf\f$
