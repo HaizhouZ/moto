@@ -43,7 +43,7 @@ struct sparse_approx_data {
         hess_ = std::move(rhs.hess_);
     }
 
-    auto &operator()(const sym& in) {
+    auto &operator()(const sym &in) {
         return in_args_[sym_uid_idx_[in->uid_]];
     }
 
@@ -127,7 +127,7 @@ class approx : public expr {
      * @tparam eval_jac evaluate jacobian if true
      * @tparam eval_hess evaluate hessian if true
      */
-    void evaluate(const problem_ptr_t& problem, sparse_approx_data& data,
+    void evaluate(const problem_ptr_t &problem, sparse_approx_data &data,
                   bool eval_val, bool eval_jac = false, bool eval_hess = false) {
         // if (eval_jac)
         if (eval_val)

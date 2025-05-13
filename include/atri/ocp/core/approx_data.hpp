@@ -20,6 +20,7 @@ struct approx_data {
     };
     offset_array<raw_approx, field::num_constr, __dyn> approx_;
     offset_array<vector, field::num_constr, __dyn> dual_;
+    vector cost_;
     // cost jacobian
     row_vector jac_[field::num_prim];
     // cost hessian h[a][b] is h_ab. Note only the upper block-triangular part is stored

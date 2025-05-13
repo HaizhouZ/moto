@@ -35,7 +35,7 @@ class data_mgr {
             "data_type must have a constructor that accepts problem_ptr_t");
 
         data_maker_func maker = [](problem_ptr_t prob) {
-            return std::unique_ptr<node_data>(new data_type(prob));
+            return std::make_unique<data_type>(prob);
         };
         static data_mgr s_(maker);
         return s_;

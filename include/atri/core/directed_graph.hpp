@@ -37,8 +37,9 @@ class directed_graph {
     };
     def_unique_ptr(edge);
 
-    void add_edge(node_ptr_t st, node_ptr_t ed, size_t len) {
+    auto &add_edge(node_ptr_t st, node_ptr_t ed, size_t len) {
         edges_.push_back(std::make_unique<edge>(st, ed, len));
+        return edges_.back();
     }
     // Sparse iterator
     struct node : public value_type {

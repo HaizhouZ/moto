@@ -18,6 +18,9 @@ approx_data::approx_data(problem_ptr_t prob) : prob_(prob) {
         dual_[i].resize(prob_->dim_[i]);
         dual_[i].setZero();
     }
+    // cost val
+    cost_.resize(1);
+    cost_.setZero();
     // cost hessian(store only half)
     for (auto i : range(field::num_prim)) {
         for (auto j : range(i, field::num_prim)) {

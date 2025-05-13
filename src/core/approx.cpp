@@ -7,8 +7,7 @@ namespace atri {
 sparse_approx_data::sparse_approx_data(sym_data *primal,
                                        approx_data *raw,
                                        approx *f)
-    : v_(raw->approx_[f->field_].v_.segment(raw->prob_->get_expr_start(*f),
-                                            f->dim_)),
+    : v_(f->field_ == __cost ? vector_ref(raw->cost_) : raw->approx_[f->field_].v_.segment(raw->prob_->get_expr_start(*f), f->dim_)),
       sym_uid_idx_(f->sym_uid_idx_) {
     auto &in_args = f->in_args();
     for (size_t i = 0; i < in_args.size(); i++) {
