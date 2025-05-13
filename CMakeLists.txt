@@ -8,6 +8,21 @@ find_package(fmt REQUIRED)
 find_package(OpenMP REQUIRED)
 find_package(Doxygen)
 
+option(USE_MIMALLOC "Use mimalloc" OFF)
+
+set(USE_MIMALLOC OFF)
+
+set(LIBS)
+
+if(USE_MIMALLOC MATCHES ON)
+  message(STATUS "Using mimalloc")
+  find_package(mimalloc REQUIRED)
+  add_compile_options(-DEIGEN_MALLOC_ALREADY_ALIGNED=0)
+  list(APPEND LIBS mimalloc)
+else()
+  message(STATUS "using system malloc")
+endif()
+
 if(DOXYGEN_FOUND)
   set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile)
   set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
@@ -25,16 +40,18 @@ include_directories(
     ${EIGEN3_INCLUDE_DIR}
     include
 )
-# add_compile_options(-march=native)
+add_compile_options(-march=native)
 
 file(GLOB SRC_FILES src/*.cpp src/core/*.cpp src/solver/*.cpp src/utils/*.cpp)
 add_library(atri SHARED ${SRC_FILES})
 
 add_executable(atri_test main.cpp)
 # add_compile_definitions(EIGEN_USE_BLAS)
+message("Linked libraries: ${LIBS}")
 target_link_libraries(atri PUBLIC 
     # OpenBLAS::OpenBLAS 
     # "/usr/local/blasfeo/lib/libblasfeo.a"
+    ${LIBS}
     OpenMP::OpenMP_CXX
     magic_enum::magic_enum
     fmt::fmt)
