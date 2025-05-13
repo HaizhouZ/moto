@@ -3,6 +3,7 @@
 
 #include <stdexcept>
 #include <vector>
+#include <cassert>
 
 namespace atri {
 /**
@@ -16,9 +17,11 @@ template <typename T, size_t N, size_t st>
 struct offset_array {
     std::array<T, N> val;
     auto &operator[](size_t i) {
+        assert(i >= st && i < st + N);
         return val[i - st];
     }
     const auto &operator[](size_t i) const {
+        assert(i >= st && i < st + N);
         return val[i - st];
     }
     offset_array() = default;

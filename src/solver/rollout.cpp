@@ -8,10 +8,10 @@ void forward_rollout(shooting_node *cur, shooting_node *next) {
     // get_data(nodes_.front()).rollout_->prim_[__x].setZero();
     auto &d = get_data(cur);
     auto &rollout_ = *d.rollout_;
+    rollout_.prim_[__y].noalias() = d.d_y.k + d.d_y.K * rollout_.prim_[__x];
     if (next != nullptr) [[likely]] {
         get_data(next).rollout_->prim_[__x] = rollout_.prim_[__y];
     }
-    rollout_.prim_[__y].noalias() = d.d_y.k + d.d_y.K * rollout_.prim_[__x];
 }
 void post_rollout_steps(shooting_node *cur) {
     auto &d = get_data(cur);

@@ -28,6 +28,7 @@ nullspace_riccati_data::nullspace_riccati_data(problem_ptr_t prob)
     nsp_->s_c_stacked_0_K.resize(ncstr, nx);
     rollout_ = new rollout_data();
     rollout_->prim_[__x].resize(nx);
+    rollout_->prim_[__x].setZero();
     rollout_->prim_[__u].resize(nu);
     rollout_->prim_[__y].resize(nx);
     rollout_->dual_[__dyn].resize(nx);

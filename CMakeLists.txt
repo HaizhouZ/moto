@@ -25,7 +25,7 @@ include_directories(
     ${EIGEN3_INCLUDE_DIR}
     include
 )
-add_compile_options(-march=native)
+# add_compile_options(-march=native)
 
 file(GLOB SRC_FILES src/*.cpp src/core/*.cpp src/solver/*.cpp src/utils/*.cpp)
 add_library(atri SHARED ${SRC_FILES})
