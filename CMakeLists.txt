@@ -5,6 +5,8 @@ find_package(Eigen3 REQUIRED)
 find_package(OpenBLAS REQUIRED)
 find_package(magic_enum REQUIRED)
 find_package(fmt REQUIRED)
+find_package(OpenMP REQUIRED)
+find_package(TBB REQUIRED)
 find_package(Doxygen)
 
 if(DOXYGEN_FOUND)
@@ -20,7 +22,6 @@ if(DOXYGEN_FOUND)
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
-
 include_directories(
     ${EIGEN3_INCLUDE_DIR}
     include
@@ -35,6 +36,8 @@ add_executable(atri_test main.cpp)
 target_link_libraries(atri PUBLIC 
     # OpenBLAS::OpenBLAS 
     # "/usr/local/blasfeo/lib/libblasfeo.a"
+    OpenMP::OpenMP_CXX
+    TBB::tbb
     magic_enum::magic_enum
     fmt::fmt)
 target_link_libraries(atri_test PUBLIC

@@ -11,20 +11,19 @@ namespace atri {
  * @param callback [idx of field, idx of expr, pointer to expr]
  */
 template <typename Callback>
-inline void for_funcs(problem_ptr_t prob, Callback &&callback) {
+inline void for_funcs(const problem_ptr_t &prob, Callback &&callback) {
     // loop with two variables due to the difference between idx and field no.
     for (size_t field : range_n(__dyn, field::num_func)) {
-        auto &exprs = prob->expr_[field];
         size_t idx = 0;
-        for (auto &expr : exprs) {
-            callback(field, idx++, std::static_pointer_cast<approx>(expr));
+        for (const auto &expr : prob->expr_[field]) {
+            callback(field, idx++, static_cast<approx *>(expr.get()));
         }
     }
 }
 
 node_data::node_data(problem_ptr_t prob)
     : sym_(new sym_data(prob)), raw_(new approx_data(prob)) {
-    for_funcs(prob, [&](size_t field, size_t idx, approx_ptr_t _f) {
+    for_funcs(prob, [&](size_t field, size_t idx, approx *_f) {
         approx_[field].push_back(_f->make_data(sym_, raw_));
     });
 }
@@ -69,7 +68,7 @@ void shooting_node::swap(shooting_node &p) {
 void shooting_node::update_approximation() {
     /// @todo: always eval residual?
     for_funcs(problem_,
-              [this](size_t field, size_t idx_expr, approx_ptr_t _f) {
+              [this](size_t field, size_t idx_expr, approx *_f) {
                   _f->evaluate(problem_, *data_->approx_[field][idx_expr],
                                true, _f->order() >= approx_order::first,
                                _f->order() >= approx_order::second);

@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <atri/core/fwd.hpp>
+#include <execution>
 #include <ranges>
 #include <set>
 #include <vector>
@@ -82,9 +83,12 @@ class directed_graph {
     }
 
     void apply_all_unary_parallel(std::function<void(value_type *)> callback) {
-#pragma omp parallel
-        for (auto cur : flatten())
-            callback(cur);
+        auto _nodes = flatten();
+
+#pragma omp parallel for schedule(dynamic)
+        for (size_t i = 0; i < _nodes.size(); ++i) {
+            callback(_nodes[i]);
+        }
     }
     /**
      * @brief apply binary function for all shooting nodes sequentially or in parallel
@@ -108,8 +112,9 @@ class directed_graph {
                         cur = next.get();
                     }
                 }
-#pragma omp parallel
-                for (auto [cur, prev] : in_) {
+#pragma omp parallel for schedule(dynamic)
+                for (size_t i = 0; i < in_.size(); ++i) {
+                    auto [cur, prev] = in_[i];
                     callback(cur, prev);
                 }
                 for (auto e : cur_edges) {
@@ -118,7 +123,7 @@ class directed_graph {
                     }
                 }
             } else { // parallel by edges
-#pragma omp parallel
+#pragma omp parallel for schedule(dynamic)
                 for (auto e : cur_edges) {
                     // edge forward
                     value_type *cur = e->st.get();
@@ -152,9 +157,9 @@ class directed_graph {
         std::vector<edge *> cur_edges(tail_->in_edges.begin(), tail_->in_edges.end()); // st nodes for this round
         std::vector<edge *> next_edges;                                                // st nodes for next round
         while (!cur_edges.empty()) {
-
-#pragma omp parallel
-            for (auto e : cur_edges) {
+            // #pragma omp parallel for
+            for (size_t i = 0; i < cur_edges.size(); ++i) {
+                auto e = cur_edges[i];
                 // edge forward
                 value_type *cur = e->ed.get();
                 for (auto &next : e->nodes | std::views::reverse) {

@@ -25,14 +25,25 @@ int main() {
     auto init_node = sqp.graph_.add(ns_sqp::node(prob));
     auto end_node = sqp.graph_.add(ns_sqp::node(prob_terminal));
 
-    sqp.graph_.add_edge(init_node, end_node, 100);
+    sqp.graph_.add_edge(init_node, end_node, 200);
 
     sqp.graph_.set_head(init_node);
     sqp.graph_.set_tail(end_node);
 
     init_node->get(dyn.r).setConstant(6);
 
-    sqp.update();
+    auto start_time = std::chrono::high_resolution_clock::now();
+    for (size_t i = 0; i < 100000; i++) {
+        sqp.update();
+    }
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
+    fmt::print("Update took {} us\n", duration / 100000);
+
+    for (size_t i = 0; i < sqp.timings.size(); i++) {
+        fmt::print("Timing[{}]: {}us\n", i, sqp.timings[i] / 100000);
+    }
 
     fmt::print("nice!\n");
 
