@@ -3,7 +3,7 @@
 
 #include <atomic>
 #include <atri/core/fwd.hpp>
-#include <execution>
+#include <atri/core/parallel_job.hpp>
 #include <ranges>
 #include <set>
 #include <vector>
@@ -81,14 +81,11 @@ class directed_graph {
         }
         return out;
     }
-
-    void apply_all_unary_parallel(std::function<void(value_type *)> callback) {
+    template <typename callback_t>
+        requires std::invocable<callback_t, value_type *>
+    void apply_all_unary_parallel(callback_t &&callback) {
         auto _nodes = flatten();
-
-#pragma omp parallel for schedule(dynamic)
-        for (size_t i = 0; i < _nodes.size(); ++i) {
-            callback(_nodes[i]);
-        }
+        parallel_for(0, _nodes.size(), [&_nodes, &callback](size_t i) { callback(_nodes[i]); });
     }
     /**
      * @brief apply binary function for all shooting nodes sequentially or in parallel
@@ -112,19 +109,15 @@ class directed_graph {
                         cur = next.get();
                     }
                 }
-#pragma omp parallel for schedule(dynamic)
-                for (size_t i = 0; i < in_.size(); ++i) {
-                    auto [cur, prev] = in_[i];
-                    callback(cur, prev);
-                }
+                parallel_for(0, in_.size(), [&callback, &in_](size_t i) { callback(in_[i].first, in_[i].second); });
                 for (auto e : cur_edges) {
                     if ((--e->ed->in_cnt) == 0 && !e->ed->out_edges.empty()) { // append ed to the list if no more in edges
                         next_edges.insert(next_edges.end(), e->ed->out_edges.begin(), e->ed->out_edges.end());
                     }
                 }
             } else { // parallel by edges
-#pragma omp parallel for schedule(dynamic)
-                for (auto e : cur_edges) {
+                parallel_for(0, cur_edges.size(), [&callback, &cur_edges, &next_edges](size_t i) {
+                    auto e = cur_edges[i];
                     // edge forward
                     value_type *cur = e->st.get();
                     for (auto &next : e->nodes) {
@@ -136,7 +129,7 @@ class directed_graph {
                     if ((--e->ed->in_cnt) == 0 && !e->ed->out_edges.empty()) { // append ed to the list if no more in edges
                         next_edges.insert(next_edges.end(), e->ed->out_edges.begin(), e->ed->out_edges.end());
                     }
-                }
+                });
             }
             cur_edges.swap(next_edges);
             next_edges.clear();

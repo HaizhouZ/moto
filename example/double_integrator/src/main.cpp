@@ -33,16 +33,16 @@ int main() {
     init_node->get(dyn.r).setConstant(6);
 
     auto start_time = std::chrono::high_resolution_clock::now();
-    for (size_t i = 0; i < 100000; i++) {
+    for (size_t i = 0; i < 10000; i++) {
         sqp.update();
     }
 
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
-    fmt::print("Update took {} us\n", duration / 100000);
+    fmt::print("Update took {} us\n", duration / 10000);
 
     for (size_t i = 0; i < sqp.timings.size(); i++) {
-        fmt::print("Timing[{}]: {}us\n", i, sqp.timings[i] / 100000);
+        fmt::print("Timing[{}]: {}us\n", i, sqp.timings[i] / 10000);
     }
 
     fmt::print("nice!\n");
