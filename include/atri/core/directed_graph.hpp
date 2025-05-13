@@ -100,37 +100,23 @@ class directed_graph {
         std::vector<edge *> cur_edges(head_->out_edges.begin(), head_->out_edges.end()); // st nodes for this round
         std::vector<edge *> next_edges;                                                  // st nodes for next round
         while (!cur_edges.empty()) {
+            std::vector<std::pair<value_type *, value_type *>> in_;
+            for (auto e : cur_edges) {
+                // edge forward
+                value_type *cur = e->st.get();
+                for (auto &next : e->nodes) {
+                    in_.emplace_back(cur, next.get());
+                    cur = next.get();
+                }
+                in_.emplace_back(cur, e->ed.get());
+                if ((--e->ed->in_cnt) == 0 && !e->ed->out_edges.empty()) { // append ed to the list if no more in edges
+                    next_edges.insert(next_edges.end(), e->ed->out_edges.begin(), e->ed->out_edges.end());
+                }
+            }
             if constexpr (parallel) { // parallel by segments
-                std::vector<std::pair<value_type *, value_type *>> in_;
-                for (auto e : cur_edges) {
-                    // edge forward
-                    value_type *cur = e->ed.get();
-                    for (auto &next : e->nodes | std::views::reverse) {
-                        in_.emplace_back(cur, next.get());
-                        cur = next.get();
-                    }
-                }
                 parallel_for(0, in_.size(), [&callback, &in_](size_t i) { callback(in_[i].first, in_[i].second); });
-                for (auto e : cur_edges) {
-                    if ((--e->ed->in_cnt) == 0 && !e->ed->out_edges.empty()) { // append ed to the list if no more in edges
-                        next_edges.insert(next_edges.end(), e->ed->out_edges.begin(), e->ed->out_edges.end());
-                    }
-                }
             } else { // parallel by edges
-                parallel_for(0, cur_edges.size(), [&callback, &cur_edges, &next_edges](size_t i) {
-                    auto e = cur_edges[i];
-                    // edge forward
-                    value_type *cur = e->st.get();
-                    for (auto &next : e->nodes) {
-                        callback(cur, next.get());
-                        cur = next.get();
-                    }
-                    // last segment
-                    callback(cur, e->ed.get());
-                    if ((--e->ed->in_cnt) == 0 && !e->ed->out_edges.empty()) { // append ed to the list if no more in edges
-                        next_edges.insert(next_edges.end(), e->ed->out_edges.begin(), e->ed->out_edges.end());
-                    }
-                });
+                sequential_for(0, in_.size(), [&callback, &in_](size_t i) { callback(in_[i].first, in_[i].second); });
             }
             cur_edges.swap(next_edges);
             next_edges.clear();
@@ -151,20 +137,22 @@ class directed_graph {
         std::vector<edge *> cur_edges(tail_->in_edges.begin(), tail_->in_edges.end()); // st nodes for this round
         std::vector<edge *> next_edges;                                                // st nodes for next round
         while (!cur_edges.empty()) {
+            std::vector<std::pair<value_type *, value_type *>> in_;
             // #pragma omp parallel for
             for (size_t i = 0; i < cur_edges.size(); ++i) {
-                auto e = cur_edges[i];
-                // edge forward
-                value_type *cur = e->ed.get();
-                for (auto &next : e->nodes | std::views::reverse) {
-                    callback(cur, next.get());
-                    cur = next.get();
+                for (auto e : cur_edges) {
+                    // edge forward
+                    value_type *cur = e->ed.get();
+                    for (auto &prev : e->nodes | std::views::reverse) {
+                        in_.emplace_back(cur, prev.get());
+                        cur = prev.get();
+                    }
+                    in_.emplace_back(cur, e->st.get());
+                    if ((--e->st->out_cnt) == 0 && !e->st->in_edges.empty()) [[likely]] { // append st to the list if no more out edges
+                        next_edges.insert(next_edges.end(), e->st->in_edges.begin(), e->st->in_edges.end());
+                    }
                 }
-                // last segment
-                callback(cur, e->st.get());
-                if ((--e->st->out_cnt) == 0 && !e->st->in_edges.empty()) [[likely]] { // append st to the list if no more out edges
-                    next_edges.insert(next_edges.end(), e->st->in_edges.begin(), e->st->in_edges.end());
-                }
+                sequential_for(0, in_.size(), [&callback, &in_](size_t i) { callback(in_[i].first, in_[i].second); });
             }
 
             cur_edges.swap(next_edges);
