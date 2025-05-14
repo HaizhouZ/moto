@@ -28,13 +28,13 @@ void pre_solving_steps_1(shooting_node *cur) {
     auto &_approx = d.raw_->approx_;
     /// @todo sparse F_y inverse
     auto &F = _approx[__dyn].jac_;
-    nsp.llt_dyn_.compute(F[__y]);
-    nsp.F_u = F[__u];
-    nsp.llt_dyn_.solveInPlace(nsp.F_u);
-    nsp.F_0_k = -_approx[__dyn].v_;
-    nsp.llt_dyn_.solveInPlace(nsp.F_0_k);
-    nsp.F_0_K = -F[__x];
-    nsp.llt_dyn_.solveInPlace(nsp.F_0_K);
+    nsp.lu_dyn_.compute(F[__y]);
+    // nsp.F_u = F[__u];
+    nsp.F_u = nsp.lu_dyn_.solve(F[__u]);
+    // nsp.F_0_k = -_approx[__dyn].v_;
+    nsp.F_0_k = nsp.lu_dyn_.solve(-_approx[__dyn].v_);
+    // nsp.F_0_K = -F[__x];
+    nsp.F_0_K  = nsp.lu_dyn_.solve(-F[__x]);
     // nullspace computation
     d.rank_status_ = rank_status::unconstrained;
     if (d.nc + d.ns > 0) {

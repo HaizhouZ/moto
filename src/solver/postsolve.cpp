@@ -39,8 +39,10 @@ void post_solving_steps(shooting_node *cur) {
         }
     }
     /// @todo transpose solve
-    nsp.llt_dyn_.solveInPlace(d.d_lbd_f.k);
-    nsp.llt_dyn_.solveInPlace(d.d_lbd_f.K);
+    nsp.lu_dyn_.matrixLU().triangularView<Eigen::UnitLower>().solveInPlace(d.d_lbd_f.k);
+    nsp.lu_dyn_.matrixLU().triangularView<Eigen::Upper>().solveInPlace(d.d_lbd_f.k);
+    nsp.lu_dyn_.matrixLU().triangularView<Eigen::UnitLower>().solveInPlace(d.d_lbd_f.K);
+    nsp.lu_dyn_.matrixLU().triangularView<Eigen::Upper>().solveInPlace(d.d_lbd_f.K);
 }
 } // namespace ns_riccati_solver
 } // namespace atri

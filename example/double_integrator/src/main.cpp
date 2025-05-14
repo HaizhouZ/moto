@@ -49,26 +49,27 @@ int main() {
     // for (size_t i = 0; i < sqp.timings.size(); i++) {
     //     fmt::print("Timing[{}]: {}us\n", i, sqp.timings[i] / 10000);
     // }
-    sqp.update(1);
+    sqp.update(10);
     // auto &data = ns_riccati_solver::get_data(init_node.get());
     // std::cout << data.rollout_->prim_[__x].transpose() << '\n';
     // sqp.update();
     sqp.graph_.apply_all_unary_forward([](ns_sqp::node *node) {
         auto &data = ns_riccati_solver::get_data(node);
         // why the delta y is wrong?
-        // std::cout << data.rollout_->prim_[__x].transpose() << '\n';
+        // std::cout << "delX  " << data.rollout_->prim_[__x].transpose() << '\n';
         std::cout << "state " << data.sym_->value_[__x].transpose() << '\n';
         std::cout << "input " << data.sym_->value_[__u].transpose() << '\n';
         std::cout << "nexts " << data.sym_->value_[__y].transpose() << '\n';
         std::cout << "resdy " << data.raw_->approx_[__dyn].v_.transpose() << '\n';
-        std::cout << '\n';
         // std::cout << data.raw_->dual_[__dyn].transpose() << '\n';
+        // std::cout << "gain \n" << data.d_y.k.transpose() << '\n';
         // std::cout << data.d_u.K.transpose() << '\n';
         // std::cout << data.nsp_->u_0_p_k.transpose() << '\n';
         // std::cout << data.nsp_->U << '\n';
         // std::cout << data.Q_y.transpose() << '\n' << '\n';
         // std::cout << data.Q_yy << '\n' << '\n';
         // std::cout << data.raw_->approx_[__dyn].v_[__x] << '\n' << '\n';
+        std::cout << '\n';
     });
 
     fmt::print("nice!\n");
