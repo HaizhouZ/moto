@@ -1,15 +1,11 @@
 #ifndef __NS_RICCATI_SOLVER__
 #define __NS_RICCATI_SOLVER__
 
-#include <atri/ocp/core/shooting_node.hpp>
-#include <atri/solver/ns_riccati_data.hpp>
-#include <list>
+#include <atri/solver/fwd.hpp>
 
 namespace atri {
 namespace ns_riccati_solver {
-inline auto &get_data(shooting_node *node) {
-    return *static_cast<nullspace_riccati_data *>(node->data_.get());
-}
+
 void pre_solving_steps_1(shooting_node *cur);
 void pre_solving_steps_2(shooting_node *cur, shooting_node *prev);
 void backward_pass(shooting_node *cur, shooting_node *prev);

@@ -19,7 +19,7 @@ class doubleIntegratorDyn : public dynamics, public collection {
     struct pos : public constr_impl {
         pos() : constr_impl("doubleIntegratorDynamics_pos", 3, __dyn, approx_order::first) {
             value = [](sparse_approx_data &data) {
-                data.v_ = -data.in_args_[0] + data.in_args_[2] - 0.01 * data.in_args_[1];
+                data.v_ = -data.in_args_[0] + data.in_args_[1] - 0.01 * data.in_args_[2];
             };
             jacobian = [](sparse_approx_data &data) {
                 data.jac_[0].diagonal().setConstant(-1);
@@ -31,7 +31,7 @@ class doubleIntegratorDyn : public dynamics, public collection {
     struct vel : public constr_impl {
         vel() : constr_impl("doubleIntegratorDynamics_vel", 3, __dyn, approx_order::first) {
             value = [](sparse_approx_data &data) {
-                data.v_ = -data.in_args_[0] + data.in_args_[2] - 0.01 * data.in_args_[1];
+                data.v_ = -data.in_args_[0] + data.in_args_[1] - 0.01 * data.in_args_[2];
             };
             jacobian = [](sparse_approx_data &data) {
                 data.jac_[0].diagonal().setConstant(-1);

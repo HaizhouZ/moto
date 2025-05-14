@@ -88,6 +88,12 @@ class directed_graph {
         auto _nodes = flatten();
         parallel_for(0, _nodes.size(), [&_nodes, &callback](size_t i) { callback(_nodes[i]); });
     }
+    template <typename callback_t>
+        requires std::invocable<callback_t, value_type *>
+    void apply_all_unary_forward(callback_t &&callback) {
+        auto _nodes = flatten();
+        sequential_for(0, _nodes.size(), [&_nodes, &callback](size_t i) { callback(_nodes[i]); });
+    }
     /**
      * @brief apply binary function for all shooting nodes sequentially or in parallel
      *

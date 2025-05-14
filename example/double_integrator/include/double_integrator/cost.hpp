@@ -20,8 +20,8 @@ struct doubleIntegratorCosts {
 
             add_arguments({r, v});
             value = [&](sparse_approx_data &data) {
-                data.v_.noalias() += d_r.transpose() * data.in_args_[0].cwiseAbs2();
-                data.v_.noalias() += d_v.transpose() * data.in_args_[1].cwiseAbs2();
+                data.v_.noalias() += 0.5 * d_r.transpose() * data.in_args_[0].cwiseAbs2();
+                data.v_.noalias() += 0.5 * d_v.transpose() * data.in_args_[1].cwiseAbs2();
             };
             jacobian = [&](sparse_approx_data &data) { // make sure use +=
                 data.jac_[0].noalias() += data.in_args_[0].transpose() * d_r.asDiagonal();
@@ -40,7 +40,7 @@ struct doubleIntegratorCosts {
             d_a.setConstant(1e-3);
             add_arguments({a});
             value = [&](sparse_approx_data &data) {
-                data.v_.noalias() += d_a.transpose() * data.in_args_[0].cwiseAbs2();
+                data.v_.noalias() += 0.5 * d_a.transpose() * data.in_args_[0].cwiseAbs2();
             };
             jacobian = [&](sparse_approx_data &data) { // make sure use +=
                 data.jac_[0].noalias() += data.in_args_[0].transpose() * d_a.asDiagonal();

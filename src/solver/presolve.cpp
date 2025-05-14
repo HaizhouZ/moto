@@ -9,6 +9,7 @@ void pre_solving_steps_1(shooting_node *cur) {
     // collect constraint residuals and jacobians
     auto &d = get_data(cur);
     auto &nsp = *d.nsp_;
+    d.raw_->cost_.setZero();
     for (auto m : {d.Q_x, d.Q_u, d.Q_y}) {
         m.setZero();
     }
@@ -61,11 +62,11 @@ void pre_solving_steps_2(shooting_node *cur, shooting_node *prev) {
     auto &d_pre = get_data(prev);
     auto &nsp = *d.nsp_;
     // add P part of V_x/V_xx to Q_y/Q_yy of previous node
-    d_pre.Q_y.noalias() += nsp.F_0_k.transpose() * -d.Q_xy.transpose();
+    d_pre.Q_y.noalias() += nsp.F_0_k.transpose() * -d.Q_xy.transpose() + d.Q_x;
     // +d.Q_y * d.F_0_K is done in backward pass
     // because Q_y has V_y in it
     d_pre.Q_yy.noalias() +=
-        -d.Q_xy * nsp.F_0_K + nsp.F_0_K.transpose() * -d.Q_xy.transpose();
+        -d.Q_xy * nsp.F_0_K + nsp.F_0_K.transpose() * -d.Q_xy.transpose() + d.Q_xx;
 }
 /// @todo set terminal Q_y, Q_yy
 

@@ -10,6 +10,7 @@ void backward_pass(shooting_node *cur, shooting_node *prev) {
     auto &nsp = *d.nsp_;
     nsp.U.noalias() = d.Q_uu + nsp.F_u.transpose() * d.Q_yy * nsp.F_u;
     // compute bar{u}_0
+    /// @todo store transposed
     nsp.u_0_p_k.noalias() =
         -d.Q_u.transpose() -
         nsp.F_u.transpose() * (-d.Q_y.transpose() - d.Q_yy * nsp.F_0_k);
