@@ -36,7 +36,6 @@ void post_rollout_steps(shooting_node *cur) {
             d.d_lbd_s_c.K.bottomRows(d.nc) * rollout_.prim_[__x];
         d.raw_->dual_[__eq_cstr_c] += rollout_.dual_[__eq_cstr_c];
     }
-    pre_solving_steps_1(cur);
 }
 } // namespace ns_riccati_solver
 } // namespace atri

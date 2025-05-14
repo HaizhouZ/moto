@@ -42,7 +42,7 @@ sparse_approx_data::sparse_approx_data(sym_data *primal,
                 /// otherwise only keep h[i][j] (empty)
                 field_1 = in_args[i]->field_;
                 field_2 = in_args[j]->field_;
-                if (field_1 <= field_2) {
+                if (field_1 >= field_2) {
                     hess_[i].push_back(raw->hessian_[field_1][field_2].block(
                         raw->prob_->get_expr_start(in_args[i]),
                         raw->prob_->get_expr_start(in_args[j]),

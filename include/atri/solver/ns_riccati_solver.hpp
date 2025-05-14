@@ -6,6 +6,7 @@
 namespace atri {
 namespace ns_riccati_solver {
 
+void pre_solving_steps_0(shooting_node *cur);
 void pre_solving_steps_1(shooting_node *cur);
 void pre_solving_steps_2(shooting_node *cur, shooting_node *prev);
 void backward_pass(shooting_node *cur, shooting_node *prev);

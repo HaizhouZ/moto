@@ -41,6 +41,7 @@ include_directories(
     include
 )
 add_compile_options(-march=native)
+add_compile_definitions(ATRI_USE_OMP)
 
 file(GLOB SRC_FILES src/*.cpp src/core/*.cpp src/solver/*.cpp src/utils/*.cpp)
 add_library(atri SHARED ${SRC_FILES})
@@ -50,7 +51,7 @@ add_executable(atri_test main.cpp)
 message("Linked libraries: ${LIBS}")
 target_link_libraries(atri PUBLIC 
     # OpenBLAS::OpenBLAS 
-    # "/usr/local/blasfeo/lib/libblasfeo.a"
+    # "/usr/local/blasfeo/lib/libblasfeo.so"
     ${LIBS}
     OpenMP::OpenMP_CXX
     magic_enum::magic_enum

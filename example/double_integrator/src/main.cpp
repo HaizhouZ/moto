@@ -1,13 +1,13 @@
 #include <atri/core/directed_graph.hpp>
+#include <atri/ocp/core/approx_data.hpp>
 #include <atri/ocp/core/shooting_node.hpp>
-#include <atri/solver/data/rollout_data.hpp>
 #include <atri/solver/data/nullspace_data.hpp>
+#include <atri/solver/data/rollout_data.hpp>
 #include <atri/solver/fwd.hpp>
 #include <atri/solver/ns_sqp.hpp>
 #include <atri/utils/print.hpp>
 #include <double_integrator/cost.hpp>
 #include <double_integrator/dynamics.hpp>
-#include <atri/ocp/core/approx_data.hpp>
 #include <iostream>
 
 using namespace atri;
@@ -49,11 +49,9 @@ int main() {
     // for (size_t i = 0; i < sqp.timings.size(); i++) {
     //     fmt::print("Timing[{}]: {}us\n", i, sqp.timings[i] / 10000);
     // }
-    for(size_t i: range(2)) {
-        sqp.update();
-        // auto &data = ns_riccati_solver::get_data(init_node.get());
-        // std::cout << data.rollout_->prim_[__x].transpose() << '\n';
-    }
+    sqp.update(1);
+    // auto &data = ns_riccati_solver::get_data(init_node.get());
+    // std::cout << data.rollout_->prim_[__x].transpose() << '\n';
     // sqp.update();
     sqp.graph_.apply_all_unary_forward([](ns_sqp::node *node) {
         auto &data = ns_riccati_solver::get_data(node);

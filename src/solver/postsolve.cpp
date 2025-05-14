@@ -24,14 +24,14 @@ void post_solving_steps(shooting_node *cur) {
 
     // compute k_lambda
     d.d_lbd_f.k.noalias() = -d.Q_y.transpose() - d.Q_yy * d.d_y.k;
-    d.d_lbd_f.K.noalias() = -d.Q_xy.transpose() - d.Q_yy * d.d_y.K;
+    d.d_lbd_f.K.noalias() = -d.Q_yx - d.Q_yy * d.d_y.K;
     if (d.ncstr > 0) {
         nsp.u_0_p_k.noalias() -= nsp.U * d.d_u.k; // reuse
         d.d_lbd_s_c.k = nsp.lu_eq_.solve(nsp.u_0_p_K);
         if (d.ns > 0) {
             d.d_lbd_f.k.noalias() -= nsp.s_y * d.d_lbd_s_c.k.head(d.ns);
         }
-        
+
         nsp.u_0_p_K.noalias() -= nsp.U * d.d_u.K;
         d.d_lbd_s_c.K = nsp.lu_eq_.solve(nsp.u_0_p_K);
         if (d.ns > 0) {

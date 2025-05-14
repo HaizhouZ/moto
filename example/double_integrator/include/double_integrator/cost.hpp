@@ -23,11 +23,11 @@ struct doubleIntegratorCosts {
                 data.v_.noalias() += 0.5 * d_r.transpose() * data.in_args_[0].cwiseAbs2();
                 data.v_.noalias() += 0.5 * d_v.transpose() * data.in_args_[1].cwiseAbs2();
             };
-            jacobian = [&](sparse_approx_data &data) { // make sure use +=
+            jacobian = [this](sparse_approx_data &data) { // make sure use +=
                 data.jac_[0].noalias() += data.in_args_[0].transpose() * d_r.asDiagonal();
                 data.jac_[1].noalias() += data.in_args_[1].transpose() * d_v.asDiagonal();
             };
-            hessian = [&](sparse_approx_data &data) {
+            hessian = [this](sparse_approx_data &data) {
                 data.hess_[0][0].diagonal() += d_r;
                 data.hess_[1][1].diagonal() += d_v;
             };
@@ -42,10 +42,10 @@ struct doubleIntegratorCosts {
             value = [&](sparse_approx_data &data) {
                 data.v_.noalias() += 0.5 * d_a.transpose() * data.in_args_[0].cwiseAbs2();
             };
-            jacobian = [&](sparse_approx_data &data) { // make sure use +=
+            jacobian = [this](sparse_approx_data &data) { // make sure use +=
                 data.jac_[0].noalias() += data.in_args_[0].transpose() * d_a.asDiagonal();
             };
-            hessian = [&](sparse_approx_data &data) {
+            hessian = [this](sparse_approx_data &data) {
                 data.hess_[0][0].diagonal() += d_a;
             };
         }

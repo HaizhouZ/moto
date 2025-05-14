@@ -5,7 +5,7 @@
 namespace atri {
 namespace ns_riccati_solver {
 
-void pre_solving_steps_1(shooting_node *cur) {
+void pre_solving_steps_0(shooting_node *cur) {
     // collect constraint residuals and jacobians
     auto &d = get_data(cur);
     auto &nsp = *d.nsp_;
@@ -13,12 +13,19 @@ void pre_solving_steps_1(shooting_node *cur) {
     for (auto m : {d.Q_x, d.Q_u, d.Q_y}) {
         m.setZero();
     }
-    for (auto m : {d.Q_xx, d.Q_xu, d.Q_uu, d.Q_xy, d.Q_yy}) {
+    for (auto m : {d.Q_xx, d.Q_ux, d.Q_uu, d.Q_yx, d.Q_yy}) {
         m.setZero();
     }
     auto &_approx = d.raw_->approx_;
     // update everything
     cur->update_approximation();
+}
+
+void pre_solving_steps_1(shooting_node *cur) {
+    // collect constraint residuals and jacobians
+    auto &d = get_data(cur);
+    auto &nsp = *d.nsp_;
+    auto &_approx = d.raw_->approx_;
     /// @todo sparse F_y inverse
     auto &F = _approx[__dyn].jac_;
     nsp.llt_dyn_.compute(F[__y]);
@@ -57,16 +64,16 @@ void pre_solving_steps_1(shooting_node *cur) {
 
 // these two cannot merge, because Q_y/yy should first be updated with
 // constr derivatives
-void pre_solving_steps_2(shooting_node *cur, shooting_node *prev) {
+void pre_solving_steps_2(shooting_node *prev, shooting_node *cur) {
     auto &d = get_data(cur);
     auto &d_pre = get_data(prev);
     auto &nsp = *d.nsp_;
     // add P part of V_x/V_xx to Q_y/Q_yy of previous node
-    d_pre.Q_y.noalias() += nsp.F_0_k.transpose() * -d.Q_xy.transpose() + d.Q_x;
+    d_pre.Q_y.noalias() += d.Q_x - nsp.F_0_k.transpose() * d.Q_yx;
     // +d.Q_y * d.F_0_K is done in backward pass
     // because Q_y has V_y in it
     d_pre.Q_yy.noalias() +=
-        -d.Q_xy * nsp.F_0_K + nsp.F_0_K.transpose() * -d.Q_xy.transpose() + d.Q_xx;
+        d.Q_xx - (d.Q_yx.transpose() * nsp.F_0_K + nsp.F_0_K.transpose() * d.Q_yx);
 }
 /// @todo set terminal Q_y, Q_yy
 

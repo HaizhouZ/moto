@@ -12,10 +12,12 @@ nullspace_riccati_data::nullspace_riccati_data(problem_ptr_t prob)
       d_y(nx, nx), d_lbd_f(nx, nx), d_lbd_s_c(ncstr, nx),
       Q_x(raw_->jac_[__x]), Q_u(raw_->jac_[__u]),
       Q_y(raw_->jac_[__y]), Q_xx(raw_->hessian_[__x][__x]),
-      Q_xu(raw_->hessian_[__x][__u]), Q_uu(raw_->hessian_[__u][__u]),
-      Q_xy(raw_->hessian_[__x][__y]), Q_yy(raw_->hessian_[__y][__y]) {
+      Q_ux(raw_->hessian_[__u][__x]), Q_uu(raw_->hessian_[__u][__u]),
+      Q_yx(raw_->hessian_[__y][__x]), Q_yy(raw_->hessian_[__y][__y]) {
     nz = nu - ncstr;
     nsp_ = new nullspace_data(raw_->approx_[__eq_cstr_s].jac_[__y]);
+    nsp_->F_0_k.resize(nx);
+    nsp_->F_0_K.resize(nx, nx);
     nsp_->F_u.resize(nx, nu);
     nsp_->z_u_k.resize(nu);
     nsp_->z_u_K.resize(nu, nx);
