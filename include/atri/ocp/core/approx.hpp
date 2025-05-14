@@ -18,7 +18,7 @@ struct approx;
  * @brief sparse approximation data
  * the dense data are mapped in the members of this class
  * @note in hess_ only the upper block triangular part are stored!(blocked by field)
- * for example Q_xu is store instead of Q_ux;
+ * for example Q_ux is store instead of Q_ux;
  */
 struct sparse_approx_data {
     // use ref to exploit sparsity (avoid copy)

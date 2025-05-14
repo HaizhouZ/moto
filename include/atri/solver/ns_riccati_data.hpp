@@ -17,7 +17,7 @@ struct nullspace_riccati_data : public node_data {
     size_t nz;
     // value function
     row_vector_ref Q_x, Q_u, Q_y;
-    matrix_ref Q_xx, Q_xu, Q_uu, Q_xy, Q_yy;
+    matrix_ref Q_xx, Q_ux, Q_uu, Q_yx, Q_yy;
 
     nullspace_data *nsp_;
 

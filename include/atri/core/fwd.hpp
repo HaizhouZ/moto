@@ -8,7 +8,7 @@
 #include <ranges>
 
 namespace atri {
-typedef float scalar_t;
+typedef double scalar_t;
 typedef Eigen::Vector<scalar_t, -1> vector;
 typedef Eigen::RowVector<scalar_t, -1> row_vector;
 typedef const Eigen::Vector<scalar_t, -1> const_vector;
