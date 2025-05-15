@@ -28,7 +28,7 @@ def_unique_ptr(node_data);
 struct node_data {
     sym_data *sym_;
     approx_data *raw_;
-    stacked_approx_data approx_;
+    stacked_approx_data sparse_view;
     node_data(problem_ptr_t prob);
     ~node_data();
 };

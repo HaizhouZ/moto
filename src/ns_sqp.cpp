@@ -10,10 +10,9 @@ void ns_sqp::update(size_t n_iter) {
     auto start = std::chrono::high_resolution_clock::now();
 
     graph_.apply_all_unary_parallel(ns_riccati_solver::pre_solving_steps_0);
-    timings[0] += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start).count();
-
+    
     for (size_t i_iter: range(n_iter)) {
-
+        
         start = std::chrono::high_resolution_clock::now();
         graph_.apply_all_unary_parallel(ns_riccati_solver::pre_solving_steps_1);
         timings[1] += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start).count();
@@ -37,7 +36,8 @@ void ns_sqp::update(size_t n_iter) {
         start = std::chrono::high_resolution_clock::now();
         graph_.apply_all_unary_parallel(ns_riccati_solver::post_rollout_steps);
         timings[6] += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start).count();
-
+        
+        start = std::chrono::high_resolution_clock::now();
         graph_.apply_all_unary_parallel(ns_riccati_solver::pre_solving_steps_0);
         timings[0] += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start).count();
     }

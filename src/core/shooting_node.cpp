@@ -24,7 +24,7 @@ inline void for_funcs(const problem_ptr_t &prob, Callback &&callback) {
 node_data::node_data(problem_ptr_t prob)
     : sym_(new sym_data(prob)), raw_(new approx_data(prob)) {
     for_funcs(prob, [&](size_t field, size_t idx, approx *_f) {
-        approx_[field].push_back(_f->make_data(sym_, raw_));
+        sparse_view[field].push_back(_f->make_data(sym_, raw_));
     });
 }
 
@@ -69,7 +69,7 @@ void shooting_node::update_approximation() {
     /// @todo: always eval residual?
     for_funcs(problem_,
               [this](size_t field, size_t idx_expr, approx *_f) {
-                  _f->evaluate(problem_, *data_->approx_[field][idx_expr],
+                  _f->evaluate(problem_, *data_->sparse_view[field][idx_expr],
                                true, _f->order() >= approx_order::first,
                                _f->order() >= approx_order::second);
               });

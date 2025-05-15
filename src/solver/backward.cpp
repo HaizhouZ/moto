@@ -1,27 +1,33 @@
-#include <atri/solver/ns_riccati_solver.hpp>
-
 #include <atri/solver/data/nullspace_data.hpp>
+#include <atri/solver/ns_riccati_solver.hpp>
+#include <iostream>
 
 namespace atri {
-
+// bool isPositiveDefinite(const Eigen::MatrixXd &A) {
+//     if (!A.isApprox(A.transpose())) {
+//         // Not symmetric
+//         fmt::println("matrix non symmetric");
+//         return false;
+//     }
+//     Eigen::LLT<Eigen::MatrixXd> llt(A);
+//     return llt.info() == Eigen::Success;
+// }
 namespace ns_riccati_solver {
 void backward_pass(shooting_node *cur, shooting_node *prev) {
     auto &d = get_data(cur);
     auto &nsp = *d.nsp_;
+    // check positiveness
+    // bool qyy_invertible = isPositiveDefinite(d.Q_yy);
     nsp.U.noalias() = d.Q_uu + nsp.F_u.transpose() * d.Q_yy * nsp.F_u;
+    // bool U_invertible = isPositiveDefinite(nsp.U);
     // compute bar{u}_0
-    /// @todo store transposed
-    nsp.u_0_p_k.noalias() =
-        -d.Q_u.transpose() -
-        nsp.F_u.transpose() * (-d.Q_y.transpose() - d.Q_yy * nsp.F_0_k);
-    nsp.u_0_p_K.noalias() =
-        -d.Q_ux -
-        nsp.F_u.transpose() * (-d.Q_yx - d.Q_yy * nsp.F_0_K);
+    nsp.u_0_p_k.noalias() = d.Q_u.transpose() - nsp.F_u.transpose() * (d.Q_y.transpose() - d.Q_yy * nsp.F_0_k);
+    nsp.u_0_p_K.noalias() = d.Q_ux - nsp.F_u.transpose() * (d.Q_yx - d.Q_yy * nsp.F_0_K);
     // compute z_u
     if (d.rank_status_ == rank_status::unconstrained) {
         nsp.z_u_k = nsp.u_0_p_k;
         nsp.z_u_K = nsp.u_0_p_K;
-        d.d_u.K = nsp.z_u_K;
+        d.d_u.K = -nsp.z_u_K;
         nsp.llt_ns_.compute(nsp.U);
         nsp.llt_ns_.solveInPlace(d.d_u.K);
     } else {
@@ -35,10 +41,10 @@ void backward_pass(shooting_node *cur, shooting_node *prev) {
             // solve nullspace system
             nsp.U_z.noalias() = nsp.Z.transpose() * nsp.U * nsp.Z;
             /// @todo: what if nsp.u_z_K size is wrong
-            nsp.u_z_K.noalias() = nsp.Z.transpose() * nsp.z_u_K;
+            nsp.u_z_K.noalias() = -nsp.Z.transpose() * nsp.z_u_K;
             nsp.llt_ns_.compute(nsp.U_z);
             nsp.llt_ns_.solveInPlace(nsp.u_z_K);
-            d.d_u.K.noalias() = nsp.u_y_K + nsp.Z * nsp.u_z_K;
+            d.d_u.K.noalias() = nsp.Z * nsp.u_z_K - nsp.u_y_K;
         }
     }
 
@@ -47,13 +53,13 @@ void backward_pass(shooting_node *cur, shooting_node *prev) {
         auto &d_pre = get_data(prev);
         // update P
         d_pre.Q_y.noalias() +=
-            -d.Q_y * nsp.F_0_K - nsp.F_0_k.transpose() * d.Q_yy * nsp.F_0_K +
+            -d.Q_y * nsp.F_0_K + nsp.F_0_k.transpose() * d.Q_yy * nsp.F_0_K +
             nsp.z_u_k.transpose() * d.d_u.K;
-        d_pre.Q_yy.noalias() =
-            -nsp.F_0_K.transpose() * d.Q_yy * nsp.F_0_K + nsp.z_u_K.transpose() * d.d_u.K;
+        d_pre.Q_yy.noalias() +=
+            nsp.F_0_K.transpose() * d.Q_yy * nsp.F_0_K + nsp.z_u_K.transpose() * d.d_u.K;
         if (d.nc + d.ns > 0) {
-            d.Q_y.noalias() += nsp.u_y_k.transpose() * nsp.u_0_p_K;
-            d.Q_yy.noalias() += nsp.u_y_K.transpose() * nsp.u_0_p_K;
+            d.Q_y.noalias() -= nsp.u_y_k.transpose() * nsp.u_0_p_K;
+            d.Q_yy.noalias() -= nsp.u_y_K.transpose() * nsp.u_0_p_K;
         }
     }
 }

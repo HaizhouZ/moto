@@ -27,7 +27,9 @@ struct nullspace_riccati_data : public node_data {
         vector k;
         matrix K;
         sensitivity(size_t n, size_t nx) : k(n), K(n, nx) {}
-    } d_u, d_y, d_lbd_f, d_lbd_s_c;
+    } d_u, d_y;
+    // multiplier sensitivity
+    vector d_lbd_f, d_lbd_s_c_pre_solve, d_lbd_s_c;
     // linear rollout
     rollout_data *rollout_;
     nullspace_riccati_data(problem_ptr_t prob);

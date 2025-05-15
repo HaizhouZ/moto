@@ -9,7 +9,7 @@ nullspace_riccati_data::nullspace_riccati_data(problem_ptr_t prob)
     : node_data(prob), nx(prob->dim_[__x]), nu(prob->dim_[__u]),
       ns(raw_->prob_->dim_[__eq_cstr_s]),
       nc(raw_->prob_->dim_[__eq_cstr_c]), ncstr(ns + nc), d_u(nu, nx),
-      d_y(nx, nx), d_lbd_f(nx, nx), d_lbd_s_c(ncstr, nx),
+      d_y(nx, nx), d_lbd_f(nx), d_lbd_s_c_pre_solve(nu), d_lbd_s_c(ncstr),
       Q_x(raw_->jac_[__x]), Q_u(raw_->jac_[__u]),
       Q_y(raw_->jac_[__y]), Q_xx(raw_->hessian_[__x][__x]),
       Q_ux(raw_->hessian_[__u][__x]), Q_uu(raw_->hessian_[__u][__u]),

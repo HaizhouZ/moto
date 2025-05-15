@@ -18,7 +18,9 @@
 
 # Todo list
 
-1. double integrator test
-2. CasADi supports
-3. precompute interface
-4. quadruped test
+1. rename headers and tidy file struct
+2. add KKT residual api
+3. improve steps
+4. CasADi supports
+5. precompute interface
+6. quadruped test

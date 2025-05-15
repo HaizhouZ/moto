@@ -1,6 +1,6 @@
 #include <atri/ocp/core/approx_data.hpp>
 #include <atri/ocp/func/constr.hpp>
-
+#include <iostream>
 namespace atri {
 constr_data::constr_data(approx_data *raw,
                          sparse_approx_data &&d,
@@ -10,6 +10,9 @@ constr_data::constr_data(approx_data *raw,
                                                 f->dim_)) {
     const auto &in_args = f->in_args();
     for (size_t i = 0; i < in_args_.size(); i++) {
+        // std::cout << "Processing in_arg[" << i << "]: name = " << in_args[i]->name_
+        //           << ", field = " << in_args[i]->field_
+        //           << ", dim = " << in_args[i]->dim_ << std::endl;
         vjp_.push_back(raw->jac_[in_args[i]->field_].segment(
             raw->prob_->get_expr_start(in_args[i]), in_args[i]->dim_));
     }
