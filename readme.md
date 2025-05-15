@@ -27,6 +27,7 @@ Less important:
  
 1. automatic handling of constraints and symbol field (especially for y)
 2. ref transpose of col major as row major with same data
-3. virtual getter of sp data
-4. KKT residual
-5. line search
+3. temporal information of nodes
+4. virtual getter of sp data
+5. KKT residual
+6. line search

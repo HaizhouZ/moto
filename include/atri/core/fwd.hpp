@@ -4,7 +4,7 @@
 #include <Eigen/Core>
 #include <memory>
 #include <fmt/core.h>
-#include <magic_enum.hpp>
+#include <magic_enum/magic_enum.hpp>
 #include <ranges>
 
 namespace atri {
