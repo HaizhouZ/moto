@@ -14,8 +14,8 @@ class expr {
     static size_t max_uid; // uid used to index global expressions
 
   public:
-    const size_t dim_;
     const std::string name_;
+    const size_t dim_;
     const size_t uid_;
     const field_t field_;
 
@@ -23,7 +23,7 @@ class expr {
         : name_(name), dim_(dim), uid_(max_uid++), field_(field) {}
 
     expr(expr &&rhs)
-        : dim_(rhs.dim_), name_(std::move(rhs.name_)), uid_(rhs.uid_), field_(rhs.field_) {}
+        : name_(std::move(rhs.name_)), dim_(rhs.dim_), uid_(rhs.uid_), field_(rhs.field_) {}
         
     auto make_vec(scalar_t *ptr) { return mapped_vector(ptr, dim_); }
 

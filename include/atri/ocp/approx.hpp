@@ -67,18 +67,18 @@ class approx : public expr {
     friend struct sparse_approx_data;
 
     /// @todo to be implemented
-    virtual void setup_sparsity(sparse_approx_data &data) {}
+    virtual void setup_sparsity([[maybe_unused]] sparse_approx_data &data) {}
 
   public:
-    virtual void value_impl(sparse_approx_data &data) {
+    virtual void value_impl([[maybe_unused]] sparse_approx_data &data) {
         throw std::runtime_error(
             fmt::format("value not implemented for approx {}", name_));
     };
-    virtual void jacobian_impl(sparse_approx_data &data) {
+    virtual void jacobian_impl([[maybe_unused]] sparse_approx_data &data) {
         throw std::runtime_error(
             fmt::format("jacobian not implemented for approx {}", name_));
     };
-    virtual void hessian_impl(sparse_approx_data &data) {
+    virtual void hessian_impl([[maybe_unused]] sparse_approx_data &data) {
         throw std::runtime_error(
             fmt::format("hessian not implemented for approx {}", name_));
     };
@@ -129,7 +129,7 @@ class approx : public expr {
      * @tparam eval_jac evaluate jacobian if true
      * @tparam eval_hess evaluate hessian if true
      */
-    void evaluate(const problem_ptr_t &problem, sparse_approx_data &data,
+    void evaluate(sparse_approx_data &data,
                   bool eval_val, bool eval_jac = false, bool eval_hess = false) {
         // if (eval_jac)
         if (eval_val)

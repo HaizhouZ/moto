@@ -1,5 +1,11 @@
-cmake_minimum_required(VERSION 3.5.0)
-project(atri VERSION 0.1.0 LANGUAGES C CXX)
+cmake_minimum_required(VERSION 3.10.0)
+
+set(PROJECT_NAMESPACE machines-in-motion)
+set(PROJECT_NAME atri)
+set(PROJECT_DESCRIPTION "Trajectory Optimization Framework.")
+set(PROJECT_URL "https://github.com/HaizhouZ/${PROJECT_NAME}")
+set(PROJECT_CUSTOM_HEADER_EXTENSION "hpp")
+set(PROJECT_USE_CMAKE_EXPORT TRUE)
 
 # check jrl modules
 set(JRL_CMAKE_MODULES "${CMAKE_CURRENT_LIST_DIR}/cmake")
@@ -13,29 +19,34 @@ else()
       TARGET jrl-cmakemodules::jrl-cmakemodules
       PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
     message(STATUS "JRL cmakemodules found on system at ${JRL_CMAKE_MODULES}")
-  elseif(${CMAKE_VERSION} VERSION_LESS "3.14.0")
+  else()
     message(
       FATAL_ERROR
         "\nCan't find jrl-cmakemodules. Please either:\n"
         "  - use git submodule: 'git submodule update --init'\n"
         "  - or install https://github.com/jrl-umi3218/jrl-cmakemodules\n"
         "  - or upgrade your CMake version to >= 3.14 to allow automatic fetching\n")
-  else()
-    message(STATUS "JRL cmakemodules not found. Let's fetch it.")
-    include(FetchContent)
-    FetchContent_Declare("jrl-cmakemodules"
-                         GIT_REPOSITORY "https://github.com/jrl-umi3218/jrl-cmakemodules.git")
-    FetchContent_MakeAvailable("jrl-cmakemodules")
-    FetchContent_GetProperties("jrl-cmakemodules" SOURCE_DIR JRL_CMAKE_MODULES)
   endif()
 endif()
 
-find_package(Eigen3 REQUIRED)
-find_package(OpenBLAS REQUIRED)
-find_package(magic_enum REQUIRED)
-find_package(fmt REQUIRED)
-find_package(OpenMP REQUIRED)
-find_package(Doxygen)
+include("${JRL_CMAKE_MODULES}/base.cmake")
+COMPUTE_PROJECT_ARGS(PROJECT_ARGS LANGUAGES CXX)
+project(${PROJECT_NAME} ${PROJECT_ARGS})
+set(CMAKE_VERBOSE_MAKEFILE OFF)
+option(INSTALL_DOCUMENTATION "Generate and install the documentation" OFF)
+
+set(DOXYGEN_USE_MATHJAX YES)
+set(DOXYGEN_USE_TEMPLATE_CSS YES)
+
+if(POLICY CMP0148)
+  cmake_policy(SET CMP0148 OLD)
+endif()
+
+add_project_dependency(Eigen3 REQUIRED)
+add_project_dependency(OpenBLAS REQUIRED)
+add_project_dependency(magic_enum REQUIRED)
+add_project_dependency(fmt REQUIRED)
+add_project_dependency(OpenMP REQUIRED)
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
 
@@ -52,18 +63,6 @@ else()
   message(STATUS "using system malloc")
 endif()
 
-if(DOXYGEN_FOUND)
-  set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile)
-  set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
-
-  add_custom_target(doc_doxygen
-    COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_IN}
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMENT "Generating API documentation with Doxygen"
-    VERBATIM
-  )
-endif()
-
 set(CMAKE_CXX_STANDARD 20)
 include_directories(
     ${EIGEN3_INCLUDE_DIR}
@@ -73,12 +72,12 @@ add_compile_options(-march=native)
 add_compile_definitions(ATRI_USE_OMP)
 
 file(GLOB_RECURSE SRC_FILES src/*.cpp)
-add_library(atri SHARED ${SRC_FILES})
+add_library(${PROJECT_NAME} SHARED ${SRC_FILES})
 
 add_executable(atri_test main.cpp)
 # add_compile_definitions(EIGEN_USE_BLAS)
 message("Linked libraries: ${LIBS}")
-target_link_libraries(atri PUBLIC 
+target_link_libraries(${PROJECT_NAME} PUBLIC 
     # OpenBLAS::OpenBLAS 
     # "/usr/local/blasfeo/lib/libblasfeo.so"
     ${LIBS}
@@ -86,13 +85,13 @@ target_link_libraries(atri PUBLIC
     magic_enum::magic_enum
     fmt::fmt)
 target_link_libraries(atri_test PUBLIC
-    atri
+    ${PROJECT_NAME}
 )
 
 add_subdirectory(example/double_integrator)
-add_subdirectory(binding)
+add_subdirectory(bindings)
 
-install(TARGETS atri
+install(TARGETS ${PROJECT_NAME}
   EXPORT atriTargets
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
@@ -101,15 +100,3 @@ install(TARGETS atri
 )
 
 install(DIRECTORY include/ DESTINATION include)
-
-install(EXPORT atriTargets
-  FILE atriTargets.cmake
-  NAMESPACE atri::
-  DESTINATION lib/cmake/atri
-)
-
-# install(FILES
-#   "${CMAKE_CURRENT_BINARY_DIR}/atriConfig.cmake"
-#   "${CMAKE_CURRENT_BINARY_DIR}/atriConfigVersion.cmake"
-#   DESTINATION lib/cmake/atri
-# )

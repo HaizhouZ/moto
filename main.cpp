@@ -1,4 +1,3 @@
-#include <Eigen/Cholesky>
 #include <atri/core/fwd.hpp>
 #include <chrono>
 #include <iostream>

@@ -13,13 +13,10 @@ execute_process(
         OUTPUT_STRIP_TRAILING_WHITESPACE)
 message("-- python site is ${PYTHON_SITE}")
 
-find_package(pybind11 REQUIRED)
+add_project_dependency(pybind11 REQUIRED)
 
-set(PYTHON_MODULE_NAME py_${PROJECT_NAME})
+set(PYTHON_MODULE_NAME ${PROJECT_NAME})
 set(BINDING_FILES "")
-
-message("=========== PYTHON_MODULE_NAME: ${PYTHON_MODULE_NAME} ===========")
-
 set(SUBDIRS)
 
 file(GLOB BINDING_SUBDIRS ${CMAKE_CURRENT_SOURCE_DIR}/*)
@@ -31,12 +28,9 @@ foreach(SUBDIR ${BINDING_SUBDIRS})
   endif()
 endforeach()
 
-pybind11_add_module(${PYTHON_MODULE_NAME} ${BINDING_FILES})
 
-
-install(TARGETS ${PYTHON_MODULE_NAME}
-        LIBRARY DESTINATION ${PYTHON_SITE}/${PROJECT_NAME})
-
-install(DIRECTORY ${SUBDIRS}
-        DESTINATION ${PYTHON_SITE}/${PYTHON_MODULE_NAME}
-        FILES_MATCHING PATTERN "*.py")
+foreach(dir IN LISTS SUBDIRS)
+        file(GLOB TOP_PY_FILES "${dir}/*.py")
+        install(FILES ${TOP_PY_FILES}
+                DESTINATION ${PYTHON_SITE}/${PYTHON_MODULE_NAME})
+endforeach()

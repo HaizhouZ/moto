@@ -1,4 +1,4 @@
-#include <Eigen/Dense>
+#include <atri/core/fwd.hpp>
 #include <functional>
 #include <pybind11/eigen.h>
 #include <pybind11/pybind11.h>

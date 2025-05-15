@@ -21,7 +21,7 @@ a = cs.SX.sym("a", model.nv)
 
 tau = cpin.rnea(cpin_model, cpin_data, q, v, a)
 
-from codegen import *
+from atri.codegen import *
 
 generate_cpp_with_eigen_ref_vector(
     "rnea",

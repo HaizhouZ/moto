@@ -18,20 +18,14 @@ print("origin")
 print(pin.rnea(model, data, q, v, a))
 
 import sys
-sys.path.append('/home/harper/Documents/atri/build/py_casadi_eigen')
-import python_invoke_interface as invoke
+from atri import invoke_interface
 
-func = invoke.load_vec_vec("gen/librnea.so", "rnea")
+func = invoke_interface.load_vec_vec("gen/librnea.so", "rnea")
 print("loaded")
 # Call the function
 print("call")
-invoke.invoke_vec_vec(func, [q, v, a], [tau])
+invoke_interface.invoke_vec_vec(func, [q, v, a], [tau])
 print("done")
 
 print("compiled")
 print(tau)
-# # Generate CasADi function
-# rnea_function = cs.Function("f", [q, v, a], [tau])
-
-# # Generate C code
-# rnea_function.generate("f.cpp", {"cpp": False})

@@ -22,8 +22,7 @@ def_unique_ptr(constr_data);
  */
 struct constr_impl : public approx {
     constr_impl(const std::string &name, size_t dim, field_t field,
-                approx_order order = approx_order::first,
-                bool enable_slack = false)
+                approx_order order = approx_order::first)
         : approx(name, dim, field, order) {
         assert(field == __dyn || magic_enum::enum_name(field).find(
                                      "cstr") != std::string::npos);
@@ -70,8 +69,7 @@ def_ptr(constr_impl);
  */
 struct constr : public constr_impl_ptr_t {
     constr(const std::string &name, size_t dim, field_t field,
-           approx_order order = approx_order::first,
-           bool enable_slack = false)
+           approx_order order = approx_order::first)
         : constr_impl_ptr_t(new constr_impl(name, dim, field, order)) {
     }
     constr(constr_impl &&impl) : constr_impl_ptr_t(new constr_impl(std::move(impl))) {}
