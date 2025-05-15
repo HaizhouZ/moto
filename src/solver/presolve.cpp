@@ -5,7 +5,7 @@
 namespace atri {
 namespace ns_riccati_solver {
 
-void pre_solving_steps_0(shooting_node *cur) {
+void pre_solving_steps_0(node *cur) {
     // collect constraint residuals and jacobians
     auto &d = get_data(cur);
     auto &nsp = *d.nsp_;
@@ -20,7 +20,7 @@ void pre_solving_steps_0(shooting_node *cur) {
     cur->update_approximation();
 }
 
-void pre_solving_steps_1(shooting_node *cur) {
+void pre_solving_steps_1(node *cur) {
     // collect constraint residuals and jacobians
     auto &d = get_data(cur);
     auto &nsp = *d.nsp_;
@@ -63,7 +63,7 @@ void pre_solving_steps_1(shooting_node *cur) {
 
 // these two cannot merge, because Q_y/yy should first be updated with
 // constr derivatives
-void pre_solving_steps_2(shooting_node *prev, shooting_node *cur) {
+void pre_solving_steps_2(node *prev, node *cur) {
     auto &d = get_data(cur);
     auto &d_pre = get_data(prev);
     auto &nsp = *d.nsp_;

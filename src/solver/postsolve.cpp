@@ -4,7 +4,7 @@
 
 namespace atri {
 namespace ns_riccati_solver {
-void post_solving_steps(shooting_node *cur) {
+void post_solving_steps(node *cur) {
     auto &d = get_data(cur);
     auto &nsp = *d.nsp_;
     // compute k_u

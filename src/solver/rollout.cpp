@@ -6,7 +6,7 @@
 
 namespace atri {
 namespace ns_riccati_solver {
-void forward_rollout(shooting_node *cur, shooting_node *next) {
+void forward_rollout(node *cur, node *next) {
     // get_data(nodes_.front()).rollout_->prim_[__x].setZero();
     auto &d = get_data(cur);
     auto &rollout_ = *d.rollout_;
@@ -15,7 +15,7 @@ void forward_rollout(shooting_node *cur, shooting_node *next) {
         get_data(next).rollout_->prim_[__x] = rollout_.prim_[__y];
     }
 }
-void post_rollout_steps(shooting_node *cur) {
+void post_rollout_steps(node *cur) {
     auto &d = get_data(cur);
     auto &rollout_ = *d.rollout_;
     auto &nsp = *d.nsp_;

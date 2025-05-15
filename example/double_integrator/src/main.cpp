@@ -3,7 +3,6 @@
 #include <atri/ocp/core/shooting_node.hpp>
 #include <atri/solver/data/nullspace_data.hpp>
 #include <atri/solver/data/rollout_data.hpp>
-#include <atri/solver/fwd.hpp>
 #include <atri/solver/ns_sqp.hpp>
 #include <atri/utils/print.hpp>
 #include <double_integrator/cost.hpp>
@@ -27,8 +26,8 @@ int main() {
 
     ns_sqp sqp;
 
-    auto init_node = sqp.graph_.add(ns_sqp::node(prob));
-    auto end_node = sqp.graph_.add(ns_sqp::node(prob_terminal));
+    auto init_node = sqp.graph_.add(ns_sqp::node_type(prob));
+    auto end_node = sqp.graph_.add(ns_sqp::node_type(prob_terminal));
 
     sqp.graph_.add_edge(init_node, end_node, 100);
 
@@ -53,7 +52,7 @@ int main() {
     // auto &data = ns_riccati_solver::get_data(init_node.get());
     // std::cout << data.rollout_->prim_[__x].transpose() << '\n';
     // sqp.update();
-    sqp.graph_.apply_all_unary_forward([](ns_sqp::node *node) {
+    sqp.graph_.apply_all_unary_forward([](ns_sqp::node_type *node) {
         auto &data = ns_riccati_solver::get_data(node);
         //     // why the delta y is wrong?
         // std::cout << "delX  " << data.rollout_->prim_[__x].transpose() << '\n';

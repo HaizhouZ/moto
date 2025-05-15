@@ -13,7 +13,7 @@ namespace atri {
 //     return llt.info() == Eigen::Success;
 // }
 namespace ns_riccati_solver {
-void backward_pass(shooting_node *cur, shooting_node *prev) {
+void backward_pass(node *cur, node *prev) {
     auto &d = get_data(cur);
     auto &nsp = *d.nsp_;
     // check positiveness

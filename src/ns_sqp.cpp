@@ -3,14 +3,12 @@
 #include <atri/solver/ns_sqp.hpp>
 
 namespace atri {
-ns_sqp::node::node(problem_ptr_t prob)
-    : shooting_node(prob, data_mgr::get<nullspace_riccati_data>()) {}
 void ns_sqp::update(size_t n_iter) {
 
     auto start = std::chrono::high_resolution_clock::now();
 
     graph_.apply_all_unary_parallel(ns_riccati_solver::pre_solving_steps_0);
-    
+
     for (size_t i_iter: range(n_iter)) {
         
         start = std::chrono::high_resolution_clock::now();
