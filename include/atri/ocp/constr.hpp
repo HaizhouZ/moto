@@ -1,7 +1,7 @@
 #ifndef ATRI_CONSTR_HPP
 #define ATRI_CONSTR_HPP
 
-#include <atri/ocp/core/approx.hpp>
+#include <atri/ocp/approx.hpp>
 
 namespace atri {
 struct constr_impl; // fwd
@@ -14,7 +14,7 @@ struct constr_data : public sparse_approx_data {
     // vector_ref slack_;      
     vector_ref multiplier_;
     std::vector<row_vector_ref> vjp_;
-    constr_data(approx_data *raw, sparse_approx_data &&d, constr_impl *cstr);
+    constr_data(approx_storage *raw, sparse_approx_data &&d, constr_impl *cstr);
 };
 def_unique_ptr(constr_data);
 /**
@@ -48,7 +48,7 @@ struct constr_impl : public approx {
      * @param raw ptr to approximation data
      * @return sparse_approx_data_ptr_t
      */
-    sparse_approx_data_ptr_t make_data(sym_data *primal, approx_data *raw) override {
+    sparse_approx_data_ptr_t make_data(sym_data *primal, approx_storage *raw) override {
         return constr_data_ptr_t(
             new constr_data(raw, std::move(*approx::make_data(primal, raw)), this));
     }

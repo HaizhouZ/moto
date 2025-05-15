@@ -1,11 +1,11 @@
-#include <atri/ocp/core/approx_data.hpp>
+#include <atri/ocp/approx_storage.hpp>
 #include <atri/solver/data/nullspace_data.hpp>
 #include <atri/solver/data/rollout_data.hpp>
-#include <atri/solver/ns_riccati_solver.hpp>
+#include <atri/solver/ns_riccati_solve.hpp>
 #include <iostream>
 
 namespace atri {
-namespace ns_riccati_solver {
+namespace ns_riccati {
 void forward_rollout(node *cur, node *next) {
     // get_data(nodes_.front()).rollout_->prim_[__x].setZero();
     auto &d = get_data(cur);
@@ -20,9 +20,9 @@ void post_rollout_steps(node *cur) {
     auto &rollout_ = *d.rollout_;
     auto &nsp = *d.nsp_;
     rollout_.prim_[__u].noalias() = d.d_u.k + d.d_u.K * rollout_.prim_[__x];
-    d.sym_->value_[__x] += rollout_.prim_[__x];
-    d.sym_->value_[__u] += rollout_.prim_[__u];
-    d.sym_->value_[__y] += rollout_.prim_[__y];
+    d.sym_->value_[__x].noalias() += rollout_.prim_[__x];
+    d.sym_->value_[__u].noalias() += rollout_.prim_[__u];
+    d.sym_->value_[__y].noalias() += rollout_.prim_[__y];
     // multiplier
     // update hard constraint multipliers
     if (d.ncstr > 0) {
@@ -37,14 +37,14 @@ void post_rollout_steps(node *cur) {
         // append last term in dynamics multipler computation
         d.d_lbd_f.noalias() -= d.d_lbd_s_c;
         rollout_.dual_[__eq_cstr_s] = d.d_lbd_s_c.head(d.ns);
-        d.raw_->dual_[__eq_cstr_s] += rollout_.dual_[__eq_cstr_s];
+        d.raw_->dual_[__eq_cstr_s].noalias() += rollout_.dual_[__eq_cstr_s];
     }
     if (d.nc > 0) {
         rollout_.dual_[__eq_cstr_c] = d.d_lbd_s_c.tail(d.nc);
-        d.raw_->dual_[__eq_cstr_c] += rollout_.dual_[__eq_cstr_c];
+        d.raw_->dual_[__eq_cstr_c].noalias() += rollout_.dual_[__eq_cstr_c];
     }
     rollout_.dual_[__dyn].noalias() = nsp.lu_dyn_.transpose().solve(d.d_lbd_f);
-    d.raw_->dual_[__dyn] += rollout_.dual_[__dyn];
+    d.raw_->dual_[__dyn].noalias() += rollout_.dual_[__dyn];
 }
-} // namespace ns_riccati_solver
+} // namespace ns_riccati
 } // namespace atri

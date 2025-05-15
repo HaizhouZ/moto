@@ -1,8 +1,9 @@
 #include <atri/solver/data/nullspace_data.hpp>
-#include <atri/solver/ns_riccati_solver.hpp>
+#include <atri/solver/ns_riccati_solve.hpp>
 #include <iostream>
 
 namespace atri {
+namespace ns_riccati {
 // bool isPositiveDefinite(const Eigen::MatrixXd &A) {
 //     if (!A.isApprox(A.transpose())) {
 //         // Not symmetric
@@ -12,7 +13,6 @@ namespace atri {
 //     Eigen::LLT<Eigen::MatrixXd> llt(A);
 //     return llt.info() == Eigen::Success;
 // }
-namespace ns_riccati_solver {
 void backward_pass(node *cur, node *prev) {
     auto &d = get_data(cur);
     auto &nsp = *d.nsp_;
@@ -25,9 +25,9 @@ void backward_pass(node *cur, node *prev) {
     nsp.u_0_p_K.noalias() = d.Q_ux - nsp.F_u.transpose() * (d.Q_yx - d.Q_yy * nsp.F_0_K);
     // compute z_u
     if (d.rank_status_ == rank_status::unconstrained) {
-        nsp.z_u_k = nsp.u_0_p_k;
-        nsp.z_u_K = nsp.u_0_p_K;
-        d.d_u.K = -nsp.z_u_K;
+        nsp.z_u_k.noalias() = nsp.u_0_p_k;
+        nsp.z_u_K.noalias() = nsp.u_0_p_K;
+        d.d_u.K.noalias() = -nsp.z_u_K;
         nsp.llt_ns_.compute(nsp.U);
         nsp.llt_ns_.solveInPlace(d.d_u.K);
     } else {
@@ -52,16 +52,14 @@ void backward_pass(node *cur, node *prev) {
     if (prev != nullptr) [[likely]] {
         auto &d_pre = get_data(prev);
         // update P
-        d_pre.Q_y.noalias() +=
-            -d.Q_y * nsp.F_0_K + nsp.F_0_k.transpose() * d.Q_yy * nsp.F_0_K +
-            nsp.z_u_k.transpose() * d.d_u.K;
-        d_pre.Q_yy.noalias() +=
-            nsp.F_0_K.transpose() * d.Q_yy * nsp.F_0_K + nsp.z_u_K.transpose() * d.d_u.K;
+        d_pre.Q_y.noalias() += -d.Q_y * nsp.F_0_K + nsp.F_0_k.transpose() * d.Q_yy * nsp.F_0_K +
+                               nsp.z_u_k.transpose() * d.d_u.K;
+        d_pre.Q_yy.noalias() += nsp.F_0_K.transpose() * d.Q_yy * nsp.F_0_K + nsp.z_u_K.transpose() * d.d_u.K;
         if (d.nc + d.ns > 0) {
             d.Q_y.noalias() -= nsp.u_y_k.transpose() * nsp.u_0_p_K;
             d.Q_yy.noalias() -= nsp.u_y_K.transpose() * nsp.u_0_p_K;
         }
     }
 }
-} // namespace ns_riccati_solver
+} // namespace ns_riccati
 } // namespace atri

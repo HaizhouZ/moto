@@ -1,17 +1,19 @@
 #ifndef __NS_RICCATI_DATA__
 #define __NS_RICCATI_DATA__
 
-
-#include <atri/ocp/core/node_data.hpp>
+#include <atri/ocp/node_data.hpp>
 
 namespace atri {
-enum rank_status : int { unconstrained = 0, constrained, fully_constrained };
+namespace ns_riccati {
+enum rank_status : int { unconstrained = 0,
+                         constrained,
+                         fully_constrained };
 
 // fwd declaration
 struct nullspace_data;
 struct rollout_data;
 
-struct nullspace_riccati_data : public node_data {
+struct riccati_data : public node_data {
     // dim
     size_t nx, nu, ns, nc, ncstr;
     size_t nz;
@@ -32,11 +34,11 @@ struct nullspace_riccati_data : public node_data {
     vector d_lbd_f, d_lbd_s_c_pre_solve, d_lbd_s_c;
     // linear rollout
     rollout_data *rollout_;
-    nullspace_riccati_data(problem_ptr_t prob);
-    ~nullspace_riccati_data();
+    riccati_data(problem_ptr_t prob);
+    ~riccati_data();
 };
-def_unique_ptr(nullspace_riccati_data);
-
+def_unique_ptr(riccati_data);
+} // namespace ns_riccati
 } // namespace atri
 
 #endif

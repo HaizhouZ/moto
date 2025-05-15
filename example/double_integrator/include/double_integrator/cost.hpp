@@ -1,7 +1,7 @@
 #ifndef DOUBLE_INTEGRATOR_COST_HPP
 #define DOUBLE_INTEGRATOR_COST_HPP
 
-#include <atri/ocp/func/cost.hpp>
+#include <atri/ocp/cost.hpp>
 
 namespace atri {
 

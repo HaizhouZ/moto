@@ -7,7 +7,7 @@
 namespace atri {
 
 struct ns_sqp {
-    using node_type = atri::ns_riccati_solver::node;
+    using node_type = atri::ns_riccati::node;
 
     void update(size_t n_iter);
 

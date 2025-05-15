@@ -1,11 +1,11 @@
-#include <atri/ocp/core/approx_data.hpp>
+#include <atri/ocp/approx_storage.hpp>
 #include <atri/solver/data/nullspace_data.hpp>
 #include <atri/solver/data/rollout_data.hpp>
 #include <atri/solver/ns_riccati_data.hpp>
 
 namespace atri {
-
-nullspace_riccati_data::nullspace_riccati_data(problem_ptr_t prob)
+namespace ns_riccati {
+riccati_data::riccati_data(problem_ptr_t prob)
     : node_data(prob), nx(prob->dim_[__x]), nu(prob->dim_[__u]),
       ns(raw_->prob_->dim_[__eq_cstr_s]),
       nc(raw_->prob_->dim_[__eq_cstr_c]), ncstr(ns + nc), d_u(nu, nx),
@@ -37,8 +37,9 @@ nullspace_riccati_data::nullspace_riccati_data(problem_ptr_t prob)
     rollout_->dual_[__eq_cstr_s].resize(ns);
     rollout_->dual_[__eq_cstr_c].resize(nc);
 }
-nullspace_riccati_data::~nullspace_riccati_data() {
+riccati_data::~riccati_data() {
     delete nsp_;
     delete rollout_;
 }
+} // namespace ns_riccati
 } // namespace atri

@@ -1,14 +1,15 @@
-#include <atri/ocp/core/approx.hpp>
-#include <atri/ocp/core/approx_data.hpp>
-#include <atri/ocp/core/sym_data.hpp>
+#include <atri/ocp/approx.hpp>
+#include <atri/ocp/approx_storage.hpp>
+#include <atri/ocp/sym_data.hpp>
 
 namespace atri {
 
 sparse_approx_data::sparse_approx_data(sym_data *primal,
-                                       approx_data *raw,
+                                       approx_storage *raw,
                                        approx *f)
     : v_(f->field_ == __cost ? vector_ref(raw->cost_) : raw->approx_[f->field_].v_.segment(raw->prob_->get_expr_start(*f), f->dim_)),
-      sym_uid_idx_(f->sym_uid_idx_) {
+      sym_uid_idx_(f->sym_uid_idx_),
+      f_(f) {
     auto &in_args = f->in_args();
     for (size_t i = 0; i < in_args.size(); i++) {
         auto arg = in_args[i];
@@ -37,7 +38,7 @@ sparse_approx_data::sparse_approx_data(sym_data *primal,
         hess_.resize(in_args_.size());
         for (size_t i : range(in_args_.size())) {
             for (size_t j : range(in_args_.size())) {
-                /// @note order matches approx_data
+                /// @note order matches approx_storage
                 /// h[i][j] = h[j][i] if i, j in the same field or field(i) < field(j)
                 /// otherwise only keep h[i][j] (empty)
                 field_1 = in_args[i]->field_;
@@ -55,7 +56,7 @@ sparse_approx_data::sparse_approx_data(sym_data *primal,
         }
     }
 }
-sparse_approx_data_ptr_t approx::make_data(sym_data *primal, approx_data *raw) {
+sparse_approx_data_ptr_t approx::make_data(sym_data *primal, approx_storage *raw) {
     if (in_args_.empty())
         throw std::runtime_error(fmt::format("in args unset for approx {} in field {}", name_, magic_enum::enum_name(field_)));
     auto data = sparse_approx_data_ptr_t();

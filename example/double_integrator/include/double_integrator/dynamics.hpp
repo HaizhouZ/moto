@@ -1,8 +1,8 @@
 #ifndef DOUBLE_INTEGRATOR_DYNAMICS_HPP
 #define DOUBLE_INTEGRATOR_DYNAMICS_HPP
 
-#include <atri/ocp/func/constr.hpp>
-#include <atri/ocp/func/dynamics.hpp>
+#include <atri/ocp/constr.hpp>
+#include <atri/ocp/dynamics.hpp>
 
 namespace atri {
 

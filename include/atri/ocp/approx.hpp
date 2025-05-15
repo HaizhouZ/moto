@@ -1,12 +1,12 @@
 #ifndef __approx__
 #define __approx__
 
-#include <atri/ocp/core/problem.hpp>
+#include <atri/ocp/problem.hpp>
 
 namespace atri {
 
-struct approx_data; // fwd declaration
-struct sym_data;    // fwd declaration
+struct approx_storage; // fwd declaration
+struct sym_data;       // fwd declaration
 
 /////////////////////////////////////////////////////////////////////
 enum class approx_order { zero = 0,
@@ -35,9 +35,9 @@ struct sparse_approx_data {
      * @param raw dense raw data of approximation
      * @param f approximation
      */
-    sparse_approx_data(sym_data *primal, approx_data *raw, approx *f);
+    sparse_approx_data(sym_data *primal, approx_storage *raw, approx *f);
     sparse_approx_data(const sparse_approx_data &rhs) = delete; // disable this
-    sparse_approx_data(sparse_approx_data &&rhs) : v_(rhs.v_), sym_uid_idx_(rhs.sym_uid_idx_) {
+    sparse_approx_data(sparse_approx_data &&rhs) : v_(rhs.v_), sym_uid_idx_(rhs.sym_uid_idx_), f_(rhs.f_) {
         in_args_ = std::move(rhs.in_args_);
         jac_ = std::move(rhs.jac_);
         hess_ = std::move(rhs.hess_);
@@ -46,6 +46,8 @@ struct sparse_approx_data {
     auto &operator()(const sym &in) {
         return in_args_[sym_uid_idx_[in->uid_]];
     }
+
+    const approx *f_; ///< pointer to the approx
 
   private:
     std::unordered_map<size_t, size_t> &sym_uid_idx_;
@@ -115,10 +117,10 @@ class approx : public expr {
 
     /**
      * @brief setup the sparse approx data
-     * @details will setup the mapping from the dense approx_data to sparse_approx_data
+     * @details will setup the mapping from the dense approx_storage to sparse_approx_data
      * @return sparse_approx_data_ptr_t
      */
-    virtual sparse_approx_data_ptr_t make_data(sym_data *primal, approx_data *raw);
+    virtual sparse_approx_data_ptr_t make_data(sym_data *primal, approx_storage *raw);
 
     /**
      * @brief evaluate the approx

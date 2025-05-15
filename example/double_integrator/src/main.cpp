@@ -1,6 +1,6 @@
 #include <atri/core/directed_graph.hpp>
-#include <atri/ocp/core/approx_data.hpp>
-#include <atri/ocp/core/shooting_node.hpp>
+#include <atri/ocp/approx_storage.hpp>
+#include <atri/ocp/shooting_node.hpp>
 #include <atri/solver/data/nullspace_data.hpp>
 #include <atri/solver/data/rollout_data.hpp>
 #include <atri/solver/ns_sqp.hpp>
@@ -34,7 +34,7 @@ int main() {
     sqp.graph_.set_head(init_node);
     sqp.graph_.set_tail(end_node);
 
-    init_node->get(dyn.r).setConstant(6);
+    init_node->value(dyn.r).setConstant(6);
 
     size_t n_iter = 1000;
 
@@ -49,11 +49,11 @@ int main() {
     //     fmt::print("Timing[{}]: {}us\n", i, sqp.timings[i] / n_iter);
     // }
 
-    // auto &data = ns_riccati_solver::get_data(init_node.get());
+    // auto &data = ns_riccati::get_data(init_node.get());
     // std::cout << data.rollout_->prim_[__x].transpose() << '\n';
     // sqp.update();
     sqp.graph_.apply_all_unary_forward([](ns_sqp::node_type *node) {
-        auto &data = ns_riccati_solver::get_data(node);
+        auto &data = ns_riccati::get_data(node);
         //     // why the delta y is wrong?
         // std::cout << "delX  " << data.rollout_->prim_[__x].transpose() << '\n';
         // std::cout << "state " << data.sym_->value_[__x].transpose() << '\n';

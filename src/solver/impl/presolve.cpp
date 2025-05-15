@@ -1,9 +1,9 @@
-#include <atri/ocp/core/approx_data.hpp>
+#include <atri/ocp/approx_storage.hpp>
 #include <atri/solver/data/nullspace_data.hpp>
-#include <atri/solver/ns_riccati_solver.hpp>
+#include <atri/solver/ns_riccati_solve.hpp>
 
 namespace atri {
-namespace ns_riccati_solver {
+namespace ns_riccati {
 
 void pre_solving_steps_0(node *cur) {
     // collect constraint residuals and jacobians
@@ -76,5 +76,5 @@ void pre_solving_steps_2(node *prev, node *cur) {
 }
 /// @todo set terminal Q_y, Q_yy
 
-} // namespace ns_riccati_solver
+} // namespace ns_riccati
 } // namespace atri

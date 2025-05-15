@@ -2,7 +2,7 @@
 // class cost_impl : public approx{
 // void add_cost_impl
 // }
-#include <atri/ocp/core/approx.hpp>
+#include <atri/ocp/approx.hpp>
 
 namespace atri {
 struct cost_impl : public approx {

@@ -2,20 +2,11 @@
 #define __NODE_DATA__
 
 #include <array>
-#include <atri/core/offset_array.hpp>
-#include <atri/ocp/core/approx.hpp>
-#include <atri/ocp/core/sym_data.hpp>
+#include <atri/core/array.hpp>
+#include <atri/ocp/approx.hpp>
+#include <atri/ocp/sym_data.hpp>
 
 namespace atri {
-
-/**
- * @brief stacked approximation data
- * @note each std::vector contains the approximation data of functions in one field
- */
-
-typedef offset_array<std::vector<sparse_approx_data_ptr_t>,
-                     field::num_func, __dyn>
-    stacked_approx_data;
 
 struct node_data;
 def_unique_ptr(node_data);
@@ -26,9 +17,10 @@ def_unique_ptr(node_data);
  * @note to use your own data class with data_mgr, inherit this class and implement constructor C(problem_ptr_t)
  */
 struct node_data {
-    sym_data *sym_;
-    approx_data *raw_;
-    stacked_approx_data sparse_view;
+    sym_data *sym_;       /// < dense storage of symbolic data
+    approx_storage *raw_; /// <dense storage of the approx data
+    shifted_array<std::vector<sparse_approx_data_ptr_t>, field::num_func, __dyn>
+        sparse_; /// < sparse view per approx
     node_data(problem_ptr_t prob);
     ~node_data();
 };

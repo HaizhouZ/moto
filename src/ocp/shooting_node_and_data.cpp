@@ -1,5 +1,5 @@
-#include <atri/ocp/core/approx_data.hpp>
-#include <atri/ocp/core/shooting_node.hpp>
+#include <atri/ocp/approx_storage.hpp>
+#include <atri/ocp/shooting_node.hpp>
 #include <ranges>
 
 namespace atri {
@@ -22,9 +22,9 @@ inline void for_funcs(const problem_ptr_t &prob, Callback &&callback) {
 }
 
 node_data::node_data(problem_ptr_t prob)
-    : sym_(new sym_data(prob)), raw_(new approx_data(prob)) {
+    : sym_(new sym_data(prob)), raw_(new approx_storage(prob)) {
     for_funcs(prob, [&](size_t field, size_t idx, approx *_f) {
-        sparse_view[field].push_back(_f->make_data(sym_, raw_));
+        sparse_[field].push_back(_f->make_data(sym_, raw_));
     });
 }
 
@@ -69,7 +69,7 @@ void shooting_node::update_approximation() {
     /// @todo: always eval residual?
     for_funcs(problem_,
               [this](size_t field, size_t idx_expr, approx *_f) {
-                  _f->evaluate(problem_, *data_->sparse_view[field][idx_expr],
+                  _f->evaluate(problem_, *data_->sparse_[field][idx_expr],
                                true, _f->order() >= approx_order::first,
                                _f->order() >= approx_order::second);
               });

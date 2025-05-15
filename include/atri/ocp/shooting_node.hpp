@@ -1,7 +1,7 @@
 #ifndef __SHOOTING_NODE__
 #define __SHOOTING_NODE__
 
-#include <atri/ocp/core/node_data.hpp>
+#include <atri/ocp/node_data.hpp>
 #include <mutex>
 #include <stack>
 
@@ -102,7 +102,54 @@ struct shooting_node {
     // update the approximation
     void update_approximation();
     // get value of the sym variable
-    auto get(sym sym) { return data_->sym_->get(sym); }
+    auto value(sym sym) { return data_->sym_->get(sym); }
+    /**
+     * @brief get the sparse approx data by pointer
+     *
+     * @param f
+     * @return auto&
+     */
+    auto &data(approx *f) {
+        auto it_pos = problem_->pos_by_uid_.find(f->uid_);
+        assert(it_pos != problem_->pos_by_uid_.end());
+        return data_->sparse_[f->field_][it_pos->second];
+    }
+    /**
+     * @brief get the sparse approx data by pointer
+     *
+     * @param f
+     * @return auto&
+     */
+    auto &data(const approx_ptr_t &f) {
+        return data(f.get());
+    }
+    /**
+     * @brief get the sparse approx data by name
+     * @todo check efficiency
+     * @param name
+     * @return auto&
+     */
+    auto &data(std::string_view name) {
+        auto it_info = problem_->by_name_.find(name);
+        assert(it_info != problem_->by_name_.end());
+        auto &info = it_info->second;
+        if (info.p->field_ >= __dyn) {
+            return data_->sparse_[info.p->field_][info.pos];
+        } else [[unlikely]] {
+            throw std::runtime_error(
+                fmt::format("approx {} not found in field {}",
+                            name, magic_enum::enum_name(info.p->field_)));
+        }
+    }
+
+    auto value(std::string_view name) {
+        auto it_info = problem_->by_name_.find(name);
+        assert(it_info != problem_->by_name_.end());
+        auto &info = it_info->second;
+        if (info.p->field_ <= field::num_sym) {
+            return data_->sym_->get(info.p);
+        }
+    }
 
     node_data_ptr_t data_;
     problem_ptr_t problem_;

@@ -1,7 +1,7 @@
 #ifndef ATRI_UTILS_PRINT_HPP
 #define ATRI_UTILS_PRINT_HPP
 
-#include <atri/ocp/core/problem.hpp>
+#include <atri/ocp/problem.hpp>
 
 namespace atri {
 namespace utils {

@@ -102,8 +102,11 @@ class directed_graph {
         requires std::invocable<callback_t, value_type *, value_type *>
     void apply_all_binary_forward(callback_t &&callback) {
         std::ranges::for_each(nodes_, [](node_ptr_t p) { p->reset_cnt(); });
-        std::vector<edge *> cur_edges(head_->out_edges.begin(), head_->out_edges.end()); // st nodes for this round
-        std::vector<edge *> next_edges;                                                  // st nodes for next round
+        // std::vector<std::pair<value_type *, value_type *>> binary_in_;
+        // std::vector<edge *> cur_edges;                               // st nodes for this round
+        // std::vector<edge *> next_edges;                              // st nodes for next round
+        cur_edges.assign(head_->out_edges.begin(), head_->out_edges.end()); // Ensure thread-local cur_edges is initialized
+        next_edges.clear();                                                 // Clear thread-local next_edges
         binary_in_.clear();
         while (!cur_edges.empty()) {
             for (auto e : cur_edges) {
@@ -145,8 +148,11 @@ class directed_graph {
         requires std::invocable<callback_t, value_type *, value_type *>
     void apply_all_binary_backward(callback_t &&callback) {
         std::for_each(nodes_.begin(), nodes_.end(), [](node_ptr_t p) { p->reset_cnt(); });
-        std::vector<edge *> cur_edges(tail_->in_edges.begin(), tail_->in_edges.end()); // st nodes for this round
-        std::vector<edge *> next_edges;                                                // st nodes for next round
+        // std::vector<std::pair<value_type *, value_type *>> binary_in_;
+        // std::vector<edge *> cur_edges;                             // st nodes for this round
+        // std::vector<edge *> next_edges;                            // st nodes for next round
+        cur_edges.assign(tail_->in_edges.begin(), tail_->in_edges.end()); // Ensure thread-local cur_edges is initialized
+        next_edges.clear();                                               // Clear thread-local next_edges
         binary_in_.clear();
         while (!cur_edges.empty()) {
             // #pragma omp parallel for
@@ -186,6 +192,8 @@ class directed_graph {
 
     std::vector<value_type *> unary_in_;
     std::vector<std::pair<value_type *, value_type *>> binary_in_;
+    std::vector<edge *> cur_edges;  // st nodes for this round
+    std::vector<edge *> next_edges; // st nodes for next round
 };
 } // namespace atri
 

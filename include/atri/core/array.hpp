@@ -1,9 +1,9 @@
-#ifndef ATRI_CORE_OFFSET_ARRAY_HPP
-#define ATRI_CORE_OFFSET_ARRAY_HPP
+#ifndef ATRI_CORE_ARRAY_HPP
+#define ATRI_CORE_ARRAY_HPP
 
+#include <cassert>
 #include <stdexcept>
 #include <vector>
-#include <cassert>
 
 namespace atri {
 /**
@@ -14,19 +14,23 @@ namespace atri {
  * @tparam st offset or starting idx value (the [st] correspond to val[0])
  */
 template <typename T, size_t N, size_t st>
-struct offset_array {
-    std::array<T, N> val;
+struct shifted_array : public std::array<T, N> {
+    using base_type = std::array<T, N>;
     auto &operator[](size_t i) {
         assert(i >= st && i < st + N);
-        return val[i - st];
+        return base_type::operator[](i - st);
     }
     const auto &operator[](size_t i) const {
         assert(i >= st && i < st + N);
-        return val[i - st];
+        return base_type::operator[](i - st);
     }
-    offset_array() = default;
-    offset_array(offset_array<T, N, st> &&rhs) : val(std::move(rhs.val)) {}
+    shifted_array() = default;
+    shifted_array(base_type &&rhs) : base_type(std::move(rhs)) {}
 };
+
+template <typename T, size_t N>
+using array = shifted_array<T, N, 0>;
+
 } // namespace atri
 
-#endif // ATRI_CORE_OFFSET_ARRAY_HPP
+#endif // ATRI_CORE_ARRAY_HPP

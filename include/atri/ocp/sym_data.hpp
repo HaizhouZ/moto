@@ -1,7 +1,7 @@
 #ifndef ATRI_OCP_CORE_SYM_DATA_HPP
 #define ATRI_OCP_CORE_SYM_DATA_HPP
 
-#include <atri/ocp/core/problem.hpp>
+#include <atri/ocp/problem.hpp>
 
 namespace atri {
 
@@ -12,9 +12,14 @@ struct sym_data {
         }
     }
 
+    auto get(expr* sym) {
+        return sym->make_vec(
+            prob_->get_data_ptr(value_[sym->field_].data(), *sym));
+    }
+
     auto get(const sym& sym) {
         return sym->make_vec(
-            prob_->get_data_ptr(value_[sym->field_].data(), sym));
+            prob_->get_data_ptr(value_[sym->field_].data(), *sym));
     }
 
     problem_ptr_t prob_;

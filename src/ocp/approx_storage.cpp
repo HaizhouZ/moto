@@ -1,8 +1,8 @@
-#include <atri/ocp/core/approx_data.hpp>
+#include <atri/ocp/approx_storage.hpp>
 
 namespace atri {
 
-approx_data::approx_data(problem_ptr_t prob) : prob_(prob) {
+approx_storage::approx_storage(problem_ptr_t prob) : prob_(prob) {
     for (auto i : range_n(__dyn, field::num_constr)) {
         if (prob_->expr_[i].empty()) {
             continue;

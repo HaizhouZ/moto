@@ -1,9 +1,9 @@
-#include <atri/ocp/core/approx_data.hpp>
+#include <atri/ocp/approx_storage.hpp>
 #include <atri/solver/data/nullspace_data.hpp>
-#include <atri/solver/ns_riccati_solver.hpp>
+#include <atri/solver/ns_riccati_solve.hpp>
 
 namespace atri {
-namespace ns_riccati_solver {
+namespace ns_riccati {
 void post_solving_steps(node *cur) {
     auto &d = get_data(cur);
     auto &nsp = *d.nsp_;
@@ -23,5 +23,5 @@ void post_solving_steps(node *cur) {
     d.d_y.k.noalias() = -nsp.F_0_k - nsp.F_u * d.d_u.k;
     d.d_y.K.noalias() = -nsp.F_0_K - nsp.F_u * d.d_u.K;
 }
-} // namespace ns_riccati_solver
+} // namespace ns_riccati
 } // namespace atri
