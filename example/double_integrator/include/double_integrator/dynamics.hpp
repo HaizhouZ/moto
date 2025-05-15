@@ -15,7 +15,7 @@ class doubleIntegratorDyn : public dynamics, public collection {
   public:
     // position, velocity, acceleration, position, velocity
     sym r, v, a, r_next, v_next;
-    constr dyn_pos, dyn_vel;
+    constr dyn_pos, dyn_vel, vel_zero_constr;
     struct pos : public constr_impl {
         pos() : constr_impl("doubleIntegratorDynamics_pos", 3, __dyn, approx_order::first) {
             value = [](sparse_approx_data &data) {
@@ -40,18 +40,29 @@ class doubleIntegratorDyn : public dynamics, public collection {
             };
         }
     };
+    struct zero_vel: public constr_impl{
+        zero_vel() : constr_impl("doubleIntegratorDynamics_zero_vel", 3, __eq_cstr_s, approx_order::first) {
+            value = [](sparse_approx_data &data) {
+                data.v_ = data.in_args_[0];
+            };
+            jacobian = [](sparse_approx_data &data) {
+                data.jac_[0].setIdentity();
+            };
+        }
+    };
     doubleIntegratorDyn()
-        : dyn_pos(pos()), dyn_vel(vel()) {
+        : dyn_pos(pos()), dyn_vel(vel()), vel_zero_constr(zero_vel()) {
         std::tie(r, r_next) = make_state("pos", 3);
         std::tie(v, v_next) = make_state("vel", 3);
         a = make_input("acc", 3);
         dyn_pos->add_arguments({r, r_next, v_next});
         dyn_vel->add_arguments({v, v_next, a});
+        vel_zero_constr->add_arguments({v_next});
         // constr trial("trial", 3, __eq_cstr_s);
         // trial->add_argument(r);
         // trial->value = [=](auto &d) { d.v_ = d(r); };
         // trial->jacobian = [](sparse_approx_data &d) { d.jac_[0].setIdentity(); };
-        add({dyn_pos, dyn_vel});
+        add({dyn_pos, dyn_vel, vel_zero_constr});
     }
 };
 // another way

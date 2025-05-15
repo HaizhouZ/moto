@@ -29,14 +29,14 @@ int main() {
     auto init_node = sqp.graph_.add(ns_sqp::node_type(prob));
     auto end_node = sqp.graph_.add(ns_sqp::node_type(prob_terminal));
 
-    sqp.graph_.add_edge(init_node, end_node, 100);
+    sqp.graph_.add_edge(init_node, end_node, 10);
 
     sqp.graph_.set_head(init_node);
     sqp.graph_.set_tail(end_node);
 
     init_node->value(dyn.r).setConstant(6);
 
-    size_t n_iter = 1000;
+    size_t n_iter = 10;
 
     auto start_time = std::chrono::high_resolution_clock::now();
     sqp.update(n_iter);
@@ -52,13 +52,17 @@ int main() {
     // auto &data = ns_riccati::get_data(init_node.get());
     // std::cout << data.rollout_->prim_[__x].transpose() << '\n';
     // sqp.update();
-    sqp.graph_.apply_all_unary_forward([](ns_sqp::node_type *node) {
+    sqp.graph_.apply_all_unary_forward([&dyn](ns_sqp::node_type *node) {
         auto &data = ns_riccati::get_data(node);
-        //     // why the delta y is wrong?
         // std::cout << "delX  " << data.rollout_->prim_[__x].transpose() << '\n';
+        // std::cout << magic_enum::enum_name(data.rank_status_) << '\n';
         // std::cout << "state " << data.sym_->value_[__x].transpose() << '\n';
-        //     std::cout << "input " << data.sym_->value_[__u].transpose() << '\n';
-        //     std::cout << "nexts " << data.sym_->value_[__y].transpose() << '\n';
+        // std::cout << "input " << data.sym_->value_[__u].transpose() << '\n';
+        // std::cout << "nexts " << data.sym_->value_[__y].transpose() << '\n';
+        // std::cout << "rescs " << node->data(dyn.vel_zero_constr).v_.transpose() << '\n';
+        // std::cout << "dual  " << static_cast<constr_data &>(node->data(dyn.vel_zero_constr)).multiplier_.transpose() << '\n';
+        // std::cout << "sy    " << data.nsp_->s_y << '\n';
+        // std::cout << "su    " << data.nsp_->s_u << '\n';
         //     std::cout << "resdy " << data.raw_->approx_[__dyn].v_.transpose() << '\n';
         //     std::cout << "dual  " << data.raw_->dual_[__dyn].transpose() << '\n';
         //     std::cout << "Qx    " << data.Q_x << '\n';
@@ -71,7 +75,7 @@ int main() {
         //     // std::cout << data.Q_y.transpose() << '\n' << '\n';
         //     // std::cout << data.Q_yx << '\n' << '\n';
         //     // std::cout << data.raw_->approx_[__dyn].v_[__x] << '\n' << '\n';
-        //     std::cout << '\n';
+        // std::cout << '\n';
     });
 
     fmt::print("nice!\n");

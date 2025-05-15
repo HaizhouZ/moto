@@ -112,7 +112,7 @@ struct shooting_node {
     auto &data(approx *f) {
         auto it_pos = problem_->pos_by_uid_.find(f->uid_);
         assert(it_pos != problem_->pos_by_uid_.end());
-        return data_->sparse_[f->field_][it_pos->second];
+        return *data_->sparse_[f->field_][it_pos->second];
     }
     /**
      * @brief get the sparse approx data by pointer
@@ -134,7 +134,7 @@ struct shooting_node {
         assert(it_info != problem_->by_name_.end());
         auto &info = it_info->second;
         if (info.p->field_ >= __dyn) {
-            return data_->sparse_[info.p->field_][info.pos];
+            return *data_->sparse_[info.p->field_][info.pos];
         } else [[unlikely]] {
             throw std::runtime_error(
                 fmt::format("approx {} not found in field {}",

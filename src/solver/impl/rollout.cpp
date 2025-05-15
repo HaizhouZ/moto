@@ -29,13 +29,13 @@ void post_rollout_steps(node *cur) {
         // LU.solve([rhs])
         d.d_lbd_s_c_pre_solve.noalias() = -nsp.u_0_p_k - nsp.u_0_p_K * rollout_.prim_[__x] - nsp.U * rollout_.prim_[__u];
         // solve for hard constraint multiplers
-        d.d_lbd_s_c.noalias() = nsp.lu_eq_.solve(d.d_lbd_s_c_pre_solve);
+        d.d_lbd_s_c.noalias() = nsp.lu_eq_.transpose().solve(d.d_lbd_s_c_pre_solve);
     }
     // dynamics multiplier first two terms
     d.d_lbd_f.noalias() = -d.Q_y.transpose() - d.Q_yx * rollout_.prim_[__x] - d.Q_yy * rollout_.prim_[__y];
     if (d.ns > 0) {
         // append last term in dynamics multipler computation
-        d.d_lbd_f.noalias() -= d.d_lbd_s_c;
+        d.d_lbd_f.noalias() -= nsp.s_y.transpose() * d.d_lbd_s_c;
         rollout_.dual_[__eq_cstr_s] = d.d_lbd_s_c.head(d.ns);
         d.raw_->dual_[__eq_cstr_s].noalias() += rollout_.dual_[__eq_cstr_s];
     }

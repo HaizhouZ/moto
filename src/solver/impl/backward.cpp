@@ -36,7 +36,7 @@ void backward_pass(node *cur, node *prev) {
         nsp.z_u_K.noalias() = nsp.u_0_p_K - nsp.U * nsp.u_y_K;
         if (d.rank_status_ == rank_status::fully_constrained) {
             // fully constrained
-            d.d_u.K = nsp.u_y_K;
+            d.d_u.K = -nsp.u_y_K;
         } else {
             // solve nullspace system
             nsp.U_z.noalias() = nsp.Z.transpose() * nsp.U * nsp.Z;
@@ -55,7 +55,7 @@ void backward_pass(node *cur, node *prev) {
         d_pre.Q_y.noalias() += -d.Q_y * nsp.F_0_K + nsp.F_0_k.transpose() * d.Q_yy * nsp.F_0_K +
                                nsp.z_u_k.transpose() * d.d_u.K;
         d_pre.Q_yy.noalias() += nsp.F_0_K.transpose() * d.Q_yy * nsp.F_0_K + nsp.z_u_K.transpose() * d.d_u.K;
-        if (d.nc + d.ns > 0) {
+        if (d.ncstr > 0) {
             d.Q_y.noalias() -= nsp.u_y_k.transpose() * nsp.u_0_p_K;
             d.Q_yy.noalias() -= nsp.u_y_K.transpose() * nsp.u_0_p_K;
         }
