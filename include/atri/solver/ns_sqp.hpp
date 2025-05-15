@@ -12,7 +12,7 @@ struct ns_sqp {
     void update(size_t n_iter);
 
     directed_graph<node_type> graph_;
-    std::array<double, 7> timings{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    // std::array<double, 7> timings{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 };
 
 } // namespace atri

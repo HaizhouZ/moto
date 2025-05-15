@@ -45,9 +45,9 @@ int main() {
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
     fmt::print("Update took {} us\n", duration / n_iter);
     // per step timing
-    for (size_t i = 0; i < sqp.timings.size(); i++) {
-        fmt::print("Timing[{}]: {}us\n", i, sqp.timings[i] / n_iter);
-    }
+    // for (size_t i = 0; i < sqp.timings.size(); i++) {
+    //     fmt::print("Timing[{}]: {}us\n", i, sqp.timings[i] / n_iter);
+    // }
 
     // auto &data = ns_riccati_solver::get_data(init_node.get());
     // std::cout << data.rollout_->prim_[__x].transpose() << '\n';
