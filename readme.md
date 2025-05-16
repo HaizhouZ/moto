@@ -18,10 +18,9 @@
 
 # Todo list
 
-1. constraint test
-2. CasADi supports
-3. precompute interface
-4. quadruped test
+1. CasADi supports
+2. precompute interface
+3. quadruped test
 
 Less important:
  
