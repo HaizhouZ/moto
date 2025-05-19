@@ -13,7 +13,7 @@ execute_process(
         OUTPUT_STRIP_TRAILING_WHITESPACE)
 message("-- python site is ${PYTHON_SITE}")
 
-add_project_dependency(pybind11 REQUIRED)
+find_package(pybind11 REQUIRED)
 
 set(PYTHON_MODULE_NAME ${PROJECT_NAME})
 set(BINDING_FILES "")

@@ -22,16 +22,12 @@
 
 namespace py = pybind11;
 
-/// @todo do I need to check major order?
-using vector = Eigen::VectorXd;
-using matrix = Eigen::MatrixXd;
-
 template <typename in_t, typename out_t>
 using func_ptr = void (*)(std::vector<Eigen::Ref<in_t>> &,
                           std::vector<Eigen::Ref<out_t>> &);
 
-using func_vec_mat_ptr = func_ptr<vector, matrix>;
-using func_vec_vec_ptr = func_ptr<vector, vector>;
+using func_vec_mat_ptr = func_ptr<atri::vector, atri::matrix>;
+using func_vec_vec_ptr = func_ptr<atri::vector, atri::vector>;
 
 template <typename in_t, typename out_t>
 py::capsule load_func(const std::string &lib_path, const std::string &func_name) {
@@ -66,17 +62,17 @@ inline void dispatch_function(
 }
 
 PYBIND11_MODULE(invoke_interface, m) {
-    m.def("load_vec_vec", &load_func<vector, vector>,
+    m.def("load_vec_vec", &load_func<atri::vector, atri::vector>,
           py::arg("lib_path"),
           py::arg("func_name"));
-    m.def("load_vec_mat", &load_func<vector, matrix>,
+    m.def("load_vec_mat", &load_func<atri::vector, atri::matrix>,
           py::arg("lib_path"),
           py::arg("func_name"));
-    m.def("invoke_vec_vec", &dispatch_function<vector, vector>,
+    m.def("invoke_vec_vec", &dispatch_function<atri::vector, atri::vector>,
           py::arg("func"),
           py::arg("in"),
           py::arg("out"));
-    m.def("invoke_vec_mat", &dispatch_function<vector, matrix>,
+    m.def("invoke_vec_mat", &dispatch_function<atri::vector, atri::matrix>,
           py::arg("func"),
           py::arg("in"),
           py::arg("out"));
