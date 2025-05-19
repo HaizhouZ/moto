@@ -21,11 +21,11 @@
 1. arm test
 2. automatic handling of constraints and symbol field (especially for y)
 3. per node class data
-4. parallel compile
+4. state input respectively node and edge (remodeling)
 5. automatic handling of expression derivative
 6. precompute interface
-7. ref transpose of col major as row major with same data
-8. improve speed with constr
-9. KKT residual
+7. improve speed with constr
+8. semi-implicit euler helper
+9.  KKT residual
 10. line search
 11. vjp AD

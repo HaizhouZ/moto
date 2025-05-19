@@ -62,7 +62,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
     magic_enum::magic_enum
     fmt::fmt)
 
-add_subdirectory(example/double_integrator)
+add_subdirectory(example)
 add_subdirectory(bindings)
 
 # install(TARGETS ${PROJECT_NAME}

@@ -5,7 +5,6 @@
 namespace atri {
 
 struct dynamics {
-  protected:
     static auto make_input(const std::string &name, size_t dim) {
         return sym(name, dim, __u);
     }

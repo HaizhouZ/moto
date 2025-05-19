@@ -18,22 +18,23 @@ cpin_data = cpin_model.createData()
 q = cs.SX.sym("q", model.nq)
 v = cs.SX.sym("v", model.nv)
 vn = cs.SX.sym("vn", model.nv)
+tq = cs.SX.sym("tq", model.nv)
 
-tau = cpin.rnea(cpin_model, cpin_data, q, v, (vn - v) / 0.01)
+tau = cpin.rnea(cpin_model, cpin_data, q, v, (vn - v) / 0.01) - tq
 
 from atri.codegen import *
 
 generate_and_compile(
     "rnea",
-    [q, v, vn],
+    [q, v, vn, tq],
     [tau],
     "gen",
 )
 
 generate_and_compile(
     "rnea_jac",
-    [q, v, vn],
-    [cs.jacobian(tau, q), cs.jacobian(tau, v), cs.jacobian(tau, vn)],
+    [q, v, vn, tq],
+    [cs.jacobian(tau, q), cs.jacobian(tau, v), cs.jacobian(tau, vn), cs.jacobian(tau, tq)],
     "gen",
 )
 

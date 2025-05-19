@@ -1,0 +1,8 @@
+file(GLOB BINDING_SUBDIRS ${CMAKE_CURRENT_SOURCE_DIR}/*)
+foreach(SUBDIR ${BINDING_SUBDIRS})
+  if(IS_DIRECTORY ${SUBDIR})
+    message(STATUS "Adding example: ${SUBDIR}")
+    add_subdirectory(${SUBDIR})
+    list(APPEND SUBDIRS ${SUBDIR})
+  endif()
+endforeach()

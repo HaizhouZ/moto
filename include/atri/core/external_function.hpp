@@ -45,7 +45,12 @@ struct ext_func {
     template <typename in_t, typename out_t>
     auto invoke(std::vector<Eigen::Ref<in_t>> &input,
                 std::vector<Eigen::Ref<out_t>> &output) {
-        return reinterpret_cast<func_ptr<in_t, out_t>>(func_)(input, output);
+        return reinterpret_cast<void (*)(decltype(input), decltype(output))>(func_)(input, output);
+    }
+    template <typename in_t, typename out_t>
+    auto invoke(std::vector<Eigen::Ref<in_t>> &input,
+                Eigen::Ref<out_t> output) {
+        return reinterpret_cast<void (*)(decltype(input), decltype(output))>(func_)(input, output);
     }
 };
 

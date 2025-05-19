@@ -13,13 +13,11 @@ struct sym_data {
     }
 
     auto get(expr* sym) {
-        return sym->make_vec(
-            prob_->get_data_ptr(value_[sym->field_].data(), *sym));
+        return value_[sym->field_].segment(prob_->get_expr_start(*sym), sym->dim_);
     }
 
     auto get(const sym& sym) {
-        return sym->make_vec(
-            prob_->get_data_ptr(value_[sym->field_].data(), *sym));
+        return get(sym.get());
     }
 
     problem_ptr_t prob_;

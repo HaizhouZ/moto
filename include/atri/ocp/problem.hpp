@@ -13,7 +13,14 @@ namespace atri {
  * @brief problem formulation of an OCP stage
  *
  */
-struct problem {
+class problem {
+  private:
+    problem() : uid_(max_uid++) {}
+    problem(const problem &rhs)
+        : uid_(max_uid++), expr_(rhs.expr_), d_idx_(rhs.d_idx_),
+          by_name_(rhs.by_name_), pos_by_uid_(rhs.pos_by_uid_), dim_(rhs.dim_) {}
+
+  public:
     static size_t max_uid;
     const size_t uid_ = 0;
     std::array<std::vector<expr_ptr_t>, field::num> expr_;
@@ -26,12 +33,8 @@ struct problem {
     std::unordered_map<size_t, size_t> pos_by_uid_;
     std::array<size_t, field::num> dim_{};
 
-    problem() : uid_(max_uid++) {}
-    problem(const problem &rhs)
-        : uid_(max_uid++), expr_(rhs.expr_), d_idx_(rhs.d_idx_),
-          by_name_(rhs.by_name_), pos_by_uid_(rhs.pos_by_uid_), dim_(rhs.dim_) {}
-
-    auto copy() { return std::make_shared<problem>(*this); }
+    static auto make() { return std::shared_ptr<problem>(new problem()); }
+    auto copy() { return std::shared_ptr<problem>(new problem(*this)); }
 
     scalar_t *get_data_ptr(scalar_t *data, expr &expr) const {
         return data + get_expr_start(expr);
@@ -61,8 +64,8 @@ struct problem {
         }
     }
 
-    template <typename derived, typename std::enable_if_t<std::is_base_of_v<expr, derived>, int> = 0>
-    void add(const std::vector<std::shared_ptr<derived>> &exprs) {
+    template <typename wrapped, typename std::enable_if_t<std::is_base_of_v<expr, typename wrapped::element_type>, int> = 0>
+    void add(const std::vector<wrapped> &exprs) {
         for (auto expr_ : exprs) {
             add(expr_);
         }
@@ -78,7 +81,7 @@ struct problem {
     /**
      * @brief get start index of expr in its field
      */
-    size_t get_expr_start(const expr_ptr_t& expr) const {
+    size_t get_expr_start(const expr_ptr_t &expr) const {
         return d_idx_.at(expr->uid_).first;
     }
     size_t get_expr_start(expr &expr) const {

@@ -72,6 +72,7 @@ struct constr : public constr_impl_ptr_t {
            approx_order order = approx_order::first)
         : constr_impl_ptr_t(new constr_impl(name, dim, field, order)) {
     }
+    constr() = default;
     constr(constr_impl &&impl) : constr_impl_ptr_t(new constr_impl(std::move(impl))) {}
     constr(const constr &rhs) = default;
 };

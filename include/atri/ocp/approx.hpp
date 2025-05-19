@@ -22,7 +22,7 @@ struct approx;
  */
 struct sparse_approx_data {
     // use ref to exploit sparsity (avoid copy)
-    std::vector<mapped_vector> in_args_;
+    std::vector<vector_ref> in_args_;
     vector_ref v_; // value
     // jacobian, index correspond to in_args_
     std::vector<matrix_ref> jac_;
