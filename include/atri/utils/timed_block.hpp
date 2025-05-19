@@ -56,26 +56,23 @@ struct timing_storage {
 /// [label, code blocks]
 
 /// @def ENABLE_TIMED_BLOCK
-/// define this to enable the timed_block, timed_block({code}) or timed_block_labeled(label, {code}) 
-
-#define ENABLE_TIMED_BLOCK
-#undef ENABLE_TIMED_BLOCK
+/// define this to enable the timed_block, timed_block({code}) or timed_block_labeled(label, {code})
 
 #ifdef ENABLE_TIMED_BLOCK
-/// @def ENABLE_TIMED_BLOCK 
+/// @def ENABLE_TIMED_BLOCK
 /// define this to enable the timed_block, timed_block({code}) or timed_block_labeled(label, {code})
-#define timed_block_impl(label, ...)                                 \
-    {                                                                \
-        static std::chrono::high_resolution_clock::time_point start; \
-        static std::chrono::high_resolution_clock::time_point end;   \
-        static auto &timing = timing_storage<label>::get();          \
-                                                                     \
-        start = std::chrono::high_resolution_clock::now();           \
-        __VA_ARGS__;                                                 \
-        end = std::chrono::high_resolution_clock::now();             \
-                                                                     \
-        timing.durations += end - start;                             \
-        timing.count++;                                              \
+#define timed_block_impl(label, ...)                                     \
+    {                                                                    \
+        static std::chrono::high_resolution_clock::time_point start;     \
+        static std::chrono::high_resolution_clock::time_point end;       \
+        static auto &timing = atri::utils::timing_storage<label>::get(); \
+                                                                         \
+        start = std::chrono::high_resolution_clock::now();               \
+        __VA_ARGS__;                                                     \
+        end = std::chrono::high_resolution_clock::now();                 \
+                                                                         \
+        timing.durations += end - start;                                 \
+        timing.count++;                                                  \
     }
 #define timed_block(...) timed_block_impl(#__VA_ARGS__, __VA_ARGS__)
 #define timed_block_labeled(label, ...) timed_block_impl(label, __VA_ARGS__)

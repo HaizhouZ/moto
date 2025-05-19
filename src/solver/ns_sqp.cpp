@@ -2,6 +2,7 @@
 #include <atri/solver/ns_riccati_solve.hpp>
 #include <atri/solver/ns_sqp.hpp>
 
+// #define ENABLE_TIMED_BLOCK
 #include <atri/utils/timed_block.hpp>
 
 

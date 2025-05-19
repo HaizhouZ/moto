@@ -1,11 +1,7 @@
 #ifndef __FRLQR_FWD__
 #define __FRLQR_FWD__
 
-#ifdef __GNUC__
-#pragma GCC diagnostic ignored "-Wconversion"
-#pragma GCC diagnostic ignored "-Wreorder"
-#endif 
-
+#include <cstddef> // For size_t
 #include <Eigen/Core>
 #include <memory>
 #include <fmt/core.h>
