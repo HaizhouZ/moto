@@ -24,7 +24,7 @@ struct armCosts {
                 kin_cost.invoke(data.in_args_, data.jac_[0]);
             };
             hessian = [this](sparse_approx_data &data) {
-                static ext_func kin_cost("gen/libkin_cost_jac.so", "kin_cost_jac");
+                static ext_func kin_cost("gen/libkin_cost_hess.so", "kin_cost_hess");
                 /// @todo: automated this
                 kin_cost.invoke(data.in_args_, data.hess_[0]);
             };
@@ -33,9 +33,9 @@ struct armCosts {
     struct state_cost : public cost_impl {
         vector d_q, d_v;
         state_cost(sym q, sym v) : cost_impl("dI_state_cost") {
-            d_q.resize(9);
+            d_q.resize(7);
             d_q.setConstant(10);
-            d_v.resize(9);
+            d_v.resize(7);
             d_v.setConstant(0.1);
 
             add_arguments({q, v});
@@ -56,7 +56,7 @@ struct armCosts {
     struct input_cost : public cost_impl {
         vector d_a;
         input_cost(sym a) : cost_impl("dI_input_cost") {
-            d_a.resize(9);
+            d_a.resize(7);
             d_a.setConstant(1e-3);
             add_arguments({a});
             value = [&](sparse_approx_data &data) {
@@ -71,10 +71,10 @@ struct armCosts {
         }
     };
     static collection running(sym q, sym v, sym a) {
-        return {new state_cost(q, v), new input_cost(a), new ee_cost(q)};
+        return {new state_cost(q, v), new input_cost(a)};//, new ee_cost(q)};
     }
     static collection terminal(sym q, sym v) {
-        return {new state_cost(q, v), new ee_cost(q)};
+        return {new state_cost(q, v)};//, new ee_cost(q)};
     }
 };
 

@@ -71,7 +71,8 @@ class directed_graph {
 
     void unary_unordered_flatten() {
         unary_in_.clear();
-        for (auto cur : nodes_) {
+        for (auto &cur : nodes_) {
+            fmt::print("Raw pointer of cur: {}\n", static_cast<void *>(cur.get()));
             unary_in_.push_back(cur.get());
             for (auto e : cur->out_edges) {
                 for (auto &p : e->nodes) {

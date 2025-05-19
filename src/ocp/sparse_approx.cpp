@@ -20,16 +20,19 @@ sparse_approx_data::sparse_approx_data(sym_data *primal,
     if (f->field_ - __dyn < field::num_constr) {
         if (f->order() >= approx_order::first) {
             for (size_t i : range(in_args_.size())) {
-                jac_.push_back(raw->approx_[f->field_].jac_[in_args[i]->field_].block(
-                    f_st, raw->prob_->get_expr_start(in_args[i]),
-                    f->dim_, in_args[i]->dim_));
+                if (in_args[i]->field_ < field::num_prim) {
+                    jac_.push_back(raw->approx_[f->field_].jac_[in_args[i]->field_].block(
+                        f_st, raw->prob_->get_expr_start(in_args[i]),
+                        f->dim_, in_args[i]->dim_));
+                }
             }
-            assert(jac_.size() == in_args_.size());
         }
     } else { // for cost
         for (size_t i : range(in_args_.size())) {
-            jac_.push_back(raw->jac_[in_args[i]->field_].segment(
-                raw->prob_->get_expr_start(in_args[i]), in_args[i]->dim_));
+            if (in_args[i]->field_ < field::num_prim) {
+                jac_.push_back(raw->jac_[in_args[i]->field_].segment(
+                    raw->prob_->get_expr_start(in_args[i]), in_args[i]->dim_));
+            }
         }
     }
 
@@ -37,20 +40,24 @@ sparse_approx_data::sparse_approx_data(sym_data *primal,
         size_t field_1, field_2;
         hess_.resize(in_args_.size());
         for (size_t i : range(in_args_.size())) {
-            for (size_t j : range(in_args_.size())) {
-                /// @note order matches approx_storage
-                /// h[i][j] = h[j][i] if i, j in the same field or field(i) < field(j)
-                /// otherwise only keep h[i][j] (empty)
-                field_1 = in_args[i]->field_;
-                field_2 = in_args[j]->field_;
-                if (field_1 >= field_2) {
-                    hess_[i].push_back(raw->hessian_[field_1][field_2].block(
-                        raw->prob_->get_expr_start(in_args[i]),
-                        raw->prob_->get_expr_start(in_args[j]),
-                        in_args[i]->dim_, in_args[j]->dim_));
-                } else {
-                    // this should be empty
-                    hess_[i].push_back(raw->hessian_[field_1][field_2]);
+            if (in_args[i]->field_ < field::num_prim) {
+                for (size_t j : range(in_args_.size())) {
+                    if (in_args[j]->field_ < field::num_prim) {
+                        /// @note order matches approx_storage
+                        /// h[i][j] = h[j][i] if i, j in the same field or field(i) < field(j)
+                        /// otherwise only keep h[i][j] (empty)
+                        field_1 = in_args[i]->field_;
+                        field_2 = in_args[j]->field_;
+                        if (field_1 >= field_2) {
+                            hess_[i].push_back(raw->hessian_[field_1][field_2].block(
+                                raw->prob_->get_expr_start(in_args[i]),
+                                raw->prob_->get_expr_start(in_args[j]),
+                                in_args[i]->dim_, in_args[j]->dim_));
+                        } else {
+                            // this should be empty
+                            hess_[i].push_back(raw->hessian_[field_1][field_2]);
+                        }
+                    }
                 }
             }
         }

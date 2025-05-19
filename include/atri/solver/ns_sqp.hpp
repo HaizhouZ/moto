@@ -10,6 +10,7 @@ struct ns_sqp {
     using node_type = atri::ns_riccati::node;
 
     void update(size_t n_iter);
+    void forward();
 
     directed_graph<node_type> graph_;
     // std::array<double, 7> timings{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
