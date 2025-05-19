@@ -22,9 +22,6 @@ template <typename in_t, typename out_t>
 using func_ptr = void (*)(std::vector<Eigen::Ref<in_t>> &,
                           std::vector<Eigen::Ref<out_t>> &);
 
-using func_vec_mat_ptr = func_ptr<vector, matrix>;
-using func_vec_vec_ptr = func_ptr<vector, vector>;
-
 void *__load_from_shared(std::string_view lib_path, std::string_view func_name) {
     void *handle = LOAD_LIBRARY(lib_path.data());
     if (!handle)
@@ -39,6 +36,18 @@ template <typename in_t, typename out_t>
 auto load_from_shared(std::string_view lib_path, std::string_view func_name) {
     return reinterpret_cast<func_ptr<in_t, out_t>>(__load_from_shared(lib_path, func_name));
 }
+
+struct ext_func {
+    void *func_;
+    ext_func(std::string_view lib_path, std::string_view func_name)
+        : func_(__load_from_shared(lib_path, func_name)) {}
+
+    template <typename in_t, typename out_t>
+    auto invoke(std::vector<Eigen::Ref<in_t>> &input,
+                std::vector<Eigen::Ref<out_t>> &output) {
+        return reinterpret_cast<func_ptr<in_t, out_t>>(func_)(input, output);
+    }
+};
 
 } // namespace atri
 

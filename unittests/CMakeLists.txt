@@ -11,6 +11,9 @@ else()
     FetchContent_MakeAvailable(Catch2)
 endif()
 
+enable_testing()
+
+
 function(add_atri_test name)
     set(test_name ${name}_test)
     set(test_file ${name}.cpp)
@@ -20,8 +23,8 @@ function(add_atri_test name)
 
     target_link_libraries(${test_name} PRIVATE ${PROJECT_NAME})
     target_link_libraries(${test_name} PRIVATE Catch2::Catch2WithMain)
-
-    add_test(NAME ${test_name} COMMAND ${test_name} WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    
+    add_test(NAME ${test_name} COMMAND ${test_name} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endfunction()
 
 add_atri_test(external_function)
