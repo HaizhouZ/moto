@@ -65,15 +65,15 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
 add_subdirectory(example/double_integrator)
 add_subdirectory(bindings)
 
-install(TARGETS ${PROJECT_NAME}
-  EXPORT atriTargets
-  LIBRARY DESTINATION lib
-  ARCHIVE DESTINATION lib
-  RUNTIME DESTINATION bin
-  INCLUDES DESTINATION include
-)
+# install(TARGETS ${PROJECT_NAME}
+#   EXPORT atriTargets
+#   LIBRARY DESTINATION lib
+#   ARCHIVE DESTINATION lib
+#   RUNTIME DESTINATION bin
+#   INCLUDES DESTINATION include
+# )
 
-install(DIRECTORY include/ DESTINATION include)
+# install(DIRECTORY include/ DESTINATION include)
 
 # make uninstall
 add_custom_target("uninstall" COMMENT "Uninstall installed files")

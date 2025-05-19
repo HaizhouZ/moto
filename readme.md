@@ -18,15 +18,14 @@
 
 # Todo list
 
-1. CasADi supports
-2. precompute interface
-3. quadruped test
-
-Less important:
- 
-1. automatic handling of constraints and symbol field (especially for y)
-2. ref transpose of col major as row major with same data
-3. temporal information of nodes
-4. virtual getter of sp data
-5. KKT residual
-6. line search
+1. arm test
+2. automatic handling of constraints and symbol field (especially for y)
+3. per node class data
+4. parallel compile
+5. automatic handling of expression derivative
+6. precompute interface
+7. ref transpose of col major as row major with same data
+8. improve speed with constr
+9. KKT residual
+10. line search
+11. vjp AD

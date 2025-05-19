@@ -23,7 +23,7 @@ tau = cpin.rnea(cpin_model, cpin_data, q, v, a)
 
 from atri.codegen import *
 
-generate_cpp_with_eigen_ref_vector(
+generate_and_compile(
     "rnea",
     [q, v, a],
     [tau],
