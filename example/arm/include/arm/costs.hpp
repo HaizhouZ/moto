@@ -26,7 +26,7 @@ struct armCosts {
             hessian = [this](sparse_approx_data &data) {
                 static ext_func kin_cost("gen/libkin_cost_hess.so", "kin_cost_hess");
                 /// @todo: automated this
-                kin_cost.invoke(data.in_args_, data.hess_[0]);
+                kin_cost.invoke(data.in_args_, data.hess_[0][0]);
             };
         }
     };
