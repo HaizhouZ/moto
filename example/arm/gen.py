@@ -48,61 +48,49 @@ jac_vel.append((vn, rnea_dvn))
 jac_vel.append((tq, -cs.SX_eye(model.nv)))
 
 
-# atri.generate_and_compile(
-#     "euler",
-#     [q, qn, vn],
-#     impl_euler,
-#     "gen",
-#     keep_c_src=True,
-#     keep_raw=True,
-#     gen_jacobian=True,
-#     ext_jac=jac_pos,
-# )
+atri.generate_and_compile(
+    "euler",
+    [q, qn, vn],
+    impl_euler,
+    "gen",
+    ext_jac=jac_pos,
+)
 
 atri.generate_and_compile(
     "rnea",
     [q, v, vn, tq],
     invdyn,
     "gen",
-    keep_c_src=True,
-    keep_raw=True,
-    gen_jacobian=True,
     ext_jac=jac_vel,
-    check_jac_ad=True,
 )
 
-# pos_d = atri.sym("pos_d", 3, atri.field_p)
+pos_d = atri.sym("pos_d", 3, atri.field_p)
 
-# cpin.forwardKinematics(cpin_model, cpin_data, q)
-# cpin.updateFramePlacements(cpin_model, cpin_data)
+cpin.forwardKinematics(cpin_model, cpin_data, q)
+cpin.updateFramePlacements(cpin_model, cpin_data)
 
-# r = cs.SX.sym("r", 3)
-# r_ee = cpin_data.oMf[model.getFrameId("iiwa_link_ee_kuka")].translation
-# cpin.computeJointJacobians(cpin_model, cpin_data)
-# J = cpin.getFrameJacobian(
-#     cpin_model, cpin_data, model.getFrameId("iiwa_link_ee_kuka"), pin.ReferenceFrame.LOCAL_WORLD_ALIGNED
-# )
-# kin_cost = cs.sumsqr(r_ee - pos_d)
-# kin_cost_proxy = cs.sumsqr(r - pos_d)
-
-
-# kin_cost_jac = cs.substitute(cs.jacobian(kin_cost_proxy, r), r, r_ee) @ J[:3, :]
-# kin_cost_hess = cs.jacobian(kin_cost_jac, q)
+r = cs.SX.sym("r", 3)
+r_ee = cpin_data.oMf[model.getFrameId("iiwa_link_ee_kuka")].translation
+cpin.computeJointJacobians(cpin_model, cpin_data)
+J = cpin.getFrameJacobian(
+    cpin_model, cpin_data, model.getFrameId("iiwa_link_ee_kuka"), pin.ReferenceFrame.LOCAL_WORLD_ALIGNED
+)
+kin_cost = cs.sumsqr(r_ee - pos_d)
+kin_cost_proxy = cs.sumsqr(r - pos_d)
 
 
-# atri.generate_and_compile(
-#     "kin_cost",
-#     [q, pos_d],
-#     kin_cost,
-#     "gen",
-#     exclude=[pos_d],
-#     gen_eval=False,
-#     gen_jacobian=False,
-#     gen_hessian=True,
-#     keep_raw=True,
-#     keep_c_src=True,
-#     ext_jac=[(q, kin_cost_jac)],
-#     ext_hess=[(q, q, kin_cost_hess)],
-# )
+kin_cost_jac = cs.substitute(cs.jacobian(kin_cost_proxy, r), r, r_ee) @ J[:3, :]
+kin_cost_hess = cs.jacobian(kin_cost_jac, q)
+
+
+atri.generate_and_compile(
+    "kin_cost",
+    [q, pos_d],
+    kin_cost,
+    "gen",
+    exclude=[pos_d],
+    ext_jac=[(q, kin_cost_jac)],
+    ext_hess=[(q, q, kin_cost_hess)],
+)
 
 atri.wait_until_generated()

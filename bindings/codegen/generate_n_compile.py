@@ -78,6 +78,10 @@ def generate_and_compile(
     excluded = [e.name for e in exclude]
     external_jac = {in_arg.name: jac for (in_arg, jac) in ext_jac}
     external_hess = {(arg0.name, arg1.name): hess for (arg0, arg1, hess) in ext_hess}
+    if ext_jac:
+        gen_jacobian = True
+    if ext_hess:
+        gen_hessian = True
     if gen_jacobian or gen_hessian:
         jacs = []
         # generate jacobian
@@ -119,7 +123,7 @@ def generate_and_compile(
                     hess[-1].append(cs.jacobian(cs.jacobian(sx_output, i), j))
             if hess:
                 hess = [item for sublist in hess for item in sublist]
-                worker.append((func_name + "_hess", hess))
+                worker.append((func_name + "_hess", (hess,)))
 
     def impl(func_name, sx_outputs, check_required: bool = False, f_ground_truth: cs.Function | None = None):
         # Step 1: Create CasADi function, filter zeros
@@ -302,19 +306,19 @@ def generate_and_compile(
             f.write("}\n")
             f.write("#endif\n\n")
 
-        print(f"C++ code generated: {final_cpp_path}")
+        print(f"Generated: {final_cpp_path}")
         if compile:
             # Step 6: Compile the generated C++ code into a shared library
             so_file_path = os.path.join(output_dir, f"lib{func_name}.so")
             compile_command = f"g++ -shared -fPIC -O3 -DNDEBUG -std=gnu++20 -march=native -o {so_file_path} {final_cpp_path} -I /usr/include/eigen3"
             os.system(compile_command)
-            print(f"Shared library generated: {so_file_path}")
+            print(f"Compiled:  {so_file_path}")
             if not keep_raw:
                 os.remove(cpp_path + "raw.c")
-                print(f"Raw C code removed: {cpp_path + 'raw.c'}")
+                print(f"Removed:   {cpp_path + 'raw.c'}")
             if not keep_c_src:
                 os.remove(final_cpp_path)
-                print(f"Generated C++ code removed: {final_cpp_path}")
+                print(f"Removed:   {final_cpp_path}")
 
     for name, args_ in worker:
         process_.append(
