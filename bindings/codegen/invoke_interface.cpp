@@ -61,7 +61,7 @@ inline void dispatch_function(
     f(input_refs, output_refs);
 }
 
-PYBIND11_MODULE(invoke_interface, m) {
+void register_submodule_codegen(pybind11::module_ &m) {
     m.def("load_vec_vec", &load_func<atri::vector, atri::vector>,
           py::arg("lib_path"),
           py::arg("func_name"));

@@ -42,22 +42,22 @@ sparse_approx_data::sparse_approx_data(sym_data *primal,
         for (size_t i : range(in_args_.size())) {
             if (in_args[i]->field_ < field::num_prim) {
                 for (size_t j : range(in_args_.size())) {
-                    if (in_args[j]->field_ < field::num_prim) {
+                    field_1 = in_args[i]->field_;
+                    field_2 = in_args[j]->field_;
+                    if (field_2 < field::num_prim) {
                         /// @note order matches approx_storage
                         /// h[i][j] = h[j][i] if i, j in the same field or field(i) < field(j)
                         /// otherwise only keep h[i][j] (empty)
-                        field_1 = in_args[i]->field_;
-                        field_2 = in_args[j]->field_;
                         if (field_1 >= field_2) {
                             hess_[i].push_back(raw->hessian_[field_1][field_2].block(
                                 raw->prob_->get_expr_start(in_args[i]),
                                 raw->prob_->get_expr_start(in_args[j]),
                                 in_args[i]->dim_, in_args[j]->dim_));
-                        } else {
-                            // this should be empty
-                            hess_[i].push_back(raw->hessian_[field_1][field_2]);
+                            continue;
                         }
                     }
+                    // this should be empty. do this anyway to make the shape of hess_ right
+                    hess_[i].push_back(raw->hessian_[field_1][field_2]);
                 }
             }
         }

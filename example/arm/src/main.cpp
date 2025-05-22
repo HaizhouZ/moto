@@ -20,7 +20,7 @@ int main() {
     auto init_node = sqp.graph_.add(ns_sqp::node_type(prob));
     auto end_node = sqp.graph_.add(ns_sqp::node_type(prob_terminal));
 
-    sqp.graph_.add_edge(init_node, end_node, 10);
+    sqp.graph_.add_edge(init_node, end_node, 100);
 
     sqp.graph_.set_head(init_node);
     sqp.graph_.set_tail(end_node);

@@ -6,6 +6,32 @@
 
 namespace atri {
 
+auto load_eval(const std::string &func_name) {
+    return ext_func("gen/" + func_name + ".so", func_name);
+}
+
+auto make_eval(const std::string &func_name) {
+    return [func_name](sparse_approx_data &data) {
+        static ext_func func = load_eval(func_name);
+        func.invoke(data.in_args_, data.v_);
+    };
+}
+
+auto make_jac(const std::string &func_name) {
+    return [func_name](sparse_approx_data &data) {
+        static ext_func func = load_eval(func_name + "_jac");
+        func.invoke(data.in_args_, data.jac_);
+    };
+}
+
+// auto make_hess(const std::string &func_name) {
+//     return [func_name](sparse_approx_data &data) {
+//         static ext_func func = load_eval(func_name + "_hess");
+//         /// @todo finish
+//         func.invoke(data.in_args_, data.hess_);
+//     };
+// }
+
 struct armCosts {
     struct ee_cost : public cost_impl {
         vector d_r;
@@ -71,10 +97,10 @@ struct armCosts {
         }
     };
     static collection running(sym q, sym v, sym a) {
-        return {new state_cost(q, v), new input_cost(a)};//, new ee_cost(q)};
+        return {new state_cost(q, v), new input_cost(a)}; //, new ee_cost(q)};
     }
     static collection terminal(sym q, sym v) {
-        return {new state_cost(q, v)};//, new ee_cost(q)};
+        return {new state_cost(q, v)}; //, new ee_cost(q)};
     }
 };
 
