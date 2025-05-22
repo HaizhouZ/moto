@@ -23,9 +23,9 @@
 3. per node class data
 4. state input respectively node and edge (remodeling)
 5. automatic handling of expression derivative
-6. precompute interface
-7. improve speed with constr
-8. semi-implicit euler helper
-9.  KKT residual
-10. line search
-11. vjp AD
+6. vjp AD
+7. precompute interface
+8. improve speed with constr
+9. semi-implicit euler helper
+10. KKT residual
+11. line search
