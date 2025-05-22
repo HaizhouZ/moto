@@ -59,47 +59,17 @@ jac_vel.append((tq, -cs.SX_eye(model.nv)))
 #     ext_jac=jac_pos,
 # )
 
-# atri.generate_and_compile(
-#     "rnea",
-#     [q, v, vn, tq],
-#     invdyn,
-#     "gen",
-#     keep_c_src=True,
-#     keep_raw=True,
-#     gen_jacobian=True,
-#     ext_jac=jac_vel,
-# )
-
-eval_ = atri.external_function("gen/librnea.so", "rnea")
-ad = atri.external_function("gen/librnea_jac_ad.so", "rnea_jac")
-
-ana = atri.external_function("gen/librnea_jac.so", "rnea_jac")
-
-import numpy as np
-
-# todo: make auto random tests
-q = np.random.random((model.nq, 1))
-v = np.random.random((model.nv, 1))
-vn = np.random.random((model.nv, 1))
-tq = np.random.random((model.nv, 1))
-
-tau = np.zeros(model.nv)
-eval_([q, v, vn, tq], tau)
-print("eval\n", tau.flatten())
-print("gt  \n", pin.rnea(model, data, q, v, (vn - v) / dt).flatten() - tq.flatten())
-
-jac_ad = [np.zeros((model.nv, e.shape[0])) for e in [q, v, vn, tq]]
-
-ad([q, v, vn, tq], jac_ad)
-
-# print("ad:\n", jac_ad)
-
-jac_ana = [np.zeros((model.nv, e.shape[0])) for e in [q, v, vn, tq]]
-
-ana([q, v, vn, tq], jac_ana)
-
-# print("ana\n", jac_ana)
-print("res\n", np.max(np.abs(jac_ana[1] - jac_ad[1])))
+atri.generate_and_compile(
+    "rnea",
+    [q, v, vn, tq],
+    invdyn,
+    "gen",
+    keep_c_src=True,
+    keep_raw=True,
+    gen_jacobian=True,
+    ext_jac=jac_vel,
+    check_jac_ad=True,
+)
 
 # pos_d = atri.sym("pos_d", 3, atri.field_p)
 

@@ -62,15 +62,19 @@ def generate_and_compile(
     gen_hessian=False,
     ext_jac: list[tuple[cs.SX, cs.SX]] = [],  # [(input, jacobian)]
     ext_hess: list[tuple[cs.SX, cs.SX, cs.SX]] = [],  # [input1, input2, jacobian)]
+    check_jac_ad: bool = False,
+    check_hess_ad: bool = False,
 ):
     """
     generate and compile the evaluation and derivatives of a function
     will create async threads of compilation
     call wait_until_generated() to ensure the compilation is done
     """
+    n_in = len(sx_inputs)
+
     worker = []
     if gen_eval:
-        worker = [(func_name, [sx_output])]
+        worker = [(func_name, ([sx_output],))]
     excluded = [e.name for e in exclude]
     external_jac = {in_arg.name: jac for (in_arg, jac) in ext_jac}
     external_hess = {(arg0.name, arg1.name): hess for (arg0, arg1, hess) in ext_hess}
@@ -87,7 +91,12 @@ def generate_and_compile(
                 else:
                     jacs.append(cs.SX(0.123456))
             if jacs:
-                worker.append((func_name + "_jac", jacs))
+                if check_jac_ad:
+                    f_ad = cs.Function(func_name + "_ad", sx_inputs, [cs.jacobian(sx_output, e) for e in sx_inputs])
+                    worker.append((func_name + "_jac", (jacs, True, f_ad)))
+                else:
+                    worker.append((func_name + "_jac", (jacs,)))
+
         # generate hessian
         hess = []
         if gen_hessian:
@@ -112,13 +121,31 @@ def generate_and_compile(
                 hess = [item for sublist in hess for item in sublist]
                 worker.append((func_name + "_hess", hess))
 
-    def impl(func_name, sx_outputs):
+    def impl(func_name, sx_outputs, check_required: bool = False, f_ground_truth: cs.Function | None = None):
         # Step 1: Create CasADi function, filter zeros
         # casadi_func = cs.Function(func_name, sx_inputs, sx_outputs)
         casadi_func = filter_func_near_zero(func_name, sx_inputs, sx_outputs)
         sx_outputs = casadi_func(*sx_inputs)
         if not isinstance(sx_outputs, tuple):
             sx_outputs = (sx_outputs,)
+
+        if check_required:
+            assert isinstance(f_ground_truth, cs.Function)
+            check_res_inf = np.zeros(n_in)
+            # do 20 trials and see if matches the ground truth
+            for n in range(20):
+                random_inargs = [np.random.random(e.shape) for e in sx_inputs]
+                res_ad = f_ground_truth(*random_inargs)
+                res_gen = casadi_func(*random_inargs)
+                if not isinstance(res_ad, tuple):
+                    res_ad = (res_ad,)
+                    res_gen = (res_gen,)
+                for i, s in enumerate(sx_inputs):
+                    if s.name not in excluded:
+                        check_res_inf[i] = max(np.max(np.abs(res_ad[i] - res_gen[i])), check_res_inf[i])
+            print(f"{func_name} check inf residual: ")
+            for i, s in enumerate(sx_inputs):
+                print(f"\t{s.name}:\t", check_res_inf[i])
 
         # Step 2: Generate raw C code
         cgen = cs.CodeGenerator("raw")
@@ -134,7 +161,6 @@ def generate_and_compile(
         # Extract input/output variable shapes
         input_shapes = [x.shape for x in sx_inputs]
         output_shapes = [y.shape for y in sx_outputs]
-        n_in = len(sx_inputs)
 
         # make the mapping of ccs indices to (i, j)
         ij_pairs_all = []
@@ -290,11 +316,11 @@ def generate_and_compile(
                 os.remove(final_cpp_path)
                 print(f"Generated C++ code removed: {final_cpp_path}")
 
-    for name, task in worker:
+    for name, args_ in worker:
         process_.append(
             Process(
                 target=impl,
-                args=(name, task),
+                args=(name, *args_),
             )
         )
         process_[-1].start()
