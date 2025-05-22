@@ -7,7 +7,7 @@ from multiprocessing import Process
 process_ = []
 
 
-def filter_func_near_zero(func_name: str, inputs: list[cs.SX], expr: list[cs.SX], tol=1e-8, ntrials=10):
+def filter_func_near_zero(func_name: str, inputs: list[cs.SX], expr: list[cs.SX], tol=1e-8, ntrials=50):
     """
     The nonzeros across all trials will be recorded to generate a new function,
     of which the output is filtered by zeros in the random tests
@@ -34,13 +34,12 @@ def filter_func_near_zero(func_name: str, inputs: list[cs.SX], expr: list[cs.SX]
             filtered[k][i, j] = expr[k][i, j]
 
     return cs.Function(func_name, inputs, filtered)
-    # return cs.Function(func_name, inputs, expr)
 
 
 def ccs_index_to_ij(rows, cols, row, colind):
-    '''
+    """
     create index-ij pair map from ccs format sparsity (default of casadi)
-    '''
+    """
     ij_pairs = []
     for j in range(cols):  # Loop over columns
         for k in range(colind[j], colind[j + 1]):
@@ -64,11 +63,11 @@ def generate_and_compile(
     ext_jac: list[tuple[cs.SX, cs.SX]] = [],  # [(input, jacobian)]
     ext_hess: list[tuple[cs.SX, cs.SX, cs.SX]] = [],  # [input1, input2, jacobian)]
 ):
-    '''
+    """
     generate and compile the evaluation and derivatives of a function
     will create async threads of compilation
     call wait_until_generated() to ensure the compilation is done
-    '''
+    """
     worker = []
     if gen_eval:
         worker = [(func_name, [sx_output])]
@@ -107,7 +106,7 @@ def generate_and_compile(
                         elif (j.name, i.name) in external_hess.keys():
                             hess[-1].append(external_hess[(j.name, i.name)])
                             continue
-
+                    # if not included will do autodiff
                     hess[-1].append(cs.jacobian(cs.jacobian(sx_output, i), j))
             if hess:
                 hess = [item for sublist in hess for item in sublist]
@@ -115,6 +114,7 @@ def generate_and_compile(
 
     def impl(func_name, sx_outputs):
         # Step 1: Create CasADi function, filter zeros
+        # casadi_func = cs.Function(func_name, sx_inputs, sx_outputs)
         casadi_func = filter_func_near_zero(func_name, sx_inputs, sx_outputs)
         sx_outputs = casadi_func(*sx_inputs)
         if not isinstance(sx_outputs, tuple):
@@ -192,7 +192,6 @@ def generate_and_compile(
                     return f"outputs[{arg_idx}]({i},{j})"
                 elif vec_out:
                     return f"outputs({i})"
-
 
         # Step 4: Replace all casadi generated arrays with Eigen::Ref notation
         processed_lines = []
@@ -302,9 +301,9 @@ def generate_and_compile(
 
 
 def wait_until_generated():
-    '''
+    """
     must call this to ensure all tests are done
-    '''
+    """
     for p in process_:
         p.join()
     process_.clear()

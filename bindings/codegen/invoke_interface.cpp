@@ -1,8 +1,8 @@
 #include <atri/core/fwd.hpp>
 #include <functional>
 #include <pybind11/eigen.h>
-#include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
+#include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <vector>
 
@@ -22,58 +22,63 @@
 
 namespace py = pybind11;
 
-template <typename in_t, typename out_t>
-using func_ptr = void (*)(std::vector<Eigen::Ref<in_t>> &,
-                          std::vector<Eigen::Ref<out_t>> &);
+struct external_function {
+    external_function(const external_function& rhs) = default;
+    explicit external_function(const std::string &lib_path, const std::string &func_name) {
+        void *handle = LOAD_LIBRARY(lib_path.c_str());
+        if (!handle)
+            throw std::runtime_error("Failed to open library");
+        void *sym = GET_SYMBOL(handle, func_name.c_str());
+        if (!sym)
+            throw std::runtime_error("Failed to get function symbol");
+        func_ptr = py::capsule(sym, "func_ptr");
+    }
 
-using func_vec_mat_ptr = func_ptr<atri::vector, atri::matrix>;
-using func_vec_vec_ptr = func_ptr<atri::vector, atri::vector>;
+    void operator()(py::list in, py::list out) {
+        using in_t = atri::vector;
+        using out_t = atri::matrix;
 
-template <typename in_t, typename out_t>
-py::capsule load_func(const std::string &lib_path, const std::string &func_name) {
-    void *handle = LOAD_LIBRARY(lib_path.c_str());
-    if (!handle)
-        throw std::runtime_error("Failed to open library");
-    void *sym = GET_SYMBOL(handle, func_name.c_str());
-    if (!sym)
-        throw std::runtime_error("Failed to get function symbol");
-    auto func = reinterpret_cast<func_ptr<in_t, out_t>>(sym);
-    return py::capsule((void *)func, "func_ptr");
-}
+        std::vector<Eigen::Ref<in_t>> input_refs;
+        std::vector<Eigen::Ref<out_t>> output_refs;
 
-template <typename in_t, typename out_t>
-inline void dispatch_function(
-    // func_ptr<in_t, out_t> func,
-    py::capsule func,
-    py::list in,
-    py::list out) {
+        for (py::handle m : in)
+            input_refs.emplace_back(m.cast<Eigen::Ref<in_t>>());
+        for (py::handle m : out) {
+            py::array_t<double, py::array::c_style | py::array::forcecast> arr = py::cast<py::array>(m);
+            if (arr.ndim() != 2)
+                throw std::runtime_error("Each output must be 2D");
+            output_refs.emplace_back(Eigen::Map<out_t>(
+                arr.mutable_data(), arr.shape(0), arr.shape(1)));
+        }
 
-    std::vector<Eigen::Ref<in_t>> input_refs;
-    std::vector<Eigen::Ref<out_t>> output_refs;
+        auto f = reinterpret_cast<void (*)(decltype(input_refs) &, decltype(output_refs) &)>(func_ptr.get_pointer());
+        f(input_refs, output_refs);
+    }
 
-    for (py::handle m : in)
-        input_refs.emplace_back(m.cast<Eigen::Ref<in_t>>());
-    for (py::handle m : out)
-        output_refs.emplace_back(m.cast<Eigen::Ref<out_t>>());
+    void operator()(py::list in, Eigen::Ref<atri::vector> out) {
+        using in_t = atri::vector;
+        using out_t = atri::vector;
 
-    auto f = reinterpret_cast<func_ptr<in_t, out_t>>(func.get_pointer());
+        std::vector<Eigen::Ref<in_t>> input_refs;
 
-    f(input_refs, output_refs);
-}
+        for (py::handle m : in)
+            input_refs.emplace_back(m.cast<Eigen::Ref<in_t>>());
+
+        auto f = reinterpret_cast<void (*)(decltype(input_refs) &, decltype(out))>(func_ptr.get_pointer());
+        f(input_refs, out);
+    }
+
+  private:
+    py::capsule func_ptr;
+};
 
 void register_submodule_codegen(pybind11::module_ &m) {
-    m.def("load_vec_vec", &load_func<atri::vector, atri::vector>,
-          py::arg("lib_path"),
-          py::arg("func_name"));
-    m.def("load_vec_mat", &load_func<atri::vector, atri::matrix>,
-          py::arg("lib_path"),
-          py::arg("func_name"));
-    m.def("invoke_vec_vec", &dispatch_function<atri::vector, atri::vector>,
-          py::arg("func"),
-          py::arg("in"),
-          py::arg("out"));
-    m.def("invoke_vec_mat", &dispatch_function<atri::vector, atri::matrix>,
-          py::arg("func"),
-          py::arg("in"),
-          py::arg("out"));
+    py::class_<external_function>(m, "external_function")
+        .def(py::init<const std::string &, const std::string &>(), py::arg("lib_path"), py::arg("func_name"))
+        .def("__call__", static_cast<void (external_function::*)(py::list, py::list)>(&external_function::operator()),
+             py::arg("in"),
+             py::arg("out"))
+        .def("__call__", static_cast<void (external_function::*)(py::list, Eigen::Ref<atri::vector>)>(&external_function::operator()),
+             py::arg("in"),
+             py::arg("out"));
 }

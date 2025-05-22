@@ -3,6 +3,8 @@ import pinocchio.casadi as cpin
 import casadi as cs
 import atri
 
+import atri.codegen
+
 # Load the robot model
 model_path = "rsc/iiwa_description/urdf"
 urdf_filename = "iiwa14.urdf"
@@ -26,21 +28,78 @@ tq = atri.sym("tq", model.nv, atri.field_u)
 dt = 0.01
 impl_euler = qn - (q + vn * dt)
 invdyn = cpin.rnea(cpin_model, cpin_data, q, v, (vn - v) / dt) - tq
-dyn_constr = cs.vcat([impl_euler, invdyn])
 
-a = cs.SX.sym('a', model.nv)
+# a = cs.SX.sym("a", model.nv)
+a = (vn - v) / dt
 
 rnea_dq, rnea_dv, rnea_da = cpin.computeRNEADerivatives(cpin_model, cpin_data, q, v, a)
 
-atri.generate_and_compile(
-    "rnea",
-    [q, v, qn, vn, tq],
-    dyn_constr,
-    "gen",
-    keep_c_src=True,
-    keep_raw=True,
-    gen_jacobian=True,
-)
+# rnea_dq = cs.substitute(rnea_dq, a, (vn - v) / dt)
+rnea_dv = rnea_dv - rnea_da / dt
+rnea_dvn = rnea_da / dt
+
+in_args = [q, v, qn, vn, tq]
+
+jac_pos = [(e, cs.jacobian(impl_euler, e)) for e in in_args]
+jac_vel = []
+jac_vel.append((q, rnea_dq))
+jac_vel.append((v, rnea_dv))
+jac_vel.append((vn, rnea_dvn))
+jac_vel.append((tq, -cs.SX_eye(model.nv)))
+
+
+# atri.generate_and_compile(
+#     "euler",
+#     [q, qn, vn],
+#     impl_euler,
+#     "gen",
+#     keep_c_src=True,
+#     keep_raw=True,
+#     gen_jacobian=True,
+#     ext_jac=jac_pos,
+# )
+
+# atri.generate_and_compile(
+#     "rnea",
+#     [q, v, vn, tq],
+#     invdyn,
+#     "gen",
+#     keep_c_src=True,
+#     keep_raw=True,
+#     gen_jacobian=True,
+#     ext_jac=jac_vel,
+# )
+
+eval_ = atri.external_function("gen/librnea.so", "rnea")
+ad = atri.external_function("gen/librnea_jac_ad.so", "rnea_jac")
+
+ana = atri.external_function("gen/librnea_jac.so", "rnea_jac")
+
+import numpy as np
+
+# todo: make auto random tests
+q = np.random.random((model.nq, 1))
+v = np.random.random((model.nv, 1))
+vn = np.random.random((model.nv, 1))
+tq = np.random.random((model.nv, 1))
+
+tau = np.zeros(model.nv)
+eval_([q, v, vn, tq], tau)
+print("eval\n", tau.flatten())
+print("gt  \n", pin.rnea(model, data, q, v, (vn - v) / dt).flatten() - tq.flatten())
+
+jac_ad = [np.zeros((model.nv, e.shape[0])) for e in [q, v, vn, tq]]
+
+ad([q, v, vn, tq], jac_ad)
+
+# print("ad:\n", jac_ad)
+
+jac_ana = [np.zeros((model.nv, e.shape[0])) for e in [q, v, vn, tq]]
+
+ana([q, v, vn, tq], jac_ana)
+
+# print("ana\n", jac_ana)
+print("res\n", np.max(np.abs(jac_ana[1] - jac_ad[1])))
 
 # pos_d = atri.sym("pos_d", 3, atri.field_p)
 
