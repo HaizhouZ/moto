@@ -24,7 +24,8 @@ sparse_approx_data::sparse_approx_data(sym_data *primal,
                     jac_.push_back(raw->approx_[f->field_].jac_[in_args[i]->field_].block(
                         f_st, raw->prob_->get_expr_start(in_args[i]),
                         f->dim_, in_args[i]->dim_));
-                }
+                } else // useless
+                    jac_.push_back(raw->approx_[f->field_].jac_[in_args[i]->field_]);
             }
         }
     } else { // for cost
@@ -32,7 +33,8 @@ sparse_approx_data::sparse_approx_data(sym_data *primal,
             if (in_args[i]->field_ < field::num_prim) {
                 jac_.push_back(raw->jac_[in_args[i]->field_].segment(
                     raw->prob_->get_expr_start(in_args[i]), in_args[i]->dim_));
-            }
+            } else // useless
+                jac_.push_back(raw->approx_[f->field_].jac_[in_args[i]->field_]);
         }
     }
 

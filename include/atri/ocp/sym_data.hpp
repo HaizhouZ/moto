@@ -17,7 +17,7 @@ struct sym_data {
     }
 
     auto get(const sym& sym) {
-        return get(sym.get());
+        return get(sym.ptr());
     }
 
     problem_ptr_t prob_;

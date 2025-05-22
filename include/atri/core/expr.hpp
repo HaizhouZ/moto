@@ -2,6 +2,7 @@
 #define __EXPRESSION_BASE__
 
 #include <atri/core/fields.hpp>
+#include <casadi/casadi.hpp>
 
 namespace atri {
 class expr;
@@ -24,7 +25,7 @@ class expr {
 
     expr(expr &&rhs)
         : name_(std::move(rhs.name_)), dim_(rhs.dim_), uid_(rhs.uid_), field_(rhs.field_) {}
-        
+
     auto make_vec(scalar_t *ptr) { return mapped_vector(ptr, dim_); }
 
     auto make_vec(const scalar_t *ptr) { return mapped_const_vector(ptr, dim_); }
@@ -38,16 +39,20 @@ class expr {
     virtual ~expr() = default;
 };
 
+namespace cs = casadi;
+
 /**
  * @brief wrapper of symbolic expressions like primal variables or parameters
  * @note in fact a pointer!
  */
-struct sym : public expr_ptr_t {
+struct sym : public expr_ptr_t, public cs::SX {
     sym(const std::string &name, size_t dim, field_t type)
-        : expr_ptr_t(new expr(name, dim, type)) {
+        : expr_ptr_t(new expr(name, dim, type)), cs::SX(cs::SX::sym(name, dim)) {
         assert(size_t(type) <= field::num_sym);
     }
     sym() = default;
+    using expr_ptr_t::operator->;
+    auto *ptr() const { return expr_ptr_t::get(); }
 };
 
 /**
