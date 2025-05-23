@@ -8,14 +8,15 @@ namespace ns_riccati {
 void pre_solving_steps_0(node *cur) {
     // collect constraint residuals and jacobians
     auto &d = get_data(cur);
-    [[maybe_unused]] auto &nsp = *d.nsp_;
     d.raw_->cost_.setZero();
-    for (auto m : {d.Q_x, d.Q_u, d.Q_y}) {
-        m.setZero();
-    }
-    for (auto m : {d.Q_xx, d.Q_ux, d.Q_uu, d.Q_yx, d.Q_yy}) {
-        m.setZero();
-    }
+    d.Q_x.setZero();
+    d.Q_u.setZero();
+    d.Q_y.setZero();
+    d.Q_xx.setZero(); 
+    d.Q_ux.setZero(); 
+    d.Q_uu.setZero(); 
+    d.Q_yx.setZero(); 
+    d.Q_yy.setZero();
     // update everything
     cur->update_approximation();
 }

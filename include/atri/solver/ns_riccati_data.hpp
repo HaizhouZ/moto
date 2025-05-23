@@ -18,8 +18,14 @@ struct riccati_data : public node_data {
     size_t nx, nu, ns, nc, ncstr;
     size_t nz;
     // value function
-    row_vector_ref Q_x, Q_u, Q_y;
-    matrix_ref Q_xx, Q_ux, Q_uu, Q_yx, Q_yy;
+    row_vector& Q_x;
+    row_vector& Q_u;
+    row_vector& Q_y;
+    matrix& Q_xx;
+    matrix& Q_ux;
+    matrix& Q_uu;
+    matrix& Q_yx;
+    matrix& Q_yy;
 
     nullspace_data *nsp_;
 

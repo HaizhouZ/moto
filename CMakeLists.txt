@@ -11,7 +11,7 @@ find_package(OpenBLAS REQUIRED)
 find_package(magic_enum REQUIRED)
 find_package(fmt REQUIRED)
 find_package(OpenMP REQUIRED)
-find_package(CASADI 3.7 REQUIRED)
+find_package(CASADI REQUIRED)
 find_package(Boost REQUIRED COMPONENTS regex)
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
@@ -60,7 +60,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
     # OpenBLAS::OpenBLAS 
     # "/usr/local/blasfeo/lib/libblasfeo.so"
     ${LIBS}
-    casadi::casadi
+    casadi
     OpenMP::OpenMP_CXX
     magic_enum::magic_enum
     fmt::fmt)

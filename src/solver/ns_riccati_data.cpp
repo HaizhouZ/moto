@@ -25,6 +25,7 @@ riccati_data::riccati_data(problem_ptr_t prob)
     nsp_->s_0_p_k.resize(ns);
     nsp_->s_0_p_K.resize(ns, nx);
     nsp_->s_u.resize(ns, nu);
+    nsp_->Q_yy_F_0_K.resize(nx, nx);
     nsp_->s_c_stacked.resize(ncstr, nu);
     nsp_->s_c_stacked_0_k.resize(ncstr);
     nsp_->s_c_stacked_0_K.resize(ncstr, nx);

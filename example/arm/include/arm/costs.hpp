@@ -5,55 +5,16 @@
 #include <atri/ocp/cost.hpp>
 
 namespace atri {
-
-auto load_eval(const std::string &func_name) {
-    return ext_func("gen/" + func_name + ".so", func_name);
-}
-
-auto make_eval(const std::string &func_name) {
-    return [func_name](sparse_approx_data &data) {
-        static ext_func func = load_eval(func_name);
-        func.invoke(data.in_args_, data.v_);
-    };
-}
-
-auto make_jac(const std::string &func_name) {
-    return [func_name](sparse_approx_data &data) {
-        static ext_func func = load_eval(func_name + "_jac");
-        func.invoke(data.in_args_, data.jac_);
-    };
-}
-
-// auto make_hess(const std::string &func_name) {
-//     return [func_name](sparse_approx_data &data) {
-//         static ext_func func = load_eval(func_name + "_hess");
-//         /// @todo finish
-//         func.invoke(data.in_args_, data.hess_);
-//     };
-// }
-
 struct armCosts {
     struct ee_cost : public cost_impl {
         vector d_r;
         inline static sym r_des{"r_des", 3, __p};
-        ee_cost(sym q) : cost_impl("ee_cost") {
+        ee_cost(sym q) : cost_impl("kin_cost") {
             d_r.resize(3);
             d_r.setConstant(100);
 
             add_arguments({q, r_des});
-            value = [](sparse_approx_data &data) {
-                static ext_func kin_cost("gen/libkin_cost.so", "kin_cost");
-                kin_cost.invoke(data.in_args_, data.v_);
-            };
-            jacobian = [this](sparse_approx_data &data) { // make sure use +=
-                static ext_func kin_cost("gen/libkin_cost_jac.so", "kin_cost_jac");
-                kin_cost.invoke(data.in_args_, data.jac_[0]);
-            };
-            hessian = [this](sparse_approx_data &data) {
-                static ext_func kin_cost("gen/libkin_cost_hess.so", "kin_cost_hess");
-                /// @todo: automated this
-                kin_cost.invoke(data.in_args_, data.hess_[0][0]);
-            };
+            load_external();
         }
     };
     struct state_cost : public cost_impl {

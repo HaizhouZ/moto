@@ -91,6 +91,7 @@ atri.generate_and_compile(
     exclude=[pos_d],
     ext_jac=[(q, kin_cost_jac)],
     ext_hess=[(q, q, kin_cost_hess)],
+    keep_c_src=True
 )
 
 atri.wait_until_generated()

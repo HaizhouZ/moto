@@ -298,7 +298,7 @@ void generate_and_compile(const std::string &func_name,
                           cs::SX sx_output) {
     size_t n_in = opt.sx_inputs.size();
     if (opt.gen_eval)
-        workers.push_back(std::async(std::launch::async, [func_name, opt, sx_output]() {
+        workers.push_back(std::async(std::launch::deferred, [func_name, opt, sx_output]() {
             generate_eigen_cpp(func_name, opt, {sx_output});
         }));
     std::set<size_t> excluded;
@@ -331,14 +331,14 @@ void generate_and_compile(const std::string &func_name,
                 try {
                     cs::Function f_ad(func_name + "_ad", to_sx_list(opt.sx_inputs), ad_jacs);
                     // Here you can wrap f_ad if needed
-                    workers.push_back(std::async(std::launch::async, [func_name, opt, jacs, f_ad]() {
+                    workers.push_back(std::async(std::launch::deferred, [func_name, opt, jacs, f_ad]() {
                         generate_eigen_cpp(func_name + "_jac", opt, jacs, true, f_ad);
                     }));
                 } catch (const std::exception& ex) {
                     throw ex;
                 }
             } else {
-                workers.push_back(std::async(std::launch::async, [func_name, opt, jacs]() {
+                workers.push_back(std::async(std::launch::deferred, [func_name, opt, jacs]() {
                     generate_eigen_cpp(func_name + "_jac", opt, jacs);
                 }));
             }

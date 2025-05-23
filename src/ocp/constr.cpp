@@ -1,7 +1,6 @@
 #include <atri/core/external_function.hpp>
 #include <atri/ocp/approx_storage.hpp>
 #include <atri/ocp/constr.hpp>
-#include <filesystem>
 #include <iostream>
 namespace atri {
 constr_data::constr_data(approx_storage *raw,
@@ -16,24 +15,19 @@ constr_data::constr_data(approx_storage *raw,
             raw->prob_->get_expr_start(in_args[i]), in_args[i]->dim_));
     }
 }
+
 void constr_impl::load_external(const std::string &path) {
-    std::filesystem::path p(path);
-    ext_func eval(p / ("lib" + name_ + ".so"), name_);
-    value = [eval](sparse_approx_data &d) {
+    auto funcs = load_approx(name_, true, order() >= approx_order::first, order() >= approx_order::second);
+    value = [eval = funcs[0]](sparse_approx_data &d) {
         eval.invoke(d.in_args_, d.v_);
     };
-    if (order() >= approx_order::first) {
-        ext_func jac(p / ("lib" + name_ + "_jac.so"), name_ + "_jac");
-        jacobian = [jac](sparse_approx_data &d) {
-            jac.invoke(d.in_args_, d.jac_);
-        };
-    }
-    if (order() >= approx_order::second) {
-        ext_func hess(p / ("lib" + name_ + "_hess.so"), name_ + "_hess");
-        hessian = [hess](constr_data &d) {
-            hess.invoke(d.in_args_, d.jac_);
-        };
-    }
+    jacobian = [jac = funcs[1]](sparse_approx_data &d) {
+        jac.invoke(d.in_args_, d.jac_);
+    };
+
+    hessian = [hess = funcs[2]](constr_data &d) {
+        hess.invoke(d.in_args_, d.hess_);
+    };
 }
 void constr_impl::jacobian_impl(sparse_approx_data &data) {
     // compute jacobian first

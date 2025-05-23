@@ -14,7 +14,7 @@ namespace ns_riccati {
  */
 struct nullspace_data {
     // jacobian
-    matrix_ref s_y; ///< state constraint derivative w.r.t. y
+    matrix& s_y; ///< state constraint derivative w.r.t. y
     // nullspace
     matrix U;                            ///< projected u hessian
     matrix U_z;                          ///< nullspace u hessian
@@ -33,13 +33,14 @@ struct nullspace_data {
     matrix F_u;                          ///< \f$f_y^{-1}f_u\f$
     vector F_0_k;                        ///< \f$s_yf\f$
     matrix F_0_K;                        ///< \f$s_yf_x\f$
+    matrix Q_yy_F_0_K;
     matrix s_c_stacked;                  ///< \f$[s_u;c_u]\f$
     vector s_c_stacked_0_k;              ///< \f$[s;c]\f$
     matrix s_c_stacked_0_K;              ///< \f$[s_x;c_x]\f$
     Eigen::FullPivLU<matrix> lu_eq_;     ///< LU factorizer of the eq constraints
     Eigen::LLT<matrix> llt_ns_;          ///< LLT solver of the projected hessian
     Eigen::PartialPivLU<matrix> lu_dyn_; ///< LU solver of the dynamics derivative \f$f_y\f$
-    nullspace_data(matrix_ref _s_y) : s_y(_s_y) {}
+    nullspace_data(matrix& _s_y) : s_y(_s_y) {}
 };
 } // namespace ns_riccati
 } // namespace atri

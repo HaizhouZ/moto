@@ -17,6 +17,8 @@ struct cost_impl : public approx {
           value(std::move(rhs.value)),
           jacobian(std::move(rhs.jacobian)),
           hessian(std::move(rhs.hessian)) {}
+          
+    void load_external(const std::string &path = "gen");
 
   protected: // unify interface with constr
     std::function<void(sparse_approx_data &)> value;
@@ -37,7 +39,7 @@ struct cost_impl : public approx {
 def_ptr(cost_impl);
 /**
  * @brief wrapper of cost_impl, in fact a pointer
- * 
+ *
  */
 struct cost : public cost_impl_ptr_t {
     cost(const std::string &name)

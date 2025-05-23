@@ -22,7 +22,8 @@ void backward_pass(node *cur, node *prev) {
     // bool U_invertible = isPositiveDefinite(nsp.U);
     // compute bar{u}_0
     nsp.u_0_p_k.noalias() = d.Q_u.transpose() - nsp.F_u.transpose() * (d.Q_y.transpose() - d.Q_yy * nsp.F_0_k);
-    nsp.u_0_p_K.noalias() = d.Q_ux - nsp.F_u.transpose() * (d.Q_yx - d.Q_yy * nsp.F_0_K);
+    nsp.Q_yy_F_0_K.noalias() = d.Q_yy * nsp.F_0_K;
+    nsp.u_0_p_K.noalias() = d.Q_ux - nsp.F_u.transpose() * (d.Q_yx - nsp.Q_yy_F_0_K);
     // compute z_u
     if (d.rank_status_ == rank_status::unconstrained) {
         nsp.z_u_k.noalias() = nsp.u_0_p_k;
@@ -52,9 +53,9 @@ void backward_pass(node *cur, node *prev) {
     if (prev != nullptr) [[likely]] {
         auto &d_pre = get_data(prev);
         // update P
-        d_pre.Q_y.noalias() += -d.Q_y * nsp.F_0_K + nsp.F_0_k.transpose() * d.Q_yy * nsp.F_0_K +
+        d_pre.Q_y.noalias() += -d.Q_y * nsp.F_0_K + nsp.F_0_k.transpose() * nsp.Q_yy_F_0_K +
                                nsp.z_u_k.transpose() * d.d_u.K;
-        d_pre.Q_yy.noalias() += nsp.F_0_K.transpose() * d.Q_yy * nsp.F_0_K + nsp.z_u_K.transpose() * d.d_u.K;
+        d_pre.Q_yy.noalias() += nsp.F_0_K.transpose() * nsp.Q_yy_F_0_K + nsp.z_u_K.transpose() * d.d_u.K;
         if (d.ncstr > 0) {
             d.Q_y.noalias() -= nsp.u_y_k.transpose() * nsp.u_0_p_K;
             d.Q_yy.noalias() -= nsp.u_y_K.transpose() * nsp.u_0_p_K;

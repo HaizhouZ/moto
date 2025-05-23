@@ -20,7 +20,7 @@ int main() {
     auto init_node = sqp.graph_.add(ns_sqp::node_type(prob));
     auto end_node = sqp.graph_.add(ns_sqp::node_type(prob_terminal));
 
-    sqp.graph_.add_edge(init_node, end_node, 100);
+    sqp.graph_.add_edge(init_node, end_node, 200);
 
     sqp.graph_.set_head(init_node);
     sqp.graph_.set_tail(end_node);
@@ -29,9 +29,10 @@ int main() {
     //     node->value(armCosts::ee_cost::r_des).setConstant(0.3);
     // });
 
-    for(auto i: range(1000)){
-        sqp.forward();
-    }
+    // for(auto i: range(1000)){
+    //     sqp.forward();
+    // }
+    sqp.update(2000);
 
     fmt::print("well done!\n");
     return 0;
