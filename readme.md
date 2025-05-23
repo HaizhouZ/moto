@@ -30,3 +30,4 @@
 10. more model helpers
 11. KKT residual
 12. line search
+13. matrix sparsity
