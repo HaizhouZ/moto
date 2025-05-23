@@ -50,9 +50,18 @@ struct sym : public expr_ptr_t, public cs::SX {
         : expr_ptr_t(new expr(name, dim, type)), cs::SX(cs::SX::sym(name, dim)) {
         assert(size_t(type) <= field::num_sym);
     }
+    sym(const expr_ptr_t &rhs)
+        : expr_ptr_t(rhs), cs::SX(cs::SX::sym(rhs->name_, rhs->dim_)) {}
     sym() = default;
+
+    bool operator==(const sym &rhs) {
+        return this->ptr() == rhs.ptr();
+    }
+
+    bool empty() { return this->ptr() == nullptr; }
+
     using expr_ptr_t::operator->;
-    auto *ptr() const { return expr_ptr_t::get(); }
+    expr *ptr() const { return expr_ptr_t::get(); }
 };
 
 /**

@@ -3,7 +3,7 @@
 # Requirements
 
 1. Eigen 3 (> 3.4)
-2. CasADi (optional)
+2. CasADi (>3.7 optional)
 3. BLASFEO
 4. OpenMP
 5. libfmt

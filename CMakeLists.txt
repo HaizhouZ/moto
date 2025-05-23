@@ -11,7 +11,8 @@ find_package(OpenBLAS REQUIRED)
 find_package(magic_enum REQUIRED)
 find_package(fmt REQUIRED)
 find_package(OpenMP REQUIRED)
-find_package(CASADI REQUIRED)
+find_package(CASADI 3.7 REQUIRED)
+find_package(Boost REQUIRED COMPONENTS regex)
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
 option(BUILD_DOCUMENTATION "Build documentation with doxygen" OFF)
@@ -47,7 +48,7 @@ include_directories(
     ${EIGEN3_INCLUDE_DIR}
     include
 )
-add_compile_options(-march=native)
+# add_compile_options(-march=native)
 add_compile_definitions(ATRI_USE_OMP)
 
 file(GLOB_RECURSE SRC_FILES src/*.cpp)

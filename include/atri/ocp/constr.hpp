@@ -29,6 +29,9 @@ struct constr_impl : public approx {
         /// @todo : make dual variables
         // if (enable_slack) {
         // }
+        value = [this](auto &d) { approx::value_impl(d); };
+        jacobian = [this](auto &d) { approx::jacobian_impl(d); };
+        hessian = [this](auto &d) { approx::hessian_impl(d); };
     }
 
     constr_impl(constr_impl &&rhs)
@@ -50,6 +53,11 @@ struct constr_impl : public approx {
     void value_impl(sparse_approx_data &data) override final { value(data); }
     void jacobian_impl(sparse_approx_data &data) override final;
     void hessian_impl(sparse_approx_data &data) override final;
+
+  public:
+    std::function<void(sparse_approx_data &)> value;
+    std::function<void(sparse_approx_data &)> jacobian;
+    std::function<void(constr_data &)> hessian;
 };
 def_ptr(constr_impl);
 /**
@@ -65,50 +73,15 @@ struct constr : public constr_impl_ptr_t {
     constr(constr_impl &&impl) : constr_impl_ptr_t(new constr_impl(std::move(impl))) {}
     constr(constr_impl *impl) : constr_impl_ptr_t(impl) {}
     constr(const constr &rhs) = default;
-
-    constr(const std::string &name, std::vector<sym> in_args,
-           const cs::SX &expr, field_t type, approx_order order) {
-        auto p = new constr_impl(name, expr.rows(), type, order);
-        p->add_arguments(in_args);
-        std::vector<cs::SX> sx_args(in_args.begin(), in_args.end());
-        p->value = [=](sparse_approx_data &d) {
-            static auto func = cs::Function(name, sx_args, {expr});
-            std::vector<const double *> in_;
-            for (auto &in : d.in_args_) {
-                in_.push_back(in.data());
-            }
-            func(in_, std::vector<double *>{d.v_.data()});
-        };
-        std::vector<cs::Function> jac_funcs;
-        std::vector<cs::SX> jac_out;
-        for (size_t i = 0; i < sx_args.size(); ++i) {
-            for (size_t j = 0; j < sx_args[i].rows(); j++) {
-                if (in_args[i]->field_ < field::num_prim)
-                    jac_out.push_back(cs::SX::jacobian(expr, sx_args[i](j)));
-            }
-        }
-        cs::Function jac_func(name + "_jac", sx_args, jac_out);
-        p->jacobian = [=](sparse_approx_data &d) {
-            std::vector<const double *> in_;
-            for (auto &in : d.in_args_) {
-                in_.push_back(in.data());
-            }
-            // Flatten jacobian storage for each argument
-            std::vector<double *> jac_flat;
-            size_t idx_arg = 0;
-            for (auto jac : d.jac_) {
-                if (d.f_->in_args()[idx_arg]->field_ < field::num_prim) {
-                    for (size_t i_row : range(jac.cols())) {
-                        jac_flat.push_back(jac.col(i_row).data());
-                    }
-                }
-                idx_arg++;
-            }
-            jac_func(in_, jac_flat);
-        };
-        reset(p);
-    }
 };
+
+// struct casadi_approx {
+//     casadi_approx(const std::string &name, std::vector<sym> in_args,
+//                   const cs::SX &expr, field_t type, approx_order order) {
+        
+//     }
+// };
+
 } // namespace atri
 
 #endif // ATRI_CONSTR_HPP

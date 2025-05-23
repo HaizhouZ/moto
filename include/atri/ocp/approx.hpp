@@ -71,13 +71,16 @@ class approx : public expr {
 
   public:
     virtual void value_impl([[maybe_unused]] sparse_approx_data &data) {
-        value(data);
+        throw std::runtime_error(
+            fmt::format("value not implemented for approx {}", name_));
     };
     virtual void jacobian_impl([[maybe_unused]] sparse_approx_data &data) {
-        jacobian(data);
+        throw std::runtime_error(
+            fmt::format("jacobian not implemented for approx {}", name_));
     };
     virtual void hessian_impl([[maybe_unused]] sparse_approx_data &data) {
-        hessian(data);
+        throw std::runtime_error(
+            fmt::format("hessian not implemented for approx {}", name_));
     };
 
   public:
@@ -105,27 +108,12 @@ class approx : public expr {
            approx_order order)
         : expr(name, dim, field), order_(order) {
         // default
-        value = [this]([[maybe_unused]] sparse_approx_data &data) {
-            throw std::runtime_error(
-                fmt::format("value not implemented for approx {}", name_));
-        };
-        jacobian = [this]([[maybe_unused]] sparse_approx_data &data) {
-            throw std::runtime_error(
-                fmt::format("jacobian not implemented for approx {}", name_));
-        };
-        hessian = [this]([[maybe_unused]] sparse_approx_data &data) {
-            throw std::runtime_error(
-                fmt::format("hessian not implemented for approx {}", name_));
-        };
     }
 
     approx(approx &&rhs)
         : expr(std::move(rhs)), order_(rhs.order_),
           in_args_(std::move(rhs.in_args_)),
-          sym_uid_idx_(std::move(rhs.sym_uid_idx_)),
-          value(std::move(rhs.value)),
-          jacobian(std::move(rhs.jacobian)),
-          hessian(std::move(rhs.hessian)) {}
+          sym_uid_idx_(std::move(rhs.sym_uid_idx_)) {}
     /**
      * @brief get other variables related to this approximation
      * @details here it is the input arguments, probably also parameters in the future
@@ -159,9 +147,6 @@ class approx : public expr {
         if (eval_hess)
             hessian_impl(data);
     }
-    std::function<void(sparse_approx_data &)> value;
-    std::function<void(sparse_approx_data &)> jacobian;
-    std::function<void(sparse_approx_data &)> hessian;
 };
 def_ptr(approx);
 } // namespace atri
