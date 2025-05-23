@@ -48,7 +48,7 @@ include_directories(
     ${EIGEN3_INCLUDE_DIR}
     include
 )
-# add_compile_options(-march=native)
+add_compile_options(-march=native)
 add_compile_definitions(ATRI_USE_OMP)
 
 file(GLOB_RECURSE SRC_FILES src/*.cpp)
@@ -60,7 +60,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
     # OpenBLAS::OpenBLAS 
     # "/usr/local/blasfeo/lib/libblasfeo.so"
     ${LIBS}
-    casadi
+    casadi::casadi
     OpenMP::OpenMP_CXX
     magic_enum::magic_enum
     fmt::fmt)

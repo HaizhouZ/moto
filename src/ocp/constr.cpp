@@ -1,5 +1,7 @@
+#include <atri/core/external_function.hpp>
 #include <atri/ocp/approx_storage.hpp>
 #include <atri/ocp/constr.hpp>
+#include <filesystem>
 #include <iostream>
 namespace atri {
 constr_data::constr_data(approx_storage *raw,
@@ -10,11 +12,27 @@ constr_data::constr_data(approx_storage *raw,
                                                 f->dim_)) {
     const auto &in_args = f->in_args();
     for (size_t i = 0; i < in_args_.size(); i++) {
-        // std::cout << "Processing in_arg[" << i << "]: name = " << in_args[i]->name_
-        //           << ", field = " << in_args[i]->field_
-        //           << ", dim = " << in_args[i]->dim_ << std::endl;
         vjp_.push_back(raw->jac_[in_args[i]->field_].segment(
             raw->prob_->get_expr_start(in_args[i]), in_args[i]->dim_));
+    }
+}
+void constr_impl::load_external(const std::string &path) {
+    std::filesystem::path p(path);
+    ext_func eval(p / ("lib" + name_ + ".so"), name_);
+    value = [eval](sparse_approx_data &d) {
+        eval.invoke(d.in_args_, d.v_);
+    };
+    if (order() >= approx_order::first) {
+        ext_func jac(p / ("lib" + name_ + "_jac.so"), name_ + "_jac");
+        jacobian = [jac](sparse_approx_data &d) {
+            jac.invoke(d.in_args_, d.jac_);
+        };
+    }
+    if (order() >= approx_order::second) {
+        ext_func hess(p / ("lib" + name_ + "_hess.so"), name_ + "_hess");
+        hessian = [hess](constr_data &d) {
+            hess.invoke(d.in_args_, d.jac_);
+        };
     }
 }
 void constr_impl::jacobian_impl(sparse_approx_data &data) {

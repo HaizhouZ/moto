@@ -37,6 +37,8 @@ struct constr_impl : public approx {
     constr_impl(constr_impl &&rhs)
         : approx(std::move(rhs)) {}
 
+    void load_external(const std::string &path = "gen");
+
     /**
      * @brief wrapped data maker for constr
      *
@@ -78,7 +80,7 @@ struct constr : public constr_impl_ptr_t {
 // struct casadi_approx {
 //     casadi_approx(const std::string &name, std::vector<sym> in_args,
 //                   const cs::SX &expr, field_t type, approx_order order) {
-        
+
 //     }
 // };
 
