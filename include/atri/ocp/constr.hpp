@@ -12,6 +12,7 @@ struct constr_impl; // fwd
 struct constr_data : public sparse_approx_data {
     /// @todo: add this to raw
     // vector_ref slack_;
+    double* merit_;
     vector_ref multiplier_;
     std::vector<row_vector_ref> vjp_;
     constr_data(approx_storage *raw, sparse_approx_data &&d, constr_impl *cstr);
@@ -55,7 +56,7 @@ struct constr_impl : public approx {
     }
 
   private:
-    void value_impl(sparse_approx_data &data) override final { value(data); }
+    void value_impl(sparse_approx_data &data) override final;
     void jacobian_impl(sparse_approx_data &data) override final;
     void hessian_impl(sparse_approx_data &data) override final;
 

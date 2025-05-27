@@ -44,9 +44,11 @@ void ns_sqp::update(size_t n_iter) {
         // );
         std::atomic<double> cost_all{0.};
         graph_.apply_all_unary_parallel([&cost_all](node_type *n) {
-            cost_all += n->data_->dense_->cost_(0);
+            cost_all += n->data_->dense_->cost_;
         });
+
         fmt::print("cost_total: {}\n", cost_all);
+        /// @todo: check langrangian
     }
     // });
     atri::utils::timing_storage<"all">::get().count = n_iter;

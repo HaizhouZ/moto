@@ -7,11 +7,12 @@
 #include <fmt/format.h>
 #include <sstream>
 
-template <typename T, int Rows, int Cols, int Options, int MaxRows, int MaxCols>
-struct fmt::formatter<Eigen::Matrix<T, Rows, Cols, Options, MaxRows, MaxCols>> {
+template <typename derived>
+    requires std::is_base_of_v<Eigen::MatrixBase<derived>, derived>
+struct fmt::formatter<derived> {
     int precision = 2;
 
-    constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
+    constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
         auto it = ctx.begin();
         auto end = ctx.end();
 
@@ -33,8 +34,8 @@ struct fmt::formatter<Eigen::Matrix<T, Rows, Cols, Options, MaxRows, MaxCols>> {
     }
 
     template <typename FormatContext>
-    auto format(const Eigen::Matrix<T, Rows, Cols, Options, MaxRows, MaxCols>& mat,
-                FormatContext& ctx) -> decltype(ctx.out()) {
+    auto format(const Eigen::MatrixBase<derived> &mat,
+                FormatContext &ctx) -> decltype(ctx.out()) {
         std::ostringstream oss;
         if (precision >= 0) {
             Eigen::IOFormat cleanFmt(precision, 0, ", ", "\n", "[", "]");

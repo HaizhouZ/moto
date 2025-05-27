@@ -19,8 +19,7 @@ approx_storage::approx_storage(problem_ptr_t prob) : prob_(prob) {
         dual_[i].setZero();
     }
     // cost val
-    cost_.resize(1);
-    cost_.setZero();
+    cost_ = 0;
     // cost hessian(store only half)
     for (auto i : range(field::num_prim)) {
         for (auto j : range(i, field::num_prim)) {

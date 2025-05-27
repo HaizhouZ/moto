@@ -8,7 +8,7 @@ namespace ns_riccati {
 void pre_solving_steps_0(node *cur) {
     // collect constraint residuals and jacobians
     auto &d = get_data(cur);
-    d.dense_->cost_.setZero();
+    d.dense_->cost_ = 0.;
     d.Q_x.setZero();
     d.Q_u.setZero();
     d.Q_y.setZero();

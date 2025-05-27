@@ -26,15 +26,17 @@ int main() {
     sqp.graph_.set_tail(end_node);
     init_node->value(dyn.q).setRandom();
 
-
     sqp.graph_.apply_all_unary_parallel([](ns_sqp::node_type *node) {
-        node->value(armCosts::ee_cost::r_des).setConstant(0.3);
+        node->value(armCosts::ee_cost::r_des).setConstant(0.5);
     });
 
     // for(auto i: range(1000)){
     //     sqp.forward();
     // }
-    sqp.update(10);
+    try {
+        sqp.update(10);
+    } catch (...) {
+    }
 
     sqp.graph_.apply_all_unary_forward([&dyn](ns_sqp::node_type *node) {
         auto &data = ns_riccati::get_data(node);
@@ -47,7 +49,8 @@ int main() {
         // std::cout << "dual  " << static_cast<constr_data &>(node->data(dyn.vel_zero_constr)).multiplier_.transpose() << '\n';
         // std::cout << "sy    " << data.nsp_->s_y << '\n';
         // std::cout << "su    " << data.nsp_->s_u << '\n';
-        //     std::cout << "resdy " << data.dense_->approx_[__dyn].v_.transpose() << '\n';
+        // std::cout << "resdy " << data.dense_->approx_[__dyn].v_.transpose() << '\n';
+        // std::cout << "jacdy \n" << data.dense_->approx_[__dyn].jac_[__y] << '\n';
         //     std::cout << "dual  " << data.dense_->dual_[__dyn].transpose() << '\n';
         //     std::cout << "Qx    " << data.Q_x << '\n';
         //     std::cout << "Qu    " << data.Q_u << '\n';

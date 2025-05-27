@@ -20,7 +20,7 @@ struct approx_storage {
     };
     shifted_array<raw_approx, field::num_constr, __dyn> approx_;
     shifted_array<vector, field::num_constr, __dyn> dual_;
-    vector cost_;
+    scalar_t cost_;
     // cost jacobian
     array<row_vector, field::num_prim> jac_;
     // cost hessian h[a][b] is h_ab. Note only the upper block-triangular part is stored

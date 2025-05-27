@@ -44,7 +44,7 @@ struct armCosts {
         vector d_a;
         input_cost(sym a) : cost_impl("dI_input_cost") {
             d_a.resize(7);
-            d_a.setConstant(1e-3);
+            d_a.setConstant(1e-2);
             add_arguments({a});
             value = [&](sparse_approx_data &data) {
                 data.v_.noalias() += 0.5 * d_a.transpose() * data.in_args_[0].cwiseAbs2();

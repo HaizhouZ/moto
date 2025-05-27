@@ -4,25 +4,15 @@
 
 namespace atri {
 namespace ns_riccati {
-// bool isPositiveDefinite(const Eigen::MatrixXd &A) {
-//     if (!A.isApprox(A.transpose())) {
-//         // Not symmetric
-//         fmt::println("matrix non symmetric");
-//         return false;
-//     }
-//     Eigen::LLT<Eigen::MatrixXd> llt(A);
-//     return llt.info() == Eigen::Success;
-// }
 void backward_pass(node *cur, node *prev) {
     auto &d = get_data(cur);
     auto &nsp = *d.nsp_;
     // check positiveness
     // bool qyy_invertible = isPositiveDefinite(d.Q_yy);
-    nsp.U.noalias() = d.Q_uu + nsp.F_u.transpose() * d.Q_yy * nsp.F_u;
-    nsp.U.array() /= 2;
+    d.Q_yy.array() /= 2;
     /// @todo: temporary
-    nsp.U = nsp.U + nsp.U.transpose().eval(); 
-    // bool U_invertible = isPositiveDefinite(nsp.U);
+    d.Q_yy = d.Q_yy + d.Q_yy.transpose().eval();
+    nsp.U.noalias() = d.Q_uu + nsp.F_u.transpose() * d.Q_yy * nsp.F_u;
     // compute bar{u}_0
     nsp.u_0_p_k.noalias() = d.Q_u.transpose() - nsp.F_u.transpose() * (d.Q_y.transpose() - d.Q_yy * nsp.F_0_k);
     nsp.Q_yy_F_0_K.noalias() = d.Q_yy * nsp.F_0_K;
@@ -34,9 +24,10 @@ void backward_pass(node *cur, node *prev) {
         d.d_u.K.noalias() = -nsp.z_u_K;
         nsp.llt_ns_.compute(nsp.U);
         if (nsp.llt_ns_.info() != Eigen::Success) {
-            std::cout << "nsp.U\n"
-                      << nsp.U << '\n';
-            throw std::runtime_error("fail to solve LLT");
+            fmt::print("Q_uu: \n{}\n", d.Q_uu);
+            fmt::print("Q_yy: \n{}\n", d.Q_yy);
+            fmt::print("U: \n{}\n", nsp.U);
+            throw std::runtime_error("U is not positive definite");
         }
         nsp.llt_ns_.solveInPlace(d.d_u.K);
     } else {
