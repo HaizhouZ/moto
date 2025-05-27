@@ -30,6 +30,7 @@ void backward_pass(node *cur, node *prev) {
         nsp.z_u_K.noalias() = nsp.u_0_p_K;
         d.d_u.K.noalias() = -nsp.z_u_K;
         nsp.llt_ns_.compute(nsp.U);
+        assert(nsp.llt_ns_.info() == Eigen::Success);
         nsp.llt_ns_.solveInPlace(d.d_u.K);
     } else {
         // constr rank > 0

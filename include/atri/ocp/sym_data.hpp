@@ -9,6 +9,7 @@ struct sym_data {
     sym_data(problem_ptr_t prob) : prob_(prob) {
         for (size_t i = 0; i < field::num_sym; i++) {
             value_[i].resize(prob_->dim_[i]);
+            value_[i].setZero();
         }
     }
 

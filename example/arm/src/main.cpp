@@ -25,10 +25,9 @@ int main() {
     sqp.graph_.set_head(init_node);
     sqp.graph_.set_tail(end_node);
     init_node->value(dyn.q).setRandom();
-    init_node->value(dyn.v).setZero();
 
 
-    sqp.graph_.apply_all_unary_parallel([](auto *node) {
+    sqp.graph_.apply_all_unary_parallel([](ns_sqp::node_type *node) {
         node->value(armCosts::ee_cost::r_des).setConstant(0.3);
     });
 

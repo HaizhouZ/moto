@@ -33,9 +33,12 @@ struct constr_impl : public approx {
         jacobian = [this](auto &d) { approx::jacobian_impl(d); };
         hessian = [this](auto &d) { approx::hessian_impl(d); };
     }
-
+    constr_impl(const constr_impl &rhs) = delete;
     constr_impl(constr_impl &&rhs)
-        : approx(std::move(rhs)) {}
+        : approx(std::move(rhs)),
+          value(std::move(rhs.value)),
+          jacobian(std::move(rhs.jacobian)),
+          hessian(std::move(rhs.hessian)) {}
 
     void load_external(const std::string &path = "gen");
 

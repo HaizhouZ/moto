@@ -62,7 +62,7 @@ class doubleIntegratorDyn : public dynamics, public collection {
         // trial->add_argument(r);
         // trial->value = [=](auto &d) { d.v_ = d(r); };
         // trial->jacobian = [](sparse_approx_data &d) { d.jac_[0].setIdentity(); };
-        add({dyn_pos, dyn_vel, vel_zero_constr});
+        add({dyn_pos, dyn_vel});
     }
 };
 // another way

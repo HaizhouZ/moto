@@ -35,8 +35,9 @@ int main() {
     sqp.graph_.set_tail(end_node);
 
     init_node->value(dyn.r).setConstant(6);
+    init_node->value(dyn.v).setZero();
 
-    size_t n_iter = 1000;
+    size_t n_iter = 10;
 
     auto start_time = std::chrono::high_resolution_clock::now();
     sqp.update(n_iter);
@@ -56,8 +57,8 @@ int main() {
         auto &data = ns_riccati::get_data(node);
         // std::cout << "delX  " << data.rollout_->prim_[__x].transpose() << '\n';
         // std::cout << magic_enum::enum_name(data.rank_status_) << '\n';
-        // std::cout << "state " << data.sym_->value_[__x].transpose() << '\n';
-        // std::cout << "input " << data.sym_->value_[__u].transpose() << '\n';
+        std::cout << "state " << data.sym_->value_[__x].transpose() << '\n';
+        std::cout << "input " << data.sym_->value_[__u].transpose() << '\n';
         // std::cout << "nexts " << data.sym_->value_[__y].transpose() << '\n';
         // std::cout << "rescs " << node->data(dyn.vel_zero_constr).v_.transpose() << '\n';
         // std::cout << "dual  " << static_cast<constr_data &>(node->data(dyn.vel_zero_constr)).multiplier_.transpose() << '\n';
