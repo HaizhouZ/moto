@@ -33,8 +33,10 @@ sparse_approx_data::sparse_approx_data(sym_data *primal,
             if (in_args[i]->field_ < field::num_prim) {
                 jac_.push_back(raw->jac_[in_args[i]->field_].segment(
                     raw->prob_->get_expr_start(in_args[i]), in_args[i]->dim_));
-            } else // useless
-                jac_.push_back(raw->approx_[f->field_].jac_[in_args[i]->field_]);
+            } else { // useless
+                static matrix empty;
+                jac_.push_back(empty);
+            }
         }
     }
 
@@ -59,7 +61,8 @@ sparse_approx_data::sparse_approx_data(sym_data *primal,
                         }
                     }
                     // this should be empty. do this anyway to make the shape of hess_ right
-                    hess_[i].push_back(raw->hessian_[field_1][field_2]);
+                    static matrix empty;
+                    hess_[i].push_back(empty);
                 }
             }
         }

@@ -43,7 +43,7 @@ struct timing_storage {
      *
      */
     ~timing_storage() {
-        auto avg = durations / count;
+        auto avg = durations / (count != 0 ? count : 1);
         auto per = std::chrono::duration_cast<std::chrono::microseconds>(avg).count();
         fmt::print("{}: {} us\n", label.value, per);
     }

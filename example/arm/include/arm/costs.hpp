@@ -58,10 +58,10 @@ struct armCosts {
         }
     };
     static collection running(sym q, sym v, sym a) {
-        return {new state_cost(q, v), new input_cost(a)}; //, new ee_cost(q)};
+        return {new state_cost(q, v), new input_cost(a), new ee_cost(q)};
     }
     static collection terminal(sym q, sym v) {
-        return {new state_cost(q, v)}; //, new ee_cost(q)};
+        return {new state_cost(q, v), new ee_cost(q)};
     }
 };
 

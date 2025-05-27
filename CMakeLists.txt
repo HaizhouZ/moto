@@ -58,7 +58,7 @@ add_library(${PROJECT_NAME} SHARED ${SRC_FILES})
 message("Linked libraries: ${LIBS}")
 target_link_libraries(${PROJECT_NAME} PUBLIC 
     # OpenBLAS::OpenBLAS 
-    # "/usr/local/blasfeo/lib/libblasfeo.so"
+    # "/usr/local/blasfeo/lib/libblasfeo.a"
     ${LIBS}
     casadi
     OpenMP::OpenMP_CXX
