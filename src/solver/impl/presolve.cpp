@@ -12,10 +12,10 @@ void pre_solving_steps_0(node *cur) {
     d.Q_x.setZero();
     d.Q_u.setZero();
     d.Q_y.setZero();
-    d.Q_xx.setZero(); 
-    d.Q_ux.setZero(); 
-    d.Q_uu.setZero(); 
-    d.Q_yx.setZero(); 
+    d.Q_xx.setZero();
+    d.Q_ux.setZero();
+    d.Q_uu.setZero();
+    d.Q_yx.setZero();
     d.Q_yy.setZero();
     // update everything
     cur->update_approximation();
@@ -79,8 +79,7 @@ void pre_solving_steps_2(node *prev, node *cur) {
     d_pre.Q_y.noalias() += d.Q_x - nsp.F_0_k.transpose() * d.Q_yx;
     // +d.Q_y * d.F_0_K is done in backward pass
     // because Q_y has V_y in it
-    d_pre.Q_yy.noalias() +=
-        d.Q_xx - (d.Q_yx.transpose() * nsp.F_0_K + nsp.F_0_K.transpose() * d.Q_yx);
+    d_pre.Q_yy.noalias() += d.Q_xx - (d.Q_yx.transpose() * nsp.F_0_K + nsp.F_0_K.transpose() * d.Q_yx);
 }
 /// @todo set terminal Q_y, Q_yy
 

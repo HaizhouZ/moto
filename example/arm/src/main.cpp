@@ -34,7 +34,7 @@ int main() {
     // for(auto i: range(1000)){
     //     sqp.forward();
     // }
-    sqp.update(1);
+    sqp.update(10);
 
     sqp.graph_.apply_all_unary_forward([&dyn](ns_sqp::node_type *node) {
         auto &data = ns_riccati::get_data(node);

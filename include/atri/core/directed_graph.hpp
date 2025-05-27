@@ -184,6 +184,9 @@ class directed_graph {
         }
     }
 
+    node* head() {return head_.get();}
+    node* tail() {return tail_.get();}
+
   private:
     node_ptr_t head_ = nullptr;
     /// @todo: multiple tail

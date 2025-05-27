@@ -1,4 +1,3 @@
-#include <atri/ocp/approx_storage.hpp>
 #include <atri/ocp/shooting_node.hpp>
 #include <ranges>
 

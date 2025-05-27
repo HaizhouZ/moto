@@ -4,6 +4,7 @@
 #include <array>
 #include <atri/core/array.hpp>
 #include <atri/ocp/approx.hpp>
+#include <atri/ocp/approx_storage.hpp>
 #include <atri/ocp/sym_data.hpp>
 
 namespace atri {

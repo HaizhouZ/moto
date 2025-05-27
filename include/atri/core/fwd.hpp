@@ -8,6 +8,8 @@
 #include <magic_enum/magic_enum.hpp>
 #include <ranges>
 
+#include <atri/utils/eigen_fmt.h>
+
 namespace atri {
 typedef double scalar_t;
 typedef Eigen::Vector<scalar_t, -1> vector;

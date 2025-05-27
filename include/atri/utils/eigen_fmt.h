@@ -1,0 +1,49 @@
+#ifndef __ATRI_FMT_EIGEN__
+#define __ATRI_FMT_EIGEN__
+
+#include <Eigen/Core>
+#include <charconv>
+#include <fmt/core.h>
+#include <fmt/format.h>
+#include <sstream>
+
+template <typename T, int Rows, int Cols, int Options, int MaxRows, int MaxCols>
+struct fmt::formatter<Eigen::Matrix<T, Rows, Cols, Options, MaxRows, MaxCols>> {
+    int precision = 2;
+
+    constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
+        auto it = ctx.begin();
+        auto end = ctx.end();
+
+        if (it != end && *it == '.') {
+            ++it;
+            int value = 0;
+            while (it != end && *it >= '0' && *it <= '9') {
+                value = value * 10 + (*it - '0');
+                ++it;
+            }
+            precision = value;
+        }
+
+        if (it != end && *it != '}') {
+            throw format_error("Invalid format specifier for Eigen matrix");
+        }
+
+        return it;
+    }
+
+    template <typename FormatContext>
+    auto format(const Eigen::Matrix<T, Rows, Cols, Options, MaxRows, MaxCols>& mat,
+                FormatContext& ctx) -> decltype(ctx.out()) {
+        std::ostringstream oss;
+        if (precision >= 0) {
+            Eigen::IOFormat cleanFmt(precision, 0, ", ", "\n", "[", "]");
+            oss << mat.format(cleanFmt);
+        } else {
+            oss << mat;
+        }
+        return fmt::format_to(ctx.out(), "{}", oss.str());
+    }
+};
+
+#endif

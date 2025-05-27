@@ -19,6 +19,9 @@ void backward_pass(node *cur, node *prev) {
     // check positiveness
     // bool qyy_invertible = isPositiveDefinite(d.Q_yy);
     nsp.U.noalias() = d.Q_uu + nsp.F_u.transpose() * d.Q_yy * nsp.F_u;
+    nsp.U.array() /= 2;
+    /// @todo: temporary
+    nsp.U = nsp.U + nsp.U.transpose().eval(); 
     // bool U_invertible = isPositiveDefinite(nsp.U);
     // compute bar{u}_0
     nsp.u_0_p_k.noalias() = d.Q_u.transpose() - nsp.F_u.transpose() * (d.Q_y.transpose() - d.Q_yy * nsp.F_0_k);
@@ -30,7 +33,11 @@ void backward_pass(node *cur, node *prev) {
         nsp.z_u_K.noalias() = nsp.u_0_p_K;
         d.d_u.K.noalias() = -nsp.z_u_K;
         nsp.llt_ns_.compute(nsp.U);
-        assert(nsp.llt_ns_.info() == Eigen::Success);
+        if (nsp.llt_ns_.info() != Eigen::Success) {
+            std::cout << "nsp.U\n"
+                      << nsp.U << '\n';
+            throw std::runtime_error("fail to solve LLT");
+        }
         nsp.llt_ns_.solveInPlace(d.d_u.K);
     } else {
         // constr rank > 0

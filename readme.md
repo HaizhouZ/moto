@@ -31,3 +31,4 @@
 11. KKT residual
 12. line search
 13. matrix sparsity
+14. md5 gen and recompile
