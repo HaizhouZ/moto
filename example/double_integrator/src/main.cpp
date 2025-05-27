@@ -64,8 +64,8 @@ int main() {
         // std::cout << "dual  " << static_cast<constr_data &>(node->data(dyn.vel_zero_constr)).multiplier_.transpose() << '\n';
         // std::cout << "sy    " << data.nsp_->s_y << '\n';
         // std::cout << "su    " << data.nsp_->s_u << '\n';
-        //     std::cout << "resdy " << data.raw_->approx_[__dyn].v_.transpose() << '\n';
-        //     std::cout << "dual  " << data.raw_->dual_[__dyn].transpose() << '\n';
+        //     std::cout << "resdy " << data.dense_->approx_[__dyn].v_.transpose() << '\n';
+        //     std::cout << "dual  " << data.dense_->dual_[__dyn].transpose() << '\n';
         //     std::cout << "Qx    " << data.Q_x << '\n';
         //     std::cout << "Qu    " << data.Q_u << '\n';
         //     std::cout << "Qy    " << data.Q_y << '\n';
@@ -75,7 +75,7 @@ int main() {
         //     // std::cout << data.nsp_->U << '\n';
         //     // std::cout << data.Q_y.transpose() << '\n' << '\n';
         //     // std::cout << data.Q_yx << '\n' << '\n';
-        //     // std::cout << data.raw_->approx_[__dyn].v_[__x] << '\n' << '\n';
+        //     // std::cout << data.dense_->approx_[__dyn].v_[__x] << '\n' << '\n';
         // std::cout << '\n';
     });
 

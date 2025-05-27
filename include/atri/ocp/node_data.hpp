@@ -18,7 +18,7 @@ def_unique_ptr(node_data);
  */
 struct node_data {
     sym_data *sym_;       /// < dense storage of symbolic data
-    approx_storage *raw_; /// <dense storage of the approx data
+    approx_storage *dense_; /// <dense storage of the approx data
     shifted_array<std::vector<sparse_approx_data_ptr_t>, field::num_func, __dyn>
         sparse_; /// < sparse view per approx
     node_data(problem_ptr_t prob);

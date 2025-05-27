@@ -22,15 +22,15 @@ inline void for_funcs(const problem_ptr_t &prob, Callback &&callback) {
 }
 
 node_data::node_data(problem_ptr_t prob)
-    : sym_(new sym_data(prob)), raw_(new approx_storage(prob)) {
+    : sym_(new sym_data(prob)), dense_(new approx_storage(prob)) {
     for_funcs(prob, [&](size_t field, [[maybe_unused]] size_t idx, approx *_f) {
-        sparse_[field].push_back(_f->make_data(sym_, raw_));
+        sparse_[field].push_back(_f->make_data(sym_, dense_));
     });
 }
 
 node_data::~node_data() {
     delete sym_;
-    delete raw_;
+    delete dense_;
 }
 
 void data_mgr::create_data_batch(problem_ptr_t prob, size_t N) {

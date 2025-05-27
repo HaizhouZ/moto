@@ -8,7 +8,7 @@ namespace ns_riccati {
 void pre_solving_steps_0(node *cur) {
     // collect constraint residuals and jacobians
     auto &d = get_data(cur);
-    d.raw_->cost_.setZero();
+    d.dense_->cost_.setZero();
     d.Q_x.setZero();
     d.Q_u.setZero();
     d.Q_y.setZero();
@@ -25,7 +25,7 @@ void pre_solving_steps_1(node *cur) {
     // collect constraint residuals and jacobians
     auto &d = get_data(cur);
     auto &nsp = *d.nsp_;
-    auto &_approx = d.raw_->approx_;
+    auto &_approx = d.dense_->approx_;
     /// @todo sparse F_y inverse
     auto &F = _approx[__dyn].jac_;
     nsp.lu_dyn_.compute(F[__y]);
