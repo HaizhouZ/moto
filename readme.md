@@ -18,17 +18,15 @@
 
 # Todo list
 
-1. automatic handling of expression derivative
-2. arm test
-3. per node class data
-4. state input respectively node and edge (remodeling)
-5. automatic handling of constraints and symbol field (especially for y)
-6. vjp AD
-7. precompute interface
-8. improve speed with constr
-9. semi-implicit euler helper (cpp)
+1. arm test
+2. KKT residual
+3. line search
+4. per node class data
+5. state input respectively node and edge (remodeling)
+6. automatic handling of constraints and symbol field (especially for y)
+7. vjp AD
+8. semi-implicit euler helper (cpp)
+9.  md5 gen and recompile
 10. more model helpers
-11. KKT residual
-12. line search
-13. matrix sparsity
-14. md5 gen and recompile
+11. precompute interface
+12. matrix sparsity
