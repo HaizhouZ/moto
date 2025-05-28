@@ -57,12 +57,12 @@ class doubleIntegratorDyn : public dynamics, public expr_list {
         a = make_input("acc", 3);
         dyn_pos->add_arguments({r, r_next, v_next});
         dyn_vel->add_arguments({v, v_next, a});
-        vel_zero_constr->add_arguments({v_next});
+        vel_zero_constr->add_arguments({v});
         // constr trial("trial", 3, __eq_cstr_s);
         // trial->add_argument(r);
         // trial->value = [=](auto &d) { d.v_ = d(r); };
         // trial->jacobian = [](sparse_approx_data &d) { d.jac_[0].setIdentity(); };
-        add({dyn_pos, dyn_vel});
+        add({dyn_pos, dyn_vel, vel_zero_constr});
     }
 };
 // another way

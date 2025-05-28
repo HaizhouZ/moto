@@ -43,18 +43,21 @@ class constr_impl : public approx {
                 field = __eq_cstr_s;
             else
                 throw std::runtime_error(fmt::format("unsupported constr type has_x: {}, has_u: {}, has_y: {}", has_[__x], has_[__u], has_[__y]));
-            if (field_ == __eq_cstr_s) {
-                // do in_arg substitute
-                try {
-                    for (auto &arg : in_args_) {
-                        if (arg->field_ == __x) {
-                            arg = sym(expr_index::get(arg->name_ + "_nxt"));
-                        }
+        }
+        if (field_ == __eq_cstr_s) {
+            // do in_arg substitute
+            try {
+                for (auto &arg : in_args_) {
+                    if (arg->field_ == __x) {
+#ifndef NDEBUG
+                        fmt::print("replacing in arg {} of approx {} with {}\n", arg->name_, name_, arg->name_ + "_nxt");
+#endif
+                        arg = sym(expr_index::get(arg->name_ + "_nxt"));
                     }
-                } catch (const std::exception &ex) {
-                    fmt::print("substitute exception");
-                    throw;
                 }
+            } catch (const std::exception &ex) {
+                fmt::print("substitute exception");
+                throw;
             }
         }
         assert(field_ == __dyn || magic_enum::enum_name(field_).find(
