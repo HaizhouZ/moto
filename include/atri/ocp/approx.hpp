@@ -60,9 +60,9 @@ def_unique_ptr(sparse_approx_data);
  * @todo: change to differentiable for precompute
  */
 class approx : public expr {
-  private:
+  protected:
     approx_order order_;
-    std::vector<sym> in_args_;
+    std::vector<expr_ptr_t> in_args_;
     std::unordered_map<size_t, size_t> sym_uid_idx_;
     friend struct sparse_approx_data;
 
@@ -104,8 +104,7 @@ class approx : public expr {
     // order of approximation
     inline approx_order order() { return order_; }
 
-    approx(const std::string &name, size_t dim, field_t field,
-           approx_order order)
+    approx(const std::string &name, approx_order order, size_t dim = 0, field_t field = __undefined)
         : expr(name, dim, field), order_(order) {
         // default
     }

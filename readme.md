@@ -18,15 +18,16 @@
 
 # Todo list
 
-1. state input respectively node and edge (remodeling)
-2. per node class data
-3. automatic handling of constraints and symbol field (especially for y)
-4. arm test
-5. KKT residual
-6. line search
-7. vjp AD
-8. semi-implicit euler helper (cpp)
-9.  md5 gen and recompile
-10. more model helpers
-11. precompute interface
-12. matrix sparsity
+1. external function description json
+2. constraint type automatic detection
+3. constraint dimension automatic detection
+4. per node class data
+5. arm test
+6. KKT residual
+7. line search
+8. vjp AD
+9. semi-implicit euler helper (cpp)
+10. md5 gen and recompile
+11. more model helpers
+12. precompute interface
+13. matrix sparsity

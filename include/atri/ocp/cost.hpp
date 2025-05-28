@@ -1,4 +1,4 @@
-// a collection of cost_impl functions;
+// a expr_list of cost_impl functions;
 // class cost_impl : public approx{
 // void add_cost_impl
 // }
@@ -7,7 +7,7 @@
 namespace atri {
 struct cost_impl : public approx {
     cost_impl(const std::string &name, approx_order order = approx_order::second)
-        : approx(name, 1, __cost, order) {
+        : approx(name, order, 1, __cost) {
         value = [this](auto &d) { approx::value_impl(d); };
         jacobian = [this](auto &d) { approx::jacobian_impl(d); };
         hessian = [this](auto &d) { approx::hessian_impl(d); };

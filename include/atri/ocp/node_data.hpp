@@ -18,13 +18,21 @@ def_unique_ptr(node_data);
  * @note to use your own data class with data_mgr, inherit this class and implement constructor C(problem_ptr_t)
  */
 struct node_data {
-    sym_data *sym_;       /// < dense storage of symbolic data
+    sym_data *sym_;         /// < dense storage of symbolic data
     approx_storage *dense_; /// <dense storage of the approx data
     shifted_array<std::vector<sparse_approx_data_ptr_t>, field::num_func, __dyn>
         sparse_; /// < sparse view per approx
     node_data(problem_ptr_t prob);
     ~node_data();
 };
+// terminal_cost(y), constr(y)
+// we still want to keep the semantics, but user can choose whether they want it
+// x -- u --> y
+// jump dynamics is identity map
+// conversion constr(x)->constr(y) does not hold if assuming the adjacent nodes are unknown
+// but we can still allow someone to use __x states to make constr(x) and translate to constr(y) by simply adding suffix
+// we can also do constraint type automatic detection
+
 } // namespace atri
 
 #endif

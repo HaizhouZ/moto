@@ -16,6 +16,7 @@ enum field_t : size_t {
     // ineq_cstr_x, // "state inequality constraints"
     // ineq_cstr_u, // "state-input inequality constraints"
     NUM,
+    __undefined,
 };
 namespace field {
 constexpr size_t num_sym = __p + 1;  // number of symbolic fields
@@ -23,7 +24,6 @@ constexpr size_t num_prim = __y + 1; // number of primal fields
 constexpr size_t num = NUM;
 constexpr size_t num_func = num - num_sym;
 constexpr size_t num_constr = num_func - 1;
-;
 } // namespace field
 
 } // namespace atri

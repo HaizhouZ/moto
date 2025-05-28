@@ -50,10 +50,10 @@ struct doubleIntegratorCosts {
             };
         }
     };
-    collection running(sym r, sym v, sym a) {
+    expr_list running(sym r, sym v, sym a) {
         return {new state_cost(r, v), new input_cost(a)};
     }
-    collection terminal(sym r, sym v) {
+    expr_list terminal(sym r, sym v) {
         return {new state_cost(r, v)};
     }
 };

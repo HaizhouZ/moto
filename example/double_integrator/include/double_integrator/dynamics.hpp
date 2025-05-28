@@ -11,13 +11,13 @@ namespace atri {
  * v_next - v - a * dt = 0
  * r_next - r - v_next * dt = 0
  */
-class doubleIntegratorDyn : public dynamics, public collection {
+class doubleIntegratorDyn : public dynamics, public expr_list {
   public:
     // position, velocity, acceleration, position, velocity
     sym r, v, a, r_next, v_next;
     constr dyn_pos, dyn_vel, vel_zero_constr;
     struct pos : public constr_impl {
-        pos() : constr_impl("doubleIntegratorDynamics_pos", 3, __dyn, approx_order::first) {
+        pos() : constr_impl("doubleIntegratorDynamics_pos", approx_order::first, 3, __dyn) {
             value = [](sparse_approx_data &data) {
                 data.v_ = -data.in_args_[0] + data.in_args_[1] - 0.01 * data.in_args_[2];
             };
@@ -29,7 +29,7 @@ class doubleIntegratorDyn : public dynamics, public collection {
         }
     };
     struct vel : public constr_impl {
-        vel() : constr_impl("doubleIntegratorDynamics_vel", 3, __dyn, approx_order::first) {
+        vel() : constr_impl("doubleIntegratorDynamics_vel", approx_order::first, 3, __dyn) {
             value = [](sparse_approx_data &data) {
                 data.v_ = -data.in_args_[0] + data.in_args_[1] - 0.01 * data.in_args_[2];
             };
@@ -41,7 +41,7 @@ class doubleIntegratorDyn : public dynamics, public collection {
         }
     };
     struct zero_vel: public constr_impl{
-        zero_vel() : constr_impl("doubleIntegratorDynamics_zero_vel", 3, __eq_cstr_s, approx_order::first) {
+        zero_vel() : constr_impl("doubleIntegratorDynamics_zero_vel", approx_order::first, 3, __eq_cstr_s) {
             value = [](sparse_approx_data &data) {
                 data.v_ = data.in_args_[0];
             };
@@ -67,7 +67,7 @@ class doubleIntegratorDyn : public dynamics, public collection {
 };
 // another way
 // class doubleIntegrator : dynamics, public constr
-// or just implement a method returning a func::collection
+// or just implement a method returning a func::expr_list
 } // namespace atri
 
 #endif // DOUBLE_INTEGRATOR_DYNAMICS_HPP
