@@ -19,15 +19,16 @@
 # Todo list
 
 1. external function description json
-2. constraint type automatic detection
+2. share from derived
 3. constraint dimension automatic detection
-4. per node class data
-5. arm test
-6. KKT residual
-7. line search
-8. vjp AD
-9. semi-implicit euler helper (cpp)
-10. md5 gen and recompile
-11. more model helpers
-12. precompute interface
-13. matrix sparsity
+4. terminal cost suffix
+5. per node class data
+6. arm test
+7. KKT residual
+8. line search
+9. vjp AD
+10. semi-implicit euler helper (cpp)
+11. md5 gen and recompile
+12. more model helpers
+13. precompute interface
+14. matrix sparsity

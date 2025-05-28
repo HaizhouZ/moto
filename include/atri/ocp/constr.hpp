@@ -37,7 +37,7 @@ class constr_impl : public approx {
             auto &field = *const_cast<field_t *>(&field_);
             if (has_[__u] && !has_[__y])
                 field = __eq_cstr_c;
-            else if (has_[__u] && has_[__x] && has_[__y])
+            else if (has_[__x] && has_[__y])
                 field = __dyn;
             else if (!has_[__u] && !has_[__x] && has_[__y])
                 field = __eq_cstr_s;

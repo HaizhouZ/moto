@@ -62,7 +62,7 @@ struct armCosts {
         return {new state_cost(q, v), new input_cost(a), new ee_cost(q)};
     }
     static expr_list terminal(sym q, sym v) {
-        return {new state_cost(q, v), new ee_cost(q)};
+        return {make_terminal_cost(new state_cost(q, v)), make_terminal_cost(new ee_cost(q))};
     }
 };
 

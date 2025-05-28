@@ -17,7 +17,7 @@ struct cost_impl : public approx {
           value(std::move(rhs.value)),
           jacobian(std::move(rhs.jacobian)),
           hessian(std::move(rhs.hessian)) {}
-          
+
     void load_external(const std::string &path = "gen");
 
   protected: // unify interface with constr
@@ -37,6 +37,19 @@ struct cost_impl : public approx {
     };
 };
 def_ptr(cost_impl);
+/**
+ * @brief helper function, appending suffix "_terminal" to costs
+ *
+ * @tparam cost_type derived from cost_impl
+ * @param cst pointer from new cost_type(...)
+ * @return the pointer
+ */
+template <typename cost_type>
+    requires std::is_base_of_v<cost_impl, cost_type>
+inline auto make_terminal_cost(cost_type *cst) {
+    *const_cast<std::string *>(&cst->name_) = cst->name_ + "_terminal";
+    return cst;
+}
 /**
  * @brief wrapper of cost_impl, in fact a pointer
  *

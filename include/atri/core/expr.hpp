@@ -85,7 +85,7 @@ class expr : public std::enable_shared_from_this<expr> {
             } catch (const std::bad_weak_ptr &ex) {
                 throw std::runtime_error(fmt::format("expr {} not created from shared_ptr", name_));
             }
-            expr_index::by_uid_.try_emplace(uid_, shared_from_this());
+            // expr_index::by_uid_.try_emplace(uid_, shared_from_this());
         }
         return finalized;
     }
@@ -94,11 +94,6 @@ class expr : public std::enable_shared_from_this<expr> {
      * @return std::vector<expr_ptr_t> list of expressions
      */
     virtual std::vector<expr_ptr_t> get_aux() { return {}; }
-
-    virtual ~expr() {
-        expr_index::by_name_.erase(name_);
-        expr_index::by_uid_.erase(uid_);
-    };
 };
 
 namespace cs = casadi;
