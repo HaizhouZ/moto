@@ -33,10 +33,16 @@ void constr_impl::value_impl(sparse_approx_data &data) {
     value(data);
     // compute contribution to merit function
     auto &d = static_cast<constr_data &>(data);
-    *d.merit_ += d.multiplier_.dot(d.v_);
     // fmt::print("\t{}:\tv:{}\n", name_, d.v_.transpose());
+    // #pragma omp critical
+    // {
+    // fmt::print("pre {}\n", *d.merit_);
+    *d.merit_ += d.multiplier_.dot(d.v_);
+    //     fmt::print("\t{}:\tv:{}\n", name_, d.multiplier_.dot(d.v_));
+    //     fmt::print("after {}\n", *d.merit_);
+    // }
     // fmt::print("\t{}:\tm:{}\n", name_, d.multiplier_.transpose());
-}
+} // namespace atri
 void constr_impl::jacobian_impl(sparse_approx_data &data) {
     // compute jacobian first
     jacobian(data);

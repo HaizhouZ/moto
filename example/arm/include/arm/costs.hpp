@@ -9,11 +9,12 @@ struct armCosts {
     struct ee_cost : public cost_impl {
         vector d_r;
         inline static sym r_des{"r_des", 3, __p};
+        inline static sym W_kin{"W_kin", 1, __p};
         ee_cost(sym q) : cost_impl("kin_cost") {
             d_r.resize(3);
             d_r.setConstant(100);
 
-            add_arguments({q, r_des});
+            add_arguments({q, r_des, W_kin});
             load_external();
         }
     };

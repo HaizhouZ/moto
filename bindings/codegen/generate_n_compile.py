@@ -60,6 +60,8 @@ def generate_and_compile(
     gen_eval=True,
     gen_jacobian=False,
     gen_hessian=False,
+    append_value=False,
+    append_jac=False,
     ext_jac: list[tuple[cs.SX, cs.SX]] = [],  # [(input, jacobian)]
     ext_hess: list[tuple[cs.SX, cs.SX, cs.SX]] = [],  # [input1, input2, jacobian)]
     check_jac_ad: bool = False,
@@ -74,7 +76,7 @@ def generate_and_compile(
 
     worker = []
     if gen_eval:
-        worker = [(func_name, ([sx_output],))]
+        worker = [(func_name, ([sx_output], False, append_value))]
     excluded = [e.name for e in exclude]
     external_jac = {in_arg.name: jac for (in_arg, jac) in ext_jac}
     external_hess = {(arg0.name, arg1.name): hess for (arg0, arg1, hess) in ext_hess}
@@ -97,9 +99,9 @@ def generate_and_compile(
             if jacs:
                 if check_jac_ad:
                     f_ad = cs.Function(func_name + "_ad", sx_inputs, [cs.jacobian(sx_output, e) for e in sx_inputs])
-                    worker.append((func_name + "_jac", (jacs, True, f_ad)))
+                    worker.append((func_name + "_jac", (jacs, True, append_jac, f_ad)))
                 else:
-                    worker.append((func_name + "_jac", (jacs,)))
+                    worker.append((func_name + "_jac", (jacs, False, append_jac)))
 
         # generate hessian
         hess = []
@@ -123,9 +125,15 @@ def generate_and_compile(
                     hess[-1].append(cs.jacobian(cs.jacobian(sx_output, i), j))
             if hess:
                 hess = [item for sublist in hess for item in sublist]
-                worker.append((func_name + "_hess", (hess,)))
+                worker.append((func_name + "_hess", (hess, False, True)))
 
-    def impl(func_name, sx_outputs, check_required: bool = False, f_ground_truth: cs.Function | None = None):
+    def impl(
+        func_name,
+        sx_outputs,
+        check_required: bool = False,
+        append: bool = False,
+        f_ground_truth: cs.Function | None = None,
+    ):
         # Step 1: Create CasADi function, filter zeros
         # casadi_func = cs.Function(func_name, sx_inputs, sx_outputs)
         casadi_func = filter_func_near_zero(func_name, sx_inputs, sx_outputs)
@@ -211,17 +219,21 @@ def generate_and_compile(
             return f"inputs[{arg_idx}]({i})"
 
         def make_output_ref_access(arg_idx, index):
+            out = ""
             if is_hessian:
                 row = arg_idx // n_in
                 col = arg_idx % n_in
                 i, j = ij_pairs_all[arg_idx + n_in][index]
-                return f"outputs[{row}][{col}]({i},{j})+"
+                out = f"outputs[{row}][{col}]({i},{j})"
             else:
                 i, j = ij_pairs_all[arg_idx + n_in][index]
                 if mat_output:
-                    return f"outputs[{arg_idx}]({i},{j})"
+                    out = f"outputs[{arg_idx}]({i},{j})"
                 elif vec_out:
-                    return f"outputs({i})"
+                    out = f"outputs({i})"
+            if append:
+                out += "+"
+            return out
 
         # Step 4: Replace all casadi generated arrays with Eigen::Ref notation
         processed_lines = []

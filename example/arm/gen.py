@@ -65,6 +65,7 @@ atri.generate_and_compile(
 )
 
 pos_d = atri.sym("pos_d", 3, atri.field_p)
+W_kin = atri.sym("W_kin", 1, atri.field_p)
 
 cpin.forwardKinematics(cpin_model, cpin_data, q)
 cpin.updateFramePlacements(cpin_model, cpin_data)
@@ -75,8 +76,8 @@ cpin.computeJointJacobians(cpin_model, cpin_data)
 J = cpin.getFrameJacobian(
     cpin_model, cpin_data, model.getFrameId("iiwa_link_ee_kuka"), pin.ReferenceFrame.LOCAL_WORLD_ALIGNED
 )
-kin_cost = cs.sumsqr(r_ee - pos_d)
-kin_cost_proxy = cs.sumsqr(r - pos_d)
+kin_cost = cs.sumsqr(r_ee - pos_d) * W_kin
+kin_cost_proxy = cs.sumsqr(r - pos_d) * W_kin
 
 
 kin_cost_jac = cs.substitute(cs.jacobian(kin_cost_proxy, r), r, r_ee) @ J[:3, :]
@@ -85,13 +86,15 @@ kin_cost_hess = cs.jacobian(kin_cost_jac, q)
 
 atri.generate_and_compile(
     "kin_cost",
-    [q, pos_d],
+    [q, pos_d, W_kin],
     kin_cost,
     "gen",
-    exclude=[pos_d],
+    exclude=[pos_d, W_kin],
     ext_jac=[(q, kin_cost_jac)],
     ext_hess=[(q, q, kin_cost_hess)],
-    keep_c_src=True
+    keep_c_src=True,
+    append_value=True,
+    append_jac=True
 )
 
 atri.wait_until_generated()

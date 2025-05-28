@@ -20,14 +20,15 @@ int main() {
     auto init_node = sqp.graph_.add(ns_sqp::node_type(prob));
     auto end_node = sqp.graph_.add(ns_sqp::node_type(prob_terminal));
 
-    sqp.graph_.add_edge(init_node, end_node, 50);
+    sqp.graph_.add_edge(init_node, end_node, 5);
 
     sqp.graph_.set_head(init_node);
     sqp.graph_.set_tail(end_node);
-    init_node->value(dyn.q).setRandom();
+    init_node->value(dyn.q).setOnes();
 
     sqp.graph_.apply_all_unary_parallel([](ns_sqp::node_type *node) {
         node->value(armCosts::ee_cost::r_des).setConstant(0.5);
+        node->value(armCosts::ee_cost::W_kin).setConstant(100);
     });
 
     // for(auto i: range(1000)){
