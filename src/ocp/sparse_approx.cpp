@@ -69,6 +69,8 @@ sparse_approx_data::sparse_approx_data(sym_data *primal,
     }
 }
 sparse_approx_data_ptr_t approx::make_data(sym_data *primal, approx_storage *raw) {
+    if (field_ == __undefined)
+        throw std::runtime_error(fmt::format("make_data cannot be called for undefined approx {}", name_));
     if (in_args_.empty())
         throw std::runtime_error(fmt::format("in args unset for approx {} in field {}", name_, magic_enum::enum_name(field_)));
     auto data = sparse_approx_data_ptr_t();
