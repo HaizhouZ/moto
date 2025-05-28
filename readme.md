@@ -18,12 +18,12 @@
 
 # Todo list
 
-1. arm test
-2. KKT residual
-3. line search
-4. per node class data
-5. state input respectively node and edge (remodeling)
-6. automatic handling of constraints and symbol field (especially for y)
+1. state input respectively node and edge (remodeling)
+2. per node class data
+3. automatic handling of constraints and symbol field (especially for y)
+4. arm test
+5. KKT residual
+6. line search
 7. vjp AD
 8. semi-implicit euler helper (cpp)
 9.  md5 gen and recompile
