@@ -4,6 +4,8 @@ import re
 import numpy as np
 from multiprocessing import Process
 from atri.common import *
+import hashlib
+import json
 
 process_ = []
 
@@ -49,17 +51,17 @@ def ccs_index_to_ij(rows, cols, row, colind):
     return ij_pairs
 
 
-def make_func_json(func_name, inputs: list[cs.SX], outputs: list[cs.SX], output_dir="gen"):
+def make_func_json(func_name, inputs: list[cs.SX], outputs: list[cs.SX], output_dir="gen", md5_hash: str = ""):
     """
     create a json file for the function
     """
-    import json
 
     os.makedirs(output_dir, exist_ok=True)
     func_json = {
         "name": func_name,
         "inputs": {e.name: [e.shape[0], e.field.value] for e in inputs},
         "outputs": [e.shape for e in outputs],
+        "md5": md5_hash,
     }
 
     with open(os.path.join(output_dir, f"{func_name}.json"), "w") as f:
@@ -86,6 +88,7 @@ def generate_and_compile(
     keep_raw=False,
     keep_c_src=False,
     compile=True,
+    force_recompile=False,
     exclude=[],
     gen_eval=True,
     gen_jacobian=False,
@@ -346,19 +349,34 @@ def generate_and_compile(
             f.write("#endif\n\n")
 
         print(f"Generated: {final_cpp_path}")
-        make_func_json(func_name, sx_inputs, sx_outputs, output_dir)
+        # generate json file for the function
+        with open(final_cpp_path, "rb") as f_md5:
+            md5_hash = hashlib.md5(f_md5.read()).hexdigest()
+        make_func_json(func_name, sx_inputs, sx_outputs, output_dir, md5_hash)
         if compile:
             # Step 6: Compile the generated C++ code into a shared library
             so_file_path = os.path.join(output_dir, f"lib{func_name}.so")
-            compile_command = f"g++ -shared -fPIC -O3 -DNDEBUG -std=gnu++20 -march=native -o {so_file_path} {final_cpp_path} -I /usr/include/eigen3"
-            os.system(compile_command)
-            print(f"Compiled:  {so_file_path}")
-            if not keep_raw:
-                os.remove(cpp_path + "raw.c")
-                print(f"Removed:   {cpp_path + 'raw.c'}")
-            if not keep_c_src:
-                os.remove(final_cpp_path)
-                print(f"Removed:   {final_cpp_path}")
+            # Find existing JSON file for the function
+            json_path = os.path.join(output_dir, f"{func_name}.json")
+            if os.path.exists(json_path):
+                with open(json_path, "r") as jf:
+                    func_json = json.load(jf)
+                    if "md5" in func_json:
+                        md5_existing = func_json["md5"]
+                    else:
+                        md5_existing = ""
+            if md5_hash == md5_existing and not force_recompile and os.path.exists(so_file_path):
+                print(f"Skipping {func_name} as it is already up-to-date.")
+            else:
+                compile_command = f"g++ -shared -fPIC -O3 -DNDEBUG -std=gnu++20 -march=native -o {so_file_path} {final_cpp_path} -I /usr/include/eigen3"
+                os.system(compile_command)
+                print(f"Compiled:  {so_file_path}")
+        if not keep_raw:
+            os.remove(cpp_path + "raw.c")
+            print(f"Removed:   {cpp_path + 'raw.c'}")
+        if not keep_c_src:
+            os.remove(final_cpp_path)
+            print(f"Removed:   {final_cpp_path}")
 
     for name, inputs, outputs, kwargs_ in worker:
         process_.append(
