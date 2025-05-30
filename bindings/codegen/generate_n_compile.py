@@ -47,6 +47,25 @@ def ccs_index_to_ij(rows, cols, row, colind):
             ij_pairs.append((i, j))
     return ij_pairs
 
+import pprint
+
+def make_func_json(func_name, inputs: list[cs.SX], outputs: list[cs.SX], output_dir="gen"):
+    """
+    create a json file for the function
+    """
+    import json
+
+    os.makedirs(output_dir, exist_ok=True)
+    func_json = {
+        "name": func_name,
+        "inputs": {e.name: e.shape[0] for e in inputs},
+        "outputs": [e.shape for e in outputs],
+    }
+
+    with open(os.path.join(output_dir, f"{func_name}.json"), "w") as f:
+        # Use json to write the function metadata
+        json.dump(func_json, f, indent=4)
+
 
 def generate_and_compile(
     func_name,
@@ -98,7 +117,7 @@ def generate_and_compile(
                     continue
                 jacs.append(cs.jacobian(sx_output, s))
             else:
-                jacs.append(cs.SX(0.123456))
+                jacs.append(cs.SX(0))
         if gen_jacobian and jacs:
             if check_jac_ad:
                 f_ad = cs.Function(func_name + "_ad", sx_inputs, [cs.jacobian(sx_output, e) for e in sx_inputs])
@@ -120,7 +139,7 @@ def generate_and_compile(
                     vjp_ = cs.jtimes(sx_output, i, lbd, True)
                 for idx_j, j in enumerate(sx_inputs):
                     if i.name in excluded or j.name in excluded or i.field.value < j.field.value:
-                        hess[-1].append(cs.SX(0.123456))
+                        hess[-1].append(cs.SX(0))
                         continue
                     # for i,j in same field, just copy
                     if i.field.value == j.field.value and idx_i > idx_j:
@@ -133,7 +152,7 @@ def generate_and_compile(
                 hess.append([])
                 for j in sx_inputs:
                     if i.name in excluded or j.name in excluded or (i.field.value < j.field.value):
-                        hess[-1].append(cs.SX(0.123456))
+                        hess[-1].append(cs.SX(0))
                         continue
                     if external_hess:
                         if (i.name, j.name) in external_hess.keys():
@@ -210,18 +229,6 @@ def generate_and_compile(
                         x.sparsity().colind(),
                     )
                 )
-
-        # check non-op set
-        non_op_sets = []
-
-        def detect_non_op_set(code_str):
-            pattern = r"\b(a\d+)\b\s*=\s*(?:0*\.?0*123456(?:0+)?|1\.23456(?:0+)?e-?0*1)\b"
-            match = re.search(pattern, code_str)
-            if match:
-                non_op_sets.append(match.group(1))
-                return True
-            return False
-
         def simplify_conditional(code_str):
             pattern = r"arg\[(\d+)\]\? ([^:;]+) : 0;"
             return re.sub(pattern, r"\2;", code_str)
@@ -290,17 +297,6 @@ def generate_and_compile(
                 func_done = True
                 break
 
-            if non_op_sets:
-                found = False
-                for i in non_op_sets:
-                    if i + ";" in line:
-                        found = True
-                        break
-                if found:
-                    continue
-            if detect_non_op_set(line):
-                continue
-
             line = simplify_conditional(line)
             line = simplify_if(line)
 
@@ -337,6 +333,7 @@ def generate_and_compile(
             f.write("#endif\n\n")
 
         print(f"Generated: {final_cpp_path}")
+        make_func_json(func_name, sx_inputs, sx_outputs, output_dir)
         if compile:
             # Step 6: Compile the generated C++ code into a shared library
             so_file_path = os.path.join(output_dir, f"lib{func_name}.so")
