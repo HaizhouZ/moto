@@ -3,6 +3,7 @@ import os
 import re
 import numpy as np
 from multiprocessing import Process
+from atri.common import *
 
 process_ = []
 
@@ -47,7 +48,6 @@ def ccs_index_to_ij(rows, cols, row, colind):
             ij_pairs.append((i, j))
     return ij_pairs
 
-import pprint
 
 def make_func_json(func_name, inputs: list[cs.SX], outputs: list[cs.SX], output_dir="gen"):
     """
@@ -58,13 +58,24 @@ def make_func_json(func_name, inputs: list[cs.SX], outputs: list[cs.SX], output_
     os.makedirs(output_dir, exist_ok=True)
     func_json = {
         "name": func_name,
-        "inputs": {e.name: e.shape[0] for e in inputs},
+        "inputs": {e.name: dict(name=e.shape[0], field=e.field.value) for e in inputs},
         "outputs": [e.shape for e in outputs],
     }
 
     with open(os.path.join(output_dir, f"{func_name}.json"), "w") as f:
         # Use json to write the function metadata
         json.dump(func_json, f, indent=4)
+
+
+def in_arg_check(in_args: list[cs.SX]):
+    """
+    Checks that every argument in the 'y' field has the '_nxt' suffix.
+    Raises an exception if the condition is not met.
+    """
+    for arg in in_args:
+        if arg.field == atri.field_y:
+            if not arg.name.endswith("_nxt"):
+                raise ValueError(f"Argument '{arg.name}' in field 'y' must have '_nxt' suffix.")
 
 
 def generate_and_compile(
@@ -91,6 +102,7 @@ def generate_and_compile(
     will create async threads of compilation
     call wait_until_generated() to ensure the compilation is done
     """
+    in_arg_check(sx_inputs)
     worker = []
     if gen_eval:
         worker = [(func_name, sx_inputs, [sx_output], dict(append=append_value))]
@@ -229,6 +241,7 @@ def generate_and_compile(
                         x.sparsity().colind(),
                     )
                 )
+
         def simplify_conditional(code_str):
             pattern = r"arg\[(\d+)\]\? ([^:;]+) : 0;"
             return re.sub(pattern, r"\2;", code_str)

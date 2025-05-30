@@ -19,11 +19,9 @@ cpin_model = cpin.Model(model)
 cpin_data = cpin_model.createData()
 
 
-q = atri.sym("q", model.nq, atri.field_x)
-v = atri.sym("v", model.nv, atri.field_x)
-qn = atri.sym("qn", model.nq, atri.field_y)
-vn = atri.sym("vn", model.nv, atri.field_y)
-tq = atri.sym("tq", model.nv, atri.field_u)
+q, qn = atri.states("q", model.nq)
+v, vn = atri.states("v", model.nv)
+tq = atri.inputs("tq", model.nv)
 
 dt = 0.01
 impl_euler = qn - (q + vn * dt)
@@ -64,8 +62,8 @@ atri.generate_and_compile(
     ext_jac=jac_vel,
 )
 
-pos_d = atri.sym("pos_d", 3, atri.field_p)
-W_kin = atri.sym("W_kin", 1, atri.field_p)
+pos_d = atri.params("pos_d", 3)
+W_kin = atri.params("W_kin")
 
 cpin.forwardKinematics(cpin_model, cpin_data, q)
 cpin.updateFramePlacements(cpin_model, cpin_data)
