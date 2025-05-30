@@ -25,7 +25,6 @@
 5. line search
 6. vjp AD
 7.  semi-implicit euler helper (cpp)
-8.  md5 gen and recompile
-9.  more model helpers
-10. precompute interface
-11. matrix sparsity
+8.  more model helpers
+9.  precompute interface
+10. matrix sparsity
