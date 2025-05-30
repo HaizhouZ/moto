@@ -27,5 +27,5 @@ function(add_atri_test name)
     add_test(NAME ${test_name} COMMAND ${test_name} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endfunction()
 
-# add_atri_test(external_function)
+add_atri_test(external_function)
 add_atri_test(symbolic_comp)

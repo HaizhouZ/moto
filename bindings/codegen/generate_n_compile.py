@@ -72,11 +72,9 @@ def generate_and_compile(
     will create async threads of compilation
     call wait_until_generated() to ensure the compilation is done
     """
-    n_in = len(sx_inputs)
-
     worker = []
     if gen_eval:
-        worker = [(func_name, ([sx_output], False, append_value))]
+        worker = [(func_name, sx_inputs, [sx_output], dict(append=append_value))]
     excluded = [e.name for e in exclude]
     external_jac = {in_arg.name: jac for (in_arg, jac) in ext_jac}
     external_hess = {(arg0.name, arg1.name): hess for (arg0, arg1, hess) in ext_hess}
@@ -84,30 +82,53 @@ def generate_and_compile(
         gen_jacobian = True
     if ext_hess:
         gen_hessian = True
-    if gen_jacobian or gen_hessian:
-        jacs = []
-        # generate jacobian
-        if gen_jacobian:
-            for s in sx_inputs:
-                if s.name not in excluded:
-                    if external_jac and s.name in external_jac.keys():
-                        jacs.append(external_jac[s.name])
-                        continue
-                    jacs.append(cs.jacobian(sx_output, s))
-                else:
-                    jacs.append(cs.SX(0.123456))
-            if jacs:
-                if check_jac_ad:
-                    f_ad = cs.Function(func_name + "_ad", sx_inputs, [cs.jacobian(sx_output, e) for e in sx_inputs])
-                    worker.append((func_name + "_jac", (jacs, True, append_jac, f_ad)))
-                else:
-                    worker.append((func_name + "_jac", (jacs, False, append_jac)))
+    vjp_for_hess = False
 
-        # generate hessian
-        hess = []
-        if gen_hessian:
-            if sx_output.shape[0] > 1 and not ext_hess:
-                raise ValueError("can only generate hessian for scalar func; maybe use ext_hess")
+    if sx_output.shape[0] > 1 and not ext_hess and gen_hessian:
+        # will use jacobian to compute vjp -> hessian
+        vjp_for_hess = True
+
+    jacs = []
+    # generate jacobian
+    if gen_jacobian or vjp_for_hess:
+        for s in sx_inputs:
+            if s.name not in excluded:
+                if external_jac and s.name in external_jac.keys():
+                    jacs.append(external_jac[s.name])
+                    continue
+                jacs.append(cs.jacobian(sx_output, s))
+            else:
+                jacs.append(cs.SX(0.123456))
+        if gen_jacobian and jacs:
+            if check_jac_ad:
+                f_ad = cs.Function(func_name + "_ad", sx_inputs, [cs.jacobian(sx_output, e) for e in sx_inputs])
+                worker.append(
+                    (func_name + "_jac", sx_inputs, jacs, dict(check=True, append=append_jac, f_ground_truth=f_ad))
+                )
+            else:
+                worker.append((func_name + "_jac", sx_inputs, jacs, dict(append=append_jac)))
+
+    # generate hessian
+    hess = []
+    if gen_hessian:
+        # use AD of vjp to compute hessian
+        if vjp_for_hess:
+            lbd = cs.SX.sym(func_name + "_lbd", sx_output.shape[0])
+            for idx_i, i in enumerate(sx_inputs):
+                hess.append([])
+                if i.name not in excluded:
+                    vjp_ = cs.jtimes(sx_output, i, lbd, True)
+                for idx_j, j in enumerate(sx_inputs):
+                    if i.name in excluded or j.name in excluded or i.field.value < j.field.value:
+                        hess[-1].append(cs.SX(0.123456))
+                        continue
+                    # for i,j in same field, just copy
+                    if i.field.value == j.field.value and idx_i > idx_j:
+                        hess[-1].append(hess[idx_j][idx_i].T)
+                        continue
+                    hess[-1].append(cs.jacobian(vjp_, j))
+            hess_inputs = sx_inputs + [lbd]
+        else:
             for i in sx_inputs:
                 hess.append([])
                 for j in sx_inputs:
@@ -123,17 +144,20 @@ def generate_and_compile(
                             continue
                     # if not included will do autodiff
                     hess[-1].append(cs.jacobian(cs.jacobian(sx_output, i), j))
-            if hess:
-                hess = [item for sublist in hess for item in sublist]
-                worker.append((func_name + "_hess", (hess, False, True)))
+            hess_inputs = sx_inputs
+        if hess:
+            hess = [item for sublist in hess for item in sublist]
+            worker.append((func_name + "_hess", hess_inputs, hess, dict(append=True)))
 
     def impl(
         func_name,
-        sx_outputs,
-        check_required: bool = False,
+        sx_inputs: list[cs.SX],
+        sx_outputs: list[cs.SX],
+        check: bool = False,
         append: bool = False,
         f_ground_truth: cs.Function | None = None,
     ):
+        n_in = len(sx_inputs)
         # Step 1: Create CasADi function, filter zeros
         # casadi_func = cs.Function(func_name, sx_inputs, sx_outputs)
         casadi_func = filter_func_near_zero(func_name, sx_inputs, sx_outputs)
@@ -141,7 +165,7 @@ def generate_and_compile(
         if not isinstance(sx_outputs, tuple):
             sx_outputs = (sx_outputs,)
 
-        if check_required:
+        if check:
             assert isinstance(f_ground_truth, cs.Function)
             check_res_inf = np.zeros(n_in)
             # do 20 trials and see if matches the ground truth
@@ -198,13 +222,6 @@ def generate_and_compile(
                 return True
             return False
 
-        # Create dense mapping from flat index to Eigen::Ref(i,j)
-        # def flat_index_to_ij(index, shape):
-        #     rows, cols = shape
-        #     i = index % rows
-        #     j = index // rows
-        #     return i, j
-
         def simplify_conditional(code_str):
             pattern = r"arg\[(\d+)\]\? ([^:;]+) : 0;"
             return re.sub(pattern, r"\2;", code_str)
@@ -243,6 +260,7 @@ def generate_and_compile(
         mat_output = not vec_out
         is_hessian = func_name.endswith("_hess")
         for line in lines:
+            # preseve casadi built-in functions like casadi_sq (square)
             if "casadi_real casadi_" in line:
                 processed_lines.append(line)
 
@@ -332,11 +350,12 @@ def generate_and_compile(
                 os.remove(final_cpp_path)
                 print(f"Removed:   {final_cpp_path}")
 
-    for name, args_ in worker:
+    for name, inputs, outputs, kwargs_ in worker:
         process_.append(
             Process(
                 target=impl,
-                args=(name, *args_),
+                args=(name, inputs, outputs),
+                kwargs=kwargs_,
             )
         )
         process_[-1].start()
