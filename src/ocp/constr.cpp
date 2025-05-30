@@ -14,6 +14,9 @@ constr_data::constr_data(approx_storage *raw,
         vjp_.push_back(raw->jac_[in_args[i]->field_].segment(
             raw->prob_->get_expr_start(in_args[i]), in_args[i]->dim_));
     }
+    if (f->order() >= approx_order::second) {
+        in_args_.push_back(multiplier_);       
+    }
 }
 
 void constr_impl::load_external(const std::string &path) {
