@@ -58,7 +58,7 @@ def make_func_json(func_name, inputs: list[cs.SX], outputs: list[cs.SX], output_
     os.makedirs(output_dir, exist_ok=True)
     func_json = {
         "name": func_name,
-        "inputs": {e.name: dict(name=e.shape[0], field=e.field.value) for e in inputs},
+        "inputs": {e.name: [e.shape[0], e.field.value] for e in inputs},
         "outputs": [e.shape for e in outputs],
     }
 
@@ -129,7 +129,7 @@ def generate_and_compile(
                     continue
                 jacs.append(cs.jacobian(sx_output, s))
             else:
-                jacs.append(cs.SX(0))
+                jacs.append(cs.SX())
         if gen_jacobian and jacs:
             if check_jac_ad:
                 f_ad = cs.Function(func_name + "_ad", sx_inputs, [cs.jacobian(sx_output, e) for e in sx_inputs])
@@ -151,7 +151,7 @@ def generate_and_compile(
                     vjp_ = cs.jtimes(sx_output, i, lbd, True)
                 for idx_j, j in enumerate(sx_inputs):
                     if i.name in excluded or j.name in excluded or i.field.value < j.field.value:
-                        hess[-1].append(cs.SX(0))
+                        hess[-1].append(cs.SX())
                         continue
                     # for i,j in same field, just copy
                     if i.field.value == j.field.value and idx_i > idx_j:
@@ -164,7 +164,7 @@ def generate_and_compile(
                 hess.append([])
                 for j in sx_inputs:
                     if i.name in excluded or j.name in excluded or (i.field.value < j.field.value):
-                        hess[-1].append(cs.SX(0))
+                        hess[-1].append(cs.SX())
                         continue
                     if external_hess:
                         if (i.name, j.name) in external_hess.keys():
