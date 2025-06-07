@@ -16,8 +16,6 @@ add_project_dependency(Boost REQUIRED COMPONENTS regex)
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
 
-set(ATRI_PUBLIC_DEPENDENCIES)
-
 if(USE_MIMALLOC MATCHES ON)
   message(STATUS "Using mimalloc")
   add_project_dependency(mimalloc REQUIRED)
