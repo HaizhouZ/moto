@@ -19,12 +19,10 @@
 # Todo list
 
 1. per node class data
-2. arm test
-3. func json parse
-4. KKT residual
-5. line search
-6. vjp AD
-7.  semi-implicit euler helper (cpp)
-8.  more model helpers
-9.  precompute interface
-10. matrix sparsity
+2. func json parse
+3. KKT residual
+4. line search
+5.  semi-implicit euler helper (cpp)
+6.  more model helpers
+7.  precompute interface
+8.  matrix sparsity
