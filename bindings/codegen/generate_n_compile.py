@@ -51,7 +51,7 @@ def ccs_index_to_ij(rows, cols, row, colind):
     return ij_pairs
 
 
-def make_func_json(func_name, inputs: list[cs.SX], outputs: list[cs.SX], output_dir="gen", md5_hash: str = ""):
+def make_func_json(func_name, inputs: list[cs.SX], outputs: list[cs.SX], output_dir="gen", md5_hash: str = "", compile_flag: str = ""):
     """
     create a json file for the function
     """
@@ -62,6 +62,7 @@ def make_func_json(func_name, inputs: list[cs.SX], outputs: list[cs.SX], output_
         "inputs": {e.name: [e.shape[0], e.field.value] for e in inputs},
         "outputs": [e.shape for e in outputs],
         "md5": md5_hash,
+        "compile_flag": compile_flag,
     }
 
     with open(os.path.join(output_dir, f"{func_name}.json"), "w") as f:
@@ -78,6 +79,10 @@ def in_arg_check(in_args: list[cs.SX]):
         if arg.field == atri.field_y:
             if not arg.name.endswith("_nxt"):
                 raise ValueError(f"Argument '{arg.name}' in field 'y' must have '_nxt' suffix.")
+
+
+RELEASE_FLAG = "-O3 -DNDEBUG "
+ARCH_NATIVE_FLAG = "-march=native "
 
 
 def generate_and_compile(
@@ -99,6 +104,9 @@ def generate_and_compile(
     ext_hess: list[tuple[cs.SX, cs.SX, cs.SX]] = [],  # [input1, input2, jacobian)]
     check_jac_ad: bool = False,
     check_hess_ad: bool = False,
+    eval_compile_flag: str = RELEASE_FLAG + ARCH_NATIVE_FLAG,
+    jac_compile_flag: str = RELEASE_FLAG + ARCH_NATIVE_FLAG,
+    hess_compile_flag: str = RELEASE_FLAG + ARCH_NATIVE_FLAG,
 ):
     """
     generate and compile the evaluation and derivatives of a function
@@ -108,7 +116,17 @@ def generate_and_compile(
     in_arg_check(sx_inputs)
     worker = []
     if gen_eval:
-        worker = [(func_name, sx_inputs, [sx_output], dict(append=append_value))]
+        worker = [
+            (
+                func_name,
+                sx_inputs,
+                [sx_output],
+                dict(
+                    append=append_value,
+                    compile_flag=eval_compile_flag,
+                ),
+            )
+        ]
     excluded = [e.name for e in exclude]
     external_jac = {in_arg.name: jac for (in_arg, jac) in ext_jac}
     external_hess = {(arg0.name, arg1.name): hess for (arg0, arg1, hess) in ext_hess}
@@ -136,12 +154,19 @@ def generate_and_compile(
         if gen_jacobian and jacs:
             if check_jac_ad:
                 f_ad = cs.Function(func_name + "_ad", sx_inputs, [cs.jacobian(sx_output, e) for e in sx_inputs])
-                worker.append(
-                    (func_name + "_jac", sx_inputs, jacs, dict(check=True, append=append_jac, f_ground_truth=f_ad))
+            worker.append(
+                (
+                    func_name + "_jac",
+                    sx_inputs,
+                    jacs,
+                    dict(
+                        check=check_jac_ad,
+                        append=append_jac,
+                        f_ground_truth=None if not check_jac_ad else f_ad,
+                        compile_flag=jac_compile_flag,
+                    ),
                 )
-            else:
-                worker.append((func_name + "_jac", sx_inputs, jacs, dict(append=append_jac)))
-
+            )
     # generate hessian
     hess = []
     if gen_hessian:
@@ -181,7 +206,17 @@ def generate_and_compile(
             hess_inputs = sx_inputs
         if hess:
             hess = [item for sublist in hess for item in sublist]
-            worker.append((func_name + "_hess", hess_inputs, hess, dict(append=True)))
+            worker.append(
+                (
+                    func_name + "_hess",
+                    hess_inputs,
+                    hess,
+                    dict(
+                        append=True,
+                        compile_flag=hess_compile_flag,
+                    ),
+                )
+            )
 
     def impl(
         func_name,
@@ -190,6 +225,7 @@ def generate_and_compile(
         check: bool = False,
         append: bool = False,
         f_ground_truth: cs.Function | None = None,
+        compile_flag: str = "",
     ):
         n_in = len(sx_inputs)
         # Step 1: Create CasADi function, filter zeros
@@ -352,7 +388,6 @@ def generate_and_compile(
         # generate json file for the function
         with open(final_cpp_path, "rb") as f_md5:
             md5_hash = hashlib.md5(f_md5.read()).hexdigest()
-        make_func_json(func_name, sx_inputs, sx_outputs, output_dir, md5_hash)
         if compile:
             # Step 6: Compile the generated C++ code into a shared library
             so_file_path = os.path.join(output_dir, f"lib{func_name}.so")
@@ -361,14 +396,18 @@ def generate_and_compile(
             if os.path.exists(json_path):
                 with open(json_path, "r") as jf:
                     func_json = json.load(jf)
-                    if "md5" in func_json:
-                        md5_existing = func_json["md5"]
-                    else:
-                        md5_existing = ""
-            if md5_hash == md5_existing and not force_recompile and os.path.exists(so_file_path):
+                    md5_existing = func_json["md5"] if "md5" in func_json else ""
+                    compile_flag_previous = func_json["compile_flag"] if "compile_flag" in func_json else "none"
+            # check if the existing function is up-to-date (by md5 and by compile flag)
+            if (
+                md5_hash == md5_existing
+                and compile_flag_previous == compile_flag
+                and not force_recompile
+                and os.path.exists(so_file_path)
+            ):
                 print(f"Skipping {func_name} as it is already up-to-date.")
             else:
-                compile_command = f"g++ -shared -fPIC -O3 -DNDEBUG -std=gnu++20 -march=native -o {so_file_path} {final_cpp_path} -I /usr/include/eigen3"
+                compile_command = f"g++ -shared -fPIC -std=gnu++20 {compile_flag} -o {so_file_path} {final_cpp_path} -I /usr/include/eigen3"
                 os.system(compile_command)
                 print(f"Compiled:  {so_file_path}")
         if not keep_raw:
@@ -377,7 +416,8 @@ def generate_and_compile(
         if not keep_c_src:
             os.remove(final_cpp_path)
             print(f"Removed:   {final_cpp_path}")
-
+        make_func_json(func_name, sx_inputs, sx_outputs, output_dir, md5_hash, compile_flag)
+        
     for name, inputs, outputs, kwargs_ in worker:
         process_.append(
             Process(

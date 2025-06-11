@@ -52,9 +52,9 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
     magic_enum::magic_enum
     fmt::fmt)
 
+include(cmake/installHelpers.cmake)
+
 add_subdirectory(example)
 add_subdirectory(bindings)
 
 add_subdirectory(unittests)
-
-include(cmake/installHelpers.cmake)
