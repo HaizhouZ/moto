@@ -29,6 +29,7 @@ foreach(SUBDIR ${BINDING_SUBDIRS})
 endforeach()
 
 pybind11_add_module(${PYTHON_MODULE_NAME} ${BINDING_FILES} setup_bindings.cpp)
+target_link_libraries(${PYTHON_MODULE_NAME} PRIVATE ${PROJECT_NAME})
 
 install(TARGETS ${PYTHON_MODULE_NAME}
         LIBRARY DESTINATION ${PYTHON_SITE}/${PROJECT_NAME})
