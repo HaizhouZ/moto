@@ -27,7 +27,7 @@ endif()
 
 include(cmake/docHelpers.cmake)
 
-set(CMAKE_CXX_STANDARD 20)
+# set(CMAKE_CXX_STANDARD 20)
 
 file(GLOB_RECURSE SRC_FILES src/*.cpp)
 add_library(${PROJECT_NAME} SHARED ${SRC_FILES})
@@ -40,6 +40,7 @@ target_include_directories(
 )
 target_compile_options(${PROJECT_NAME} PUBLIC -march=native)
 target_compile_definitions(${PROJECT_NAME} PUBLIC ATRI_USE_OMP)
+target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_20)
 # target_compile_definitions(${PROJECT_NAME} PUBLIC EIGEN_USE_BLAS)
 
 message("Additionally Linked libraries: ${LIBS}")
