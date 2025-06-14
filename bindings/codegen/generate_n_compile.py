@@ -393,15 +393,16 @@ def generate_and_compile(
             so_file_path = os.path.join(output_dir, f"lib{func_name}.so")
             # Find existing JSON file for the function
             json_path = os.path.join(output_dir, f"{func_name}.json")
+            match_prev = False
             if os.path.exists(json_path):
                 with open(json_path, "r") as jf:
                     func_json = json.load(jf)
                     md5_existing = func_json["md5"] if "md5" in func_json else ""
                     compile_flag_previous = func_json["compile_flag"] if "compile_flag" in func_json else "none"
+                    match_prev = (md5_hash == md5_existing and compile_flag_previous == compile_flag)
             # check if the existing function is up-to-date (by md5 and by compile flag)
             if (
-                md5_hash == md5_existing
-                and compile_flag_previous == compile_flag
+                match_prev
                 and not force_recompile
                 and os.path.exists(so_file_path)
             ):

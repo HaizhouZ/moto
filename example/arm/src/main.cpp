@@ -13,6 +13,7 @@ int main() {
     auto prob_terminal = prob->copy();
     prob_terminal->add(armCosts::terminal(dyn.q_next, dyn.v_next));
     utils::print_problem(prob);
+    utils::print_problem(prob_terminal);
     fmt::print("good job!\n");
 
     ns_sqp sqp;
@@ -20,7 +21,7 @@ int main() {
     auto init_node = sqp.graph_.add(ns_sqp::node_type(prob));
     auto end_node = sqp.graph_.add(ns_sqp::node_type(prob_terminal));
 
-    sqp.graph_.add_edge(init_node, end_node, 5);
+    sqp.graph_.add_edge(init_node, end_node, 8);
 
     sqp.graph_.set_head(init_node);
     sqp.graph_.set_tail(end_node);
@@ -45,14 +46,15 @@ int main() {
         // std::cout << magic_enum::enum_name(data.rank_status_) << '\n';
         std::cout << "state " << data.sym_->value_[__x].transpose() << '\n';
         std::cout << "input " << data.sym_->value_[__u].transpose() << '\n';
-        // std::cout << "nexts " << data.sym_->value_[__y].transpose() << '\n';
+        std::cout << "nexts " << data.sym_->value_[__y].transpose() << '\n';
+        std::cout << "param " << data.sym_->value_[__p].transpose() << '\n';
         // std::cout << "rescs " << node->data(dyn.vel_zero_constr).v_.transpose() << '\n';
         // std::cout << "dual  " << static_cast<constr_data &>(node->data(dyn.vel_zero_constr)).multiplier_.transpose() << '\n';
         // std::cout << "sy    " << data.nsp_->s_y << '\n';
         // std::cout << "su    " << data.nsp_->s_u << '\n';
         // std::cout << "resdy " << data.dense_->approx_[__dyn].v_.transpose() << '\n';
         // std::cout << "jacdy \n" << data.dense_->approx_[__dyn].jac_[__y] << '\n';
-        //     std::cout << "dual  " << data.dense_->dual_[__dyn].transpose() << '\n';
+        std::cout << "dual  " << data.dense_->dual_[__dyn].transpose() << '\n';
         //     std::cout << "Qx    " << data.Q_x << '\n';
         //     std::cout << "Qu    " << data.Q_u << '\n';
         //     std::cout << "Qy    " << data.Q_y << '\n';

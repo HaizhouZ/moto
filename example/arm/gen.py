@@ -13,7 +13,7 @@ urdf_path = f"{model_path}/{urdf_filename}"
 # Build the Pinocchio model
 model = pin.buildModelFromUrdf(urdf_path)
 data = model.createData()
-
+print(model)
 # Convert to CasADi Pinocchio model
 cpin_model = cpin.Model(model)
 cpin_data = cpin_model.createData()
@@ -77,10 +77,8 @@ J = cpin.getFrameJacobian(
 kin_cost = cs.sumsqr(r_ee - pos_d) * W_kin
 kin_cost_proxy = cs.sumsqr(r - pos_d) * W_kin
 
-
 kin_cost_jac = cs.substitute(cs.jacobian(kin_cost_proxy, r), r, r_ee) @ J[:3, :]
 kin_cost_hess = cs.jacobian(kin_cost_jac, q)
-
 
 atri.generate_and_compile(
     "kin_cost",
