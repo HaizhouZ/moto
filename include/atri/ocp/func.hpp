@@ -24,14 +24,14 @@ struct sparse_primal_data {
           sym_uid_idx_(rhs.sym_uid_idx_),
           f_(rhs.f_) {
     }
-    const func *f_; ///< pointer to the func
+    const func *f_;       ///< pointer to the func
+    shared_data *shared_; ///< pointer to shared data
 
     auto &operator()(const sym &in) {
         return in_args_[sym_uid_idx_[in->uid_]];
     }
 
   protected:
-    shared_data *shared_;
     std::unordered_map<size_t, size_t> &sym_uid_idx_;
 };
 def_unique_ptr(sparse_primal_data);
