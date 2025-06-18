@@ -65,6 +65,11 @@ void shooting_node::swap(shooting_node &p) {
 
 void shooting_node::update_approximation() {
     /// @todo: always eval residual?
+    // call to precompute
+    for (const auto &expr : problem_->expr_[__pre_comp]) {
+        auto f = static_cast<func *>(expr.get());
+        f->call(&data_->shared_->get(f));
+    }
     for_funcs(problem_,
               [this](size_t field, size_t idx_expr, func *_f) {
                   _f->evaluate(*data_->sparse_[field][idx_expr],

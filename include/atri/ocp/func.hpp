@@ -66,28 +66,6 @@ struct sparse_approx_data : public sparse_primal_data {
 };
 
 def_unique_ptr(sparse_approx_data);
-/////////////////////////////////////////////////////////////////////
-class shared_data {
-    std::unordered_map<size_t, sparse_primal_data_ptr_t> data_;
-    friend struct node_data; // allow node_data to access private members
-
-  public:
-    shared_data(problem_ptr_t prob, sym_data *primal);
-
-    problem_ptr_t prob_;
-
-    auto &get(size_t uid) {
-        return *data_.at(uid);
-    }
-    auto &get(const expr_ptr_t &expr) {
-        assert(expr->field_ == __pre_comp);
-        return *data_.at(expr->uid_);
-    }
-    auto &get(const std::string &name) {
-        return get(expr_index::get(name));
-    }
-};
-def_unique_ptr(shared_data);
 
 /////////////////////////////////////////////////////////////////////
 /**
@@ -235,6 +213,32 @@ class func : public expr {
     std::function<void(sparse_approx_data &)> hessian;
 };
 def_ptr(func);
+/////////////////////////////////////////////////////////////////////
+class shared_data {
+    std::unordered_map<size_t, sparse_primal_data_ptr_t> data_;
+    friend struct node_data; // allow node_data to access private members
+
+  public:
+    shared_data(problem_ptr_t prob, sym_data *primal);
+
+    problem_ptr_t prob_;
+
+    auto &get(size_t uid) {
+        return *data_.at(uid);
+    }
+    auto &get(func *f) {
+        assert(f->field_ == __pre_comp);
+        return *data_.at(f->uid_);
+    }
+    auto &get(const expr_ptr_t &expr) {
+        assert(expr->field_ == __pre_comp);
+        return *data_.at(expr->uid_);
+    }
+    auto &get(const std::string &name) {
+        return get(expr_index::get(name));
+    }
+};
+def_unique_ptr(shared_data);
 } // namespace atri
 
 #endif /*__approx_*/
