@@ -136,21 +136,7 @@ class func_impl : public expr {
     }
 
     func_impl(const std::string &name, approx_order order, size_t dim = 0, field_t field = __undefined)
-        : expr(name, dim, field), order_(order) {
-        // default
-        value = [this]([[maybe_unused]] sparse_approx_data &data) {
-            throw std::runtime_error(
-                fmt::format("value not implemented for func {}", name_));
-        };
-        jacobian = [this]([[maybe_unused]] sparse_approx_data &data) {
-            throw std::runtime_error(
-                fmt::format("jacobian not implemented for func {}", name_));
-        };
-        hessian = [this]([[maybe_unused]] sparse_approx_data &data) {
-            throw std::runtime_error(
-                fmt::format("hessian not implemented for func {}", name_));
-        };
-    }
+        : expr(name, dim, field), order_(order) {}
 
     func_impl(func_impl &&rhs)
         : expr(std::move(rhs)), order_(rhs.order_),
@@ -207,15 +193,29 @@ class func_impl : public expr {
 };
 def_ptr(func_impl);
 /////////////////////////////////////////////////////////////////////
-struct pre_compute : public func_impl_ptr_t {
+struct pre_compute_impl : public func_impl {
+    pre_compute_impl(const std::string &name)
+        : func_impl(name, __pre_comp) {
+    }
+};
+def_ptr(pre_compute_impl);
+/////////////////////////////////////////////////////////////////////
+struct pre_compute : public pre_compute_impl_ptr_t {
     pre_compute(const std::string &name)
-        : func_impl_ptr_t(new func_impl(name, __pre_comp)) {
+        : pre_compute_impl_ptr_t(new pre_compute_impl(name)) {
     }
 };
 /////////////////////////////////////////////////////////////////////
-struct usr_func : public func_impl_ptr_t {
+struct usr_func_impl : public func_impl {
+    usr_func_impl(const std::string &name, approx_order order, size_t dim = 0)
+        : func_impl(name, order, dim, __usr_func) {
+    }
+};
+def_ptr(usr_func_impl);
+/////////////////////////////////////////////////////////////////////
+struct usr_func : public usr_func_impl_ptr_t {
     usr_func(const std::string &name, approx_order order, size_t dim = 0)
-        : func_impl_ptr_t(new func_impl(name, order, dim, __usr_func)) {
+        : usr_func_impl_ptr_t(new usr_func_impl(name, order, dim)) {
     }
 };
 /////////////////////////////////////////////////////////////////////
