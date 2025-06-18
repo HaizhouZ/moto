@@ -5,15 +5,15 @@
 #include <atri/ocp/func.hpp>
 
 namespace atri {
-struct cost_impl : public func {
+struct cost_impl : public func_impl {
     cost_impl(const std::string &name, approx_order order = approx_order::second)
-        : func(name, order, 1, __cost) {
-        value = [this](auto &d) { func::value_impl(d); };
-        jacobian = [this](auto &d) { func::jacobian_impl(d); };
-        hessian = [this](auto &d) { func::hessian_impl(d); };
+        : func_impl(name, order, 1, __cost) {
+        value = [this](auto &d) { func_impl::value_impl(d); };
+        jacobian = [this](auto &d) { func_impl::jacobian_impl(d); };
+        hessian = [this](auto &d) { func_impl::hessian_impl(d); };
     }
     cost_impl(cost_impl &&rhs)
-        : func(std::move(rhs)) {}
+        : func_impl(std::move(rhs)) {}
 };
 def_ptr(cost_impl);
 /**

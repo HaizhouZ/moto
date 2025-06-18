@@ -21,7 +21,7 @@ def_unique_ptr(constr_data);
 /**
  * @brief constraint approximation with multipliers (and slack variables)
  */
-class constr_impl : public func {
+class constr_impl : public func_impl {
   private:
     void value_impl(sparse_approx_data &data) override final;
     void jacobian_impl(sparse_approx_data &data) override final;
@@ -29,12 +29,12 @@ class constr_impl : public func {
 
   public:
     constr_impl(const std::string &name, approx_order order = approx_order::first, size_t dim = 0, field_t field = __undefined)
-        : func(name, order, dim, field) {
+        : func_impl(name, order, dim, field) {
         /// @todo : make dual variables
     }
     constr_impl(const constr_impl &rhs) = delete;
     constr_impl(constr_impl &&rhs)
-        : func(std::move(rhs)) {}
+        : func_impl(std::move(rhs)) {}
 
     /**
      * @brief wrapped data maker for constr
@@ -45,7 +45,7 @@ class constr_impl : public func {
      */
     sparse_approx_data_ptr_t make_approx_data_mapping(sym_data *primal, approx_storage *raw, shared_data* shared) override {
         return constr_data_ptr_t(
-            new constr_data(raw, std::move(*func::make_approx_data_mapping(primal, raw, shared)), this));
+            new constr_data(raw, std::move(*func_impl::make_approx_data_mapping(primal, raw, shared)), this));
     }
 };
 def_ptr(constr_impl);

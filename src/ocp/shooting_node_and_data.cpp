@@ -15,14 +15,14 @@ inline void for_funcs(const problem_ptr_t &prob, Callback &&callback) {
     for (size_t field : range_n(__dyn, field::num_func)) {
         size_t idx = 0;
         for (const auto &expr : prob->expr_[field]) {
-            callback(field, idx++, static_cast<func *>(expr.get()));
+            callback(field, idx++, static_cast<func_impl *>(expr.get()));
         }
     }
 }
 
 node_data::node_data(problem_ptr_t prob)
     : sym_(new sym_data(prob)), dense_(new approx_storage(prob)), shared_(new shared_data(prob, sym_.get())) {
-    for_funcs(prob, [&](size_t field, [[maybe_unused]] size_t idx, func *_f) {
+    for_funcs(prob, [&](size_t field, [[maybe_unused]] size_t idx, func_impl *_f) {
         sparse_[field].push_back(_f->make_approx_data_mapping(sym_.get(), dense_.get(), shared_.get()));
     });
 }
@@ -63,11 +63,11 @@ void shooting_node::update_approximation() {
     /// @todo: always eval residual?
     // call to precompute
     for (const auto &expr : problem_->expr_[__pre_comp]) {
-        auto f = static_cast<func *>(expr.get());
+        auto f = static_cast<func_impl *>(expr.get());
         f->call(&data_->shared_->get(f));
     }
     for_funcs(problem_,
-              [this](size_t field, size_t idx_expr, func *_f) {
+              [this](size_t field, size_t idx_expr, func_impl *_f) {
                   _f->evaluate(*data_->sparse_[field][idx_expr],
                                true, _f->order() >= approx_order::first,
                                _f->order() >= approx_order::second);

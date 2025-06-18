@@ -109,7 +109,7 @@ struct shooting_node {
      * @param f
      * @return auto&
      */
-    auto &data(func *f) {
+    auto &data(func_impl *f) {
         return *data_->sparse_[f->field_][problem_->pos_by_uid_[f->uid_]];
     }
     /**
@@ -118,7 +118,7 @@ struct shooting_node {
      * @param f
      * @return auto&
      */
-    auto &data(const func_ptr_t &f) {
+    auto &data(const func_impl_ptr_t &f) {
         return data(f.get());
     }
     /**
@@ -130,7 +130,7 @@ struct shooting_node {
     auto &data(const std::string &name) {
         const auto &f = expr_index::get(name);
         if (f->field_ >= __dyn && f->field_ < field::num_constr + __dyn) {
-            return data(static_cast<func *>(f.get()));
+            return data(static_cast<func_impl *>(f.get()));
         } else [[unlikely]] {
             throw std::runtime_error(
                 fmt::format("func {} in field {} not supported for data()",

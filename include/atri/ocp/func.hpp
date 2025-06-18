@@ -12,19 +12,19 @@ enum class approx_order { zero = 0,
                           first,
                           second,
                           none };
-struct func;
+struct func_impl;
 /////////////////////////////////////////////////////////////////////
 struct sparse_primal_data {
     // use ref to exploit sparsity (avoid copy)
     std::vector<vector_ref> in_args_;
-    sparse_primal_data(sym_data *primal, shared_data *shared, func *f);
+    sparse_primal_data(sym_data *primal, shared_data *shared, func_impl *f);
     sparse_primal_data(const sparse_primal_data &rhs) = delete; // disable this
     sparse_primal_data(sparse_primal_data &&rhs)
         : in_args_(std::move(rhs.in_args_)),
           sym_uid_idx_(rhs.sym_uid_idx_),
           f_(rhs.f_) {
     }
-    const func *f_;       ///< pointer to the func
+    const func_impl *f_;  ///< pointer to the func
     shared_data *shared_; ///< pointer to shared data
 
     auto &operator()(const sym &in) {
@@ -56,7 +56,7 @@ struct sparse_approx_data : public sparse_primal_data {
      * @param raw dense raw data of approximation
      * @param f approximation
      */
-    sparse_approx_data(sym_data *primal, approx_storage *raw, shared_data *shared, func *f);
+    sparse_approx_data(sym_data *primal, approx_storage *raw, shared_data *shared, func_impl *f);
     sparse_approx_data(const sparse_approx_data &rhs) = delete; // disable this
     sparse_approx_data(sparse_approx_data &&rhs) : v_(rhs.v_), sparse_primal_data(std::move(rhs)) {
         in_args_ = std::move(rhs.in_args_);
@@ -72,7 +72,7 @@ def_unique_ptr(sparse_approx_data);
  * @brief approximation class for generic functions
  * @todo: change to differentiable for precompute
  */
-class func : public expr {
+class func_impl : public expr {
   protected:
     approx_order order_;
     std::vector<expr_ptr_t> in_args_;
@@ -118,20 +118,12 @@ class func : public expr {
      * @param name name of the function
      * @param field field, must explicitly belong to the non-approximation fields
      */
-    func(const std::string &name, field_t field = __undefined)
-        : func(name, approx_order::none, 0, field) {
+    func_impl(const std::string &name, field_t field = __undefined)
+        : func_impl(name, approx_order::none, 0, field) {
         if (is_approx()) {
             throw std::runtime_error(fmt::format("func {} field type {} not qualified as non-approx",
                                                  name_, magic_enum::enum_name(field)));
         }
-    }
-    /**
-     * @brief call method for non-approximation functions
-     *
-     * @param data can be nullptr
-     */
-    virtual void call(sparse_primal_data *data = nullptr) {
-        throw std::runtime_error(fmt::format("func {} not implemented", name_));
     }
     /**
      * @brief make data for the function
@@ -143,7 +135,7 @@ class func : public expr {
         return sparse_primal_data_ptr_t(new sparse_primal_data(primal, shared, this)); // no primal data
     }
 
-    func(const std::string &name, approx_order order, size_t dim = 0, field_t field = __undefined)
+    func_impl(const std::string &name, approx_order order, size_t dim = 0, field_t field = __undefined)
         : expr(name, dim, field), order_(order) {
         // default
         value = [this]([[maybe_unused]] sparse_approx_data &data) {
@@ -160,7 +152,7 @@ class func : public expr {
         };
     }
 
-    func(func &&rhs)
+    func_impl(func_impl &&rhs)
         : expr(std::move(rhs)), order_(rhs.order_),
           in_args_(std::move(rhs.in_args_)),
           sym_uid_idx_(std::move(rhs.sym_uid_idx_)),
@@ -211,8 +203,21 @@ class func : public expr {
     std::function<void(sparse_approx_data &)> value;
     std::function<void(sparse_approx_data &)> jacobian;
     std::function<void(sparse_approx_data &)> hessian;
+    std::function<void(sparse_primal_data *)> call;
 };
-def_ptr(func);
+def_ptr(func_impl);
+/////////////////////////////////////////////////////////////////////
+struct pre_compute : public func_impl_ptr_t {
+    pre_compute(const std::string &name)
+        : func_impl_ptr_t(new func_impl(name, __pre_comp)) {
+    }
+};
+/////////////////////////////////////////////////////////////////////
+struct usr_func : public func_impl_ptr_t {
+    usr_func(const std::string &name, approx_order order, size_t dim = 0)
+        : func_impl_ptr_t(new func_impl(name, order, dim, __usr_func)) {
+    }
+};
 /////////////////////////////////////////////////////////////////////
 class shared_data {
     std::unordered_map<size_t, sparse_primal_data_ptr_t> data_;
@@ -226,7 +231,7 @@ class shared_data {
     auto &get(size_t uid) {
         return *data_.at(uid);
     }
-    auto &get(func *f) {
+    auto &get(func_impl *f) {
         assert(f->field_ == __pre_comp);
         return *data_.at(f->uid_);
     }
