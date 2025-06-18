@@ -18,7 +18,7 @@ class problem {
     problem() : uid_(max_uid++) {}
     problem(const problem &rhs)
         : uid_(max_uid++), expr_(rhs.expr_), d_idx_(rhs.d_idx_),
-          by_name_(rhs.by_name_), pos_by_uid_(rhs.pos_by_uid_), dim_(rhs.dim_) {}
+          pos_by_uid_(rhs.pos_by_uid_), dim_(rhs.dim_) {}
 
   public:
     static size_t max_uid;
@@ -29,7 +29,6 @@ class problem {
         expr *p;
         size_t pos;
     };
-    std::map<std::string, expr_info, std::less<>> by_name_;
     std::unordered_map<size_t, size_t> pos_by_uid_;
     std::array<size_t, field::num> dim_{};
 
@@ -58,7 +57,6 @@ class problem {
             expr_[expr->field_].push_back(expr);
             d_idx_[_uid] = std::make_pair(n0, n1);
             n0 = d_idx_[_uid].second;
-            by_name_.try_emplace(expr->name_, expr_info{expr.get(), expr_[expr->field_].size() - 1});
             pos_by_uid_.try_emplace(_uid, expr_[expr->field_].size() - 1);
             const auto &aux = expr->get_aux();
             if (!aux.empty()) {

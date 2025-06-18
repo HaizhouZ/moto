@@ -1,40 +1,19 @@
 // a expr_list of cost_impl functions;
-// class cost_impl : public approx{
+// class cost_impl : public func{
 // void add_cost_impl
 // }
-#include <atri/ocp/approx.hpp>
+#include <atri/ocp/func.hpp>
 
 namespace atri {
-struct cost_impl : public approx {
+struct cost_impl : public func {
     cost_impl(const std::string &name, approx_order order = approx_order::second)
-        : approx(name, order, 1, __cost) {
-        value = [this](auto &d) { approx::value_impl(d); };
-        jacobian = [this](auto &d) { approx::jacobian_impl(d); };
-        hessian = [this](auto &d) { approx::hessian_impl(d); };
+        : func(name, order, 1, __cost) {
+        value = [this](auto &d) { func::value_impl(d); };
+        jacobian = [this](auto &d) { func::jacobian_impl(d); };
+        hessian = [this](auto &d) { func::hessian_impl(d); };
     }
     cost_impl(cost_impl &&rhs)
-        : approx(std::move(rhs)),
-          value(std::move(rhs.value)),
-          jacobian(std::move(rhs.jacobian)),
-          hessian(std::move(rhs.hessian)) {}
-
-    void load_external(const std::string &path = "gen");
-
-  protected: // unify interface with constr
-    std::function<void(sparse_approx_data &)> value;
-    std::function<void(sparse_approx_data &)> jacobian;
-    std::function<void(sparse_approx_data &)> hessian;
-
-  private:
-    void value_impl(sparse_approx_data &d) override final {
-        value(d);
-    };
-    void jacobian_impl(sparse_approx_data &d) override final {
-        jacobian(d);
-    };
-    void hessian_impl(sparse_approx_data &d) override final {
-        hessian(d);
-    };
+        : func(std::move(rhs)) {}
 };
 def_ptr(cost_impl);
 /**

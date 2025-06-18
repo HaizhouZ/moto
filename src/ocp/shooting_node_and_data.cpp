@@ -15,21 +15,20 @@ inline void for_funcs(const problem_ptr_t &prob, Callback &&callback) {
     for (size_t field : range_n(__dyn, field::num_func)) {
         size_t idx = 0;
         for (const auto &expr : prob->expr_[field]) {
-            callback(field, idx++, static_cast<approx *>(expr.get()));
+            callback(field, idx++, static_cast<func *>(expr.get()));
         }
     }
 }
 
 node_data::node_data(problem_ptr_t prob)
-    : sym_(new sym_data(prob)), dense_(new approx_storage(prob)) {
-    for_funcs(prob, [&](size_t field, [[maybe_unused]] size_t idx, approx *_f) {
-        sparse_[field].push_back(_f->make_data(sym_, dense_));
+    : sym_(new sym_data(prob)), dense_(new approx_storage(prob)), shared_(new shared_data(prob, sym_.get())) {
+    for_funcs(prob, [&](size_t field, [[maybe_unused]] size_t idx, func *_f) {
+        sparse_[field].push_back(_f->make_approx_data_mapping(sym_.get(), dense_.get(), shared_.get()));
     });
-}
 
-node_data::~node_data() {
-    delete sym_;
-    delete dense_;
+    for (const auto &expr : prob->expr_[__usr_func]) {
+        usr_data_.push_back(std::static_pointer_cast<func>(expr)->make_data(sym_.get(), shared_.get()));
+    }
 }
 
 void data_mgr::create_data_batch(problem_ptr_t prob, size_t N) {
@@ -67,7 +66,7 @@ void shooting_node::swap(shooting_node &p) {
 void shooting_node::update_approximation() {
     /// @todo: always eval residual?
     for_funcs(problem_,
-              [this](size_t field, size_t idx_expr, approx *_f) {
+              [this](size_t field, size_t idx_expr, func *_f) {
                   _f->evaluate(*data_->sparse_[field][idx_expr],
                                true, _f->order() >= approx_order::first,
                                _f->order() >= approx_order::second);

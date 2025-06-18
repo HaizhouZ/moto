@@ -12,23 +12,13 @@ def_ptr(expr);
  *
  */
 class expr_index {
-    inline static std::unordered_map<size_t, expr_ptr_t> by_uid_{};
+    inline static std::vector<expr_ptr_t> all_;
     inline static std::unordered_map<std::string, expr_ptr_t> by_name_{};
     friend class expr;
 
   public:
-    static const auto &get(const std::string &name) {
-        auto it = by_name_.find(name);
-        if (it != by_name_.end())
-            return it->second;
-        throw std::runtime_error(fmt::format("expr name {} does not exist", name));
-    }
-    static const auto &get(size_t uid) {
-        auto it = by_uid_.find(uid);
-        if (it != by_uid_.end())
-            return it->second;
-        throw std::runtime_error(fmt::format("expr uid {} does not exist", uid));
-    }
+    static const auto &get(const std::string &name) { return by_name_.at(name); }
+    static const auto &get(size_t uid) { return all_.at(uid); }
 };
 /**
  * @brief general expression base class
@@ -37,6 +27,19 @@ class expr : public std::enable_shared_from_this<expr> {
   private:
     static size_t max_uid; // uid used to index global expressions
     bool finalized = false;
+    void add_to_index() {
+        try {
+            auto [it, inserted] = expr_index::by_name_.try_emplace(name_, shared_from_this());
+            if (!inserted) {
+                throw std::runtime_error(
+                    fmt::format("expr name conflicts {} of uid {} with existing uid {}",
+                                name_, uid_, it->second->uid_));
+            }
+        } catch (const std::bad_weak_ptr &ex) {
+            throw std::runtime_error(fmt::format("expr {} not created from shared_ptr", name_));
+        }
+        expr_index::all_[uid_] = shared_from_this();
+    }
 
   protected:
     virtual bool finalize_impl() { return true; }
@@ -55,10 +58,10 @@ class expr : public std::enable_shared_from_this<expr> {
      * @param field
      */
     expr(const std::string &name, size_t dim, field_t field)
-        : name_(name), dim_(dim), uid_(max_uid++), field_(field) {}
+        : name_(name), dim_(dim), uid_(max_uid++), field_(field) { expr_index::all_.push_back(nullptr); }
 
     expr(expr &&rhs)
-        : name_(std::move(rhs.name_)), dim_(rhs.dim_), uid_(rhs.uid_), field_(rhs.field_) {}
+        : name_(std::move(rhs.name_)), dim_(rhs.dim_), uid_(rhs.uid_), field_(rhs.field_) { expr_index::all_.push_back(nullptr); }
 
     auto make_vec(scalar_t *ptr) { return mapped_vector(ptr, dim_); }
 
@@ -75,16 +78,7 @@ class expr : public std::enable_shared_from_this<expr> {
             if (field_ == __undefined) {
                 throw std::runtime_error(fmt::format("expr {} field type undefined", name_));
             }
-            try {
-                auto [it, inserted] = expr_index::by_name_.try_emplace(name_, shared_from_this());
-                if (!inserted) {
-                    throw std::runtime_error(
-                        fmt::format("expr name conflicts {} of uid {} with existing uid {}",
-                                    name_, uid_, it->second->uid_));
-                }
-            } catch (const std::bad_weak_ptr &ex) {
-                throw std::runtime_error(fmt::format("expr {} not created from shared_ptr", name_));
-            }
+            add_to_index(); // cannot be called from constructor, because shared_from_this() is not available yet
             // expr_index::by_uid_.try_emplace(uid_, shared_from_this());
         }
         return finalized;
@@ -131,6 +125,7 @@ struct expr_list {
 
   protected:
     void add(std::initializer_list<expr_ptr_t> exprs) { expr_.insert(expr_.end(), exprs); }
+    void add(expr_ptr_t exprs) { expr_.emplace_back(exprs); }
 
   public:
     expr_list(std::initializer_list<expr_ptr_t> exprs) : expr_(exprs) {}

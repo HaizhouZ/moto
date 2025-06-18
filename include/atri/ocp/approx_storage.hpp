@@ -26,7 +26,7 @@ struct approx_storage {
     // cost hessian h[a][b] is h_ab. Note only the upper block-triangular part is stored
     array<array<matrix, field::num_prim>, field::num_prim> hessian_;
 };
-
+def_unique_ptr(approx_storage);
 } // namespace atri
 
 #endif // ATRI_OCP_PROBLEM_DATA_HPP

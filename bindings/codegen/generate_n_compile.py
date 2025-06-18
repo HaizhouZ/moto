@@ -6,8 +6,13 @@ from multiprocessing import Process
 from atri.common import *
 import hashlib
 import json
+from functools import partial
 
 process_ = []
+
+
+def codegen_with_prefix(prefix: str):
+    return partial(generate_and_compile, prefix=prefix)
 
 
 def filter_func_near_zero(func_name: str, inputs: list[cs.SX], expr: list[cs.SX], tol=1e-8, ntrials=50):
@@ -51,7 +56,9 @@ def ccs_index_to_ij(rows, cols, row, colind):
     return ij_pairs
 
 
-def make_func_json(func_name, inputs: list[cs.SX], outputs: list[cs.SX], output_dir="gen", md5_hash: str = "", compile_flag: str = ""):
+def make_func_json(
+    func_name, inputs: list[cs.SX], outputs: list[cs.SX], output_dir="gen", md5_hash: str = "", compile_flag: str = ""
+):
     """
     create a json file for the function
     """
@@ -107,6 +114,7 @@ def generate_and_compile(
     eval_compile_flag: str = RELEASE_FLAG + ARCH_NATIVE_FLAG,
     jac_compile_flag: str = RELEASE_FLAG + ARCH_NATIVE_FLAG,
     hess_compile_flag: str = RELEASE_FLAG + ARCH_NATIVE_FLAG,
+    prefix: str = "",
 ):
     """
     generate and compile the evaluation and derivatives of a function
@@ -114,6 +122,7 @@ def generate_and_compile(
     call wait_until_generated() to ensure the compilation is done
     """
     in_arg_check(sx_inputs)
+    func_name = prefix + '_' + func_name
     worker = []
     if gen_eval:
         worker = [
@@ -399,13 +408,9 @@ def generate_and_compile(
                     func_json = json.load(jf)
                     md5_existing = func_json["md5"] if "md5" in func_json else ""
                     compile_flag_previous = func_json["compile_flag"] if "compile_flag" in func_json else "none"
-                    match_prev = (md5_hash == md5_existing and compile_flag_previous == compile_flag)
+                    match_prev = md5_hash == md5_existing and compile_flag_previous == compile_flag
             # check if the existing function is up-to-date (by md5 and by compile flag)
-            if (
-                match_prev
-                and not force_recompile
-                and os.path.exists(so_file_path)
-            ):
+            if match_prev and not force_recompile and os.path.exists(so_file_path):
                 print(f"Skipping {func_name} as it is already up-to-date.")
             else:
                 compile_command = f"g++ -shared -fPIC -std=gnu++20 {compile_flag} -o {so_file_path} {final_cpp_path} -I /usr/include/eigen3"
@@ -418,7 +423,7 @@ def generate_and_compile(
             os.remove(final_cpp_path)
             print(f"Removed:   {final_cpp_path}")
         make_func_json(func_name, sx_inputs, sx_outputs, output_dir, md5_hash, compile_flag)
-        
+
     for name, inputs, outputs, kwargs_ in worker:
         process_.append(
             Process(
