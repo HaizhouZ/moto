@@ -25,10 +25,6 @@ node_data::node_data(problem_ptr_t prob)
     for_funcs(prob, [&](size_t field, [[maybe_unused]] size_t idx, func *_f) {
         sparse_[field].push_back(_f->make_approx_data_mapping(sym_.get(), dense_.get(), shared_.get()));
     });
-
-    for (const auto &expr : prob->expr_[__usr_func]) {
-        usr_data_.push_back(std::static_pointer_cast<func>(expr)->make_data(sym_.get(), shared_.get()));
-    }
 }
 
 void data_mgr::create_data_batch(problem_ptr_t prob, size_t N) {
