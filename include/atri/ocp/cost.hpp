@@ -12,8 +12,6 @@ struct cost_impl : public func_impl {
         jacobian = [this](auto &d) { func_impl::jacobian_impl(d); };
         hessian = [this](auto &d) { func_impl::hessian_impl(d); };
     }
-    cost_impl(cost_impl &&rhs)
-        : func_impl(std::move(rhs)) {}
 };
 def_ptr(cost_impl);
 /**
@@ -37,7 +35,7 @@ struct cost : public cost_impl_ptr_t {
     cost(const std::string &name)
         : cost_impl_ptr_t(new cost_impl(name)) {
     }
-    cost(cost_impl &&impl) : cost_impl_ptr_t(new cost_impl(std::move(impl))) {}
+    cost(cost_impl *impl) : cost_impl_ptr_t(impl) {}
     cost(const cost &rhs) = default;
 };
 }; // namespace atri

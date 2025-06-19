@@ -33,8 +33,6 @@ class constr_impl : public func_impl {
         /// @todo : make dual variables
     }
     constr_impl(const constr_impl &rhs) = delete;
-    constr_impl(constr_impl &&rhs)
-        : func_impl(std::move(rhs)) {}
 
     /**
      * @brief wrapped data maker for constr
@@ -58,7 +56,6 @@ struct constr : public constr_impl_ptr_t {
         : constr_impl_ptr_t(new constr_impl(name, order, dim, field)) {
     }
     constr() = default;
-    constr(constr_impl &&impl) : constr_impl_ptr_t(new constr_impl(std::move(impl))) {}
     constr(constr_impl *impl) : constr_impl_ptr_t(impl) {}
     constr(const constr &rhs) = default;
 };

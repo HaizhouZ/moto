@@ -4,7 +4,7 @@
 #include <atri/ocp/sym_data.hpp>
 
 namespace atri {
-sparse_primal_data::sparse_primal_data(sym_data *primal, shared_data *shared, func_impl *f)
+sparse_primal_data::sparse_primal_data(sym_data *primal, shared_data *shared, func_impl*f)
     : f_(f), sym_uid_idx_(f->sym_uid_idx_), shared_(shared) {
     auto &in_args = f->in_args();
     for (size_t i = 0; i < in_args.size(); i++) {
@@ -15,10 +15,11 @@ sparse_primal_data::sparse_primal_data(sym_data *primal, shared_data *shared, fu
 sparse_approx_data::sparse_approx_data(sym_data *primal,
                                        approx_storage *raw,
                                        shared_data *shared,
-                                       func_impl *f)
+                                       func_impl*f)
     : sparse_primal_data(primal, shared, f),
-      v_(f->field_ == __cost ? vector_ref(mapped_vector(&raw->cost_, 1))
-                             : raw->approx_[f->field_].v_.segment(raw->prob_->get_expr_start(*f), f->dim_)) {
+      v_(f->field_ == __cost
+             ? vector_ref(mapped_vector(&raw->cost_, 1))
+             : raw->approx_[f->field_].v_.segment(raw->prob_->get_expr_start(*f), f->dim_)) {
     auto &in_args = f->in_args();
     size_t f_st = raw->prob_->get_expr_start(*f);
     // for non-cost
@@ -73,9 +74,18 @@ sparse_approx_data::sparse_approx_data(sym_data *primal,
         }
     }
 }
-
+sparse_approx_data::sparse_approx_data(sym_data *primal,
+                                       vector_ref v,
+                                       const std::vector<matrix_ref> &jac,
+                                       shared_data *shared,
+                                       func_impl*f)
+    : v_(v), jac_(jac), sparse_primal_data(primal, shared, f) {
+}
 shared_data::shared_data(problem_ptr_t prob, sym_data *primal) {
     for (const auto &expr : prob->expr_[__pre_comp]) {
+        data_.try_emplace(expr->uid_, std::static_pointer_cast<func_impl>(expr)->make_data(primal, this));
+    }
+    for (const auto &expr : prob->expr_[__usr_func]) {
         data_.try_emplace(expr->uid_, std::static_pointer_cast<func_impl>(expr)->make_data(primal, this));
     }
 }
@@ -87,10 +97,10 @@ sparse_approx_data_ptr_t func_impl::make_approx_data_mapping(sym_data *primal, a
     if (in_args_.empty())
         throw std::runtime_error(fmt::format("in args unset for func {} in field {}",
                                              name_, magic_enum::enum_name(field_)));
-    auto data = sparse_approx_data_ptr_t();
-    data.reset(new sparse_approx_data(primal, raw, shared, this));
-    setup_sparsity(*data);
-    return data;
+    ;
+    auto approx_data = std::make_unique<sparse_approx_data>(primal, raw, shared, this);
+    setup_sparsity(*approx_data);
+    return approx_data;
 }
 void func_impl::load_external(const std::string &path) {
     auto funcs = load_approx(name_, true, order() >= approx_order::first, order() >= approx_order::second);

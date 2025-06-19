@@ -51,7 +51,7 @@ class doubleIntegratorDyn : public dynamics, public expr_list {
         }
     };
     doubleIntegratorDyn()
-        : dyn_pos(pos()), dyn_vel(vel()), vel_zero_constr(zero_vel()) {
+        : dyn_pos(new pos()), dyn_vel(new vel()), vel_zero_constr(new zero_vel()) {
         std::tie(r, r_next) = make_state("pos", 3);
         std::tie(v, v_next) = make_state("vel", 3);
         a = make_input("acc", 3);

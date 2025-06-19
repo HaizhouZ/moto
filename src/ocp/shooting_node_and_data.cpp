@@ -64,11 +64,11 @@ void shooting_node::update_approximation() {
     // call to precompute
     for (const auto &expr : problem_->expr_[__pre_comp]) {
         auto f = static_cast<func_impl *>(expr.get());
-        f->call(&data_->shared_->get(f));
+        f->call(data_->shared_->get(expr));
     }
     for_funcs(problem_,
               [this](size_t field, size_t idx_expr, func_impl *_f) {
-                  _f->evaluate(*data_->sparse_[field][idx_expr],
+                  _f->evaluate_approx(*data_->sparse_[field][idx_expr],
                                true, _f->order() >= approx_order::first,
                                _f->order() >= approx_order::second);
               });

@@ -15,17 +15,17 @@ enum field_t : size_t {
     // ineq_cstr_x, // "state inequality constraints"
     // ineq_cstr_u, // "state-input inequality constraints"
     __cost, // "running cost"
-    NUM,
     // user functions
     __pre_comp, // will be called before the computation of the approximation update, also the data will be shared
     __usr_func, // user function, will not be called in the approximation update, only users can use them
+    NUM,
     __undefined,
 };
 namespace field {
 constexpr size_t num_sym = __p + 1;  // number of symbolic fields
 constexpr size_t num_prim = __y + 1; // number of primal fields
 constexpr size_t num = NUM;
-constexpr size_t num_func = num - num_sym;
+constexpr size_t num_func = __cost + 1 - num_sym;
 constexpr size_t num_constr = num_func - 1; // exclude cost
 } // namespace field
 

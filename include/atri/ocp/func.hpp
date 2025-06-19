@@ -13,17 +13,22 @@ enum class approx_order { zero = 0,
                           second,
                           none };
 struct func_impl;
+def_ptr(func_impl);
 /////////////////////////////////////////////////////////////////////
 struct sparse_primal_data {
     // use ref to exploit sparsity (avoid copy)
     std::vector<vector_ref> in_args_;
+    sparse_primal_data(sym_data *primal, shared_data *shared, const func_impl_ptr_t &f)
+        : sparse_primal_data(primal, shared, f.get()) {}
     sparse_primal_data(sym_data *primal, shared_data *shared, func_impl *f);
     sparse_primal_data(const sparse_primal_data &rhs) = delete; // disable this
     sparse_primal_data(sparse_primal_data &&rhs)
         : in_args_(std::move(rhs.in_args_)),
           sym_uid_idx_(rhs.sym_uid_idx_),
-          f_(rhs.f_) {
+          f_(rhs.f_),
+          shared_(rhs.shared_) {
     }
+    virtual ~sparse_primal_data() = default;
     const func_impl *f_;  ///< pointer to the func
     shared_data *shared_; ///< pointer to shared data
 
@@ -57,16 +62,45 @@ struct sparse_approx_data : public sparse_primal_data {
      * @param f approximation
      */
     sparse_approx_data(sym_data *primal, approx_storage *raw, shared_data *shared, func_impl *f);
+    sparse_approx_data(sym_data *primal, vector_ref v, const std::vector<matrix_ref> &jac, shared_data *shared, const func_impl_ptr_t &f)
+        : sparse_approx_data(primal, v, jac, shared, f.get()) {}
+    sparse_approx_data(sym_data *primal, vector_ref v, const std::vector<matrix_ref> &jac, shared_data *shared, func_impl *f);
     sparse_approx_data(const sparse_approx_data &rhs) = delete; // disable this
     sparse_approx_data(sparse_approx_data &&rhs) : v_(rhs.v_), sparse_primal_data(std::move(rhs)) {
-        in_args_ = std::move(rhs.in_args_);
         jac_ = std::move(rhs.jac_);
         hess_ = std::move(rhs.hess_);
     }
 };
 
 def_unique_ptr(sparse_approx_data);
-
+/////////////////////////////////////////////////////////////////////
+/**
+ * @brief composing several data types into one type
+ * it will automatically call to the moving constructor of the data types
+ * @tparam data_type must be move constructible
+ */
+template <typename... data_type>
+struct composed_data : public data_type... {
+    composed_data(data_type &&...other_data)
+        : data_type(std::forward<data_type>(other_data))... {
+        static_assert((std::is_move_constructible<data_type>::value && ...),
+                      "All data types must be move constructible");
+    }
+};
+/**
+ * @brief compose (append) several data types to sparse_primal_data by moving
+ * @ref composed_data
+ * @tparam data_type must be move constructible
+ */
+template <typename... data_type>
+using composed_primal_data = composed_data<sparse_primal_data, data_type...>;
+/**
+ * @brief compose (append) several data types to sparse_approx_data by moving
+ * @ref composed_data
+ * @tparam data_type must be move constructible
+ */
+template <typename... data_type>
+using composed_approx_data = composed_data<sparse_approx_data, data_type...>;
 /////////////////////////////////////////////////////////////////////
 /**
  * @brief approximation class for generic functions
@@ -110,7 +144,7 @@ class func_impl : public expr {
     inline approx_order order() { return order_; }
     // check if the function is an approximation, true if yes
     bool is_approx() const {
-        return field_ < field::num || field_ == field_t::__undefined;
+        return (field_ != __pre_comp && field_ != __usr_func) && field_ > __dyn;
     }
     /**
      * @brief constructor for non-approximation functions
@@ -125,26 +159,11 @@ class func_impl : public expr {
                                                  name_, magic_enum::enum_name(field)));
         }
     }
-    /**
-     * @brief make data for the function
-     *
-     * @param primal
-     * @return sparse_primal_data_ptr_t
-     */
-    virtual sparse_primal_data_ptr_t make_data(sym_data *primal, shared_data *shared) {
-        return sparse_primal_data_ptr_t(new sparse_primal_data(primal, shared, this)); // no primal data
-    }
 
     func_impl(const std::string &name, approx_order order, size_t dim = 0, field_t field = __undefined)
-        : expr(name, dim, field), order_(order) {}
+        : expr(name, dim, field), order_(order) {
+    }
 
-    func_impl(func_impl &&rhs)
-        : expr(std::move(rhs)), order_(rhs.order_),
-          in_args_(std::move(rhs.in_args_)),
-          sym_uid_idx_(std::move(rhs.sym_uid_idx_)),
-          value(std::move(rhs.value)),
-          jacobian(std::move(rhs.jacobian)),
-          hessian(std::move(rhs.hessian)) {}
     /**
      * @brief get other variables related to this approximation
      * @details here it is the input arguments, probably also parameters in the future
@@ -168,15 +187,15 @@ class func_impl : public expr {
      * @tparam eval_jac evaluate jacobian if true
      * @tparam eval_hess evaluate hessian if true
      */
-    void evaluate(sparse_approx_data &data,
-                  bool eval_val, bool eval_jac = false, bool eval_hess = false) {
-        // if (eval_jac)
+    void evaluate_approx(sparse_primal_data &data,
+                         bool eval_val, bool eval_jac = false, bool eval_hess = false) {
+        assert(dynamic_cast<sparse_approx_data *>(&data) != nullptr); // check only in debug mode
         if (eval_val)
-            value_impl(data);
+            value_impl(static_cast<sparse_approx_data&>(data));
         if (eval_jac)
-            jacobian_impl(data);
+            jacobian_impl(static_cast<sparse_approx_data&>(data));
         if (eval_hess)
-            hessian_impl(data);
+            hessian_impl(static_cast<sparse_approx_data&>(data));
     }
     /**
      * @brief load the external approximation functions
@@ -189,9 +208,9 @@ class func_impl : public expr {
     std::function<void(sparse_approx_data &)> value;
     std::function<void(sparse_approx_data &)> jacobian;
     std::function<void(sparse_approx_data &)> hessian;
-    std::function<void(sparse_primal_data *)> call;
+    std::function<void(sparse_primal_data &)> call;
+    std::function<sparse_primal_data_ptr_t(sym_data *, shared_data *)> make_data;
 };
-def_ptr(func_impl);
 /////////////////////////////////////////////////////////////////////
 struct pre_compute_impl : public func_impl {
     pre_compute_impl(const std::string &name)
@@ -203,6 +222,9 @@ def_ptr(pre_compute_impl);
 struct pre_compute : public pre_compute_impl_ptr_t {
     pre_compute(const std::string &name)
         : pre_compute_impl_ptr_t(new pre_compute_impl(name)) {
+    }
+    pre_compute(pre_compute_impl *impl)
+        : pre_compute_impl_ptr_t(impl) {
     }
 };
 /////////////////////////////////////////////////////////////////////
@@ -217,6 +239,9 @@ struct usr_func : public usr_func_impl_ptr_t {
     usr_func(const std::string &name, approx_order order, size_t dim = 0)
         : usr_func_impl_ptr_t(new usr_func_impl(name, order, dim)) {
     }
+    usr_func(usr_func_impl *impl)
+        : usr_func_impl_ptr_t(impl) {
+    }
 };
 /////////////////////////////////////////////////////////////////////
 class shared_data {
@@ -228,16 +253,27 @@ class shared_data {
 
     problem_ptr_t prob_;
 
+    void add(size_t uid, sparse_primal_data_ptr_t &&data) {
+        data_.try_emplace(uid, std::move(data));
+    }
+
+    void add(expr *f, sparse_primal_data_ptr_t &&data) {
+        add(f->uid_, std::move(data));
+    }
+
+    void add(const expr_ptr_t &expr, sparse_primal_data_ptr_t &&data) {
+        add(expr.get(), std::move(data));
+    }
+
     auto &get(size_t uid) {
         return *data_.at(uid);
     }
-    auto &get(func_impl *f) {
-        assert(f->field_ == __pre_comp);
-        return *data_.at(f->uid_);
+    auto &get(expr *f) {
+        assert(f->field_ == __pre_comp || f->field_ == __usr_func);
+        return get(f->uid_);
     }
     auto &get(const expr_ptr_t &expr) {
-        assert(expr->field_ == __pre_comp);
-        return *data_.at(expr->uid_);
+        return get(expr.get());
     }
     auto &get(const std::string &name) {
         return get(expr_index::get(name));

@@ -60,6 +60,7 @@ class expr : public std::enable_shared_from_this<expr> {
     expr(const std::string &name, size_t dim, field_t field)
         : name_(name), dim_(dim), uid_(max_uid++), field_(field) { expr_index::all_.push_back(nullptr); }
 
+    expr(const expr &rhs) = delete;
     expr(expr &&rhs)
         : name_(std::move(rhs.name_)), dim_(rhs.dim_), uid_(rhs.uid_), field_(rhs.field_) { expr_index::all_.push_back(nullptr); }
 
