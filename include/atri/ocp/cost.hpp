@@ -1,7 +1,3 @@
-// a expr_list of cost_impl functions;
-// class cost_impl : public func{
-// void add_cost_impl
-// }
 #include <atri/ocp/func.hpp>
 
 namespace atri {
@@ -25,7 +21,7 @@ template <typename cost_type>
     requires std::is_base_of_v<cost_impl, cost_type>
 inline auto make_terminal_cost(cost_type *cst) {
     *const_cast<std::string *>(&cst->name_) = cst->name_ + "_terminal";
-    return cst;
+    return std::shared_ptr<cost_type>(cst);
 }
 /**
  * @brief wrapper of cost_impl, in fact a pointer
