@@ -13,7 +13,7 @@ inline auto &get_data(node_type *node) {
 }
 
 struct node : public shooting_node {
-    node(problem_ptr_t prob)
+    node(const problem_ptr_t& prob)
         : shooting_node(prob, data_mgr::get<riccati_data>()) {}
 };
 

@@ -18,11 +18,12 @@ class data_mgr {
         std::mutex mtx_;
         data_pool() = default;
     };
-    using data_maker_func = std::function<node_data_ptr_t(problem_ptr_t)>;
+    using make_data_func = std::function<node_data_ptr_t(const problem_ptr_t &)>;
+    node_data_ptr_t get_data(const problem_ptr_t &prob);
 
     data_mgr() = default;
     data_mgr(data_mgr &) = delete;
-    data_mgr(data_maker_func maker) : maker_(maker) {}
+    data_mgr(make_data_func maker) : maker_(maker) {}
 
   public:
     // singleton
@@ -31,13 +32,15 @@ class data_mgr {
         static_assert(std::is_base_of<node_data, data_type>::value,
                       "data_type must be derived from node_data");
         static_assert(
-            std::is_constructible<data_type, problem_ptr_t>::value,
-            "data_type must have a constructor that accepts problem_ptr_t");
+            std::is_constructible<data_type, const problem_ptr_t &>::value,
+            "data_type must have a constructor that accepts [const problem_ptr_t&]");
 
-        data_maker_func maker = [](problem_ptr_t prob) {
+        make_data_func maker = [](const problem_ptr_t &prob) {
             return std::make_unique<data_type>(prob);
         };
+
         static data_mgr s_(maker);
+
         return s_;
     }
 
@@ -47,13 +50,13 @@ class data_mgr {
      * @param problem the set of expression to be computed
      * @param N number of data instances. can be seen as stages
      */
-    void create_data_batch(problem_ptr_t problem, size_t N);
+    void create_data_batch(const problem_ptr_t &problem, size_t N);
     // thread-safe data access
-    node_data_ptr_t acquire_data(problem_ptr_t problem);
-    void release_data(problem_ptr_t problem, node_data_ptr_t data);
+    node_data_ptr_t acquire_data(const problem_ptr_t &problem);
+    void release_data(node_data_ptr_t &&data);
 
   private:
-    data_maker_func maker_;
+    make_data_func maker_;
     // mapping [uid of problem, data pool]
     std::unordered_map<size_t, data_pool> data_;
 };
@@ -82,27 +85,20 @@ struct shooting_node {
     /**
      * @brief Construct a new shooting node object by moving
      * @note data will be moved to the new one
-     * @param rhs the shooting ndoe to be moved
+     * @param rhs the shooting node to be moved
      */
     shooting_node(shooting_node &&rhs)
         : problem_(std::move(rhs.problem_)), mem_(rhs.mem_), data_(std::move(rhs.data_)) {
-        rhs.data_ = nullptr;
     }
 
     ~shooting_node() {
         if (data_)
-            mem_.release_data(problem_, std::move(data_));
+            mem_.release_data(std::move(data_));
     }
-    /**
-     * @brief swap two nodes, use when you want to replace nodes
-     * data, problem and mem will all be swapped
-     * @param p
-     */
-    void swap(shooting_node &p);
     // update the approximation
     void update_approximation();
     // get value of the sym variable
-    auto value(sym sym) { return data_->sym_->get(sym); }
+    auto value(const sym& sym) { return data_->sym_->get(sym); }
     /**
      * @brief get the sparse func data by pointer
      *

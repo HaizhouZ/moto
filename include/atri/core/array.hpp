@@ -24,8 +24,7 @@ struct shifted_array : public std::array<T, N> {
         assert(i >= st && i < st + N);
         return base_type::operator[](i - st);
     }
-    shifted_array() = default;
-    shifted_array(base_type &&rhs) : base_type(std::move(rhs)) {}
+    using base_type::base_type; // inherit constructors
 };
 
 template <typename T, size_t N>

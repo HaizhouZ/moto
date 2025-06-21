@@ -7,6 +7,7 @@
 namespace atri {
 class expr;
 def_ptr(expr);
+struct expr_list; // forward declaration of expr_list
 /**
  * @brief index of all syms
  *
@@ -63,10 +64,10 @@ class expr : public std::enable_shared_from_this<expr> {
      */
     bool finalize();
     /**
-     * @brief get other variables related to this expression, by default will return empty
-     * @return std::vector<expr_ptr_t> list of expressions
+     * @brief get other variables related to this expression
+     * @return pointer to std::vector<expr_ptr_t> list of expressions, default is nullptr
      */
-    virtual std::vector<expr_ptr_t> get_aux() { return {}; }
+    virtual expr_list* get_aux() { return nullptr; }
 };
 
 namespace cs = casadi;

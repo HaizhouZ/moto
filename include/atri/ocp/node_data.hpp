@@ -21,7 +21,7 @@ struct node_data {
     shared_data_ptr_t shared_;   /// < shared data
     shifted_array<std::vector<sparse_approx_data_ptr_t>, field::num_func, __dyn>
         sparse_;                                     /// < sparse view per func
-    node_data(problem_ptr_t prob);
+    node_data(const problem_ptr_t& prob);
 };
 
 } // namespace atri
