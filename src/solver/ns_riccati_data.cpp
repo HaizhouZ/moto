@@ -5,7 +5,7 @@
 
 namespace atri {
 namespace ns_riccati {
-riccati_data::riccati_data(problem_ptr_t prob)
+riccati_data::riccati_data(const problem_ptr_t& prob)
     : node_data(prob), nx(prob->dim_[__x]), nu(prob->dim_[__u]),
       ns(dense_->prob_->dim_[__eq_cstr_s]),
       nc(dense_->prob_->dim_[__eq_cstr_c]), ncstr(ns + nc), d_u(nu, nx),

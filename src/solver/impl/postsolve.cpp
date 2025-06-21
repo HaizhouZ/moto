@@ -4,8 +4,8 @@
 
 namespace atri {
 namespace ns_riccati {
-void post_solving_steps(node *cur) {
-    auto &d = get_data(cur);
+void post_solving_steps(riccati_data *cur) {
+    auto &d = *cur;
     auto &nsp = *d.nsp_;
     // compute k_u
     if (d.rank_status_ == rank_status::unconstrained) {

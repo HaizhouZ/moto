@@ -21,7 +21,7 @@ inline void for_funcs(const problem_ptr_t &prob, Callback &&callback) {
 }
 
 node_data::node_data(const problem_ptr_t &prob)
-    : sym_(new sym_data(prob)), dense_(new approx_storage(prob)), shared_(new shared_data(prob, sym_.get())) {
+    : problem_(prob), sym_(new sym_data(prob)), dense_(new approx_storage(prob)), shared_(new shared_data(prob, sym_.get())) {
     for_funcs(prob, [&](size_t field, [[maybe_unused]] size_t idx, func_impl *_f) {
         sparse_[field].push_back(_f->make_approx_data_mapping(sym_.get(), dense_.get(), shared_.get()));
     });
@@ -32,7 +32,7 @@ void data_mgr::create_data_batch(const problem_ptr_t &prob, size_t N) {
     auto &pool = data_[prob->uid_];
     std::lock_guard _lock(pool.mtx_);
     for (size_t i = 0; i < N; i++) {
-        pool.push(maker_(prob));
+        pool.emplace(maker_(prob));
     }
 }
 
@@ -48,31 +48,35 @@ node_data_ptr_t data_mgr::get_data(const problem_ptr_t &prob) {
     }
 }
 
-node_data_ptr_t data_mgr::acquire_data(const problem_ptr_t &prob) {
+node_data* data_mgr::acquire(const problem_ptr_t &prob) {
     auto p = get_data(prob);
     if (p) {
-        return p;
+        return p.release();
     } else {
         return maker_(prob);
     }
 }
 
-void data_mgr::release_data(node_data_ptr_t &&data) {
-    auto &pool = data_[data->sym_->prob_->uid_];
-    std::lock_guard _lock(pool.mtx_);
-    pool.push(std::move(data));
+node_data* data_mgr::acquire(const node_data* rhs) {
+    return acquire(rhs->problem_);
 }
 
-void shooting_node::update_approximation() {
+void data_mgr::release(node_data* data) {
+    auto &pool = data_[data->sym_->prob_->uid_];
+    std::lock_guard _lock(pool.mtx_);
+    pool.emplace(data);
+}
+
+void node_data::update_approximation() {
     /// @todo: always eval residual?
     // call to precompute
     for (const auto &expr : problem_->expr_[__pre_comp]) {
         auto f = static_cast<func_impl *>(expr.get());
-        f->call(data_->shared_->get(f));
+        f->call(shared_->get(f));
     }
     for_funcs(problem_,
               [this](size_t field, size_t idx_expr, func_impl *_f) {
-                  _f->evaluate_approx(*data_->sparse_[field][idx_expr],
+                  _f->evaluate_approx(*sparse_[field][idx_expr],
                                       true, _f->order() >= approx_order::first,
                                       _f->order() >= approx_order::second);
               });
