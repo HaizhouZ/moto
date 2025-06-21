@@ -18,11 +18,9 @@
 
 # Todo list
 
-1. per node class data
-2. func json parse
-3. KKT residual
-4. line search
-5.  semi-implicit euler helper (cpp)
-6.  more model helpers
-7.  precompute interface
-8.  matrix sparsity
+1. func json parse
+2. KKT residual
+3. line search
+4.  semi-implicit euler helper (cpp)
+5.  more model helpers
+6.  matrix sparsity
