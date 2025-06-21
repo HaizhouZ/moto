@@ -6,9 +6,9 @@
 namespace atri {
 namespace ns_riccati {
 
-void pre_solving_steps_0(node *cur) {
+void pre_solving_steps_0(riccati_data *cur) {
     // collect constraint residuals and jacobians
-    auto &d = get_data(cur);
+    auto &d = *cur;
     d.dense_->cost_ = 0.;
     d.Q_x.setZero();
     d.Q_u.setZero();
@@ -22,9 +22,9 @@ void pre_solving_steps_0(node *cur) {
     cur->update_approximation();
 }
 
-void pre_solving_steps_1(node *cur) {
+void pre_solving_steps_1(riccati_data *cur) {
     // collect constraint residuals and jacobians
-    auto &d = get_data(cur);
+    auto &d = *cur;
     auto &nsp = *d.nsp_;
     auto &_approx = d.dense_->approx_;
     /// @todo sparse F_y inverse
@@ -72,9 +72,9 @@ void pre_solving_steps_1(node *cur) {
 
 // these two cannot merge, because Q_y/yy should first be updated with
 // constr derivatives
-void pre_solving_steps_2(node *prev, node *cur) {
-    auto &d = get_data(cur);
-    auto &d_pre = get_data(prev);
+void pre_solving_steps_2(riccati_data *prev, riccati_data *cur) {
+    auto &d = *cur;
+    auto &d_pre = *prev;
     auto &nsp = *d.nsp_;
     // add P part of V_x/V_xx to Q_y/Q_yy of previous node
     d_pre.Q_y.noalias() += d.Q_x - nsp.F_0_k.transpose() * d.Q_yx;

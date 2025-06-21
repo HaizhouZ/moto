@@ -26,8 +26,8 @@ int main() {
 
     ns_sqp sqp;
 
-    auto init_node = sqp.graph_.add(ns_sqp::node_type(prob));
-    auto end_node = sqp.graph_.add(ns_sqp::node_type(prob_terminal));
+    auto& init_node = sqp.graph_.add(ns_sqp::node_type(prob));
+    auto& end_node = sqp.graph_.add(ns_sqp::node_type(prob_terminal));
 
     sqp.graph_.add_edge(init_node, end_node, 100);
 
@@ -53,12 +53,11 @@ int main() {
     // auto &data = ns_riccati::get_data(init_node.get());
     // std::cout << data.rollout_->prim_[__x].transpose() << '\n';
     // sqp.update();
-    sqp.graph_.apply_all_unary_forward([&dyn](ns_sqp::node_type *node) {
-        auto &data = ns_riccati::get_data(node);
+    sqp.graph_.apply_all_unary_forward([&dyn](auto *node) {
         // std::cout << "delX  " << data.rollout_->prim_[__x].transpose() << '\n';
         // std::cout << magic_enum::enum_name(data.rank_status_) << '\n';
-        std::cout << "state " << data.sym_->value_[__x].transpose() << '\n';
-        std::cout << "input " << data.sym_->value_[__u].transpose() << '\n';
+        std::cout << "state " << node->sym_->value_[__x].transpose() << '\n';
+        std::cout << "input " << node->sym_->value_[__u].transpose() << '\n';
         // std::cout << "nexts " << data.sym_->value_[__y].transpose() << '\n';
         // std::cout << "rescs " << node->data(dyn.vel_zero_constr).v_.transpose() << '\n';
         // std::cout << "dual  " << static_cast<constr_data &>(node->data(dyn.vel_zero_constr)).multiplier_.transpose() << '\n';

@@ -90,7 +90,7 @@ atri.generate_and_compile(
     ext_hess=[(q, q, kin_cost_hess)],
     keep_c_src=True,
     append_value=True,
-    append_jac=True
+    append_jac=True,
 )
 
 atri.wait_until_generated()

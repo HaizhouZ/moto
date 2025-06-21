@@ -16,16 +16,16 @@ void ns_sqp::update(size_t n_iter) {
     {
         graph_.apply_all_unary_parallel(ns_riccati::pre_solving_steps_0);
         std::atomic<double> cost_all{0.};
-        graph_.apply_all_unary_parallel([&cost_all](node_type *n) {
-            cost_all += n->data_->dense_->cost_;
+        graph_.apply_all_unary_parallel([&cost_all](auto *n) {
+            cost_all += n->dense_->cost_;
         });
 
         fmt::print("initial cost_total: {}\n", cost_all);
     }
     // );
     for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
-        std::cout << "------------------------------------\n";
-        std::cout << "Iteration: " << i_iter << std::endl;
+        fmt::print("------------------------------------\n");
+        fmt::print("Iteration: {}", i_iter);
         timed_block_labeled("all",
 
         // timed_block(
@@ -51,9 +51,9 @@ void ns_sqp::update(size_t n_iter) {
         // );
         );
         std::atomic<double> cost_all{0.};
-        graph_.apply_all_unary_parallel([&cost_all](node_type *n) {
+        graph_.apply_all_unary_parallel([&cost_all](auto *n) {
             // fmt::print("v:{}\n", n->data_->dense_->cost_);
-            cost_all += n->data_->dense_->cost_;
+            cost_all += n->dense_->cost_;
         });
 
         fmt::print("cost_total: {}\n", cost_all);

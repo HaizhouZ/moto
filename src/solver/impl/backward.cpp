@@ -4,16 +4,16 @@
 
 namespace atri {
 namespace ns_riccati {
-void kkt_diagnosis(node *cur) {
-    auto &d = get_data(cur);
+void kkt_diagnosis(riccati_data *cur) {
+    auto &d = *cur;
     if (d.Q_xx.llt().info() != Eigen::Success) {
         fmt::print("Q_xx is not positive definite\n");
         fmt::print("Eigenvalues of Q_xx: \n{}\n", d.Q_xx.eigenvalues().transpose());
     }
     /// @todo some more maybe about constraints
 }
-void backward_pass(node *cur, node *prev) {
-    auto &d = get_data(cur);
+void backward_pass(riccati_data *cur, riccati_data *prev) {
+    auto &d = *cur;
     auto &nsp = *d.nsp_;
     // check positiveness
     // bool qyy_invertible = isPositiveDefinite(d.Q_yy);
@@ -57,7 +57,7 @@ void backward_pass(node *cur, node *prev) {
 
     // update value function derivatives of previous node
     if (prev != nullptr) [[likely]] {
-        auto &d_pre = get_data(prev);
+        auto &d_pre = *prev;
         // update P
         d_pre.Q_y.noalias() += -d.Q_y * nsp.F_0_K + nsp.F_0_k.transpose() * nsp.Q_yy_F_0_K +
                                nsp.z_u_k.transpose() * d.d_u.K;

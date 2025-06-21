@@ -8,17 +8,17 @@
 
 namespace atri {
 namespace ns_riccati {
-void forward_rollout(node *cur, node *next) {
+void forward_rollout(riccati_data *cur, riccati_data *next) {
     // get_data(nodes_.front()).rollout_->prim_[__x].setZero();
-    auto &d = get_data(cur);
+    auto &d = *cur;
     auto &rollout_ = *d.rollout_;
     rollout_.prim_[__y].noalias() = d.d_y.k + d.d_y.K * rollout_.prim_[__x];
     if (next != nullptr) [[likely]] {
-        get_data(next).rollout_->prim_[__x] = rollout_.prim_[__y];
+        next->rollout_->prim_[__x] = rollout_.prim_[__y];
     }
 }
-void post_rollout_steps(node *cur) {
-    auto &d = get_data(cur);
+void post_rollout_steps(riccati_data *cur) {
+    auto &d = *cur;
     auto &rollout_ = *d.rollout_;
     auto &nsp = *d.nsp_;
     rollout_.prim_[__u].noalias() = d.d_u.k + d.d_u.K * rollout_.prim_[__x];

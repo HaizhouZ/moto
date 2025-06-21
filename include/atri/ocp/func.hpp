@@ -106,10 +106,10 @@ using composed_approx_data = composed_data<sparse_approx_data, data_type...>;
  * @brief approximation class for generic functions
  * @todo: change to differentiable for precompute
  */
-class func_impl : public expr {
+class func_impl : public expr_impl {
   protected:
     approx_order order_;
-    std::vector<expr_ptr_t> in_args_;
+    expr_list in_args_;
     std::unordered_map<size_t, size_t> sym_uid_idx_;
     friend struct sparse_primal_data;
 
@@ -122,7 +122,7 @@ class func_impl : public expr {
     virtual void hessian_impl([[maybe_unused]] sparse_approx_data &data) { hessian(data); };
 
   public:
-    void add_argument(sym in) {
+    void add_argument(const sym& in) {
         in_args_.push_back(in);
         sym_uid_idx_[in->uid_] = sym_uid_idx_.size();
     }
@@ -161,16 +161,16 @@ class func_impl : public expr {
     }
 
     func_impl(const std::string &name, approx_order order, size_t dim = 0, field_t field = __undefined)
-        : expr(name, dim, field), order_(order) {
+        : expr_impl(name, dim, field), order_(order) {
     }
 
     /**
      * @brief get other variables related to this approximation
      * @details here it is the input arguments, probably also parameters in the future
-     * @return std::vector<expr_ptr_t> list of expressions
+     * @return list of expressions
      */
-    std::vector<expr_ptr_t> get_aux() override {
-        return std::vector<expr_ptr_t>(in_args_.begin(), in_args_.end());
+    expr_list *get_aux() override {
+        return &in_args_;
     }
     /**
      * @brief setup the sparse func data
@@ -191,11 +191,11 @@ class func_impl : public expr {
                          bool eval_val, bool eval_jac = false, bool eval_hess = false) {
         assert(dynamic_cast<sparse_approx_data *>(&data) != nullptr); // check only in debug mode
         if (eval_val)
-            value_impl(static_cast<sparse_approx_data&>(data));
+            value_impl(static_cast<sparse_approx_data &>(data));
         if (eval_jac)
-            jacobian_impl(static_cast<sparse_approx_data&>(data));
+            jacobian_impl(static_cast<sparse_approx_data &>(data));
         if (eval_hess)
-            hessian_impl(static_cast<sparse_approx_data&>(data));
+            hessian_impl(static_cast<sparse_approx_data &>(data));
     }
     /**
      * @brief load the external approximation functions
@@ -249,7 +249,7 @@ class shared_data {
     friend struct node_data; // allow node_data to access private members
 
   public:
-    shared_data(problem_ptr_t prob, sym_data *primal);
+    shared_data(const problem_ptr_t &prob, sym_data *primal);
 
     problem_ptr_t prob_;
 
@@ -257,26 +257,30 @@ class shared_data {
         data_.try_emplace(uid, std::move(data));
     }
 
-    void add(expr *f, sparse_primal_data_ptr_t &&data) {
+    void add(expr_impl *f, sparse_primal_data_ptr_t &&data) {
         add(f->uid_, std::move(data));
     }
 
-    void add(const expr_ptr_t &expr, sparse_primal_data_ptr_t &&data) {
+    template <typename derived>
+        requires std::is_base_of_v<func_impl, derived>
+    void add(const std::shared_ptr<derived> &expr, sparse_primal_data_ptr_t &&data) {
         add(expr.get(), std::move(data));
     }
 
     auto &get(size_t uid) {
         return *data_.at(uid);
     }
-    auto &get(expr *f) {
+    auto &get(expr_impl *f) {
         assert(f->field_ == __pre_comp || f->field_ == __usr_func);
         return get(f->uid_);
     }
-    auto &get(const expr_ptr_t &expr) {
+    template <typename derived>
+        requires std::is_base_of_v<func_impl, derived>
+    auto &get(const std::shared_ptr<derived> &expr) {
         return get(expr.get());
     }
     auto &get(const std::string &name) {
-        return get(expr_index::get(name));
+        return get(expr_index::get(name).get());
     }
 };
 def_unique_ptr(shared_data);

@@ -2,6 +2,7 @@
 #include <arm/dynamics.hpp>
 #include <atri/solver/ns_sqp.hpp>
 #include <atri/utils/print.hpp>
+#include <iostream>
 
 int main() {
     using namespace atri;
@@ -18,8 +19,8 @@ int main() {
 
     ns_sqp sqp;
 
-    auto init_node = sqp.graph_.add(ns_sqp::node_type(prob));
-    auto end_node = sqp.graph_.add(ns_sqp::node_type(prob_terminal));
+    auto& init_node = sqp.graph_.add(ns_sqp::node_type(prob));
+    auto& end_node = sqp.graph_.add(ns_sqp::node_type(prob_terminal));
 
     sqp.graph_.add_edge(init_node, end_node, 8);
 
@@ -27,7 +28,7 @@ int main() {
     sqp.graph_.set_tail(end_node);
     init_node->value(dyn.q).setOnes();
 
-    sqp.graph_.apply_all_unary_parallel([](ns_sqp::node_type *node) {
+    sqp.graph_.apply_all_unary_parallel([](auto *node) {
         node->value(armCosts::ee_cost::r_des).setConstant(0.5);
         node->value(armCosts::ee_cost::W_kin).setConstant(100);
     });
@@ -40,31 +41,30 @@ int main() {
     } catch (...) {
     }
 
-    sqp.graph_.apply_all_unary_forward([&dyn](ns_sqp::node_type *node) {
-        auto &data = ns_riccati::get_data(node);
-        // std::cout << "delX  " << data.rollout_->prim_[__x].transpose() << '\n';
-        // std::cout << magic_enum::enum_name(data.rank_status_) << '\n';
-        std::cout << "state " << data.sym_->value_[__x].transpose() << '\n';
-        std::cout << "input " << data.sym_->value_[__u].transpose() << '\n';
-        std::cout << "nexts " << data.sym_->value_[__y].transpose() << '\n';
-        std::cout << "param " << data.sym_->value_[__p].transpose() << '\n';
+    sqp.graph_.apply_all_unary_forward([&dyn](auto *node) {
+        // std::cout << "delX  " << node->rollout_->prim_[__x].transpose() << '\n';
+        // std::cout << magic_enum::enum_name(node->rank_status_) << '\n';
+        std::cout << "state " << node->sym_->value_[__x].transpose() << '\n';
+        std::cout << "input " << node->sym_->value_[__u].transpose() << '\n';
+        std::cout << "nexts " << node->sym_->value_[__y].transpose() << '\n';
+        std::cout << "param " << node->sym_->value_[__p].transpose() << '\n';
         // std::cout << "rescs " << node->data(dyn.vel_zero_constr).v_.transpose() << '\n';
         // std::cout << "dual  " << static_cast<constr_data &>(node->data(dyn.vel_zero_constr)).multiplier_.transpose() << '\n';
-        // std::cout << "sy    " << data.nsp_->s_y << '\n';
-        // std::cout << "su    " << data.nsp_->s_u << '\n';
-        // std::cout << "resdy " << data.dense_->approx_[__dyn].v_.transpose() << '\n';
-        // std::cout << "jacdy \n" << data.dense_->approx_[__dyn].jac_[__y] << '\n';
-        std::cout << "dual  " << data.dense_->dual_[__dyn].transpose() << '\n';
-        //     std::cout << "Qx    " << data.Q_x << '\n';
-        //     std::cout << "Qu    " << data.Q_u << '\n';
-        //     std::cout << "Qy    " << data.Q_y << '\n';
-        //     // std::cout << "gain \n" << data.d_y.k.transpose() << '\n';
-        //     // std::cout << data.d_u.K.transpose() << '\n';
-        //     // std::cout << data.nsp_->u_0_p_k.transpose() << '\n';
-        //     // std::cout << data.nsp_->U << '\n';
-        //     // std::cout << data.Q_y.transpose() << '\n' << '\n';
-        //     // std::cout << data.Q_yx << '\n' << '\n';
-        //     // std::cout << data.dense_->approx_[__dyn].v_[__x] << '\n' << '\n';
+        // std::cout << "sy    " << node->nsp_->s_y << '\n';
+        // std::cout << "su    " << node->nsp_->s_u << '\n';
+        // std::cout << "resdy " << node->dense_->approx_[__dyn].v_.transpose() << '\n';
+        // std::cout << "jacdy \n" << node->dense_->approx_[__dyn].jac_[__y] << '\n';
+        std::cout << "dual  " << node->dense_->dual_[__dyn].transpose() << '\n';
+        //     std::cout << "Qx    " << node->Q_x << '\n';
+        //     std::cout << "Qu    " << node->Q_u << '\n';
+        //     std::cout << "Qy    " << node->Q_y << '\n';
+        //     // std::cout << "gain \n" << node->d_y.k.transpose() << '\n';
+        //     // std::cout << node->d_u.K.transpose() << '\n';
+        //     // std::cout << node->nsp_->u_0_p_k.transpose() << '\n';
+        //     // std::cout << node->nsp_->U << '\n';
+        //     // std::cout << node->Q_y.transpose() << '\n' << '\n';
+        //     // std::cout << node->Q_yx << '\n' << '\n';
+        //     // std::cout << node->dense_->approx_[__dyn].v_[__x] << '\n' << '\n';
         // std::cout << '\n';
     });
 

@@ -20,7 +20,7 @@ class problem {
     problem(const problem &rhs)
         : uid_(max_uid++), expr_(rhs.expr_), d_idx_(rhs.d_idx_),
           pos_by_uid_(rhs.pos_by_uid_), dim_(rhs.dim_) {}
-    void add_impl(const expr_ptr_t &expr);
+    bool add_impl(const expr_ptr_t &expr);
 
   public:
     const size_t uid_ = 0;
@@ -36,10 +36,10 @@ class problem {
     static auto make() { return std::shared_ptr<problem>(new problem()); }
     auto copy() { return std::shared_ptr<problem>(new problem(*this)); }
 
-    scalar_t *get_data_ptr(scalar_t *data, expr &expr) const {
+    scalar_t *get_data_ptr(scalar_t *data, expr_impl &expr) const {
         return data + get_expr_start(expr);
     }
-    scalar_t *get_data_ptr(scalar_t *data, expr &expr, size_t offset) const {
+    scalar_t *get_data_ptr(scalar_t *data, expr_impl &expr, size_t offset) const {
         return data + get_expr_start(expr) * offset;
     }
     /**
@@ -56,7 +56,7 @@ class problem {
     void add(expr_ptr_t &&expr);
 
     template <typename derived>
-        requires std::is_base_of_v<expr, derived>
+        requires std::is_base_of_v<expr_impl, derived>
     void add(const std::vector<std::shared_ptr<derived>> &exprs) {
         for (const auto &expr_ : exprs) {
             add(expr_);
@@ -64,7 +64,7 @@ class problem {
     }
 
     template <typename derived>
-        requires std::is_base_of_v<expr, derived>
+        requires std::is_base_of_v<expr_impl, derived>
     void add(std::vector<std::shared_ptr<derived>> &&exprs) {
         for (auto &expr_ : exprs) {
             add(std::move(expr_));
@@ -74,7 +74,7 @@ class problem {
     /**
      * @brief add a expr_list to the problem
      * will be called if argument is a list of raw pointers
-     * @param exprs 
+     * @param exprs
      */
     void add(expr_list &&exprs) {
         for (auto &expr_ : exprs) {
@@ -85,10 +85,12 @@ class problem {
     /**
      * @brief get start index of expr in its field
      */
-    size_t get_expr_start(const expr_ptr_t &expr) const {
+    template <typename derived>
+        requires std::is_base_of_v<expr_impl, derived>
+    inline size_t get_expr_start(const std::shared_ptr<derived> &expr) const {
         return get_expr_start(*expr);
     }
-    size_t get_expr_start(const expr &expr) const;
+    size_t get_expr_start(const expr_impl &expr) const;
 };
 
 def_ptr(problem);

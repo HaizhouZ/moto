@@ -16,12 +16,57 @@ def_unique_ptr(node_data);
  * @note to use your own data class with data_mgr, inherit this class and implement constructor C(problem_ptr_t)
  */
 struct node_data {
+    problem_ptr_t problem_;      /// < pointer to the problem
     sym_data_ptr_t sym_;         /// < dense storage of symbolic data
     approx_storage_ptr_t dense_; /// <dense storage of the func data
     shared_data_ptr_t shared_;   /// < shared data
     shifted_array<std::vector<sparse_approx_data_ptr_t>, field::num_func, __dyn>
-        sparse_;                                     /// < sparse view per func
-    node_data(problem_ptr_t prob);
+        sparse_; /// < sparse view per func
+    node_data(const problem_ptr_t &prob);
+    virtual ~node_data() = default;
+
+    // get value of the sym variable
+    auto value(const sym &sym) { return sym_->get(sym); }
+    /**
+     * @brief get the sparse func data by pointer
+     *
+     * @param f
+     * @return auto&
+     */
+    auto &data(func_impl *f) {
+        return *sparse_[f->field_][problem_->pos_by_uid_[f->uid_]];
+    }
+    /**
+     * @brief get the sparse func data by pointer
+     *
+     * @param f
+     * @return auto&
+     */
+    auto &data(const func_impl_ptr_t &f) {
+        return data(f.get());
+    }
+    /**
+     * @brief get the sparse func data by name
+     * @todo check efficiency
+     * @param name
+     * @return auto&
+     */
+    auto &data(const std::string &name) {
+        const auto &f = expr_index::get(name);
+        if (f->field_ >= __dyn && f->field_ < field::num_constr + __dyn) {
+            return data(static_cast<func_impl *>(f.get()));
+        } else [[unlikely]] {
+            throw std::runtime_error(
+                fmt::format("func {} in field {} not supported for data()",
+                            f->name_, magic_enum::enum_name(f->field_)));
+        }
+    }
+
+    auto value(const std::string &name) {
+        return sym_->get(expr_index::get(name));
+    }
+
+    void update_approximation();
 };
 
 } // namespace atri

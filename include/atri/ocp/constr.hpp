@@ -32,7 +32,6 @@ class constr_impl : public func_impl {
         : func_impl(name, order, dim, field) {
         /// @todo : make dual variables
     }
-    constr_impl(const constr_impl &rhs) = delete;
 
     /**
      * @brief wrapped data maker for constr

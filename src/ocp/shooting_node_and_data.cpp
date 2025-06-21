@@ -20,23 +20,23 @@ inline void for_funcs(const problem_ptr_t &prob, Callback &&callback) {
     }
 }
 
-node_data::node_data(problem_ptr_t prob)
-    : sym_(new sym_data(prob)), dense_(new approx_storage(prob)), shared_(new shared_data(prob, sym_.get())) {
+node_data::node_data(const problem_ptr_t &prob)
+    : problem_(prob), sym_(new sym_data(prob)), dense_(new approx_storage(prob)), shared_(new shared_data(prob, sym_.get())) {
     for_funcs(prob, [&](size_t field, [[maybe_unused]] size_t idx, func_impl *_f) {
         sparse_[field].push_back(_f->make_approx_data_mapping(sym_.get(), dense_.get(), shared_.get()));
     });
 }
 
-void data_mgr::create_data_batch(problem_ptr_t prob, size_t N) {
+void data_mgr::create_data_batch(const problem_ptr_t &prob, size_t N) {
     data_.try_emplace(prob->uid_);
     auto &pool = data_[prob->uid_];
     std::lock_guard _lock(pool.mtx_);
     for (size_t i = 0; i < N; i++) {
-        pool.push(maker_(prob));
+        pool.emplace(maker_(prob));
     }
 }
 
-node_data_ptr_t data_mgr::acquire_data(problem_ptr_t prob) {
+node_data_ptr_t data_mgr::get_data(const problem_ptr_t &prob) {
     auto &pool = data_[prob->uid_];
     std::lock_guard _lock(pool.mtx_);
     if (!pool.empty()) {
@@ -44,33 +44,41 @@ node_data_ptr_t data_mgr::acquire_data(problem_ptr_t prob) {
         pool.pop();
         return p;
     } else {
+        return nullptr;
+    }
+}
+
+node_data* data_mgr::acquire(const problem_ptr_t &prob) {
+    auto p = get_data(prob);
+    if (p) {
+        return p.release();
+    } else {
         return maker_(prob);
     }
 }
 
-void data_mgr::release_data(problem_ptr_t prob, node_data_ptr_t data) {
-    auto &pool = data_[prob->uid_];
+node_data* data_mgr::acquire(const node_data* rhs) {
+    return acquire(rhs->problem_);
+}
+
+void data_mgr::release(node_data* data) {
+    auto &pool = data_[data->sym_->prob_->uid_];
     std::lock_guard _lock(pool.mtx_);
-    pool.push(std::move(data));
+    pool.emplace(data);
 }
 
-void shooting_node::swap(shooting_node &p) {
-    problem_.swap(p.problem_);
-    data_.swap(p.data_);
-}
-
-void shooting_node::update_approximation() {
+void node_data::update_approximation() {
     /// @todo: always eval residual?
     // call to precompute
     for (const auto &expr : problem_->expr_[__pre_comp]) {
         auto f = static_cast<func_impl *>(expr.get());
-        f->call(data_->shared_->get(expr));
+        f->call(shared_->get(f));
     }
     for_funcs(problem_,
               [this](size_t field, size_t idx_expr, func_impl *_f) {
-                  _f->evaluate_approx(*data_->sparse_[field][idx_expr],
-                               true, _f->order() >= approx_order::first,
-                               _f->order() >= approx_order::second);
+                  _f->evaluate_approx(*sparse_[field][idx_expr],
+                                      true, _f->order() >= approx_order::first,
+                                      _f->order() >= approx_order::second);
               });
 }
 

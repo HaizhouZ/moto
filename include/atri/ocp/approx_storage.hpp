@@ -11,7 +11,7 @@ namespace atri {
  * deserialized data storage of all function fields
  */
 struct approx_storage {
-    approx_storage(problem_ptr_t prob);
+    approx_storage(const problem_ptr_t &prob);
 
     problem_ptr_t prob_;
     struct raw_approx {

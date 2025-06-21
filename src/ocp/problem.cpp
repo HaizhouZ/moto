@@ -1,7 +1,7 @@
 #include <atri/ocp/problem.hpp>
 
 namespace atri {
-void problem::add_impl(const expr_ptr_t &expr) {
+bool problem::add_impl(const expr_ptr_t &expr) {
     size_t _uid = expr->uid_;
     if (d_idx_.find(_uid) == d_idx_.end()) { // skip repeated
         if (!expr->finalize()) {
@@ -11,21 +11,24 @@ void problem::add_impl(const expr_ptr_t &expr) {
         size_t n1 = n0 + expr->dim_;
         d_idx_[_uid] = std::make_pair(n0, n1);
         n0 = d_idx_[_uid].second;
-        pos_by_uid_.try_emplace(_uid, expr_[expr->field_].size() - 1);
-        const auto &aux = expr->get_aux();
-        if (!aux.empty()) {
-            add(aux);
+        pos_by_uid_.try_emplace(_uid, expr_[expr->field_].size());
+        auto aux = expr->get_aux();
+        if (aux != nullptr) {
+            add(*aux);
         }
+        return true;
     }
+    return false;
 }
 void problem::add(const expr_ptr_t &expr) {
-    expr_[expr->field_].push_back(expr);
-    add_impl(expr_[expr->field_].back());
+    if (add_impl(expr))
+        expr_[expr->field_].push_back(expr);
 }
 void problem::add(expr_ptr_t &&expr) {
-    add_impl(expr_[expr->field_].emplace_back(std::move(expr)));
+    if (add_impl(expr))
+        expr_[expr->field_].emplace_back(std::move(expr));
 }
-size_t problem::get_expr_start(const expr &expr) const {
+size_t problem::get_expr_start(const expr_impl &expr) const {
     try {
         return d_idx_.at(expr.uid_).first;
     } catch (const std::exception &e) {
