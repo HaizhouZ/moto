@@ -1,6 +1,7 @@
 #include <atri/ocp/approx_storage.hpp>
 #include <atri/solver/data/nullspace_data.hpp>
 #include <atri/solver/ns_riccati_solve.hpp>
+#include <Eigen/Eigenvalues>
 
 namespace atri {
 namespace ns_riccati {

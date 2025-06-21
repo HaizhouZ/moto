@@ -1,9 +1,17 @@
+#include <Eigen/Eigenvalues>
 #include <atri/solver/data/nullspace_data.hpp>
 #include <atri/solver/ns_riccati_solve.hpp>
-#include <iostream>
 
 namespace atri {
 namespace ns_riccati {
+void kkt_diagnosis(node *cur) {
+    auto &d = get_data(cur);
+    if (d.Q_xx.llt().info() != Eigen::Success) {
+        fmt::print("Q_xx is not positive definite\n");
+        fmt::print("Eigenvalues of Q_xx: \n{}\n", d.Q_xx.eigenvalues().transpose());
+    }
+    /// @todo some more maybe about constraints
+}
 void backward_pass(node *cur, node *prev) {
     auto &d = get_data(cur);
     auto &nsp = *d.nsp_;
@@ -25,11 +33,10 @@ void backward_pass(node *cur, node *prev) {
         nsp.llt_ns_.compute(nsp.U);
         if (nsp.llt_ns_.info() != Eigen::Success) {
             fmt::print("Q_uu: \n{}\n", d.Q_uu);
-            fmt::print("Q_yy: \n{}\n", d.Q_yy);
-            fmt::print("U: \n{}\n", nsp.U);
+            kkt_diagnosis(cur);
             throw std::runtime_error("U is not positive definite");
-        }
-        nsp.llt_ns_.solveInPlace(d.d_u.K);
+        } else
+            nsp.llt_ns_.solveInPlace(d.d_u.K);
     } else {
         // constr rank > 0
         nsp.z_u_k.noalias() = nsp.u_0_p_k - nsp.U * nsp.u_y_k;

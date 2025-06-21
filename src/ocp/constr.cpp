@@ -1,4 +1,3 @@
-#include <atri/core/external_function.hpp>
 #include <atri/ocp/approx_storage.hpp>
 #include <atri/ocp/constr.hpp>
 #include <iostream>
@@ -15,23 +14,49 @@ constr_data::constr_data(approx_storage *raw,
             raw->prob_->get_expr_start(in_args[i]), in_args[i]->dim_));
     }
     if (f->order() >= approx_order::second) {
-        in_args_.push_back(multiplier_);       
+        in_args_.push_back(multiplier_);
     }
 }
 
-void constr_impl::load_external(const std::string &path) {
-    auto funcs = load_approx(name_, true, order() >= approx_order::first, order() >= approx_order::second);
-    value = [eval = funcs[0]](sparse_approx_data &d) {
-        eval.invoke(d.in_args_, d.v_);
-    };
-    jacobian = [jac = funcs[1]](sparse_approx_data &d) {
-        jac.invoke(d.in_args_, d.jac_);
-    };
-
-    hessian = [hess = funcs[2]](constr_data &d) {
-        hess.invoke(d.in_args_, d.hess_);
-    };
+bool constr_impl::finalize_impl() {
+    if (field_ == __undefined) {
+        bool has_[3] = {false, false, false};
+        for (const auto &arg : in_args_) {
+            if (arg->field_ <= __y)
+                has_[arg->field_] = true;
+        }
+        // make this long enough so that people will not easily remove the const :D
+        auto &field = *const_cast<field_t *>(&field_);
+        if (has_[__u] && !has_[__y])
+            field = __eq_cstr_c;
+        else if (has_[__x] && has_[__y])
+            field = __dyn;
+        else if (!has_[__u] && !has_[__x] && has_[__y])
+            field = __eq_cstr_s;
+        else
+            throw std::runtime_error(fmt::format("unsupported constr type has_x: {}, has_u: {}, has_y: {}", has_[__x], has_[__u], has_[__y]));
+    }
+    if (field_ == __eq_cstr_s) {
+        // do in_arg substitute
+        try {
+            for (auto &arg : in_args_) {
+                if (arg->field_ == __x) {
+#ifndef NDEBUG
+                    fmt::print("replacing in arg {} of func {} with {}\n", arg->name_, name_, arg->name_ + "_nxt");
+#endif
+                    arg = sym(expr_index::get(arg->name_ + "_nxt"));
+                }
+            }
+        } catch (const std::exception &ex) {
+            fmt::print("substitute exception");
+            throw;
+        }
+    }
+    assert(field_ == __dyn || magic_enum::enum_name(field_).find(
+                                  "cstr") != std::string::npos);
+    return true;
 }
+
 void constr_impl::value_impl(sparse_approx_data &data) {
     value(data);
     // compute contribution to merit function
@@ -56,10 +81,5 @@ void constr_impl::jacobian_impl(sparse_approx_data &data) {
         d.vjp_[i].noalias() += d.multiplier_.transpose() * d.jac_[i];
         // fmt::print("{}\t{}:jac\n{:.3}\n", i, name_, d.jac_[i]);
     }
-}
-void constr_impl::hessian_impl(sparse_approx_data &data) {
-    // do not compute the whole hessian
-    // preferred: first do multipler.T * jac then use auto-differentiation
-    hessian(static_cast<constr_data &>(data));
 }
 } // namespace atri

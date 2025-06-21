@@ -104,51 +104,42 @@ struct shooting_node {
     // get value of the sym variable
     auto value(sym sym) { return data_->sym_->get(sym); }
     /**
-     * @brief get the sparse approx data by pointer
+     * @brief get the sparse func data by pointer
      *
      * @param f
      * @return auto&
      */
-    auto &data(approx *f) {
-        auto it_pos = problem_->pos_by_uid_.find(f->uid_);
-        assert(it_pos != problem_->pos_by_uid_.end());
-        return *data_->sparse_[f->field_][it_pos->second];
+    auto &data(func_impl *f) {
+        return *data_->sparse_[f->field_][problem_->pos_by_uid_[f->uid_]];
     }
     /**
-     * @brief get the sparse approx data by pointer
+     * @brief get the sparse func data by pointer
      *
      * @param f
      * @return auto&
      */
-    auto &data(const approx_ptr_t &f) {
+    auto &data(const func_impl_ptr_t &f) {
         return data(f.get());
     }
     /**
-     * @brief get the sparse approx data by name
+     * @brief get the sparse func data by name
      * @todo check efficiency
      * @param name
      * @return auto&
      */
-    auto &data(std::string_view name) {
-        auto it_info = problem_->by_name_.find(name);
-        assert(it_info != problem_->by_name_.end());
-        auto &info = it_info->second;
-        if (info.p->field_ >= __dyn) {
-            return *data_->sparse_[info.p->field_][info.pos];
+    auto &data(const std::string &name) {
+        const auto &f = expr_index::get(name);
+        if (f->field_ >= __dyn && f->field_ < field::num_constr + __dyn) {
+            return data(static_cast<func_impl *>(f.get()));
         } else [[unlikely]] {
             throw std::runtime_error(
-                fmt::format("approx {} not found in field {}",
-                            name, magic_enum::enum_name(info.p->field_)));
+                fmt::format("func {} in field {} not supported for data()",
+                            f->name_, magic_enum::enum_name(f->field_)));
         }
     }
 
-    auto value(std::string_view name) {
-        auto it_info = problem_->by_name_.find(name);
-        assert(it_info != problem_->by_name_.end());
-        auto &info = it_info->second;
-        if (info.p->field_ <= field::num_sym) {
-            return data_->sym_->get(info.p);
-        }
+    auto value(const std::string &name) {
+        return data_->sym_->get(expr_index::get(name));
     }
 
     node_data_ptr_t data_;

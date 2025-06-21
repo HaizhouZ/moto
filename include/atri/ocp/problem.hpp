@@ -15,22 +15,22 @@ namespace atri {
  */
 class problem {
   private:
+    inline static size_t max_uid = 0;
     problem() : uid_(max_uid++) {}
     problem(const problem &rhs)
         : uid_(max_uid++), expr_(rhs.expr_), d_idx_(rhs.d_idx_),
-          by_name_(rhs.by_name_), pos_by_uid_(rhs.pos_by_uid_), dim_(rhs.dim_) {}
+          pos_by_uid_(rhs.pos_by_uid_), dim_(rhs.dim_) {}
+    void add_impl(const expr_ptr_t &expr);
 
   public:
-    static size_t max_uid;
     const size_t uid_ = 0;
+    /// collection of all expressions in the problem
     std::array<std::vector<expr_ptr_t>, field::num> expr_;
-    std::unordered_map<size_t, std::pair<size_t, size_t>> d_idx_; // data index
-    struct expr_info {
-        expr *p;
-        size_t pos;
-    };
-    std::map<std::string, expr_info, std::less<>> by_name_;
+    /// data index of expr in serialized vector, by uid
+    std::unordered_map<size_t, std::pair<size_t, size_t>> d_idx_;
+    /// position of expr in expr_ e.g., no. xxx, by uid
     std::unordered_map<size_t, size_t> pos_by_uid_;
+    /// dimension of each field
     std::array<size_t, field::num> dim_{};
 
     static auto make() { return std::shared_ptr<problem>(new problem()); }
@@ -44,42 +44,43 @@ class problem {
     }
     /**
      * @brief add expr to problem formulation
-     *
+     * @note will copy the shared pointer
      * @param expr expression to be added
      */
-    void add(const expr_ptr_t &expr) {
-        size_t _uid = expr->uid_;
-        if (d_idx_.find(_uid) == d_idx_.end()) { // skip repeated
-            if (!expr->finalize()) {
-                throw std::runtime_error(fmt::format("cannot finalize expr {} uid {}", expr->name_, expr->uid_));
-            }
-            size_t &n0 = dim_[expr->field_];
-            size_t n1 = n0 + expr->dim_;
-            expr_[expr->field_].push_back(expr);
-            d_idx_[_uid] = std::make_pair(n0, n1);
-            n0 = d_idx_[_uid].second;
-            by_name_.try_emplace(expr->name_, expr_info{expr.get(), expr_[expr->field_].size() - 1});
-            pos_by_uid_.try_emplace(_uid, expr_[expr->field_].size() - 1);
-            const auto &aux = expr->get_aux();
-            if (!aux.empty()) {
-                add(aux);
-            }
-        }
-    }
+    void add(const expr_ptr_t &expr);
+    /**
+     * @brief add expr to problem formulation
+     * @note will move the shared pointer
+     * @param expr expression to be added
+     */
+    void add(expr_ptr_t &&expr);
 
-    template <typename wrapped, typename std::enable_if_t<std::is_base_of_v<expr, typename wrapped::element_type>, int> = 0>
-    void add(const std::vector<wrapped> &exprs) {
-        for (auto expr_ : exprs) {
+    template <typename derived>
+        requires std::is_base_of_v<expr, derived>
+    void add(const std::vector<std::shared_ptr<derived>> &exprs) {
+        for (const auto &expr_ : exprs) {
             add(expr_);
         }
     }
 
-    template <typename derived, typename std::enable_if_t<std::is_base_of_v<expr, derived>, int> = 0>
-    void add(std::shared_ptr<derived> rhs) {
-        add(std::static_pointer_cast<expr>(rhs));
+    template <typename derived>
+        requires std::is_base_of_v<expr, derived>
+    void add(std::vector<std::shared_ptr<derived>> &&exprs) {
+        for (auto &expr_ : exprs) {
+            add(std::move(expr_));
+        }
     }
 
-    void add(const expr_list &rhs) { add(rhs.get()); }
+    /**
+     * @brief add a expr_list to the problem
+     * will be called if argument is a list of raw pointers
+     * @param exprs 
+     */
+    void add(expr_list &&exprs) {
+        for (auto &expr_ : exprs) {
+            add(std::move(expr_));
+        }
+    }
 
     /**
      * @brief get start index of expr in its field
@@ -87,13 +88,7 @@ class problem {
     size_t get_expr_start(const expr_ptr_t &expr) const {
         return get_expr_start(*expr);
     }
-    size_t get_expr_start(const expr &expr) const {
-        try {
-            return d_idx_.at(expr.uid_).first;
-        } catch (const std::exception &e) {
-            throw std::runtime_error(fmt::format("expr {} uid {} cannot be found", expr.name_, expr.dim_));
-        }
-    }
+    size_t get_expr_start(const expr &expr) const;
 };
 
 def_ptr(problem);

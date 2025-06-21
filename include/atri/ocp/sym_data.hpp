@@ -24,6 +24,8 @@ struct sym_data {
     problem_ptr_t prob_;
     std::array<vector, field::num_sym> value_;
 };
+
+def_unique_ptr(sym_data);
 } // namespace atri
 
 #endif // ATRI_OCP_CORE_SYM_DATA_HPP

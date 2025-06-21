@@ -51,7 +51,7 @@ class doubleIntegratorDyn : public dynamics, public expr_list {
         }
     };
     doubleIntegratorDyn()
-        : dyn_pos(pos()), dyn_vel(vel()), vel_zero_constr(zero_vel()) {
+        : dyn_pos(new pos()), dyn_vel(new vel()), vel_zero_constr(new zero_vel()) {
         std::tie(r, r_next) = make_state("pos", 3);
         std::tie(v, v_next) = make_state("vel", 3);
         a = make_input("acc", 3);
@@ -62,7 +62,7 @@ class doubleIntegratorDyn : public dynamics, public expr_list {
         // trial->add_argument(r);
         // trial->value = [=](auto &d) { d.v_ = d(r); };
         // trial->jacobian = [](sparse_approx_data &d) { d.jac_[0].setIdentity(); };
-        add({dyn_pos, dyn_vel, vel_zero_constr});
+        extend({dyn_pos, dyn_vel, vel_zero_constr});
     }
 };
 // another way

@@ -31,15 +31,27 @@ def make_dyn():
 
 dyn = make_dyn()
 
+# def make_cost():
+#     q = cs.SX.sym("q", model.nq)
+#     pos_d = cs.SX.sym("pos_d", 3)
+#     cpin.forwardKinematics(cpin_model, cpin_data, q)
+#     cpin.updateFramePlacements(cpin_model, cpin_data)
+#     r_ee = cpin_data.oMf[model.getFrameId("iiwa_link_ee_kuka")].translation
+#     kin_cost = cs.sumsqr(r_ee - pos_d)
+
+#     return cs.Function('cost', [q, pos_d], [kin_cost])
+
 def make_cost():
     q = cs.SX.sym("q", model.nq)
+    pos = cs.SX.sym("pos", 3)
     pos_d = cs.SX.sym("pos_d", 3)
     cpin.forwardKinematics(cpin_model, cpin_data, q)
     cpin.updateFramePlacements(cpin_model, cpin_data)
     r_ee = cpin_data.oMf[model.getFrameId("iiwa_link_ee_kuka")].translation
-    kin_cost = cs.sumsqr(r_ee - pos_d)
+    kin_cost = cs.sumsqr(pos - pos_d)
+    kin_constr = r_ee - pos
 
-    return cs.Function('cost', [q, pos_d], [kin_cost])
+    return cs.Function('cost', [q, pos_d, pos], [kin_cost, kin_constr])
 
 kin_cost = make_cost()
 
@@ -59,16 +71,20 @@ sqp.set_value(q0, np.ones(model.nq))
 sqp.set_value(v0, np.zeros(model.nv))
 cost = 0.
 cost += 0.5 * (10 * cs.sumsqr(q0) + 0.1 * cs.sumsqr(v0))
-N = 5
+N = 8
 for i in range(N):
     q = sqp.variable(model.nq)
     v = sqp.variable(model.nv)
+    pos = sqp.variable(3)
     tq = sqp.variable(model.nv)
     euler, rnea = dyn(q_[-1], v_[-1], q, v, tq)
-    cost_ = kin_cost(q, pos_d)
+    (cost_, kin_cstr) = kin_cost(q, pos_d, pos)
+    # (cost_) = kin_cost(q, pos_d)
     sqp.subject_to(euler == 0)
     sqp.subject_to(rnea == 0)
-    cost += 100 * cost_
+    sqp.subject_to(kin_cstr == 0)
+    # cost += 100 * cost_
+    cost += 200 * cost_+ 1e-8 * cs.sumsqr(pos)
     cost += 0.5 * (10 * cs.sumsqr(q) + 0.1 * cs.sumsqr(v) + 1e-2 * cs.sumsqr(tq))
     q_.append(q)
     v_.append(v)
