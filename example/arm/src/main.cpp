@@ -2,6 +2,7 @@
 #include <arm/dynamics.hpp>
 #include <atri/solver/ns_sqp.hpp>
 #include <atri/utils/print.hpp>
+#include <iostream>
 
 int main() {
     using namespace atri;

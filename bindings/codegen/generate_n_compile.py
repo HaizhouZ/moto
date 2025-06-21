@@ -122,7 +122,7 @@ def generate_and_compile(
     call wait_until_generated() to ensure the compilation is done
     """
     in_arg_check(sx_inputs)
-    func_name = prefix + '_' + func_name
+    func_name = prefix + '_' + func_name if prefix else func_name
     worker = []
     if gen_eval:
         worker = [

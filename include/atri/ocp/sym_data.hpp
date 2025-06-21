@@ -13,12 +13,12 @@ struct sym_data {
         }
     }
 
-    auto get(expr *sym) {
+    auto get(expr_impl *sym) {
         return value_[sym->field_].segment(prob_->get_expr_start(*sym), sym->dim_);
     }
 
     auto get(const sym &sym) {
-        return get(sym.ptr());
+        return get(sym.get());
     }
 
     problem_ptr_t prob_;

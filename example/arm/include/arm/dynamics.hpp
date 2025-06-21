@@ -15,10 +15,10 @@ struct armDynamics {
 
         dyn_pos = constr("euler", approx_order::first, 7);
         dyn_pos->add_arguments({q, q_next, v_next});
-        // dyn_pos->load_external();
+        dyn_pos->load_external();
         dyn_vel = constr("rnea", approx_order::first, 7);
         dyn_vel->add_arguments({q, v, v_next, tau});
-        // dyn_vel->load_external();
+        dyn_vel->load_external();
     }
 };
 } // namespace atri

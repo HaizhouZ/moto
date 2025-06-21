@@ -106,7 +106,7 @@ using composed_approx_data = composed_data<sparse_approx_data, data_type...>;
  * @brief approximation class for generic functions
  * @todo: change to differentiable for precompute
  */
-class func_impl : public expr {
+class func_impl : public expr_impl {
   protected:
     approx_order order_;
     expr_list in_args_;
@@ -161,7 +161,7 @@ class func_impl : public expr {
     }
 
     func_impl(const std::string &name, approx_order order, size_t dim = 0, field_t field = __undefined)
-        : expr(name, dim, field), order_(order) {
+        : expr_impl(name, dim, field), order_(order) {
     }
 
     /**
@@ -257,7 +257,7 @@ class shared_data {
         data_.try_emplace(uid, std::move(data));
     }
 
-    void add(expr *f, sparse_primal_data_ptr_t &&data) {
+    void add(expr_impl *f, sparse_primal_data_ptr_t &&data) {
         add(f->uid_, std::move(data));
     }
 
@@ -270,7 +270,7 @@ class shared_data {
     auto &get(size_t uid) {
         return *data_.at(uid);
     }
-    auto &get(expr *f) {
+    auto &get(expr_impl *f) {
         assert(f->field_ == __pre_comp || f->field_ == __usr_func);
         return get(f->uid_);
     }

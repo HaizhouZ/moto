@@ -1,7 +1,7 @@
 #include <atri/core/expr.hpp>
 
 namespace atri {
-void expr::add_to_index() {
+void expr_impl::add_to_index() {
     try {
         auto [it, inserted] = expr_index::by_name_.try_emplace(name_, shared_from_this());
         if (!inserted) {
@@ -14,7 +14,7 @@ void expr::add_to_index() {
     }
     expr_index::all_[uid_] = shared_from_this();
 }
-bool expr::finalize() {
+bool expr_impl::finalize() {
     if (!finalized) {
         finalized = finalize_impl();
         if (field_ == __undefined) {

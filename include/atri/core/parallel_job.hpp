@@ -23,7 +23,6 @@ namespace atri {
 template <typename callback_t, bool reverse_block = true>
     requires std::invocable<callback_t, size_t>
 inline void parallel_for(size_t start, size_t stop, callback_t &&callback) {
-    std::exception_ptr eptr = nullptr; // to store the first exception
 
     size_t n_threads = MAX_THREADS;
     size_t chunk_size = (stop - start + n_threads - 1) / n_threads;
@@ -39,27 +38,14 @@ inline void parallel_for(size_t start, size_t stop, callback_t &&callback) {
         size_t end = std::min(begin + chunk_size, stop); // Ensure bounds are within _nodes size
         for (size_t i = begin; i < end; ++i) {
             // for (size_t i = end-1; i >= begin && i < end; i--) {
-            try {
-                callback(i);
-            } catch (const std::exception &ex) {
-#pragma omp critical
-                fmt::print("exception thread {} no. {}: {}\n", j, i, ex.what());
-                if (!eptr) {
-                    eptr = std::current_exception(); // capture first exception
-                }
-                break;
-            }
+            callback(i);
         }
-    }
-    if (eptr) {
-        std::rethrow_exception(eptr);
     }
 }
 
 template <typename callback_t>
     requires std::invocable<callback_t, size_t>
 inline void sequential_for(size_t start, size_t stop, callback_t &&callback) {
-    std::exception_ptr eptr = nullptr; // to store the first exception
 
     size_t n_threads = MAX_THREADS;
     size_t chunk_size = (stop - start + n_threads - 1) / n_threads;
@@ -73,19 +59,8 @@ inline void sequential_for(size_t start, size_t stop, callback_t &&callback) {
 #pragma omp ordered
 #endif
         for (size_t i = begin; i < end; ++i) {
-            try {
-                callback(i);
-            } catch (const std::exception &ex) {
-                fmt::print("exception thread {} no. {}: {}\n", j, i, ex.what());
-                if (!eptr) {
-                    eptr = std::current_exception(); // capture first exception
-                }
-                break;
-            }
+            callback(i);
         }
-    }
-    if (eptr) {
-        std::rethrow_exception(eptr);
     }
 }
 
