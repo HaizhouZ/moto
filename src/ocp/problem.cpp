@@ -1,7 +1,7 @@
 #include <atri/ocp/problem.hpp>
 
 namespace atri {
-bool problem::add_impl(const expr_ptr_t &expr) {
+bool ocp::add_impl(const expr_ptr_t &expr) {
     size_t _uid = expr->uid_;
     if (d_idx_.find(_uid) == d_idx_.end()) { // skip repeated
         if (!expr->finalize()) {
@@ -20,15 +20,15 @@ bool problem::add_impl(const expr_ptr_t &expr) {
     }
     return false;
 }
-void problem::add(const expr_ptr_t &expr) {
+void ocp::add(const expr_ptr_t &expr) {
     if (add_impl(expr))
         expr_[expr->field_].push_back(expr);
 }
-void problem::add(expr_ptr_t &&expr) {
+void ocp::add(expr_ptr_t &&expr) {
     if (add_impl(expr))
         expr_[expr->field_].emplace_back(std::move(expr));
 }
-size_t problem::get_expr_start(const expr_impl &expr) const {
+size_t ocp::get_expr_start(const expr_impl &expr) const {
     try {
         return d_idx_.at(expr.uid_).first;
     } catch (const std::exception &e) {

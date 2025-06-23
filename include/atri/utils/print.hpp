@@ -6,7 +6,7 @@
 namespace atri {
 namespace utils {
 
-void print_problem(problem_ptr_t prob);
+void print_problem(ocp_ptr_t prob);
 
 } // namespace utils
 } // namespace atri

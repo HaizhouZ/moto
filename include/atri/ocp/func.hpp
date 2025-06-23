@@ -15,13 +15,31 @@ enum class approx_order { zero = 0,
 struct func_impl;
 def_ptr(func_impl);
 /////////////////////////////////////////////////////////////////////
+/**
+ * @brief sparse primal data
+ * sparse view to access the input arguments of a function
+ * @note it uses reference to avoid copying the input arguments
+ */
 struct sparse_primal_data {
-    // use ref to exploit sparsity (avoid copy)
+    /// use ref to exploit sparsity (avoid copy)
     std::vector<vector_ref> in_args_;
+    /**
+     * @brief Construct a new sparse primal data object
+     *
+     * @param primal sym data including states inputs etc
+     * @param shared shared data
+     * @param f function implementation pointer (unique_ptr const ref)
+     */
     sparse_primal_data(sym_data *primal, shared_data *shared, const func_impl_ptr_t &f)
         : sparse_primal_data(primal, shared, f.get()) {}
+    /**
+     * @brief Construct a new sparse primal data object
+     * @param primal sym data including states inputs etc
+     * @param shared shared data
+     * @param f function implementation pointer
+     */
     sparse_primal_data(sym_data *primal, shared_data *shared, func_impl *f);
-    sparse_primal_data(const sparse_primal_data &rhs) = delete; // disable this
+    /// move constructor
     sparse_primal_data(sparse_primal_data &&rhs)
         : in_args_(std::move(rhs.in_args_)),
           sym_uid_idx_(rhs.sym_uid_idx_),
@@ -31,7 +49,11 @@ struct sparse_primal_data {
     virtual ~sparse_primal_data() = default;
     const func_impl *f_;  ///< pointer to the func
     shared_data *shared_; ///< pointer to shared data
-
+    /**
+     * @brief get the input argument values
+     * @note this is a wrapper of in_args_ to access the values
+     * @return vector_ref of input arguments
+     */
     auto &operator()(const sym &in) {
         return in_args_[sym_uid_idx_[in->uid_]];
     }
@@ -49,23 +71,44 @@ def_unique_ptr(sparse_primal_data);
  */
 struct sparse_approx_data : public sparse_primal_data {
 
-    vector_ref v_; // value
-    // jacobian, index correspond to in_args_
+    vector_ref v_; ///< value ref
+    /// jacobian, by default index correspond to @ref sparse_primal_data::in_args_
     std::vector<matrix_ref> jac_;
-    // hessian for cost. index corresponds to in_args_
+    /// hessian for cost. index corresponds to @ref sparse_primal_data::in_args_
     std::vector<std::vector<matrix_ref>> hess_;
     /**
-     * @brief Construct a new sparse func data object
+     * @brief Construct a new sparse approx data object
      *
      * @param primal sym data including states inputs etc
      * @param raw dense raw data of approximation
+     * @param shared shared data
      * @param f approximation
      */
     sparse_approx_data(sym_data *primal, approx_storage *raw, shared_data *shared, func_impl *f);
+    /**
+     * @brief Construct a new sparse approx data object
+     *
+     * @param primal sym data including states inputs etc
+     * @param v value vector reference
+     * @param jac jacobian matrix references
+     * @param shared shared data
+     * @param f approximation function implementation pointer (unique_ptr const ref)
+     * @note this constructor is used for approximations not mapped from @ref approx_storage
+     */
     sparse_approx_data(sym_data *primal, vector_ref v, const std::vector<matrix_ref> &jac, shared_data *shared, const func_impl_ptr_t &f)
         : sparse_approx_data(primal, v, jac, shared, f.get()) {}
+    /**
+     * @brief Construct a new sparse approx data object
+     *
+     * @param primal sym data including states inputs etc
+     * @param v value vector reference
+     * @param jac jacobian matrix references
+     * @param shared shared data
+     * @param f approximation function implementation pointer
+     * @note this constructor is used for approximations not mapped from @ref approx_storage
+     */
     sparse_approx_data(sym_data *primal, vector_ref v, const std::vector<matrix_ref> &jac, shared_data *shared, func_impl *f);
-    sparse_approx_data(const sparse_approx_data &rhs) = delete; // disable this
+    /// move constructor
     sparse_approx_data(sparse_approx_data &&rhs) : v_(rhs.v_), sparse_primal_data(std::move(rhs)) {
         jac_ = std::move(rhs.jac_);
         hess_ = std::move(rhs.hess_);
@@ -122,7 +165,7 @@ class func_impl : public expr_impl {
     virtual void hessian_impl([[maybe_unused]] sparse_approx_data &data) { hessian(data); };
 
   public:
-    void add_argument(const sym& in) {
+    void add_argument(const sym &in) {
         in_args_.push_back(in);
         sym_uid_idx_[in->uid_] = sym_uid_idx_.size();
     }
@@ -138,14 +181,59 @@ class func_impl : public expr_impl {
             add_argument(in);
         }
     }
-    // get input argument values
+    /// @brief get input argument values
     const auto &in_args() const { return in_args_; }
-    // order of approximation
+    /// @brief order of approximation
     inline approx_order order() { return order_; }
-    // check if the function is an approximation, true if yes
-    bool is_approx() const {
-        return (field_ != __pre_comp && field_ != __usr_func) && field_ > __dyn;
+    /**
+     * @breid check if the function is an approximation
+     * @note funcs in __undefined will be considered as (possibly) approximation
+     * @return true if field is not __pre_comp or __usr_func and field value is greater than __dyn
+     */
+    bool is_approx() const { return (field_ != __pre_comp && field_ != __usr_func) && field_ > __dyn; }
+
+    /**
+     * @brief get other variables related to this approximation
+     * @details here it is the input arguments, probably also parameters in the future
+     * @return list of expressions
+     */
+    expr_list *get_aux() override { return &in_args_; }
+    /**
+     * @brief setup the sparse func data
+     * @details will setup the mapping from the dense approx_storage to sparse_approx_data
+     * @return sparse_approx_data_ptr_t
+     */
+    virtual sparse_approx_data_ptr_t make_approx_data_mapping(sym_data *primal,
+                                                              approx_storage *raw,
+                                                              shared_data *shared);
+    /**
+     * @brief evaluate the func
+     * @param data sparse_approx_data to be evaluated
+     * @param eval_val evaluate value if true
+     * @param eval_jac evaluate jacobian if true
+     * @param eval_hess evaluate hessian if true
+     */
+    void evaluate_approx(sparse_approx_data &data,
+                         bool eval_val, bool eval_jac = false, bool eval_hess = false) {
+        if (eval_val)
+            value_impl(data);
+        if (eval_jac)
+            jacobian_impl(data);
+        if (eval_hess)
+            hessian_impl(data);
     }
+    template <typename T>
+    void evaluate_approx(T &data,
+                         bool eval_val, bool eval_jac = false, bool eval_hess = false) {
+        evaluate_approx(dynamic_cast<sparse_approx_data &>(data), eval_val, eval_jac, eval_hess);
+    }
+    /**
+     * @brief load the external approximation functions
+     * @note will find the functions with suffix _jac, _hess
+     * @param path folder of the external functions, default is "gen"
+     */
+    virtual void load_external(const std::string &path = "gen");
+
     /**
      * @brief constructor for non-approximation functions
      *
@@ -158,130 +246,73 @@ class func_impl : public expr_impl {
             throw std::runtime_error(fmt::format("func {} field type {} not qualified as non-approx",
                                                  name_, magic_enum::enum_name(field)));
         }
+        // make a default make_data
+        make_data = [this](sym_data *primal, shared_data *shared) {
+            return std::make_unique<sparse_primal_data>(primal, shared, this);
+        };
     }
-
+    /**
+     * @brief constructor for approximation functions
+     * @note the order must be specified, otherwise it will be considered as non-approximation
+     * @param name name of the function
+     * @param order order of the approximation
+     * @param dim dimension of the function, default is 0
+     * @param field field type, default is __undefined (to be finalized later, @ref finalize_impl)
+     */
     func_impl(const std::string &name, approx_order order, size_t dim = 0, field_t field = __undefined)
         : expr_impl(name, dim, field), order_(order) {
     }
 
-    /**
-     * @brief get other variables related to this approximation
-     * @details here it is the input arguments, probably also parameters in the future
-     * @return list of expressions
-     */
-    expr_list *get_aux() override {
-        return &in_args_;
-    }
-    /**
-     * @brief setup the sparse func data
-     * @details will setup the mapping from the dense approx_storage to sparse_approx_data
-     * @return sparse_approx_data_ptr_t
-     */
-    virtual sparse_approx_data_ptr_t make_approx_data_mapping(sym_data *primal,
-                                                              approx_storage *raw,
-                                                              shared_data *shared);
-    /**
-     * @brief evaluate the func
-     * @note currently using template to avoid ifelse, maybe unnecessary
-     * @tparam eval_val evaluate value if true
-     * @tparam eval_jac evaluate jacobian if true
-     * @tparam eval_hess evaluate hessian if true
-     */
-    void evaluate_approx(sparse_primal_data &data,
-                         bool eval_val, bool eval_jac = false, bool eval_hess = false) {
-        assert(dynamic_cast<sparse_approx_data *>(&data) != nullptr); // check only in debug mode
-        if (eval_val)
-            value_impl(static_cast<sparse_approx_data &>(data));
-        if (eval_jac)
-            jacobian_impl(static_cast<sparse_approx_data &>(data));
-        if (eval_hess)
-            hessian_impl(static_cast<sparse_approx_data &>(data));
-    }
-    /**
-     * @brief load the external approximation functions
-     * @note will find the functions with suffix _jac, _hess
-     * @param path folder of the external functions, default is "gen"
-     */
-    virtual void load_external(const std::string &path = "gen");
-
   public:
+    /// @brief callback to evaluate the value of the approximation
     std::function<void(sparse_approx_data &)> value;
+    /// @brief callback to evaluate the jacobian of the approximation
     std::function<void(sparse_approx_data &)> jacobian;
+    /// @brief callback to evaluate the hessian of the approximation
     std::function<void(sparse_approx_data &)> hessian;
+    /// @brief callback to call a non-approximation function
     std::function<void(sparse_primal_data &)> call;
+    /// @brief callback to make data（for non-approx) @note will not be called in @ref make_approx_data_mapping
     std::function<sparse_primal_data_ptr_t(sym_data *, shared_data *)> make_data;
 };
 /////////////////////////////////////////////////////////////////////
-struct pre_compute_impl : public func_impl {
-    pre_compute_impl(const std::string &name)
-        : func_impl(name, __pre_comp) {
-    }
-};
-def_ptr(pre_compute_impl);
-/////////////////////////////////////////////////////////////////////
-struct pre_compute : public pre_compute_impl_ptr_t {
-    pre_compute(const std::string &name)
-        : pre_compute_impl_ptr_t(new pre_compute_impl(name)) {
-    }
-    pre_compute(pre_compute_impl *impl)
-        : pre_compute_impl_ptr_t(impl) {
-    }
-};
-/////////////////////////////////////////////////////////////////////
-struct usr_func_impl : public func_impl {
-    usr_func_impl(const std::string &name, approx_order order, size_t dim = 0)
-        : func_impl(name, order, dim, __usr_func) {
-    }
-};
-def_ptr(usr_func_impl);
-/////////////////////////////////////////////////////////////////////
-struct usr_func : public usr_func_impl_ptr_t {
-    usr_func(const std::string &name, approx_order order, size_t dim = 0)
-        : usr_func_impl_ptr_t(new usr_func_impl(name, order, dim)) {
-    }
-    usr_func(usr_func_impl *impl)
-        : usr_func_impl_ptr_t(impl) {
-    }
-};
-/////////////////////////////////////////////////////////////////////
+/**
+ * @brief shared data for all funcs in one problem formulation
+ * @note it will store (class derived from) sparse_primal_data
+ */
 class shared_data {
     std::unordered_map<size_t, sparse_primal_data_ptr_t> data_;
-    friend struct node_data; // allow node_data to access private members
 
   public:
-    shared_data(const problem_ptr_t &prob, sym_data *primal);
+    shared_data(const ocp_ptr_t &prob, sym_data *primal);
 
-    problem_ptr_t prob_;
-
-    void add(size_t uid, sparse_primal_data_ptr_t &&data) {
-        data_.try_emplace(uid, std::move(data));
-    }
-
+    ocp_ptr_t prob_;
+    /// @brief add data by uid of the func (owner of the data)
+    void add(size_t uid, sparse_primal_data_ptr_t &&data) { data_.try_emplace(uid, std::move(data)); }
+    /// @brief add data by func pointer (owner of the data)
     void add(expr_impl *f, sparse_primal_data_ptr_t &&data) {
+        assert(f->field_ == __pre_comp || f->field_ == __usr_func);
         add(f->uid_, std::move(data));
     }
-
+    /// @brief add data by func shared pointer (owner of the data)
     template <typename derived>
         requires std::is_base_of_v<func_impl, derived>
     void add(const std::shared_ptr<derived> &expr, sparse_primal_data_ptr_t &&data) {
         add(expr.get(), std::move(data));
     }
-
-    auto &get(size_t uid) {
-        return *data_.at(uid);
-    }
+    /// @brief get the data by uid
+    auto &get(size_t uid) { return *data_.at(uid); }
+    /// @brief get the data by func pointer (owner of the data)
     auto &get(expr_impl *f) {
         assert(f->field_ == __pre_comp || f->field_ == __usr_func);
         return get(f->uid_);
     }
+    /// @brief get the data by func name (owner of the data)
+    auto &get(const std::string &name) { return get(expr_index::get(name).get()); }
+    /// @brief get the data by func shared pointer (owner of the data)
     template <typename derived>
         requires std::is_base_of_v<func_impl, derived>
-    auto &get(const std::shared_ptr<derived> &expr) {
-        return get(expr.get());
-    }
-    auto &get(const std::string &name) {
-        return get(expr_index::get(name).get());
-    }
+    auto &get(const std::shared_ptr<derived> &expr) { return get(expr.get()); }
 };
 def_unique_ptr(shared_data);
 } // namespace atri

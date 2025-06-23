@@ -17,7 +17,7 @@
 #endif
 
 namespace atri {
-void *__load_from_shared(const std::string &lib_path, const std::string &func_name) {
+void *load_from_shared(const std::string &lib_path, const std::string &func_name) {
     void *handle = LOAD_LIBRARY(lib_path.data());
     if (!handle)
         throw std::runtime_error(fmt::format("Failed to open library: {}", lib_path));

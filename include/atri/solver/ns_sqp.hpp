@@ -8,7 +8,7 @@ namespace atri {
 
 struct ns_sqp {
     struct node_type : public shooting_node<ns_riccati::riccati_data> {
-        node_type(const problem_ptr_t &prob)
+        node_type(const ocp_ptr_t &prob)
             : shooting_node<ns_riccati::riccati_data>(prob) {}
         node_type(const node_type &rhs) = default;
         node_type(node_type &&rhs) = default;

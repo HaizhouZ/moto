@@ -13,16 +13,16 @@ def_unique_ptr(node_data);
 /**
  * @brief node data class
  * stores the shooting node data including symbolics, raw approximation and its sparse mapping
- * @note to use your own data class with data_mgr, inherit this class and implement constructor C(problem_ptr_t)
+ * @note to use your own data class with data_mgr, inherit this class and implement constructor C(ocp_ptr_t)
  */
 struct node_data {
-    problem_ptr_t problem_;      /// < pointer to the problem
+    ocp_ptr_t ocp_;          /// < pointer to the problem
     sym_data_ptr_t sym_;         /// < dense storage of symbolic data
     approx_storage_ptr_t dense_; /// <dense storage of the func data
     shared_data_ptr_t shared_;   /// < shared data
     shifted_array<std::vector<sparse_approx_data_ptr_t>, field::num_func, __dyn>
         sparse_; /// < sparse view per func
-    node_data(const problem_ptr_t &prob);
+    node_data(const ocp_ptr_t &prob);
     virtual ~node_data() = default;
 
     // get value of the sym variable
@@ -34,7 +34,7 @@ struct node_data {
      * @return auto&
      */
     auto &data(func_impl *f) {
-        return *sparse_[f->field_][problem_->pos_by_uid_[f->uid_]];
+        return *sparse_[f->field_][ocp_->pos_by_uid_[f->uid_]];
     }
     /**
      * @brief get the sparse func data by pointer

@@ -14,7 +14,7 @@ using namespace atri;
 int main() {
     doubleIntegratorDyn dyn;
     doubleIntegratorCosts costs;
-    auto prob = problem::make();
+    auto prob = ocp::make();
     prob->add(dyn);
     prob->add(costs.running(dyn.r, dyn.v, dyn.a));
     auto prob_terminal = prob->copy();
