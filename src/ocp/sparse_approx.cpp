@@ -81,7 +81,7 @@ sparse_approx_data::sparse_approx_data(sym_data *primal,
                                        func_impl*f)
     : v_(v), jac_(jac), sparse_primal_data(primal, shared, f) {
 }
-shared_data::shared_data(const problem_ptr_t& prob, sym_data *primal) {
+shared_data::shared_data(const ocp_ptr_t& prob, sym_data *primal) {
     for (const auto &expr : prob->expr_[__pre_comp]) {
         data_.try_emplace(expr->uid_, std::static_pointer_cast<func_impl>(expr)->make_data(primal, this));
     }

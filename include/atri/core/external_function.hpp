@@ -13,7 +13,7 @@ namespace atri {
  * @return Pointer to the loaded function
  * @exception Throws std::runtime_error if the library cannot be opened or the function cannot be found.
  */
-void *__load_from_shared(const std::string &lib_path, const std::string &func_name);
+void *load_from_shared(const std::string &lib_path, const std::string &func_name);
 /**
  * @brief A wrapper for an external function loaded from a shared library
  * This struct holds a pointer to the loaded function and provides an interface to invoke it.
@@ -27,12 +27,12 @@ struct ext_func {
      */
     bool empty() {return func_ == nullptr; }
     /**
-     * @brief Construct a new ext_func object
+     * @brief Construct a new ext_func object by calling @ref load_from_shared
      * @param lib_path Path to the shared library (e.g., "gen/libmy_approx.so")
      * @param func_name Name of the function to load (e.g., "my_approx")
      */
     ext_func(const std::string &lib_path, const std::string &func_name)
-        : func_(__load_from_shared(lib_path, func_name)) {}
+        : func_(load_from_shared(lib_path, func_name)) {}
     /**
      * @brief Invoke the loaded function
      *

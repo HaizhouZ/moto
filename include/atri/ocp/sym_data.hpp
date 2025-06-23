@@ -4,24 +4,36 @@
 #include <atri/ocp/problem.hpp>
 
 namespace atri {
-
+/**
+ * @brief Symbolic data storage
+ * stores the symbolic variables in a dense format
+ * and provides access to the values of the symbolic variables
+ *
+ */
 struct sym_data {
-    sym_data(const problem_ptr_t &prob) : prob_(prob) {
+    /**
+     * @brief Construct a new sym data object
+     *
+     * @param prob problem pointer, it will be used to get the dimensions of the symbolic variables
+     */
+    sym_data(const ocp_ptr_t &prob) : prob_(prob) {
         for (size_t i = 0; i < field::num_sym; i++) {
             value_[i].resize(prob_->dim_[i]);
             value_[i].setZero();
         }
     }
-
+    /// get the symbolic variable value of the sym
     auto get(expr_impl *sym) {
         return value_[sym->field_].segment(prob_->get_expr_start(*sym), sym->dim_);
     }
-
+    /// get the symbolic variable value of the sym
     auto get(const sym &sym) {
         return get(sym.get());
     }
 
-    problem_ptr_t prob_;
+    /// pointer to the problem, used to get dimensions of symbolic variables
+    ocp_ptr_t prob_;
+    /// dense storage of symbolic variables, indexed by field
     std::array<vector, field::num_sym> value_;
 };
 

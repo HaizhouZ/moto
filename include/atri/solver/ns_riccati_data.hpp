@@ -40,7 +40,7 @@ struct riccati_data : public node_data {
     vector d_lbd_f, d_lbd_s_c_pre_solve, d_lbd_s_c;
     // linear rollout
     rollout_data *rollout_;
-    riccati_data(const problem_ptr_t& prob);
+    riccati_data(const ocp_ptr_t& prob);
     ~riccati_data();
 };
 } // namespace ns_riccati

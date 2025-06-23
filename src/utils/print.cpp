@@ -2,7 +2,7 @@
 
 namespace atri {
 namespace utils {
-void print_problem(problem_ptr_t prob) {
+void print_problem(ocp_ptr_t prob) {
     for (size_t i = 0; i < field::num; i++) {
         fmt::print("field : {}, \ttotal dim {}\n",
                    magic_enum::enum_name(static_cast<field_t>(i)),

@@ -13,11 +13,11 @@ namespace atri {
  * @brief problem formulation of an OCP stage
  *
  */
-class problem {
+class ocp {
   private:
     inline static size_t max_uid = 0;
-    problem() : uid_(max_uid++) {}
-    problem(const problem &rhs)
+    ocp() : uid_(max_uid++) {}
+    ocp(const ocp &rhs)
         : uid_(max_uid++), expr_(rhs.expr_), d_idx_(rhs.d_idx_),
           pos_by_uid_(rhs.pos_by_uid_), dim_(rhs.dim_) {}
     bool add_impl(const expr_ptr_t &expr);
@@ -33,8 +33,8 @@ class problem {
     /// dimension of each field
     std::array<size_t, field::num> dim_{};
 
-    static auto make() { return std::shared_ptr<problem>(new problem()); }
-    auto copy() { return std::shared_ptr<problem>(new problem(*this)); }
+    static auto make() { return std::shared_ptr<ocp>(new ocp()); }
+    auto copy() { return std::shared_ptr<ocp>(new ocp(*this)); }
 
     scalar_t *get_data_ptr(scalar_t *data, expr_impl &expr) const {
         return data + get_expr_start(expr);
@@ -93,7 +93,7 @@ class problem {
     size_t get_expr_start(const expr_impl &expr) const;
 };
 
-def_ptr(problem);
+def_ptr(ocp);
 } // namespace atri
 
 #endif /*__problem_FORMULATION_*/

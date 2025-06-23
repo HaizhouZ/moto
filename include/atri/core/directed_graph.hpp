@@ -9,67 +9,105 @@
 #include <vector>
 
 namespace atri {
-namespace directed_graph_types {
-template <typename element_type, typename derived>
-class node_type; // fwd
+namespace graph_types {
+template <typename dtype, typename derived, typename edge_type>
+class node_base; // fwd
 
-template <typename node_t>
-struct edge_type {
-    using node = node_t;
-    def_unique_ptr(node);
-    node *st;
-    node *ed;
+/**
+ * @brief Base class for an edge in a directed graph
+ *
+ * @tparam node node type, must be derived from graph_types::node_base
+ */
+template <typename node>
+struct edge_base {
+    using node_type = node;
+    def_unique_ptr_named(node, node_type);
+    node *st; /// < start node of the edge
+    node *ed; /// < end node of the edge
+
+    /// intermediate nodes, cloned from start node
     std::vector<node_ptr_t> nodes;
-    size_t len; // length
-    void resize(size_t new_len) { len = new_len; }
-    edge_type(node *start, node *end, size_t length)
-        : st(start), ed(end), len(length) {
+    /**
+     * @brief construct a new edge from start to end node with a given length
+     * it will clone the start node for each intermediate node
+     * @param start start node
+     * @param end end node
+     * @param length length of the edge, i.e., number of nodes in between = length - 1
+     */
+    edge_base(node *start, node *end, size_t length)
+        : st(start), ed(end) {
         st->out_edges.emplace(this);
         ed->in_edges.emplace(this);
-        while (--length) {                                     // exclude ed node
-            nodes.emplace_back(std::make_unique<node_t>(*st)); // clone the start node
+        while (--length) {                                   // exclude ed node
+            nodes.emplace_back(std::make_unique<node>(*st)); // clone the start node
         }
     }
-    ~edge_type() {
+    ~edge_base() {
         st->out_edges.erase(this);
         ed->in_edges.erase(this);
     }
 };
-
-template <typename T, typename derived>
-struct node_type {
-    using element_type = T;
-    using edge = edge_type<derived>;
-    std::set<edge *> in_edges;
-    std::set<edge *> out_edges;
-    std::atomic<size_t> in_cnt{0}, out_cnt{0};
-    element_type *data_; // pointer to the data
-    /// necessary as proxy, for user manipulation
-    element_type *operator->() { return data_; }
-    node_type() : data_(nullptr) {}
-    node_type(const node_type &rhs) : data_(nullptr) {}
-    node_type(node_type &&rhs) = default;
+/**
+ * @brief Base class for a node in a directed graph
+ *
+ * @tparam dtype data type stored in the node (by pointer)
+ * @tparam derived derived type of the node, used for CRTP
+ * @tparam edge edge type, default is edge_base<derived>
+ */
+template <typename dtype, typename derived, typename edge = edge_base<derived>>
+struct node_base {
+    using data_type = dtype;
+    using edge_type = edge;
+    std::set<edge_type *> in_edges;            ///< incoming edges
+    std::set<edge_type *> out_edges;           ///< outgoing edges
+    std::atomic<size_t> in_cnt{0}, out_cnt{0}; ///< counts of in and out edges
+    data_type *data_;                          ///< pointer to the data
+    /// necessary as proxy, e.g., node->(member of @ref data_type)
+    data_type *operator->() { return data_; }
+    /// @brief default constructor, initializes data_ to nullptr
+    node_base() : data_(nullptr) {}
+    /// @brief copy constructor (not really copied), initializes data_ to nullptr
+    node_base(const node_base &rhs) : data_(nullptr) {}
+    /// @brief default move constructor
+    node_base(node_base &&rhs) = default;
+    /// @brief reset the counts of in and out edges
     void reset_cnt() {
         in_cnt = in_edges.size();
         out_cnt = out_edges.size();
     }
-    virtual ~node_type() {}
+    virtual ~node_base() {}
 };
-} // namespace directed_graph_types
-// Sparse iterator
+} // namespace graph_types
+/**
+ * @brief A directed graph class that allows adding nodes and edges,
+ * iterating over nodes, and applying unary or binary functions to the nodes.
+ * @tparam node node type, must be derived from graph_types::node_base
+ * @tparam edge edge type, must be derived from graph_types::edge_base, default is node::edge_type
+ */
 template <typename node,
-          typename edge = node::edge>
+          typename edge = node::edge_type>
 class directed_graph {
   public:
-    using element_type = typename node::element_type;
-    def_unique_ptr(node);
-    def_unique_ptr(edge);
+    using data_type = typename node::data_type;
+    /**
+     * @brief add an edge from start node to end node with a given length
+     * @ref graph_types::edge_base
+     * @param st start node
+     * @param ed end node
+     * @param len length of the edge, i.e., number of intermediate nodes + 1
+     * @return const auto& const reference to the added edge
+     */
     const auto &add_edge(node &st, node &ed, size_t len) {
         edges_.emplace_back(std::make_unique<edge>(&st, &ed, len));
         return edges_.back();
     }
 
-    // Add a node to the graph
+    /**
+     * @brief add a node to the graph
+     * 
+     * @param d node to be added (movable)
+     * @return node& reference to the added node
+     */
     node &add(node &&d) {
         nodes_.emplace_back(std::make_unique<node>(std::move(d)));
         return *nodes_.back();
@@ -77,8 +115,10 @@ class directed_graph {
 
     void set_tail(node &tail) { tail_ = &tail; }
     void set_head(node &head) { head_ = &head; }
-    auto begin() { return head_; }
-
+    /**
+     * @brief get the flattened list of all nodes in the graph
+     *
+     */
     void unary_unordered_flatten() {
         unary_in_.clear();
         for (auto &cur : nodes_) {
@@ -91,15 +131,24 @@ class directed_graph {
             }
         }
     }
-
+    /**
+     * @brief apply unary function for all shooting nodes in parallel
+     *
+     * @param callback function [node]
+     */
     template <typename callback_t>
-        requires std::invocable<callback_t, element_type *>
+        requires std::invocable<callback_t, data_type *>
     void apply_all_unary_parallel(callback_t &&callback) {
         unary_unordered_flatten();
         parallel_for(0, unary_in_.size(), [this, &callback](size_t i) { callback(unary_in_[i]); });
     }
+    /**
+     * @brief apply unary function for all shooting nodes sequentially
+     *
+     * @param callback function [node]
+     */
     template <typename callback_t>
-        requires std::invocable<callback_t, element_type *>
+        requires std::invocable<callback_t, data_type *>
     void apply_all_unary_forward(callback_t &&callback) {
         unary_unordered_flatten();
         sequential_for(0, unary_in_.size(), [this, &callback](size_t i) { callback(unary_in_[i]); });
@@ -110,10 +159,10 @@ class directed_graph {
      * @param callback function [d, d+1]
      */
     template <bool parallel = false, bool tail_null_edge = false, typename callback_t>
-        requires std::invocable<callback_t, element_type *, element_type *>
+        requires std::invocable<callback_t, data_type *, data_type *>
     void apply_all_binary_forward(callback_t &&callback) {
         std::ranges::for_each(nodes_, [](auto &p) { p->reset_cnt(); });
-        // std::vector<std::pair<element_type *, element_type *>> binary_in_;
+        // std::vector<std::pair<data_type *, data_type *>> binary_in_;
         // std::vector<edge *> cur_edges;                               // st nodes for this round
         // std::vector<edge *> next_edges;                              // st nodes for next round
         cur_edges.assign(head_->out_edges.begin(), head_->out_edges.end()); // Ensure thread-local cur_edges is initialized
@@ -156,10 +205,10 @@ class directed_graph {
      * @param callback function [d, d-1]
      */
     template <bool head_null_edge = true, typename callback_t>
-        requires std::invocable<callback_t, element_type *, element_type *>
+        requires std::invocable<callback_t, data_type *, data_type *>
     void apply_all_binary_backward(callback_t &&callback) {
         std::for_each(nodes_.begin(), nodes_.end(), [](auto &p) { p->reset_cnt(); });
-        // std::vector<std::pair<element_type *, element_type *>> binary_in_;
+        // std::vector<std::pair<data_type *, data_type *>> binary_in_;
         // std::vector<edge *> cur_edges;                             // st nodes for this round
         // std::vector<edge *> next_edges;                            // st nodes for next round
         cur_edges.assign(tail_->in_edges.begin(), tail_->in_edges.end()); // Ensure thread-local cur_edges is initialized
@@ -198,16 +247,19 @@ class directed_graph {
     node *tail() { return tail_; }
 
   private:
-    node *head_ = nullptr;
+    def_unique_ptr(node);
+    def_unique_ptr(edge);
+    node *head_ = nullptr; /// < head node of the graph, i.e., the first node in the graph
     /// @todo: multiple tail
-    node *tail_ = nullptr;
-    std::vector<node_ptr_t> nodes_; // key nodes used to describe the graph
-    std::vector<edge_ptr_t> edges_;
+    node *tail_ = nullptr;          ///< tail node of the graph, i.e., the last node in the graph
+    std::vector<node_ptr_t> nodes_; ///< key nodes used to describe the graph
+    std::vector<edge_ptr_t> edges_; ///< edges used to connect the key nodes
 
-    std::vector<element_type *> unary_in_;
-    std::vector<std::pair<element_type *, element_type *>> binary_in_;
-    std::vector<edge *> cur_edges;  // st nodes for this round
-    std::vector<edge *> next_edges; // st nodes for next round
+    // temporary storage for unary and binary functions
+    std::vector<data_type *> unary_in_;                          ///< data pointers for unary functions
+    std::vector<std::pair<data_type *, data_type *>> binary_in_; ///< data pointers for binary functions
+    std::vector<edge *> cur_edges;                               ///< edges for bfs current iteration
+    std::vector<edge *> next_edges;                              ///< edges for bfs next iteration
 };
 } // namespace atri
 

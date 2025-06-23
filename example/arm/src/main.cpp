@@ -6,7 +6,7 @@
 
 int main() {
     using namespace atri;
-    auto prob = problem::make();
+    auto prob = ocp::make();
     armDynamics dyn;
     prob->add(dyn.dyn_pos);
     prob->add(dyn.dyn_vel);

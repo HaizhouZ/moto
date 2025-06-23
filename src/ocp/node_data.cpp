@@ -10,7 +10,7 @@ namespace atri {
  * @param callback [idx of field, idx of expr, pointer to expr]
  */
 template <typename Callback>
-inline void for_funcs(const problem_ptr_t &prob, Callback &&callback) {
+inline void for_funcs(const ocp_ptr_t &prob, Callback &&callback) {
     // loop with two variables due to the difference between idx and field no.
     for (size_t field : range_n(__dyn, field::num_func)) {
         size_t idx = 0;
@@ -20,14 +20,14 @@ inline void for_funcs(const problem_ptr_t &prob, Callback &&callback) {
     }
 }
 
-node_data::node_data(const problem_ptr_t &prob)
-    : problem_(prob), sym_(new sym_data(prob)), dense_(new approx_storage(prob)), shared_(new shared_data(prob, sym_.get())) {
+node_data::node_data(const ocp_ptr_t &prob)
+    : ocp_(prob), sym_(new sym_data(prob)), dense_(new approx_storage(prob)), shared_(new shared_data(prob, sym_.get())) {
     for_funcs(prob, [&](size_t field, [[maybe_unused]] size_t idx, func_impl *_f) {
         sparse_[field].push_back(_f->make_approx_data_mapping(sym_.get(), dense_.get(), shared_.get()));
     });
 }
 
-void data_mgr::create_data_batch(const problem_ptr_t &prob, size_t N) {
+void data_mgr::create_data_batch(const ocp_ptr_t &prob, size_t N) {
     data_.try_emplace(prob->uid_);
     auto &pool = data_[prob->uid_];
     std::lock_guard _lock(pool.mtx_);
@@ -36,7 +36,7 @@ void data_mgr::create_data_batch(const problem_ptr_t &prob, size_t N) {
     }
 }
 
-node_data_ptr_t data_mgr::get_data(const problem_ptr_t &prob) {
+node_data_ptr_t data_mgr::get_data(const ocp_ptr_t &prob) {
     auto &pool = data_[prob->uid_];
     std::lock_guard _lock(pool.mtx_);
     if (!pool.empty()) {
@@ -48,7 +48,7 @@ node_data_ptr_t data_mgr::get_data(const problem_ptr_t &prob) {
     }
 }
 
-node_data* data_mgr::acquire(const problem_ptr_t &prob) {
+node_data* data_mgr::acquire(const ocp_ptr_t &prob) {
     auto p = get_data(prob);
     if (p) {
         return p.release();
@@ -58,7 +58,7 @@ node_data* data_mgr::acquire(const problem_ptr_t &prob) {
 }
 
 node_data* data_mgr::acquire(const node_data* rhs) {
-    return acquire(rhs->problem_);
+    return acquire(rhs->ocp_);
 }
 
 void data_mgr::release(node_data* data) {
@@ -70,11 +70,11 @@ void data_mgr::release(node_data* data) {
 void node_data::update_approximation() {
     /// @todo: always eval residual?
     // call to precompute
-    for (const auto &expr : problem_->expr_[__pre_comp]) {
+    for (const auto &expr : ocp_->expr_[__pre_comp]) {
         auto f = static_cast<func_impl *>(expr.get());
         f->call(shared_->get(f));
     }
-    for_funcs(problem_,
+    for_funcs(ocp_,
               [this](size_t field, size_t idx_expr, func_impl *_f) {
                   _f->evaluate_approx(*sparse_[field][idx_expr],
                                       true, _f->order() >= approx_order::first,

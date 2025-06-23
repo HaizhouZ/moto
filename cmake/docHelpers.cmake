@@ -1,7 +1,3 @@
-option(BUILD_DOCUMENTATION "Build documentation with doxygen" OFF)
-
-if(BUILD_DOCUMENTATION MATCHES ON)
-message(STATUS "Building documentation with doxygen")
 add_project_dependency(Doxygen)
 if(DOXYGEN_FOUND)
   set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile)
@@ -13,5 +9,4 @@ if(DOXYGEN_FOUND)
     COMMENT "Generating API documentation with Doxygen"
     VERBATIM
   )
-endif()
 endif()

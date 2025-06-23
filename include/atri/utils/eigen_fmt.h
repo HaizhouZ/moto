@@ -7,9 +7,10 @@
 #include <fmt/format.h>
 #include <sstream>
 
+namespace fmt {
 template <typename derived>
     requires std::is_base_of_v<Eigen::MatrixBase<derived>, derived>
-struct fmt::formatter<derived> {
+struct formatter<derived> {
     int precision = 2;
 
     constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
@@ -46,5 +47,6 @@ struct fmt::formatter<derived> {
         return fmt::format_to(ctx.out(), "{}", oss.str());
     }
 };
+} // namespace fmt
 
 #endif

@@ -38,6 +38,7 @@ class constr_impl : public func_impl {
      *
      * @param primal ptr to primal data
      * @param raw ptr to approximation data
+     * @param shared ptr to shared data
      * @return sparse_approx_data_ptr_t
      */
     sparse_approx_data_ptr_t make_approx_data_mapping(sym_data *primal, approx_storage *raw, shared_data* shared) override {
