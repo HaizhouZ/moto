@@ -20,7 +20,7 @@ def_ptr(func_impl);
  * sparse view to access the input arguments of a function
  * @note it uses reference to avoid copying the input arguments
  */
-struct sparse_primal_data {
+struct sp_arg_map {
     /// use ref to exploit sparsity (avoid copy)
     std::vector<vector_ref> in_args_;
     /**
@@ -30,23 +30,21 @@ struct sparse_primal_data {
      * @param shared shared data
      * @param f function implementation pointer (unique_ptr const ref)
      */
-    sparse_primal_data(sym_data *primal, shared_data *shared, const func_impl_ptr_t &f)
-        : sparse_primal_data(primal, shared, f.get()) {}
+    sp_arg_map(sym_data *primal, shared_data *shared, const func_impl_ptr_t &f)
+        : sp_arg_map(primal, shared, f.get()) {}
     /**
      * @brief Construct a new sparse primal data object
      * @param primal sym data including states inputs etc
      * @param shared shared data
      * @param f function implementation pointer
      */
-    sparse_primal_data(sym_data *primal, shared_data *shared, func_impl *f);
-    /// move constructor
-    sparse_primal_data(sparse_primal_data &&rhs)
-        : in_args_(std::move(rhs.in_args_)),
-          sym_uid_idx_(rhs.sym_uid_idx_),
-          f_(rhs.f_),
-          shared_(rhs.shared_) {
-    }
-    virtual ~sparse_primal_data() = default;
+    sp_arg_map(sym_data *primal, shared_data *shared, func_impl *f);
+    // constructor for sparse primal data with vector_ref
+    sp_arg_map(std::vector<vector_ref> &&primal, shared_data *shared, func_impl *f);
+    sp_arg_map(std::vector<vector_ref> &&primal, shared_data *shared, const func_impl_ptr_t &f)
+        : sp_arg_map(std::move(primal), shared, f.get()) {}
+
+    virtual ~sp_arg_map() = default;
     const func_impl *f_;  ///< pointer to the func
     shared_data *shared_; ///< pointer to shared data
     /**
@@ -61,7 +59,7 @@ struct sparse_primal_data {
   protected:
     std::unordered_map<size_t, size_t> &sym_uid_idx_;
 };
-def_unique_ptr(sparse_primal_data);
+def_unique_ptr(sp_arg_map);
 /////////////////////////////////////////////////////////////////////
 /**
  * @brief sparse approximation data
@@ -69,12 +67,12 @@ def_unique_ptr(sparse_primal_data);
  * @note in hess_ only the upper block triangular part are stored!(blocked by field)
  * for example Q_ux is store instead of Q_ux;
  */
-struct sparse_approx_data : public sparse_primal_data {
+struct sp_approx_map : public sp_arg_map {
 
     vector_ref v_; ///< value ref
-    /// jacobian, by default index correspond to @ref sparse_primal_data::in_args_
+    /// jacobian, by default index correspond to @ref sp_arg_map::in_args_
     std::vector<matrix_ref> jac_;
-    /// hessian for cost. index corresponds to @ref sparse_primal_data::in_args_
+    /// hessian for cost. index corresponds to @ref sp_arg_map::in_args_
     std::vector<std::vector<matrix_ref>> hess_;
     /**
      * @brief Construct a new sparse approx data object
@@ -84,7 +82,7 @@ struct sparse_approx_data : public sparse_primal_data {
      * @param shared shared data
      * @param f approximation
      */
-    sparse_approx_data(sym_data *primal, approx_storage *raw, shared_data *shared, func_impl *f);
+    sp_approx_map(sym_data *primal, approx_storage *raw, shared_data *shared, func_impl *f);
     /**
      * @brief Construct a new sparse approx data object
      *
@@ -95,8 +93,8 @@ struct sparse_approx_data : public sparse_primal_data {
      * @param f approximation function implementation pointer (unique_ptr const ref)
      * @note this constructor is used for approximations not mapped from @ref approx_storage
      */
-    sparse_approx_data(sym_data *primal, vector_ref v, const std::vector<matrix_ref> &jac, shared_data *shared, const func_impl_ptr_t &f)
-        : sparse_approx_data(primal, v, jac, shared, f.get()) {}
+    sp_approx_map(sym_data *primal, vector_ref v, const std::vector<matrix_ref> &jac, shared_data *shared, const func_impl_ptr_t &f)
+        : sp_approx_map(primal, v, jac, shared, f.get()) {}
     /**
      * @brief Construct a new sparse approx data object
      *
@@ -107,15 +105,13 @@ struct sparse_approx_data : public sparse_primal_data {
      * @param f approximation function implementation pointer
      * @note this constructor is used for approximations not mapped from @ref approx_storage
      */
-    sparse_approx_data(sym_data *primal, vector_ref v, const std::vector<matrix_ref> &jac, shared_data *shared, func_impl *f);
-    /// move constructor
-    sparse_approx_data(sparse_approx_data &&rhs) : v_(rhs.v_), sparse_primal_data(std::move(rhs)) {
-        jac_ = std::move(rhs.jac_);
-        hess_ = std::move(rhs.hess_);
-    }
+    sp_approx_map(sym_data *primal, vector_ref v, const std::vector<matrix_ref> &jac, shared_data *shared, func_impl *f);
+    /// constructor for sparse approx data with already created sp_arg_map
+    sp_approx_map(sp_arg_map &&rhs, vector_ref v, const std::vector<matrix_ref> &jac)
+        : sp_arg_map(std::move(rhs)), v_(v), jac_(jac) {}
 };
 
-def_unique_ptr(sparse_approx_data);
+def_unique_ptr(sp_approx_map);
 /////////////////////////////////////////////////////////////////////
 /**
  * @brief composing several data types into one type
@@ -125,25 +121,16 @@ def_unique_ptr(sparse_approx_data);
 template <typename... data_type>
 struct composed_data : public data_type... {
     composed_data(data_type &&...other_data)
-        : data_type(std::forward<data_type>(other_data))... {
+    : data_type(std::forward<data_type>(other_data))... {
         static_assert((std::is_move_constructible<data_type>::value && ...),
-                      "All data types must be move constructible");
+        "All data types must be move constructible");
     }
 };
-/**
- * @brief compose (append) several data types to sparse_primal_data by moving
- * @ref composed_data
- * @tparam data_type must be move constructible
- */
+
 template <typename... data_type>
-using composed_primal_data = composed_data<sparse_primal_data, data_type...>;
-/**
- * @brief compose (append) several data types to sparse_approx_data by moving
- * @ref composed_data
- * @tparam data_type must be move constructible
- */
-template <typename... data_type>
-using composed_approx_data = composed_data<sparse_approx_data, data_type...>;
+auto make_composed(data_type &&...other_data) {
+    return std::make_unique<composed_data<data_type...>>(std::forward<data_type>(other_data)...);
+}
 /////////////////////////////////////////////////////////////////////
 /**
  * @brief approximation class for generic functions
@@ -154,15 +141,15 @@ class func_impl : public expr_impl {
     approx_order order_;
     expr_list in_args_;
     std::unordered_map<size_t, size_t> sym_uid_idx_;
-    friend struct sparse_primal_data;
+    friend struct sp_arg_map;
 
     /// @todo to be implemented
-    virtual void setup_sparsity([[maybe_unused]] sparse_approx_data &data) {}
+    virtual void setup_sparsity([[maybe_unused]] sp_approx_map &data) {}
 
   public:
-    virtual void value_impl([[maybe_unused]] sparse_approx_data &data) { value(data); };
-    virtual void jacobian_impl([[maybe_unused]] sparse_approx_data &data) { jacobian(data); };
-    virtual void hessian_impl([[maybe_unused]] sparse_approx_data &data) { hessian(data); };
+    virtual void value_impl([[maybe_unused]] sp_approx_map &data) { value(data); };
+    virtual void jacobian_impl([[maybe_unused]] sp_approx_map &data) { jacobian(data); };
+    virtual void hessian_impl([[maybe_unused]] sp_approx_map &data) { hessian(data); };
 
   public:
     void add_argument(const sym &in) {
@@ -200,20 +187,20 @@ class func_impl : public expr_impl {
     expr_list *get_aux() override { return &in_args_; }
     /**
      * @brief setup the sparse func data
-     * @details will setup the mapping from the dense approx_storage to sparse_approx_data
-     * @return sparse_approx_data_ptr_t
+     * @details will setup the mapping from the dense approx_storage to sp_approx_map
+     * @return sp_approx_map_ptr_t
      */
-    virtual sparse_approx_data_ptr_t make_approx_data_mapping(sym_data *primal,
+    virtual sp_approx_map_ptr_t make_approx_data_mapping(sym_data *primal,
                                                               approx_storage *raw,
                                                               shared_data *shared);
     /**
      * @brief evaluate the func
-     * @param data sparse_approx_data to be evaluated
+     * @param data sp_approx_map to be evaluated
      * @param eval_val evaluate value if true
      * @param eval_jac evaluate jacobian if true
      * @param eval_hess evaluate hessian if true
      */
-    void evaluate_approx(sparse_approx_data &data,
+    void evaluate_approx(sp_approx_map &data,
                          bool eval_val, bool eval_jac = false, bool eval_hess = false) {
         if (eval_val)
             value_impl(data);
@@ -225,7 +212,7 @@ class func_impl : public expr_impl {
     template <typename T>
     void evaluate_approx(T &data,
                          bool eval_val, bool eval_jac = false, bool eval_hess = false) {
-        evaluate_approx(dynamic_cast<sparse_approx_data &>(data), eval_val, eval_jac, eval_hess);
+        evaluate_approx(dynamic_cast<sp_approx_map &>(data), eval_val, eval_jac, eval_hess);
     }
     /**
      * @brief load the external approximation functions
@@ -248,7 +235,7 @@ class func_impl : public expr_impl {
         }
         // make a default make_data
         make_data = [this](sym_data *primal, shared_data *shared) {
-            return std::make_unique<sparse_primal_data>(primal, shared, this);
+            return std::make_unique<sp_arg_map>(primal, shared, this);
         };
     }
     /**
@@ -265,39 +252,39 @@ class func_impl : public expr_impl {
 
   public:
     /// @brief callback to evaluate the value of the approximation
-    std::function<void(sparse_approx_data &)> value;
+    std::function<void(sp_approx_map &)> value;
     /// @brief callback to evaluate the jacobian of the approximation
-    std::function<void(sparse_approx_data &)> jacobian;
+    std::function<void(sp_approx_map &)> jacobian;
     /// @brief callback to evaluate the hessian of the approximation
-    std::function<void(sparse_approx_data &)> hessian;
+    std::function<void(sp_approx_map &)> hessian;
     /// @brief callback to call a non-approximation function
-    std::function<void(sparse_primal_data &)> call;
+    std::function<void(sp_arg_map &)> call;
     /// @brief callback to make data（for non-approx) @note will not be called in @ref make_approx_data_mapping
-    std::function<sparse_primal_data_ptr_t(sym_data *, shared_data *)> make_data;
+    std::function<sp_arg_map_ptr_t(sym_data *, shared_data *)> make_data;
 };
 /////////////////////////////////////////////////////////////////////
 /**
  * @brief shared data for all funcs in one problem formulation
- * @note it will store (class derived from) sparse_primal_data
+ * @note it will store (class derived from) sp_arg_map
  */
 class shared_data {
-    std::unordered_map<size_t, sparse_primal_data_ptr_t> data_;
+    std::unordered_map<size_t, sp_arg_map_ptr_t> data_;
 
   public:
     shared_data(const ocp_ptr_t &prob, sym_data *primal);
 
     ocp_ptr_t prob_;
     /// @brief add data by uid of the func (owner of the data)
-    void add(size_t uid, sparse_primal_data_ptr_t &&data) { data_.try_emplace(uid, std::move(data)); }
+    void add(size_t uid, sp_arg_map_ptr_t &&data) { data_.try_emplace(uid, std::move(data)); }
     /// @brief add data by func pointer (owner of the data)
-    void add(expr_impl *f, sparse_primal_data_ptr_t &&data) {
+    void add(expr_impl *f, sp_arg_map_ptr_t &&data) {
         assert(f->field_ == __pre_comp || f->field_ == __usr_func);
         add(f->uid_, std::move(data));
     }
     /// @brief add data by func shared pointer (owner of the data)
     template <typename derived>
         requires std::is_base_of_v<func_impl, derived>
-    void add(const std::shared_ptr<derived> &expr, sparse_primal_data_ptr_t &&data) {
+    void add(const std::shared_ptr<derived> &expr, sp_arg_map_ptr_t &&data) {
         add(expr.get(), std::move(data));
     }
     /// @brief get the data by uid

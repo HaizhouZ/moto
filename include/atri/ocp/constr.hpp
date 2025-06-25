@@ -7,15 +7,15 @@ namespace atri {
 struct constr_impl; // fwd
 /**
  * @brief constraint data
- * derived from sparse_approx_data with multipler and vjp (for cost) mapping in addition
+ * derived from sp_approx_map with multipler and vjp (for cost) mapping in addition
  */
-struct constr_data : public sparse_approx_data {
+struct constr_data : public sp_approx_map {
     /// @todo: add this to raw
     // vector_ref slack_;
     double *merit_;
     vector_ref multiplier_;
     std::vector<row_vector_ref> vjp_;
-    constr_data(approx_storage *raw, sparse_approx_data &&d, constr_impl *cstr);
+    constr_data(approx_storage *raw, sp_approx_map &&d, constr_impl *cstr);
 };
 def_unique_ptr(constr_data);
 /**
@@ -23,8 +23,8 @@ def_unique_ptr(constr_data);
  */
 class constr_impl : public func_impl {
   private:
-    void value_impl(sparse_approx_data &data) override final;
-    void jacobian_impl(sparse_approx_data &data) override final;
+    void value_impl(sp_approx_map &data) override final;
+    void jacobian_impl(sp_approx_map &data) override final;
     bool finalize_impl() override;
 
   public:
@@ -39,9 +39,9 @@ class constr_impl : public func_impl {
      * @param primal ptr to primal data
      * @param raw ptr to approximation data
      * @param shared ptr to shared data
-     * @return sparse_approx_data_ptr_t
+     * @return sp_approx_map_ptr_t
      */
-    sparse_approx_data_ptr_t make_approx_data_mapping(sym_data *primal, approx_storage *raw, shared_data* shared) override {
+    sp_approx_map_ptr_t make_approx_data_mapping(sym_data *primal, approx_storage *raw, shared_data* shared) override {
         return constr_data_ptr_t(
             new constr_data(raw, std::move(*func_impl::make_approx_data_mapping(primal, raw, shared)), this));
     }

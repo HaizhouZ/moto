@@ -2,9 +2,9 @@
 #include <iostream>
 namespace atri {
 constr_data::constr_data(approx_storage *raw,
-                         sparse_approx_data &&d,
+                         sp_approx_map &&d,
                          constr_impl *f)
-    : sparse_approx_data(std::move(d)), merit_(&raw->cost_),
+    : sp_approx_map(std::move(d)), merit_(&raw->cost_),
       multiplier_(raw->dual_[f->field_].segment(raw->prob_->get_expr_start(*f),
                                                 f->dim_)) {
     const auto &in_args = f->in_args();
@@ -56,7 +56,7 @@ bool constr_impl::finalize_impl() {
     return true;
 }
 
-void constr_impl::value_impl(sparse_approx_data &data) {
+void constr_impl::value_impl(sp_approx_map &data) {
     value(data);
     // compute contribution to merit function
     auto &d = static_cast<constr_data &>(data);
@@ -70,7 +70,7 @@ void constr_impl::value_impl(sparse_approx_data &data) {
     // }
     // fmt::print("\t{}:\tm:{}\n", name_, d.multiplier_.transpose());
 } // namespace atri
-void constr_impl::jacobian_impl(sparse_approx_data &data) {
+void constr_impl::jacobian_impl(sp_approx_map &data) {
     // compute jacobian first
     jacobian(data);
     // update multiplier - jacobian product

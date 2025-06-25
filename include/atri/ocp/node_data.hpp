@@ -20,7 +20,7 @@ struct node_data {
     sym_data_ptr_t sym_;         /// < dense storage of symbolic data
     approx_storage_ptr_t dense_; /// <dense storage of the func data
     shared_data_ptr_t shared_;   /// < shared data
-    shifted_array<std::vector<sparse_approx_data_ptr_t>, field::num_func, __dyn>
+    shifted_array<std::vector<sp_approx_map_ptr_t>, field::num_func, __dyn>
         sparse_; /// < sparse view per func
     node_data(const ocp_ptr_t &prob);
     virtual ~node_data() = default;

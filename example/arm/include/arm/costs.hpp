@@ -27,15 +27,15 @@ struct armCosts {
             d_v.setConstant(0.1);
 
             add_arguments({q, v});
-            value = [&](sparse_approx_data &data) {
+            value = [&](sp_approx_map &data) {
                 data.v_.noalias() += 0.5 * d_q.transpose() * data.in_args_[0].cwiseAbs2();
                 data.v_.noalias() += 0.5 * d_v.transpose() * data.in_args_[1].cwiseAbs2();
             };
-            jacobian = [this](sparse_approx_data &data) { // make sure use +=
+            jacobian = [this](sp_approx_map &data) { // make sure use +=
                 data.jac_[0].noalias() += data.in_args_[0].transpose() * d_q.asDiagonal();
                 data.jac_[1].noalias() += data.in_args_[1].transpose() * d_v.asDiagonal();
             };
-            hessian = [this](sparse_approx_data &data) {
+            hessian = [this](sp_approx_map &data) {
                 data.hess_[0][0].diagonal() += d_q;
                 data.hess_[1][1].diagonal() += d_v;
             };
@@ -47,13 +47,13 @@ struct armCosts {
             d_a.resize(7);
             d_a.setConstant(1e-2);
             add_arguments({a});
-            value = [&](sparse_approx_data &data) {
+            value = [&](sp_approx_map &data) {
                 data.v_.noalias() += 0.5 * d_a.transpose() * data.in_args_[0].cwiseAbs2();
             };
-            jacobian = [this](sparse_approx_data &data) { // make sure use +=
+            jacobian = [this](sp_approx_map &data) { // make sure use +=
                 data.jac_[0].noalias() += data.in_args_[0].transpose() * d_a.asDiagonal();
             };
-            hessian = [this](sparse_approx_data &data) {
+            hessian = [this](sp_approx_map &data) {
                 data.hess_[0][0].diagonal() += d_a;
             };
         }

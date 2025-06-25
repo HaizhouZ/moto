@@ -97,7 +97,7 @@ struct sym : public expr_ptr_t, public cs::SX {
      */
     sym(const std::string &name, size_t dim, field_t type)
         : expr_ptr_t(new expr_impl(name, dim, type)), cs::SX(cs::SX::sym(name, dim)) {
-        assert(size_t(type) <= field::num_sym);
+        assert(size_t(type) <= field::num_sym || type == __usr_var);
     }
     /**
      * @brief Construct a new sym object from an existing expr_ptr_t
