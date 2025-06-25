@@ -1,15 +1,15 @@
-#include <atri/core/directed_graph.hpp>
-#include <atri/ocp/approx_storage.hpp>
-#include <atri/ocp/shooting_node.hpp>
-#include <atri/solver/data/nullspace_data.hpp>
-#include <atri/solver/data/rollout_data.hpp>
-#include <atri/solver/ns_sqp.hpp>
-#include <atri/utils/print.hpp>
+#include <moto/core/directed_graph.hpp>
+#include <moto/ocp/approx_storage.hpp>
+#include <moto/ocp/shooting_node.hpp>
+#include <moto/solver/data/nullspace_data.hpp>
+#include <moto/solver/data/rollout_data.hpp>
+#include <moto/solver/ns_sqp.hpp>
+#include <moto/utils/print.hpp>
 #include <double_integrator/cost.hpp>
 #include <double_integrator/dynamics.hpp>
 #include <iostream>
 
-using namespace atri;
+using namespace moto;
 
 int main() {
     doubleIntegratorDyn dyn;

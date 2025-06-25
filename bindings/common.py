@@ -1,8 +1,8 @@
 import casadi as cs
-import atri
+import moto
 
 
-def sym(name: str, dim: int, field: atri.field):
+def sym(name: str, dim: int, field: moto.field):
     s = cs.SX.sym(name, dim)
     s.name = name
     s.field = field
@@ -13,20 +13,20 @@ def make_next(name, dim):
     # this suffix is compulsory
     if not name.endswith("_nxt"):
         name = name + "_nxt"
-    return sym(name, dim, atri.field_y)
+    return sym(name, dim, moto.field_y)
 
 
 def states(name, dim):
-    x = sym(name, dim, atri.field_x)
+    x = sym(name, dim, moto.field_x)
     xn = make_next(name, dim)
     return x, xn
 
 
 def inputs(name, dim):
-    u = sym(name, dim, atri.field_u)
+    u = sym(name, dim, moto.field_u)
     return u
 
 
 def params(name, dim=1):
-    p = sym(name, dim, atri.field_p)
+    p = sym(name, dim, moto.field_p)
     return p

@@ -1,8 +1,8 @@
 #include <Eigen/Eigenvalues>
-#include <atri/solver/data/nullspace_data.hpp>
-#include <atri/solver/ns_riccati_solve.hpp>
+#include <moto/solver/data/nullspace_data.hpp>
+#include <moto/solver/ns_riccati_solve.hpp>
 
-namespace atri {
+namespace moto {
 namespace ns_riccati {
 void kkt_diagnosis(riccati_data *cur) {
     auto &d = *cur;
@@ -69,4 +69,4 @@ void backward_pass(riccati_data *cur, riccati_data *prev) {
     }
 }
 } // namespace ns_riccati
-} // namespace atri
+} // namespace moto

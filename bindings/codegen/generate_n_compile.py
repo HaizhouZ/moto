@@ -3,7 +3,7 @@ import os
 import re
 import numpy as np
 from multiprocessing import Process
-from atri.common import *
+from moto.common import *
 import hashlib
 import json
 from functools import partial
@@ -83,7 +83,7 @@ def in_arg_check(in_args: list[cs.SX]):
     Raises an exception if the condition is not met.
     """
     for arg in in_args:
-        if arg.field == atri.field_y:
+        if arg.field == moto.field_y:
             if not arg.name.endswith("_nxt"):
                 raise ValueError(f"Argument '{arg.name}' in field 'y' must have '_nxt' suffix.")
 

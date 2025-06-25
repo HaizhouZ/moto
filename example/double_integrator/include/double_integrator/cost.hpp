@@ -1,9 +1,9 @@
 #ifndef DOUBLE_INTEGRATOR_COST_HPP
 #define DOUBLE_INTEGRATOR_COST_HPP
 
-#include <atri/ocp/cost.hpp>
+#include <moto/ocp/cost.hpp>
 
-namespace atri {
+namespace moto {
 
 /**
  * @brief An example of how to write a neat sparse cost
@@ -58,6 +58,6 @@ struct doubleIntegratorCosts {
     }
 };
 
-} // namespace atri
+} // namespace moto
 
 #endif // DOUBLE_INTEGRATOR_COST_HPP

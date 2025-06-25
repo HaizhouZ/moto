@@ -1,4 +1,4 @@
-#include <atri/core/fwd.hpp>
+#include <moto/core/fwd.hpp>
 #include <functional>
 #include <pybind11/eigen.h>
 #include <pybind11/numpy.h>
@@ -35,8 +35,8 @@ struct external_function {
     }
 
     void operator()(py::list in, py::list out) {
-        using in_t = atri::vector;
-        using out_t = atri::matrix;
+        using in_t = moto::vector;
+        using out_t = moto::matrix;
 
         std::vector<Eigen::Ref<in_t>> input_refs;
         std::vector<Eigen::Ref<out_t>> output_refs;
@@ -55,9 +55,9 @@ struct external_function {
         f(input_refs, output_refs);
     }
 
-    void operator()(py::list in, Eigen::Ref<atri::vector> out) {
-        using in_t = atri::vector;
-        using out_t = atri::vector;
+    void operator()(py::list in, Eigen::Ref<moto::vector> out) {
+        using in_t = moto::vector;
+        using out_t = moto::vector;
 
         std::vector<Eigen::Ref<in_t>> input_refs;
 
@@ -78,7 +78,7 @@ void register_submodule_codegen(pybind11::module_ &m) {
         .def("__call__", static_cast<void (external_function::*)(py::list, py::list)>(&external_function::operator()),
              py::arg("in"),
              py::arg("out"))
-        .def("__call__", static_cast<void (external_function::*)(py::list, Eigen::Ref<atri::vector>)>(&external_function::operator()),
+        .def("__call__", static_cast<void (external_function::*)(py::list, Eigen::Ref<moto::vector>)>(&external_function::operator()),
              py::arg("in"),
              py::arg("out"));
 }

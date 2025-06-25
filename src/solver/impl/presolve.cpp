@@ -1,9 +1,9 @@
-#include <atri/ocp/approx_storage.hpp>
-#include <atri/solver/data/nullspace_data.hpp>
-#include <atri/solver/ns_riccati_solve.hpp>
+#include <moto/ocp/approx_storage.hpp>
+#include <moto/solver/data/nullspace_data.hpp>
+#include <moto/solver/ns_riccati_solve.hpp>
 #include <Eigen/Eigenvalues>
 
-namespace atri {
+namespace moto {
 namespace ns_riccati {
 
 void pre_solving_steps_0(riccati_data *cur) {
@@ -85,4 +85,4 @@ void pre_solving_steps_2(riccati_data *prev, riccati_data *cur) {
 /// @todo set terminal Q_y, Q_yy
 
 } // namespace ns_riccati
-} // namespace atri
+} // namespace moto

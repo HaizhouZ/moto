@@ -1,11 +1,11 @@
-#include <atri/solver/ns_riccati_data.hpp>
-#include <atri/solver/ns_riccati_solve.hpp>
-#include <atri/solver/ns_sqp.hpp>
+#include <moto/solver/ns_riccati_data.hpp>
+#include <moto/solver/ns_riccati_solve.hpp>
+#include <moto/solver/ns_sqp.hpp>
 
 #define ENABLE_TIMED_BLOCK
-#include <atri/utils/timed_block.hpp>
+#include <moto/utils/timed_block.hpp>
 
-namespace atri {
+namespace moto {
 void ns_sqp::forward() {
     timed_block(graph_.apply_all_unary_parallel(ns_riccati::pre_solving_steps_0));
 }
@@ -60,6 +60,6 @@ void ns_sqp::update(size_t n_iter) {
         /// @todo: check langrangian
     }
     // });
-    atri::utils::timing_storage<"all">::get().count = n_iter;
+    moto::utils::timing_storage<"all">::get().count = n_iter;
 }
-} // namespace atri
+} // namespace moto

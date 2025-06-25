@@ -1,4 +1,4 @@
-#include <atri/core/external_function.hpp>
+#include <moto/core/external_function.hpp>
 
 #include <filesystem>
 
@@ -16,7 +16,7 @@
 #define CLOSE_LIBRARY(handle) dlclose(handle)
 #endif
 
-namespace atri {
+namespace moto {
 void *load_from_shared(const std::string &lib_path, const std::string &func_name) {
     void *handle = LOAD_LIBRARY(lib_path.data());
     if (!handle)
@@ -41,4 +41,4 @@ std::array<ext_func, 3> load_approx(const std::string &name,
     return funcs;
 }
 
-} // namespace atri
+} // namespace moto

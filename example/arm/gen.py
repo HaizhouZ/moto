@@ -1,9 +1,9 @@
 import pinocchio as pin
 import pinocchio.casadi as cpin
 import casadi as cs
-import atri
+import moto
 
-import atri.codegen
+import moto.codegen
 
 # Load the robot model
 model_path = "rsc/iiwa_description/urdf"
@@ -19,9 +19,9 @@ cpin_model = cpin.Model(model)
 cpin_data = cpin_model.createData()
 
 
-q, qn = atri.states("q", model.nq)
-v, vn = atri.states("v", model.nv)
-tq = atri.inputs("tq", model.nv)
+q, qn = moto.states("q", model.nq)
+v, vn = moto.states("v", model.nv)
+tq = moto.inputs("tq", model.nv)
 
 dt = 0.01
 impl_euler = qn - (q + vn * dt)
@@ -46,7 +46,7 @@ jac_vel.append((vn, rnea_dvn))
 jac_vel.append((tq, -cs.SX_eye(model.nv)))
 
 
-atri.generate_and_compile(
+moto.generate_and_compile(
     "euler",
     [q, qn, vn],
     impl_euler,
@@ -54,7 +54,7 @@ atri.generate_and_compile(
     ext_jac=jac_pos,
 )
 
-atri.generate_and_compile(
+moto.generate_and_compile(
     "rnea",
     [q, v, vn, tq],
     invdyn,
@@ -62,8 +62,8 @@ atri.generate_and_compile(
     ext_jac=jac_vel,
 )
 
-pos_d = atri.params("pos_d", 3)
-W_kin = atri.params("W_kin")
+pos_d = moto.params("pos_d", 3)
+W_kin = moto.params("W_kin")
 
 cpin.forwardKinematics(cpin_model, cpin_data, q)
 cpin.updateFramePlacements(cpin_model, cpin_data)
@@ -80,7 +80,7 @@ kin_cost_proxy = cs.sumsqr(r - pos_d) * W_kin
 kin_cost_jac = cs.substitute(cs.jacobian(kin_cost_proxy, r), r, r_ee) @ J[:3, :]
 kin_cost_hess = cs.jacobian(kin_cost_jac, q)
 
-atri.generate_and_compile(
+moto.generate_and_compile(
     "kin_cost",
     [q, pos_d, W_kin],
     kin_cost,
@@ -93,4 +93,4 @@ atri.generate_and_compile(
     append_jac=True,
 )
 
-atri.wait_until_generated()
+moto.wait_until_generated()

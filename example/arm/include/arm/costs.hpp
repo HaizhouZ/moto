@@ -1,10 +1,10 @@
-#ifndef ATRI_ARM_COST_HPP
-#define ATRI_ARM_COST_HPP
+#ifndef MOTO_ARM_COST_HPP
+#define MOTO_ARM_COST_HPP
 
-#include <atri/core/external_function.hpp>
-#include <atri/ocp/cost.hpp>
+#include <moto/core/external_function.hpp>
+#include <moto/ocp/cost.hpp>
 
-namespace atri {
+namespace moto {
 struct armCosts {
     struct ee_cost : public cost_impl {
         vector d_r;
@@ -66,6 +66,6 @@ struct armCosts {
     }
 };
 
-} // namespace atri
+} // namespace moto
 
 #endif // ARM_COST_HPP

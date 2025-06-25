@@ -1,6 +1,6 @@
-#include <atri/ocp/constr.hpp>
+#include <moto/ocp/constr.hpp>
 #include <iostream>
-namespace atri {
+namespace moto {
 constr_data::constr_data(approx_storage *raw,
                          sp_approx_map &&d,
                          constr_impl *f)
@@ -69,7 +69,7 @@ void constr_impl::value_impl(sp_approx_map &data) {
     //     fmt::print("after {}\n", *d.merit_);
     // }
     // fmt::print("\t{}:\tm:{}\n", name_, d.multiplier_.transpose());
-} // namespace atri
+} // namespace moto
 void constr_impl::jacobian_impl(sp_approx_map &data) {
     // compute jacobian first
     jacobian(data);
@@ -81,4 +81,4 @@ void constr_impl::jacobian_impl(sp_approx_map &data) {
         // fmt::print("{}\t{}:jac\n{:.3}\n", i, name_, d.jac_[i]);
     }
 }
-} // namespace atri
+} // namespace moto

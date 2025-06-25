@@ -1,7 +1,7 @@
-#include <atri/core/fields.hpp>
+#include <moto/core/fields.hpp>
 #include <pybind11/pybind11.h>
 
-using namespace atri;
+using namespace moto;
 namespace py = pybind11;
 
 // Template function to export any enum using magic_enum

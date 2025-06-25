@@ -2,6 +2,6 @@
 # Initialize the package here if needed.
 
 __version__ = "0.1.0"
-from .atri_pywrap import *
+from .moto_pywrap import *
 from .codegen.generate_n_compile import *
 from .common import *

@@ -1,10 +1,10 @@
 #ifndef DOUBLE_INTEGRATOR_DYNAMICS_HPP
 #define DOUBLE_INTEGRATOR_DYNAMICS_HPP
 
-#include <atri/ocp/constr.hpp>
-#include <atri/ocp/dynamics.hpp>
+#include <moto/ocp/constr.hpp>
+#include <moto/ocp/dynamics.hpp>
 
-namespace atri {
+namespace moto {
 
 /**
  * @brief double integrator dynamics
@@ -68,6 +68,6 @@ class doubleIntegratorDyn : public dynamics, public expr_list {
 // another way
 // class doubleIntegrator : dynamics, public constr
 // or just implement a method returning a func::expr_list
-} // namespace atri
+} // namespace moto
 
 #endif // DOUBLE_INTEGRATOR_DYNAMICS_HPP

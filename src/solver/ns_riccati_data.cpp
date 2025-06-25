@@ -1,9 +1,9 @@
-#include <atri/ocp/approx_storage.hpp>
-#include <atri/solver/data/nullspace_data.hpp>
-#include <atri/solver/data/rollout_data.hpp>
-#include <atri/solver/ns_riccati_data.hpp>
+#include <moto/ocp/approx_storage.hpp>
+#include <moto/solver/data/nullspace_data.hpp>
+#include <moto/solver/data/rollout_data.hpp>
+#include <moto/solver/ns_riccati_data.hpp>
 
-namespace atri {
+namespace moto {
 namespace ns_riccati {
 riccati_data::riccati_data(const ocp_ptr_t& prob)
     : node_data(prob), nx(prob->dim_[__x]), nu(prob->dim_[__u]),
@@ -43,4 +43,4 @@ riccati_data::~riccati_data() {
     delete rollout_;
 }
 } // namespace ns_riccati
-} // namespace atri
+} // namespace moto

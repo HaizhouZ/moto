@@ -1,6 +1,6 @@
-#include <atri/ocp/problem.hpp>
+#include <moto/ocp/problem.hpp>
 
-namespace atri {
+namespace moto {
 bool ocp::add_impl(const expr_ptr_t &expr) {
     size_t _uid = expr->uid_;
     if (d_idx_.find(_uid) == d_idx_.end()) { // skip repeated
@@ -35,4 +35,4 @@ size_t ocp::get_expr_start(const expr_impl &expr) const {
         throw std::runtime_error(fmt::format("expr {} uid {} cannot be found", expr.name_, expr.dim_));
     }
 }
-} // namespace atri
+} // namespace moto

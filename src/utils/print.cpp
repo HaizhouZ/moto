@@ -1,6 +1,6 @@
-#include <atri/utils/print.hpp>
+#include <moto/utils/print.hpp>
 
-namespace atri {
+namespace moto {
 namespace utils {
 void print_problem(ocp_ptr_t prob) {
     for (size_t i = 0; i < field::num; i++) {
@@ -14,4 +14,4 @@ void print_problem(ocp_ptr_t prob) {
 }
 } // namespace utils
 
-} // namespace atri
+} // namespace moto

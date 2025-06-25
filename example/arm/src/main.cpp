@@ -1,11 +1,11 @@
 #include <arm/costs.hpp>
 #include <arm/dynamics.hpp>
-#include <atri/solver/ns_sqp.hpp>
-#include <atri/utils/print.hpp>
+#include <moto/solver/ns_sqp.hpp>
+#include <moto/utils/print.hpp>
 #include <iostream>
 
 int main() {
-    using namespace atri;
+    using namespace moto;
     auto prob = ocp::make();
     armDynamics dyn;
     prob->add(dyn.dyn_pos);

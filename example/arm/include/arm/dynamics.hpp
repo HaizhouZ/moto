@@ -1,10 +1,10 @@
-#ifndef __ATRI_EXAMPLE_ARM_DYNAMICS_HPP__
-#define __ATRI_EXAMPLE_ARM_DYNAMICS_HPP__
+#ifndef __MOTO_EXAMPLE_ARM_DYNAMICS_HPP__
+#define __MOTO_EXAMPLE_ARM_DYNAMICS_HPP__
 
-#include <atri/ocp/constr.hpp>
-#include <atri/ocp/dynamics.hpp>
+#include <moto/ocp/constr.hpp>
+#include <moto/ocp/dynamics.hpp>
 
-namespace atri {
+namespace moto {
 struct armDynamics {
     sym q, v, tau, q_next, v_next;
     constr dyn_pos, dyn_vel;
@@ -21,6 +21,6 @@ struct armDynamics {
         dyn_vel->load_external();
     }
 };
-} // namespace atri
+} // namespace moto
 
 #endif

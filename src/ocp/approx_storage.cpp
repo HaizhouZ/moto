@@ -1,6 +1,6 @@
-#include <atri/ocp/approx_storage.hpp>
+#include <moto/ocp/approx_storage.hpp>
 
-namespace atri {
+namespace moto {
 
 approx_storage::approx_storage(const ocp_ptr_t &prob) : prob_(prob) {
     for (auto i : range_n(__dyn, field::num_constr)) {
@@ -30,4 +30,4 @@ approx_storage::approx_storage(const ocp_ptr_t &prob) : prob_(prob) {
         jac_[i].setZero();
     }
 }
-} // namespace atri
+} // namespace moto

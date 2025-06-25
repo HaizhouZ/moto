@@ -1,9 +1,9 @@
-#include <atri/core/external_function.hpp>
-#include <atri/ocp/approx_storage.hpp>
-#include <atri/ocp/func.hpp>
-#include <atri/ocp/sym_data.hpp>
+#include <moto/core/external_function.hpp>
+#include <moto/ocp/approx_storage.hpp>
+#include <moto/ocp/func.hpp>
+#include <moto/ocp/sym_data.hpp>
 
-namespace atri {
+namespace moto {
 sp_arg_map::sp_arg_map(sym_data *primal, shared_data *shared, func_impl *f)
     : f_(f), shared_(shared), sym_uid_idx_(f->sym_uid_idx_) {
     auto &in_args = f->in_args();
@@ -118,4 +118,4 @@ void func_impl::load_external(const std::string &path) {
         hess.invoke(d.in_args_, d.hess_);
     };
 }
-} // namespace atri
+} // namespace moto

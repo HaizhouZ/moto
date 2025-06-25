@@ -1,11 +1,11 @@
 #define CATCH_CONFIG_MAIN
-#include <atri/core/external_function.hpp>
+#include <moto/core/external_function.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <iostream>
 
 TEST_CASE("externalFunc") {
-    using namespace atri;
+    using namespace moto;
     std::cout << "Current directory: " << std::filesystem::current_path() << '\n';
     auto func = ext_func("gen/librnea_hess.so", "rnea_hess");
     auto q = vector(7).setRandom();

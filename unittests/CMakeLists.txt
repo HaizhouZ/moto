@@ -14,7 +14,7 @@ endif()
 enable_testing()
 
 
-function(add_atri_test name)
+function(add_moto_test name)
     set(test_name ${name}_test)
     set(test_file ${name}.cpp)
 
@@ -27,5 +27,5 @@ function(add_atri_test name)
     add_test(NAME ${test_name} COMMAND ${test_name} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endfunction()
 
-# add_atri_test(external_function)
-# add_atri_test(symbolic_comp)
+# add_moto_test(external_function)
+# add_moto_test(symbolic_comp)

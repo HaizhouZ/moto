@@ -1,12 +1,12 @@
 #define CATCH_CONFIG_MAIN
-#include <atri/core/expr.hpp>
-#include <atri/ocp/constr.hpp>
-#include <atri/utils/codegen.hpp>
+#include <moto/core/expr.hpp>
+#include <moto/ocp/constr.hpp>
+#include <moto/utils/codegen.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <iostream>
 
-using namespace atri;
+using namespace moto;
 
 TEST_CASE("symbolicComp") {
     sym a("a", 3, __x);

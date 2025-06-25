@@ -1,12 +1,12 @@
-#include <atri/ocp/approx_storage.hpp>
-#include <atri/solver/data/nullspace_data.hpp>
-#include <atri/solver/data/rollout_data.hpp>
-#include <atri/solver/ns_riccati_solve.hpp>
+#include <moto/ocp/approx_storage.hpp>
+#include <moto/solver/data/nullspace_data.hpp>
+#include <moto/solver/data/rollout_data.hpp>
+#include <moto/solver/ns_riccati_solve.hpp>
 #include <iostream>
 
 #define a 1
 
-namespace atri {
+namespace moto {
 namespace ns_riccati {
 void forward_rollout(riccati_data *cur, riccati_data *next) {
     // get_data(nodes_.front()).rollout_->prim_[__x].setZero();
@@ -49,4 +49,4 @@ void post_rollout_steps(riccati_data *cur) {
     d.dense_->dual_[__dyn].noalias() += a * rollout_.dual_[__dyn];
 }
 } // namespace ns_riccati
-} // namespace atri
+} // namespace moto

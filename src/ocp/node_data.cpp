@@ -1,7 +1,7 @@
-#include <atri/ocp/shooting_node.hpp>
+#include <moto/ocp/shooting_node.hpp>
 #include <ranges>
 
-namespace atri {
+namespace moto {
 
 /**
  * @brief for loop shortcut for funcs (dyn,cost,constr...)
@@ -82,4 +82,4 @@ void node_data::update_approximation() {
               });
 }
 
-} // namespace atri
+} // namespace moto
