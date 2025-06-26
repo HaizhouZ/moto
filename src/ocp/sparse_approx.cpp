@@ -7,6 +7,7 @@ namespace moto {
 sp_arg_map::sp_arg_map(sym_data &primal, shared_data &shared, func_impl &f)
     : f_(f), shared_(shared), sym_uid_idx_(f.sym_uid_idx_) {
     auto &in_args = f.in_args();
+    in_args_.reserve(in_args.size());
     for (auto &arg : in_args) {
         in_args_.push_back(primal[arg]);
     }
@@ -27,6 +28,7 @@ sp_approx_map::sp_approx_map(sym_data &primal,
     // for non-cost
     if (f.field_ - __dyn < field::num_constr) {
         if (f.order() >= approx_order::first) {
+            jac_.reserve(in_args_.size());
             for (size_t i : range(in_args_.size())) {
                 if (in_args[i]->field_ < field::num_prim) {
                     jac_.push_back(raw.approx_[f.field_].jac_[in_args[i]->field_].block(
@@ -37,6 +39,7 @@ sp_approx_map::sp_approx_map(sym_data &primal,
             }
         }
     } else { // for cost
+        jac_.reserve(in_args_.size());
         for (size_t i : range(in_args_.size())) {
             if (in_args[i]->field_ < field::num_prim) {
                 jac_.push_back(raw.jac_[in_args[i]->field_].segment(
@@ -53,6 +56,7 @@ sp_approx_map::sp_approx_map(sym_data &primal,
         hess_.resize(in_args_.size());
         for (size_t i : range(in_args_.size())) {
             if (in_args[i]->field_ < field::num_prim) {
+                hess_[i].reserve(in_args_.size());
                 for (size_t j : range(in_args_.size())) {
                     field_1 = in_args[i]->field_;
                     field_2 = in_args[j]->field_;
@@ -84,6 +88,7 @@ sp_approx_map::sp_approx_map(sym_data &primal,
     : v_(v), jac_(jac), sp_arg_map(primal, shared, f) {
 }
 shared_data::shared_data(const ocp_ptr_t &prob, sym_data &primal) {
+    data_.reserve(prob->expr_[__pre_comp].size() + prob->expr_[__usr_func].size());
     for (const auto &expr : prob->expr_[__pre_comp]) {
         data_.try_emplace(expr->uid_, std::static_pointer_cast<func_impl>(expr)->make_data(primal, *this));
     }

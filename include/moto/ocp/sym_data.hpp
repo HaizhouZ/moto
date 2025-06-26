@@ -29,9 +29,9 @@ struct sym_data {
     /// get the symbolic variable value of the sym
     vector_ref get(expr_impl *sym) {
         if (sym->field_ == __usr_var)
-            return usr_value_[sym->uid_];
+            return usr_value_.at(sym->uid_);
         else
-            return value_[sym->field_].segment(prob_->get_expr_start(*sym), sym->dim_);
+            return value_.at(sym->field_).segment(prob_->get_expr_start(*sym), sym->dim_);
     }
     auto operator[](expr_impl *sym) {
         return get(sym);

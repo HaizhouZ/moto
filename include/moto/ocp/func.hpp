@@ -40,9 +40,9 @@ struct sp_arg_map {
      * @return vector_ref of input arguments
      */
     auto operator[](const sym &in) {
-        return in_args_[sym_uid_idx_[in->uid_]];
+        return in_args_[sym_uid_idx_.at(in->uid_)];
     }
-    auto operator[](size_t i) const { return in_args_[i]; }
+    auto operator[](size_t i) const { return in_args_.at(i); }
 
     const auto &in_args() const { return in_args_; }
 
