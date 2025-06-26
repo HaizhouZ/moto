@@ -8,7 +8,7 @@ sp_arg_map::sp_arg_map(sym_data &primal, shared_data &shared, func_impl &f)
     : f_(f), shared_(shared), sym_uid_idx_(f.sym_uid_idx_) {
     auto &in_args = f.in_args();
     for (auto &arg : in_args) {
-        in_args_.push_back(primal(arg));
+        in_args_.push_back(primal[arg]);
     }
 }
 sp_arg_map::sp_arg_map(std::vector<vector_ref> &&primal, shared_data &shared, func_impl &f)

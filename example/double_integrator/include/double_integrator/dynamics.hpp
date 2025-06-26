@@ -19,7 +19,7 @@ class doubleIntegratorDyn : public dynamics, public expr_list {
     struct pos : public constr_impl {
         pos() : constr_impl("doubleIntegratorDynamics_pos", approx_order::first, 3, __dyn) {
             value = [](sp_approx_map &data) {
-                data.v_ = -data.in_args(0) + data.in_args(1) - 0.01 * data.in_args(2);
+                data.v_ = -data[0] + data[1] - 0.01 * data[2];
             };
             jacobian = [](sp_approx_map &data) {
                 data.jac_[0].diagonal().setConstant(-1);
@@ -31,7 +31,7 @@ class doubleIntegratorDyn : public dynamics, public expr_list {
     struct vel : public constr_impl {
         vel() : constr_impl("doubleIntegratorDynamics_vel", approx_order::first, 3, __dyn) {
             value = [](sp_approx_map &data) {
-                data.v_ = -data.in_args(0) + data.in_args(1) - 0.01 * data.in_args(2);
+                data.v_ = -data[0] + data[1] - 0.01 * data[2];
             };
             jacobian = [](sp_approx_map &data) {
                 data.jac_[0].diagonal().setConstant(-1);
@@ -43,7 +43,7 @@ class doubleIntegratorDyn : public dynamics, public expr_list {
     struct zero_vel: public constr_impl{
         zero_vel() : constr_impl("doubleIntegratorDynamics_zero_vel", approx_order::first, 3, __eq_cstr_s) {
             value = [](sp_approx_map &data) {
-                data.v_ = data.in_args(0);
+                data.v_ = data[0];
             };
             jacobian = [](sp_approx_map &data) {
                 data.jac_[0].setIdentity();

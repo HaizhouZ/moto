@@ -33,12 +33,12 @@ struct sym_data {
         else
             return value_[sym->field_].segment(prob_->get_expr_start(*sym), sym->dim_);
     }
-    auto operator()(expr_impl *sym) {
+    auto operator[](expr_impl *sym) {
         return get(sym);
     }
     template <typename derived>
         requires(std::derived_from<derived, expr_impl>)
-    auto operator()(const std::shared_ptr<derived> &sym) {
+    auto operator[](const std::shared_ptr<derived> &sym) {
         return get(sym.get());
     }
 

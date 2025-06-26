@@ -72,7 +72,7 @@ void node_data::update_approximation() {
     // call to precompute
     for (const auto &expr : ocp_->expr_[__pre_comp]) {
         auto &f = static_cast<func_impl &>(*expr);
-        f.call((*shared_)(f));
+        f.call((*shared_)[f]);
     }
     for_funcs(ocp_,
               [this](size_t field, size_t idx_expr, func_impl &_f) {

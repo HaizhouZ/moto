@@ -39,12 +39,12 @@ struct sp_arg_map {
      * @note this is a wrapper of in_args_ to access the values
      * @return vector_ref of input arguments
      */
-    auto &operator()(const sym &in) {
+    auto operator[](const sym &in) {
         return in_args_[sym_uid_idx_[in->uid_]];
     }
+    auto operator[](size_t i) const { return in_args_[i]; }
 
     const auto &in_args() const { return in_args_; }
-    auto in_args(size_t i) const { return in_args_[i]; }
 
   protected:
     /// use ref to exploit sparsity (avoid copy)
@@ -268,10 +268,10 @@ class shared_data {
     /// @brief get the data by func shared pointer (owner of the data)
     template <typename derived>
         requires std::is_base_of_v<func_impl, derived>
-    auto &operator()(const std::shared_ptr<derived> &expr) { return get(expr->uid_); }
+    auto &operator[](const std::shared_ptr<derived> &expr) { return get(expr->uid_); }
     template <typename derived>
         requires std::is_base_of_v<func_impl, derived>
-    auto &operator()(const derived &expr) { return get(expr.uid_); }
+    auto &operator[](const derived &expr) { return get(expr.uid_); }
 };
 def_unique_ptr(shared_data);
 } // namespace moto

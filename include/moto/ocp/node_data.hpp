@@ -26,7 +26,7 @@ struct node_data {
     virtual ~node_data() = default;
 
     // get value of the sym variable
-    auto value(const sym &sym) { return (*sym_)(sym); }
+    auto value(const sym &sym) { return (*sym_)[sym]; }
     /**
      * @brief get the sparse func data by pointer
      *
@@ -47,11 +47,7 @@ struct node_data {
     auto &data(const std::shared_ptr<derived> &f) {
         return data(*f);
     }
-
-    auto value(const std::string &name) {
-        return (*sym_)(expr_index::get(name));
-    }
-
+    
     void update_approximation();
 };
 

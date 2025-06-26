@@ -20,12 +20,12 @@ struct doubleIntegratorCosts {
 
             add_arguments({r, v});
             value = [&](sp_approx_map &data) {
-                data.v_.noalias() += 0.5 * d_r.transpose() * data.in_args(0).cwiseAbs2();
-                data.v_.noalias() += 0.5 * d_v.transpose() * data.in_args(1).cwiseAbs2();
+                data.v_.noalias() += 0.5 * d_r.transpose() * data[0].cwiseAbs2();
+                data.v_.noalias() += 0.5 * d_v.transpose() * data[1].cwiseAbs2();
             };
             jacobian = [this](sp_approx_map &data) { // make sure use +=
-                data.jac_[0].noalias() += data.in_args(0).transpose() * d_r.asDiagonal();
-                data.jac_[1].noalias() += data.in_args(1).transpose() * d_v.asDiagonal();
+                data.jac_[0].noalias() += data[0].transpose() * d_r.asDiagonal();
+                data.jac_[1].noalias() += data[1].transpose() * d_v.asDiagonal();
             };
             hessian = [this](sp_approx_map &data) {
                 data.hess_[0][0].diagonal() += d_r;
@@ -40,10 +40,10 @@ struct doubleIntegratorCosts {
             d_a.setConstant(1e-3);
             add_arguments({a});
             value = [&](sp_approx_map &data) {
-                data.v_.noalias() += 0.5 * d_a.transpose() * data.in_args(0).cwiseAbs2();
+                data.v_.noalias() += 0.5 * d_a.transpose() * data[0].cwiseAbs2();
             };
             jacobian = [this](sp_approx_map &data) { // make sure use +=
-                data.jac_[0].noalias() += data.in_args(0).transpose() * d_a.asDiagonal();
+                data.jac_[0].noalias() += data[0].transpose() * d_a.asDiagonal();
             };
             hessian = [this](sp_approx_map &data) {
                 data.hess_[0][0].diagonal() += d_a;
