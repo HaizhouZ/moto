@@ -22,7 +22,7 @@ struct usr_func : public usr_func_impl_ptr_t {
     usr_func(const std::string &name, approx_order order, size_t dim = 0)
         : usr_func_impl_ptr_t(new usr_func_impl(name, order, dim)) {
     }
-    usr_func(usr_func_impl *impl)
+    usr_func(usr_func_impl &impl)
         : usr_func_impl_ptr_t(impl) {
     }
 };

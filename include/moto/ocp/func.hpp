@@ -21,32 +21,19 @@ def_ptr(func_impl);
  * @note it uses reference to avoid copying the input arguments
  */
 struct sp_arg_map {
-    /// use ref to exploit sparsity (avoid copy)
-    std::vector<vector_ref> in_args_;
-    /**
-     * @brief Construct a new sparse primal data object
-     *
-     * @param primal sym data including states inputs etc
-     * @param shared shared data
-     * @param f function implementation pointer (unique_ptr const ref)
-     */
-    sp_arg_map(sym_data *primal, shared_data *shared, const func_impl_ptr_t &f)
-        : sp_arg_map(primal, shared, f.get()) {}
     /**
      * @brief Construct a new sparse primal data object
      * @param primal sym data including states inputs etc
      * @param shared shared data
      * @param f function implementation pointer
      */
-    sp_arg_map(sym_data *primal, shared_data *shared, func_impl *f);
+    sp_arg_map(sym_data &primal, shared_data &shared, func_impl &f);
     // constructor for sparse primal data with vector_ref
-    sp_arg_map(std::vector<vector_ref> &&primal, shared_data *shared, func_impl *f);
-    sp_arg_map(std::vector<vector_ref> &&primal, shared_data *shared, const func_impl_ptr_t &f)
-        : sp_arg_map(std::move(primal), shared, f.get()) {}
+    sp_arg_map(std::vector<vector_ref> &&primal, shared_data &shared, func_impl &f);
 
     virtual ~sp_arg_map() = default;
-    const func_impl *f_;  ///< pointer to the func
-    shared_data *shared_; ///< pointer to shared data
+    func_impl &f_;        ///< pointer to the func
+    shared_data &shared_; ///< ref to shared data
     /**
      * @brief get the input argument values
      * @note this is a wrapper of in_args_ to access the values
@@ -56,7 +43,12 @@ struct sp_arg_map {
         return in_args_[sym_uid_idx_[in->uid_]];
     }
 
+    const auto &in_args() const { return in_args_; }
+    auto in_args(size_t i) const { return in_args_[i]; }
+
   protected:
+    /// use ref to exploit sparsity (avoid copy)
+    std::vector<vector_ref> in_args_;
     std::unordered_map<size_t, size_t> &sym_uid_idx_;
 };
 def_unique_ptr(sp_arg_map);
@@ -82,7 +74,7 @@ struct sp_approx_map : public sp_arg_map {
      * @param shared shared data
      * @param f approximation
      */
-    sp_approx_map(sym_data *primal, approx_storage *raw, shared_data *shared, func_impl *f);
+    sp_approx_map(sym_data &primal, approx_storage &raw, shared_data &shared, func_impl &f);
     /**
      * @brief Construct a new sparse approx data object
      *
@@ -93,22 +85,10 @@ struct sp_approx_map : public sp_arg_map {
      * @param f approximation function implementation pointer (unique_ptr const ref)
      * @note this constructor is used for approximations not mapped from @ref approx_storage
      */
-    sp_approx_map(sym_data *primal, vector_ref v, const std::vector<matrix_ref> &jac, shared_data *shared, const func_impl_ptr_t &f)
-        : sp_approx_map(primal, v, jac, shared, f.get()) {}
-    /**
-     * @brief Construct a new sparse approx data object
-     *
-     * @param primal sym data including states inputs etc
-     * @param v value vector reference
-     * @param jac jacobian matrix references
-     * @param shared shared data
-     * @param f approximation function implementation pointer
-     * @note this constructor is used for approximations not mapped from @ref approx_storage
-     */
-    sp_approx_map(sym_data *primal, vector_ref v, const std::vector<matrix_ref> &jac, shared_data *shared, func_impl *f);
+    sp_approx_map(sym_data &primal, vector_ref v, const std::vector<matrix_ref> &jac, shared_data &shared, func_impl &f);
     /// constructor for sparse approx data with already created sp_arg_map
-    sp_approx_map(sp_arg_map &&rhs, vector_ref v, const std::vector<matrix_ref> &jac)
-        : sp_arg_map(std::move(rhs)), v_(v), jac_(jac) {}
+    sp_approx_map(sp_arg_map &&rhs, vector_ref v, std::vector<matrix_ref> &&jac)
+        : sp_arg_map(std::move(rhs)), v_(v), jac_(std::move(jac)) {}
 };
 
 def_unique_ptr(sp_approx_map);
@@ -190,9 +170,9 @@ class func_impl : public expr_impl {
      * @details will setup the mapping from the dense approx_storage to sp_approx_map
      * @return sp_approx_map_ptr_t
      */
-    virtual sp_approx_map_ptr_t make_approx_data_mapping(sym_data *primal,
-                                                         approx_storage *raw,
-                                                         shared_data *shared);
+    virtual sp_approx_map_ptr_t make_approx_data_mapping(sym_data &primal,
+                                                         approx_storage &raw,
+                                                         shared_data &shared);
     /**
      * @brief evaluate the func
      * @param data sp_approx_map to be evaluated
@@ -234,8 +214,8 @@ class func_impl : public expr_impl {
                                                  name_, magic_enum::enum_name(field)));
         }
         // make a default make_data
-        make_data = [this](sym_data *primal, shared_data *shared) {
-            return std::make_unique<sp_arg_map>(primal, shared, this);
+        make_data = [this](sym_data &primal, shared_data &shared) {
+            return std::make_unique<sp_arg_map>(primal, shared, *this);
         };
     }
     /**
@@ -260,7 +240,7 @@ class func_impl : public expr_impl {
     /// @brief callback to call a non-approximation function
     std::function<void(sp_arg_map &)> call;
     /// @brief callback to make data（for non-approx) @note will not be called in @ref make_approx_data_mapping
-    std::function<sp_arg_map_ptr_t(sym_data *, shared_data *)> make_data;
+    std::function<sp_arg_map_ptr_t(sym_data &, shared_data &)> make_data;
 };
 /////////////////////////////////////////////////////////////////////
 /**
@@ -271,35 +251,27 @@ class shared_data {
     std::unordered_map<size_t, sp_arg_map_ptr_t> data_;
 
   public:
-    shared_data(const ocp_ptr_t &prob, sym_data *primal);
+    shared_data(const ocp_ptr_t &prob, sym_data &primal);
 
     ocp_ptr_t prob_;
     /// @brief add data by uid of the func (owner of the data)
     void add(size_t uid, sp_arg_map_ptr_t &&data) { data_.try_emplace(uid, std::move(data)); }
-    /// @brief add data by func pointer (owner of the data)
-    void add(expr_impl *f, sp_arg_map_ptr_t &&data) {
-        assert(f->field_ == __pre_comp || f->field_ == __usr_func);
-        add(f->uid_, std::move(data));
-    }
     /// @brief add data by func shared pointer (owner of the data)
     template <typename derived>
         requires std::is_base_of_v<func_impl, derived>
     void add(const std::shared_ptr<derived> &expr, sp_arg_map_ptr_t &&data) {
-        add(expr.get(), std::move(data));
+        assert(expr->field_ == __pre_comp || expr->field_ == __usr_func);
+        add(expr->uid, std::move(data));
     }
     /// @brief get the data by uid
     auto &get(size_t uid) { return *data_.at(uid); }
-    /// @brief get the data by func pointer (owner of the data)
-    auto &get(expr_impl *f) {
-        assert(f->field_ == __pre_comp || f->field_ == __usr_func);
-        return get(f->uid_);
-    }
-    /// @brief get the data by func name (owner of the data)
-    auto &get(const std::string &name) { return get(expr_index::get(name).get()); }
     /// @brief get the data by func shared pointer (owner of the data)
     template <typename derived>
         requires std::is_base_of_v<func_impl, derived>
-    auto &get(const std::shared_ptr<derived> &expr) { return get(expr.get()); }
+    auto &operator()(const std::shared_ptr<derived> &expr) { return get(expr->uid_); }
+    template <typename derived>
+        requires std::is_base_of_v<func_impl, derived>
+    auto &operator()(const derived &expr) { return get(expr.uid_); }
 };
 def_unique_ptr(shared_data);
 } // namespace moto

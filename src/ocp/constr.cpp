@@ -1,16 +1,16 @@
 #include <moto/ocp/constr.hpp>
 #include <iostream>
 namespace moto {
-constr_data::constr_data(approx_storage *raw,
+constr_data::constr_data(approx_storage &raw,
                          sp_approx_map &&d,
                          constr_impl *f)
-    : sp_approx_map(std::move(d)), merit_(&raw->cost_),
-      multiplier_(raw->dual_[f->field_].segment(raw->prob_->get_expr_start(*f),
+    : sp_approx_map(std::move(d)), merit_(&raw.cost_),
+      multiplier_(raw.dual_[f->field_].segment(raw.prob_->get_expr_start(*f),
                                                 f->dim_)) {
     const auto &in_args = f->in_args();
     for (size_t i = 0; i < in_args_.size(); i++) {
-        vjp_.push_back(raw->jac_[in_args[i]->field_].segment(
-            raw->prob_->get_expr_start(in_args[i]), in_args[i]->dim_));
+        vjp_.push_back(raw.jac_[in_args[i]->field_].segment(
+            raw.prob_->get_expr_start(in_args[i]), in_args[i]->dim_));
     }
     if (f->order() >= approx_order::second) {
         in_args_.push_back(multiplier_);
@@ -75,7 +75,7 @@ void constr_impl::jacobian_impl(sp_approx_map &data) {
     jacobian(data);
     // update multiplier - jacobian product
     auto &d = static_cast<constr_data &>(data);
-    for (size_t i = 0; i < d.in_args_.size(); i++) {
+    for (size_t i = 0; i < d.in_args().size(); i++) {
         // fmt::print("{}\t{}:i\t{:.3}\n", i, name_, d.in_args_[i].transpose());
         d.vjp_[i].noalias() += d.multiplier_.transpose() * d.jac_[i];
         // fmt::print("{}\t{}:jac\n{:.3}\n", i, name_, d.jac_[i]);

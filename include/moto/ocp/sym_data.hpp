@@ -21,7 +21,7 @@ struct sym_data {
             value_[i].resize(prob_->dim_[i]);
             value_[i].setZero();
         }
-        for (const auto & v : prob_->expr_[__usr_var]){
+        for (const auto &v : prob_->expr_[__usr_var]) {
             usr_value_[v->uid_] = vector(prob_->dim_[__usr_var]);
             usr_value_[v->uid_].setZero();
         }
@@ -33,8 +33,12 @@ struct sym_data {
         else
             return value_[sym->field_].segment(prob_->get_expr_start(*sym), sym->dim_);
     }
-    /// get the symbolic variable value of the sym
-    auto get(const sym &sym) {
+    auto operator()(expr_impl *sym) {
+        return get(sym);
+    }
+    template <typename derived>
+        requires(std::derived_from<derived, expr_impl>)
+    auto operator()(const std::shared_ptr<derived> &sym) {
         return get(sym.get());
     }
 

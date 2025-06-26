@@ -15,7 +15,7 @@ struct constr_data : public sp_approx_map {
     double *merit_;
     vector_ref multiplier_;
     std::vector<row_vector_ref> vjp_;
-    constr_data(approx_storage *raw, sp_approx_map &&d, constr_impl *cstr);
+    constr_data(approx_storage &raw, sp_approx_map &&d, constr_impl *cstr);
 };
 def_unique_ptr(constr_data);
 /**
@@ -41,7 +41,7 @@ class constr_impl : public func_impl {
      * @param shared ptr to shared data
      * @return sp_approx_map_ptr_t
      */
-    sp_approx_map_ptr_t make_approx_data_mapping(sym_data *primal, approx_storage *raw, shared_data* shared) override {
+    sp_approx_map_ptr_t make_approx_data_mapping(sym_data &primal, approx_storage &raw, shared_data &shared) override {
         return constr_data_ptr_t(
             new constr_data(raw, std::move(*func_impl::make_approx_data_mapping(primal, raw, shared)), this));
     }
