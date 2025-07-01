@@ -42,6 +42,7 @@ struct sp_arg_map {
     auto operator[](const sym &in) {
         return in_args_[sym_uid_idx_.at(in->uid_)];
     }
+    
     auto operator[](size_t i) const { return in_args_.at(i); }
 
     const auto &in_args() const { return in_args_; }
@@ -89,8 +90,8 @@ struct sp_approx_map : public sp_arg_map {
     /// constructor for sparse approx data with already created sp_arg_map
     sp_approx_map(sp_arg_map &&rhs, vector_ref v, std::vector<matrix_ref> &&jac)
         : sp_arg_map(std::move(rhs)), v_(v), jac_(std::move(jac)) {}
-    
-    auto jac(const sym& in) const {
+
+    auto jac(const sym &in) const {
         return jac_[sym_uid_idx_.at(in->uid_)];
     }
 };

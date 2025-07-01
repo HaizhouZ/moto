@@ -90,10 +90,10 @@ sp_approx_map::sp_approx_map(sym_data &primal,
 shared_data::shared_data(const ocp_ptr_t &prob, sym_data &primal) {
     data_.reserve(prob->expr_[__pre_comp].size() + prob->expr_[__usr_func].size());
     for (const auto &expr : prob->expr_[__pre_comp]) {
-        data_.try_emplace(expr->uid_, std::static_pointer_cast<func_impl>(expr)->make_data(primal, *this));
+        add(expr->uid_, static_cast<func_impl*>(expr.get())->make_data(primal, *this));
     }
     for (const auto &expr : prob->expr_[__usr_func]) {
-        data_.try_emplace(expr->uid_, std::static_pointer_cast<func_impl>(expr)->make_data(primal, *this));
+        add(expr->uid_, static_cast<func_impl*>(expr.get())->make_data(primal, *this));
     }
 }
 
