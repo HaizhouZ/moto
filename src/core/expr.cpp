@@ -16,10 +16,11 @@ void expr_impl::add_to_index() {
 }
 bool expr_impl::finalize() {
     if (!finalized) {
-        finalized = finalize_impl();
+        finalize_impl();
         if (field_ == __undefined) {
-            throw std::runtime_error(fmt::format("expr {} field type undefined", name_));
+            throw std::runtime_error(fmt::format("expr {} field type undefined after finalization", name_));
         }
+        finalized = true;
         add_to_index();
     }
     return finalized;

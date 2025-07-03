@@ -37,7 +37,7 @@ class expr_impl : public std::enable_shared_from_this<expr_impl> {
     void add_to_index();
 
   protected:
-    virtual bool finalize_impl() { return true; }
+    virtual void finalize_impl() {}
 
   public:
     const std::string name_;

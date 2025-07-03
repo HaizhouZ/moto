@@ -25,7 +25,7 @@ void ns_sqp::update(size_t n_iter) {
     // );
     for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
         fmt::print("------------------------------------\n");
-        fmt::print("Iteration: {}", i_iter);
+        fmt::print("Iteration: {}\n", i_iter);
         timed_block_labeled("all",
 
         // timed_block(

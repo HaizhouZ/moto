@@ -17,7 +17,7 @@ constr_data::constr_data(approx_storage &raw,
     }
 }
 
-bool constr_impl::finalize_impl() {
+void constr_impl::finalize_impl() {
     if (field_ == __undefined) {
         bool has_[3] = {false, false, false}; // x, u, y
         for (const auto &arg : in_args_) {
@@ -62,8 +62,6 @@ bool constr_impl::finalize_impl() {
         }
     }
     assert(field_ >= __dyn && field_ - __dyn < field::num_constr);
-
-    return true;
 }
 
 void constr_impl::value_impl(sp_approx_map &data) {

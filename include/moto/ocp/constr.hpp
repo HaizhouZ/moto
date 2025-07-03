@@ -26,7 +26,7 @@ class constr_impl : public func_impl {
   private:
     void value_impl(sp_approx_map &data) override final;
     void jacobian_impl(sp_approx_map &data) override final;
-    bool finalize_impl() override;
+    void finalize_impl() override;
     struct field_hint_t {
         utils::tri_state_bool is_eq;
         utils::tri_state_bool is_soft;
@@ -79,7 +79,7 @@ template <typename impl_t>
 struct eq_constr_tpl : public std::shared_ptr<impl_t> {
     using impl_ptr_t = std::shared_ptr<impl_t>;
     eq_constr_tpl(const std::string &name, approx_order order = approx_order::first, size_t dim = dim_tbd, bool soft = false)
-        : impl_ptr_t(new impl_t(name, order, true, dim, soft)) {}
+        : impl_ptr_t(new impl_t(name, order, dim, true, soft)) {}
     eq_constr_tpl() = default;
     using impl_ptr_t::operator=;
     eq_constr_tpl(impl_t *impl_rval) : impl_ptr_t(impl_rval) {} ///< will get the ownership of impl_rval
@@ -92,7 +92,7 @@ template <typename impl_t>
 struct ineq_constr_tpl : public std::shared_ptr<impl_t> {
     using impl_ptr_t = std::shared_ptr<impl_t>;
     ineq_constr_tpl(const std::string &name, approx_order order = approx_order::first, size_t dim = dim_tbd)
-        : impl_ptr_t(new impl_t(name, order, false, dim)) {}
+        : impl_ptr_t(new impl_t(name, order, dim, false)) {}
     ineq_constr_tpl() = default;
     using impl_ptr_t::operator=;
     ineq_constr_tpl(impl_t *impl_rval) : impl_ptr_t(impl_rval) {} ///< will get the ownership of impl_rval
