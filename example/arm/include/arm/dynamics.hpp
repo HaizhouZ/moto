@@ -13,10 +13,10 @@ struct armDynamics {
         std::tie(v, v_next) = dynamics::make_state("v", 7);
         tau = dynamics::make_input("tau", 7);
 
-        dyn_pos = constr("euler", approx_order::first, 7);
+        dyn_pos = eq_constr("euler", approx_order::first, 7);
         dyn_pos->add_arguments({q, q_next, v_next});
         dyn_pos->load_external();
-        dyn_vel = constr("rnea", approx_order::first, 7);
+        dyn_vel = eq_constr("rnea", approx_order::first, 7);
         dyn_vel->add_arguments({q, v, v_next, tau});
         dyn_vel->load_external();
     }

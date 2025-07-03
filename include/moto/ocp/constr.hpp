@@ -62,15 +62,17 @@ def_ptr(constr_impl);
  * @brief wrapper of constr_impl, in fact a pointer
  *
  */
-template <typename impl_t>
-    requires(std::derived_from<impl_t, constr_impl>)
-struct constr_tpl : public std::shared_ptr<impl_t> {
-    using impl_ptr_t = std::shared_ptr<impl_t>;
-    constr_tpl(const std::string &name, approx_order order = approx_order::first, size_t dim = dim_tbd, field_t field = __undefined)
-        : impl_ptr_t(new impl_t(name, order, dim, field)) {}
-    using impl_ptr_t::impl_ptr_t; // inherit constructors from std::shared_ptr
+struct constr : public std::shared_ptr<constr_impl> {
+    using impl_ptr_t = std::shared_ptr<constr_impl>;
+    constr(const std::string &name, approx_order order = approx_order::first, size_t dim = dim_tbd, field_t field = __undefined)
+        : impl_ptr_t(new constr_impl(name, order, dim, field)) {}
+    constr() = default;
+    using impl_ptr_t::operator=;
+    template <typename derived_impl>
+        requires(std::derived_from<derived_impl, constr_impl>)
+    /// @brief will get the shared ownership of impl_rval
+    constr(derived_impl *impl_rval) : impl_ptr_t(impl_rval) {}
 };
-using constr = constr_tpl<constr_impl>; // instaniate constr_impl_wrapper
 
 template <typename impl_t>
     requires(std::derived_from<impl_t, constr_impl>)
@@ -78,8 +80,12 @@ struct eq_constr_tpl : public std::shared_ptr<impl_t> {
     using impl_ptr_t = std::shared_ptr<impl_t>;
     eq_constr_tpl(const std::string &name, approx_order order = approx_order::first, size_t dim = dim_tbd, bool soft = false)
         : impl_ptr_t(new impl_t(name, order, true, dim, soft)) {}
-    using impl_ptr_t::impl_ptr_t; // inherit constructors from std::shared_ptr
+    eq_constr_tpl() = default;
+    using impl_ptr_t::operator=;
+    eq_constr_tpl(impl_t *impl_rval) : impl_ptr_t(impl_rval) {} ///< will get the ownership of impl_rval
 };
+
+typedef eq_constr_tpl<constr_impl> eq_constr; ///< instantiate eq_constr_impl_wrapper
 
 template <typename impl_t>
     requires(std::derived_from<impl_t, constr_impl>)
@@ -87,9 +93,12 @@ struct ineq_constr_tpl : public std::shared_ptr<impl_t> {
     using impl_ptr_t = std::shared_ptr<impl_t>;
     ineq_constr_tpl(const std::string &name, approx_order order = approx_order::first, size_t dim = dim_tbd)
         : impl_ptr_t(new impl_t(name, order, false, dim)) {}
-    using impl_ptr_t::impl_ptr_t; // inherit constructors from std::shared_ptr
+    ineq_constr_tpl() = default;
+    using impl_ptr_t::operator=;
+    ineq_constr_tpl(impl_t *impl_rval) : impl_ptr_t(impl_rval) {} ///< will get the ownership of impl_rval
 };
 
+typedef ineq_constr_tpl<constr_impl> ineq_constr; ///< instantiate ineq_constr_impl_wrapper
 } // namespace moto
 
 #endif // MOTO_CONSTR_HPP
