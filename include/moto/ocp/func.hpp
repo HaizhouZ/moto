@@ -175,7 +175,7 @@ class func_impl : public expr_impl {
      * @details will setup the mapping from the dense approx_storage to sp_approx_map
      * @return sp_approx_map_ptr_t
      */
-    virtual sp_approx_map_ptr_t make_approx_data_mapping(sym_data &primal,
+    virtual sp_approx_map_ptr_t make_approx_map(sym_data &primal,
                                                          approx_storage &raw,
                                                          shared_data &shared);
     /**
@@ -244,7 +244,7 @@ class func_impl : public expr_impl {
     std::function<void(sp_approx_map &)> hessian;
     /// @brief callback to call a non-approximation function
     std::function<void(sp_arg_map &)> call;
-    /// @brief callback to make data（for non-approx) @note will not be called in @ref make_approx_data_mapping
+    /// @brief callback to make data（for non-approx) @note will not be called in @ref make_approx_map
     std::function<sp_arg_map_ptr_t(sym_data &, shared_data &)> make_data;
 };
 /////////////////////////////////////////////////////////////////////

@@ -8,16 +8,16 @@ enum field_t : size_t {
     __x = 0,
     __u,
     __y,
-    __p,         // non-decision parameters
-    __dyn,       // dynamic model
-    __eq_x, // "state equality constraints"
-    __eq_xu, // "input-state equality constraints"
-    __ineq_xu, // "state-input inequality constraints"
-    __ineq_x, // "state inequality constraints"
-    __eq_x_soft, // "soft state equality constraints"
+    __p,          // non-decision parameters
+    __dyn,        // dynamic model
+    __eq_x,       // "state equality constraints"
+    __eq_xu,      // "input-state equality constraints"
+    __ineq_xu,    // "state-input inequality constraints"
+    __ineq_x,     // "state inequality constraints"
+    __eq_x_soft,  // "soft state equality constraints"
     __eq_xu_soft, // "soft state-input equality constraints"
-    __cost,    // "running cost"
-    __usr_var, // user defined variables
+    __cost,       // "running cost"
+    __usr_var,    // user defined variables
     // user functions
     __pre_comp, // will be called before the computation of the approximation update, also the data will be shared
     __usr_func, // user function, will not be called in the approximation update, only users can use them

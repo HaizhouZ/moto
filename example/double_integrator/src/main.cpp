@@ -1,8 +1,7 @@
 #include <moto/core/directed_graph.hpp>
 #include <moto/ocp/approx_storage.hpp>
 #include <moto/ocp/shooting_node.hpp>
-#include <moto/solver/data/nullspace_data.hpp>
-#include <moto/solver/data/rollout_data.hpp>
+#include <moto/solver/nullspace_data.hpp>
 #include <moto/solver/ns_sqp.hpp>
 #include <moto/utils/print.hpp>
 #include <double_integrator/cost.hpp>

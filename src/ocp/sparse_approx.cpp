@@ -34,8 +34,10 @@ sp_approx_map::sp_approx_map(sym_data &primal,
                     jac_.push_back(raw.approx_[f.field_].jac_[in_args[i]->field_].block(
                         f_st, raw.prob_->get_expr_start(in_args[i]),
                         f.dim_, in_args[i]->dim_));
-                } else // useless
-                    jac_.push_back(raw.approx_[f.field_].jac_[in_args[i]->field_]);
+                } else { // useless
+                    static matrix empty;
+                    jac_.push_back(empty);
+                }
             }
         }
     } else { // for cost
@@ -90,16 +92,16 @@ sp_approx_map::sp_approx_map(sym_data &primal,
 shared_data::shared_data(const ocp_ptr_t &prob, sym_data &primal) {
     data_.reserve(prob->expr_[__pre_comp].size() + prob->expr_[__usr_func].size());
     for (const auto &expr : prob->expr_[__pre_comp]) {
-        add(expr->uid_, static_cast<func_impl*>(expr.get())->make_data(primal, *this));
+        add(expr->uid_, static_cast<func_impl *>(expr.get())->make_data(primal, *this));
     }
     for (const auto &expr : prob->expr_[__usr_func]) {
-        add(expr->uid_, static_cast<func_impl*>(expr.get())->make_data(primal, *this));
+        add(expr->uid_, static_cast<func_impl *>(expr.get())->make_data(primal, *this));
     }
 }
 
-sp_approx_map_ptr_t func_impl::make_approx_data_mapping(sym_data &primal, approx_storage &raw, shared_data &shared) {
+sp_approx_map_ptr_t func_impl::make_approx_map(sym_data &primal, approx_storage &raw, shared_data &shared) {
     if (field_ - __dyn >= field::num_func)
-        throw std::runtime_error(fmt::format("make_approx_data_mapping cannot be called for func {} type {}",
+        throw std::runtime_error(fmt::format("make_approx_map cannot be called for func {} type {}",
                                              name_, magic_enum::enum_name(field_)));
     if (in_args_.empty())
         throw std::runtime_error(fmt::format("in args unset for func {} in field {}",

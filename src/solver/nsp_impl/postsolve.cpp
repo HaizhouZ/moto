@@ -1,5 +1,5 @@
 #include <moto/ocp/approx_storage.hpp>
-#include <moto/solver/data/nullspace_data.hpp>
+#include <moto/solver/nullspace_data.hpp>
 #include <moto/solver/ns_riccati_solve.hpp>
 
 namespace moto {

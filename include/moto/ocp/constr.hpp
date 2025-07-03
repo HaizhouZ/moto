@@ -23,9 +23,9 @@ def_unique_ptr(constr_data);
  * @brief constraint approximation with multipliers (and slack variables)
  */
 class constr_impl : public func_impl {
-  private:
-    void value_impl(sp_approx_map &data) override final;
-    void jacobian_impl(sp_approx_map &data) override final;
+  protected:
+    void value_impl(sp_approx_map &data) override;
+    void jacobian_impl(sp_approx_map &data) override;
     void finalize_impl() override;
     struct field_hint_t {
         utils::tri_state_bool is_eq;
@@ -52,9 +52,9 @@ class constr_impl : public func_impl {
      * @param shared ptr to shared data
      * @return sp_approx_map_ptr_t
      */
-    sp_approx_map_ptr_t make_approx_data_mapping(sym_data &primal, approx_storage &raw, shared_data &shared) override {
+    sp_approx_map_ptr_t make_approx_map(sym_data &primal, approx_storage &raw, shared_data &shared) override {
         return constr_data_ptr_t(
-            new constr_data(raw, std::move(*func_impl::make_approx_data_mapping(primal, raw, shared)), this));
+            new constr_data(raw, std::move(*func_impl::make_approx_map(primal, raw, shared)), this));
     }
 };
 def_ptr(constr_impl);

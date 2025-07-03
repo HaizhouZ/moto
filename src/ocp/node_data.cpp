@@ -23,7 +23,7 @@ inline void for_funcs(const ocp_ptr_t &prob, Callback &&callback) {
 node_data::node_data(const ocp_ptr_t &prob)
     : ocp_(prob), sym_(new sym_data(prob)), dense_(new approx_storage(prob)), shared_(new shared_data(prob, *sym_)) {
     for_funcs(prob, [&](size_t field, [[maybe_unused]] size_t idx, func_impl &_f) {
-        sparse_[field].push_back(_f.make_approx_data_mapping(*sym_, *dense_, *shared_));
+        sparse_[field].push_back(_f.make_approx_map(*sym_, *dense_, *shared_));
     });
 }
 

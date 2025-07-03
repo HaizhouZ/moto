@@ -1,19 +1,14 @@
 #include <moto/ocp/approx_storage.hpp>
-#include <moto/solver/data/nullspace_data.hpp>
-#include <moto/solver/data/rollout_data.hpp>
 #include <moto/solver/ns_riccati_data.hpp>
+#include <moto/solver/nullspace_data.hpp>
 
 namespace moto {
 namespace ns_riccati {
-riccati_data::riccati_data(const ocp_ptr_t& prob)
-    : node_data(prob), nx(prob->dim_[__x]), nu(prob->dim_[__u]),
+riccati_data::riccati_data(const ocp_ptr_t &prob)
+    : node_data(prob), solver::solver_data(prob, dense_.get()),
       ns(dense_->prob_->dim_[__eq_x]),
       nc(dense_->prob_->dim_[__eq_xu]), ncstr(ns + nc), d_u(nu, nx),
-      d_y(nx, nx), d_lbd_f(nx), d_lbd_s_c_pre_solve(nu), d_lbd_s_c(ncstr),
-      Q_x(dense_->jac_[__x]), Q_u(dense_->jac_[__u]),
-      Q_y(dense_->jac_[__y]), Q_xx(dense_->hessian_[__x][__x]),
-      Q_ux(dense_->hessian_[__u][__x]), Q_uu(dense_->hessian_[__u][__u]),
-      Q_yx(dense_->hessian_[__y][__x]), Q_yy(dense_->hessian_[__y][__y]) {
+      d_y(nx, nx), d_lbd_f(nx), d_lbd_s_c_pre_solve(nu), d_lbd_s_c(ncstr) {
     nz = nu - ncstr;
     nsp_ = new nullspace_data(dense_->approx_[__eq_x].jac_[__y]);
     nsp_->F_0_k.resize(nx);
@@ -29,18 +24,13 @@ riccati_data::riccati_data(const ocp_ptr_t& prob)
     nsp_->s_c_stacked.resize(ncstr, nu);
     nsp_->s_c_stacked_0_k.resize(ncstr);
     nsp_->s_c_stacked_0_K.resize(ncstr, nx);
-    rollout_ = new rollout_data();
-    rollout_->prim_[__x].resize(nx);
-    rollout_->prim_[__x].setZero();
-    rollout_->prim_[__u].resize(nu);
-    rollout_->prim_[__y].resize(nx);
-    rollout_->dual_[__dyn].resize(nx);
-    rollout_->dual_[__eq_x].resize(ns);
-    rollout_->dual_[__eq_xu].resize(nc);
+    // set rollout data for hard constraints
+    dual_rollout_[__dyn].resize(nx);
+    dual_rollout_[__eq_x].resize(ns);
+    dual_rollout_[__eq_xu].resize(nc);
 }
 riccati_data::~riccati_data() {
     delete nsp_;
-    delete rollout_;
 }
 } // namespace ns_riccati
 } // namespace moto
