@@ -27,15 +27,15 @@ bool constr_impl::finalize_impl() {
         // make this long enough so that people will not easily remove the const :D
         auto &field = *const_cast<field_t *>(&field_);
         if (has_[__u] && !has_[__y])
-            field = __eq_cstr_c;
+            field = __eq_xu;
         else if (has_[__x] && has_[__y])
             field = __dyn;
         else if (!has_[__u] && !has_[__x] && has_[__y])
-            field = __eq_cstr_s;
+            field = __eq_x;
         else
             throw std::runtime_error(fmt::format("unsupported constr type has_x: {}, has_u: {}, has_y: {}", has_[__x], has_[__u], has_[__y]));
     }
-    if (field_ == __eq_cstr_s) {
+    if (field_ == __eq_x) {
         // do in_arg substitute
         try {
             for (auto &arg : in_args_) {

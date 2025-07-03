@@ -41,7 +41,7 @@ class doubleIntegratorDyn : public dynamics, public expr_list {
         }
     };
     struct zero_vel: public constr_impl{
-        zero_vel() : constr_impl("doubleIntegratorDynamics_zero_vel", approx_order::first, 3, __eq_cstr_s) {
+        zero_vel() : constr_impl("doubleIntegratorDynamics_zero_vel", approx_order::first, 3, __eq_x) {
             value = [](sp_approx_map &data) {
                 data.v_ = data[0];
             };
@@ -58,7 +58,7 @@ class doubleIntegratorDyn : public dynamics, public expr_list {
         dyn_pos->add_arguments({r, r_next, v_next});
         dyn_vel->add_arguments({v, v_next, a});
         vel_zero_constr->add_arguments({v});
-        // constr trial("trial", 3, __eq_cstr_s);
+        // constr trial("trial", 3, __eq_x);
         // trial->add_argument(r);
         // trial->value = [=](auto &d) { d.v_ = d(r); };
         // trial->jacobian = [](sp_approx_map &d) { d.jac_[0].setIdentity(); };

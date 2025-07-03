@@ -10,10 +10,12 @@ enum field_t : size_t {
     __y,
     __p,         // non-decision parameters
     __dyn,       // dynamic model
-    __eq_cstr_s, // "state equality constraints"
-    __eq_cstr_c, // "input-state equality constraints"
-    // ineq_cstr_x, // "state inequality constraints"
-    // ineq_cstr_u, // "state-input inequality constraints"
+    __eq_x, // "state equality constraints"
+    __eq_xu, // "input-state equality constraints"
+    __ineq_xu, // "state-input inequality constraints"
+    __ineq_x, // "state inequality constraints"
+    __eq_x_soft, // "soft state equality constraints"
+    __eq_xu_soft, // "soft state-input equality constraints"
     __cost,    // "running cost"
     __usr_var, // user defined variables
     // user functions

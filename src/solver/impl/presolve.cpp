@@ -41,9 +41,9 @@ void pre_solving_steps_1(riccati_data *cur) {
     if (d.ncstr) {
         if (d.ns) {
             nsp.s_0_p_k.noalias() =
-                _approx[__eq_cstr_s].v_ - nsp.s_y * nsp.F_0_k;
+                _approx[__eq_x].v_ - nsp.s_y * nsp.F_0_k;
             nsp.s_0_p_K.noalias() =
-                _approx[__eq_cstr_s].jac_[__x] - nsp.s_y * nsp.F_0_K;
+                _approx[__eq_x].jac_[__x] - nsp.s_y * nsp.F_0_K;
             nsp.s_u.noalias() = -nsp.s_y * nsp.F_u;
             // solve pseudo inverse
             nsp.s_c_stacked.topRows(d.ns) = nsp.s_u;
@@ -51,9 +51,9 @@ void pre_solving_steps_1(riccati_data *cur) {
             nsp.s_c_stacked_0_K.topRows(d.ns) = nsp.s_0_p_K;
         }
         if (d.nc) {
-            nsp.s_c_stacked.bottomRows(d.nc) = _approx[__eq_cstr_c].jac_[__u];
-            nsp.s_c_stacked_0_k.tail(d.nc) = _approx[__eq_cstr_c].v_;
-            nsp.s_c_stacked_0_K.bottomRows(d.nc) = _approx[__eq_cstr_c].jac_[__x];
+            nsp.s_c_stacked.bottomRows(d.nc) = _approx[__eq_xu].jac_[__u];
+            nsp.s_c_stacked_0_k.tail(d.nc) = _approx[__eq_xu].v_;
+            nsp.s_c_stacked_0_K.bottomRows(d.nc) = _approx[__eq_xu].jac_[__x];
         }
         nsp.lu_eq_.compute(nsp.s_c_stacked);
         size_t rank = nsp.lu_eq_.rank();

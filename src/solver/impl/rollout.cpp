@@ -38,12 +38,12 @@ void post_rollout_steps(riccati_data *cur) {
     if (d.ns > 0) {
         // append last term in dynamics multipler computation
         d.d_lbd_f.noalias() -= nsp.s_y.transpose() * d.d_lbd_s_c;
-        rollout_.dual_[__eq_cstr_s] = d.d_lbd_s_c.head(d.ns);
-        d.dense_->dual_[__eq_cstr_s].noalias() += rollout_.dual_[__eq_cstr_s];
+        rollout_.dual_[__eq_x] = d.d_lbd_s_c.head(d.ns);
+        d.dense_->dual_[__eq_x].noalias() += rollout_.dual_[__eq_x];
     }
     if (d.nc > 0) {
-        rollout_.dual_[__eq_cstr_c] = d.d_lbd_s_c.tail(d.nc);
-        d.dense_->dual_[__eq_cstr_c].noalias() += rollout_.dual_[__eq_cstr_c];
+        rollout_.dual_[__eq_xu] = d.d_lbd_s_c.tail(d.nc);
+        d.dense_->dual_[__eq_xu].noalias() += rollout_.dual_[__eq_xu];
     }
     rollout_.dual_[__dyn].noalias() = nsp.lu_dyn_.transpose().solve(d.d_lbd_f);
     d.dense_->dual_[__dyn].noalias() += a * rollout_.dual_[__dyn];
