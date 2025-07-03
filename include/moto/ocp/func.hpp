@@ -231,7 +231,7 @@ class func_impl : public expr_impl {
      * @param dim dimension of the function, default is 0
      * @param field field type, default is __undefined (to be finalized later, @ref finalize_impl)
      */
-    func_impl(const std::string &name, approx_order order, size_t dim = 0, field_t field = __undefined)
+    func_impl(const std::string &name, approx_order order, size_t dim = dim_tbd, field_t field = __undefined)
         : expr_impl(name, dim, field), order_(order) {
     }
 

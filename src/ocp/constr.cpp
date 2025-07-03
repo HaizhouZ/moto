@@ -1,12 +1,12 @@
-#include <moto/ocp/constr.hpp>
 #include <iostream>
+#include <moto/ocp/constr.hpp>
 namespace moto {
 constr_data::constr_data(approx_storage &raw,
                          sp_approx_map &&d,
                          constr_impl *f)
     : sp_approx_map(std::move(d)), merit_(&raw.cost_),
       multiplier_(raw.dual_[f->field_].segment(raw.prob_->get_expr_start(*f),
-                                                f->dim_)) {
+                                               f->dim_)) {
     const auto &in_args = f->in_args();
     for (size_t i = 0; i < in_args_.size(); i++) {
         vjp_.push_back(raw.jac_[in_args[i]->field_].segment(
@@ -19,40 +19,50 @@ constr_data::constr_data(approx_storage &raw,
 
 bool constr_impl::finalize_impl() {
     if (field_ == __undefined) {
-        bool has_[3] = {false, false, false};
+        bool has_[3] = {false, false, false}; // x, u, y
         for (const auto &arg : in_args_) {
             if (arg->field_ <= __y)
                 has_[arg->field_] = true;
         }
         // make this long enough so that people will not easily remove the const :D
-        auto &field = *const_cast<field_t *>(&field_);
-        if (has_[__u] && !has_[__y])
-            field = __eq_xu;
-        else if (has_[__x] && has_[__y])
-            field = __dyn;
-        else if (!has_[__u] && !has_[__x] && has_[__y])
-            field = __eq_x;
-        else
-            throw std::runtime_error(fmt::format("unsupported constr type has_x: {}, has_u: {}, has_y: {}", has_[__x], has_[__u], has_[__y]));
+        auto &field = const_cast<field_t &>(field_);
+        if (field_hint_.is_eq) {
+            if (has_[__u] && !has_[__y])
+                field = field_hint_.is_soft ? __eq_xu_soft : __eq_xu;
+            else if (has_[__x] && has_[__y] && !field_hint_.is_soft)
+                field = __dyn;
+            else if (!has_[__u] && !has_[__x] && has_[__y])
+                field = field_hint_.is_soft ? __eq_x_soft : __eq_x;
+            else
+                throw std::runtime_error(fmt::format("unsupported eq constr type has_x: {}, has_u: {}, has_y: {}, soft: {}",
+                                                     has_[__x], has_[__u], has_[__y], field_hint_.is_soft));
+        } else {
+            if (has_[__u] && !has_[__y] && !field_hint_.is_soft)
+                field = __ineq_xu;
+            else if (!has_[__u] && !has_[__x] && has_[__y] && !field_hint_.is_soft)
+                field = __ineq_x;
+            else
+                throw std::runtime_error(fmt::format("unsupported ineq constr type has_x: {}, has_u: {}, has_y: {}, soft: {}",
+                                                     has_[__x], has_[__u], has_[__y], field_hint_.is_soft));
+        }
     }
-    if (field_ == __eq_x) {
+    if (field_ == __eq_x || field_ == __ineq_x || field_ == __eq_x_soft) {
         // do in_arg substitute
         try {
             for (auto &arg : in_args_) {
                 if (arg->field_ == __x) {
-#ifndef NDEBUG
-                    fmt::print("replacing in arg {} of func {} with {}\n", arg->name_, name_, arg->name_ + "_nxt");
-#endif
+                    fmt::print("substitution in constr {} of type {}: inarg {} with {}\n",
+                               name_, magic_enum::enum_name(field_), arg->name_, arg->name_ + "_nxt");
                     arg = sym(expr_index::get(arg->name_ + "_nxt"));
                 }
             }
         } catch (const std::exception &ex) {
-            fmt::print("substitute exception");
+            fmt::print("exception during substitution");
             throw;
         }
     }
-    assert(field_ == __dyn || magic_enum::enum_name(field_).find(
-                                  "cstr") != std::string::npos);
+    assert(field_ >= __dyn && field_ - __dyn < field::num_constr);
+
     return true;
 }
 

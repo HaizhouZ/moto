@@ -26,6 +26,7 @@ class expr_index {
     /// @brief get an expression by uid
     static const auto &get(size_t uid) { return all_.at(uid); }
 };
+constexpr size_t dim_tbd = 0;
 /**
  * @brief general expression base class
  */
@@ -80,7 +81,6 @@ class expr_impl : public std::enable_shared_from_this<expr_impl> {
      */
     virtual expr_list *get_aux() { return nullptr; }
 };
-
 namespace cs = casadi;
 
 /**
