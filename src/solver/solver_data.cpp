@@ -2,8 +2,8 @@
 
 namespace moto {
 namespace solver {
-solver_data::solver_data(const ocp_ptr_t &prob, approx_storage *dense_)
-    : nx(prob->dim_[__x]), nu(prob->dim_[__u]),
+solver_data::solver_data(const ocp_ptr_t &prob)
+    : node_data(prob), nx(prob->dim_[__x]), nu(prob->dim_[__u]),
       Q_x(dense_->jac_[__x]), Q_u(dense_->jac_[__u]),
       Q_y(dense_->jac_[__y]), Q_xx(dense_->hessian_[__x][__x]),
       Q_ux(dense_->hessian_[__u][__x]), Q_uu(dense_->hessian_[__u][__u]),

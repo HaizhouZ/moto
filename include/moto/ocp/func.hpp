@@ -155,6 +155,7 @@ class func_impl : public expr_impl {
     }
     /// @brief get input argument values
     const auto &in_args() const { return in_args_; }
+    const auto &in_args(size_t i) const { return in_args_[i]; }
     /// @brief order of approximation
     inline approx_order order() { return order_; }
     /**

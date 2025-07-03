@@ -5,7 +5,8 @@
 
 namespace moto {
 namespace ipm {
-void post_rollout();
+void post_rollout(solver::solver_data *cur);
+
 }; // namespace ipm
 } // namespace moto
 

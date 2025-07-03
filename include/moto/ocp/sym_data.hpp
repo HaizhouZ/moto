@@ -31,7 +31,7 @@ struct sym_data {
         if (sym->field_ == __usr_var)
             return usr_value_.at(sym->uid_);
         else
-            return value_.at(sym->field_).segment(prob_->get_expr_start(*sym), sym->dim_);
+            return prob_->extract(value_.at(sym->field_), *sym);
     }
     auto operator[](expr_impl *sym) {
         return get(sym);

@@ -1,7 +1,6 @@
 #ifndef __NS_RICCATI_DATA__
 #define __NS_RICCATI_DATA__
 
-#include <moto/ocp/node_data.hpp>
 #include <moto/solver/solver_data.hpp>
 
 namespace moto {
@@ -15,7 +14,7 @@ struct nullspace_data;
 
 constexpr field_t hard_constr_fields[] = {__dyn, __eq_x, __eq_xu};
 
-struct riccati_data : public node_data, public solver::solver_data {
+struct riccati_data : public solver::solver_data {
     // dim
     size_t ns, nc, ncstr;
     size_t nz;

@@ -1,5 +1,5 @@
-#ifndef __problem_FORMULATION__
-#define __problem_FORMULATION__
+#ifndef __MOTO_PROBLEM_HPP__
+#define __MOTO_PROBLEM_HPP__
 
 #include <array>
 #include <map>
@@ -41,6 +41,9 @@ class ocp {
     }
     scalar_t *get_data_ptr(scalar_t *data, expr_impl &expr, size_t offset) const {
         return data + get_expr_start(expr) * offset;
+    }
+    auto extract(vector_ref data, const expr_impl& expr) const {
+        return data.segment(get_expr_start(expr), expr.dim_);
     }
     /**
      * @brief add expr to problem formulation

@@ -5,7 +5,7 @@
 namespace moto {
 namespace ns_riccati {
 riccati_data::riccati_data(const ocp_ptr_t &prob)
-    : node_data(prob), solver::solver_data(prob, dense_.get()),
+    : solver::solver_data(prob),
       ns(dense_->prob_->dim_[__eq_x]),
       nc(dense_->prob_->dim_[__eq_xu]), ncstr(ns + nc), d_u(nu, nx),
       d_y(nx, nx), d_lbd_f(nx), d_lbd_s_c_pre_solve(nu), d_lbd_s_c(ncstr) {
