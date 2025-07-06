@@ -49,7 +49,7 @@ int main() {
     //     fmt::print("Timing[{}]: {}us\n", i, sqp.timings[i] / n_iter);
     // }
 
-    // auto &data = ns_riccati::get_data(init_node.get());
+    // auto &data = nullsp_kkt_solve::get_data(init_node.get());
     // std::cout << data.rollout_->prim_[__x].transpose() << '\n';
     // sqp.update();
     sqp.graph_.apply_all_unary_forward([&dyn](auto *node) {

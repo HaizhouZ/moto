@@ -1,10 +1,10 @@
 #ifndef __NS_RICCATI_DATA__
 #define __NS_RICCATI_DATA__
 
-#include <moto/solver/solver_data.hpp>
+#include <moto/solver/data_base.hpp>
 
 namespace moto {
-namespace ns_riccati {
+namespace nullsp_kkt_solve {
 enum rank_status : int { unconstrained = 0,
                          constrained,
                          fully_constrained };
@@ -14,7 +14,7 @@ struct nullspace_data;
 
 constexpr field_t hard_constr_fields[] = {__dyn, __eq_x, __eq_xu};
 
-struct riccati_data : public solver::solver_data {
+struct riccati_data : public solver::data_base {
     // dim
     size_t ns, nc, ncstr;
     size_t nz;
@@ -31,12 +31,12 @@ struct riccati_data : public solver::solver_data {
     // multiplier sensitivity
     vector d_lbd_f, d_lbd_s_c_pre_solve, d_lbd_s_c;
 
-    shifted_array<vector, std::size(hard_constr_fields), __dyn> dual_rollout_; // dual rollout
+    shifted_array<vector, std::size(hard_constr_fields), __dyn> dual_step; // dual rollout
 
     riccati_data(const ocp_ptr_t &prob);
     ~riccati_data();
 };
-} // namespace ns_riccati
+} // namespace nullsp_kkt_solve
 } // namespace moto
 
 #endif

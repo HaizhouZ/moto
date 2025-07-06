@@ -3,7 +3,7 @@
 #include <moto/solver/ns_riccati_solve.hpp>
 
 namespace moto {
-namespace ns_riccati {
+namespace nullsp_kkt_solve {
 void kkt_diagnosis(riccati_data *cur) {
     auto &d = *cur;
     if (d.Q_xx.llt().info() != Eigen::Success) {
@@ -68,5 +68,5 @@ void backward_pass(riccati_data *cur, riccati_data *prev) {
         }
     }
 }
-} // namespace ns_riccati
+} // namespace nullsp_kkt_solve
 } // namespace moto

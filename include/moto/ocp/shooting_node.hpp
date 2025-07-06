@@ -12,7 +12,7 @@ template <typename T>
     requires std::is_base_of_v<node_data, T>
 struct shooting_node : public graph_types::node_base<T, shooting_node<T>> {
     using base = graph_types::node_base<T, shooting_node<T>>;
-    using data_type = T;
+    using data_type = base::data_type;
 
     /**
      * @brief Construct a new shooting node object

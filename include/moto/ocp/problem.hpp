@@ -42,7 +42,7 @@ class ocp {
     scalar_t *get_data_ptr(scalar_t *data, expr_impl &expr, size_t offset) const {
         return data + get_expr_start(expr) * offset;
     }
-    auto extract(vector_ref data, const expr_impl& expr) const {
+    vector_ref extract(vector_ref data, const expr_impl& expr) const {
         return data.segment(get_expr_start(expr), expr.dim_);
     }
     /**

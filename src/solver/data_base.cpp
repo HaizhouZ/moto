@@ -1,17 +1,17 @@
-#include <moto/solver/solver_data.hpp>
+#include <moto/solver/data_base.hpp>
 
 namespace moto {
 namespace solver {
-solver_data::solver_data(const ocp_ptr_t &prob)
+data_base::data_base(const ocp_ptr_t &prob)
     : node_data(prob), nx(prob->dim_[__x]), nu(prob->dim_[__u]),
       Q_x(dense_->jac_[__x]), Q_u(dense_->jac_[__u]),
       Q_y(dense_->jac_[__y]), Q_xx(dense_->hessian_[__x][__x]),
       Q_ux(dense_->hessian_[__u][__x]), Q_uu(dense_->hessian_[__u][__u]),
       Q_yx(dense_->hessian_[__y][__x]), Q_yy(dense_->hessian_[__y][__y]) {
-    prim_rollout_[__x].resize(nx);
-    prim_rollout_[__x].setZero();
-    prim_rollout_[__u].resize(nu);
-    prim_rollout_[__y].resize(nx);
+    prim_step[__x].resize(nx);
+    prim_step[__x].setZero();
+    prim_step[__u].resize(nu);
+    prim_step[__y].resize(nx);
 }
 } // namespace solver
 } // namespace moto

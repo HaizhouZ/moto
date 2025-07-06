@@ -4,7 +4,7 @@
 #include <Eigen/Eigenvalues>
 
 namespace moto {
-namespace ns_riccati {
+namespace nullsp_kkt_solve {
 
 void pre_solving_steps_0(riccati_data *cur) {
     // collect constraint residuals and jacobians
@@ -84,5 +84,5 @@ void pre_solving_steps_2(riccati_data *prev, riccati_data *cur) {
 }
 /// @todo set terminal Q_y, Q_yy
 
-} // namespace ns_riccati
+} // namespace nullsp_kkt_solve
 } // namespace moto

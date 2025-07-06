@@ -4,6 +4,8 @@ namespace moto {
 namespace ipm {
 void ipn_constr_impl::value_impl(sp_approx_map &data) {
     constr_impl::value_impl(data);
+    auto &d = static_cast<ipm_data &>(data);
+    d.comp_res_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.mu_;
 }
 void ipn_constr_impl::jacobian_impl(sp_approx_map &data) {
     constr_impl::jacobian_impl(data);
@@ -11,13 +13,13 @@ void ipn_constr_impl::jacobian_impl(sp_approx_map &data) {
     // setup T^{-1} N
     d.diag_scaling.noalias() = d.multiplier_.cwiseQuotient(d.slack_);
     // set scaled residual
-    d.scaled_residual = d.diag_scaling.cwiseProduct(d.v_);
-    d.scaled_residual.array() += d.mu_ / d.slack_.array();
+    d.scaled_res_ = d.diag_scaling.cwiseProduct(d.v_);
+    d.scaled_res_.array() += d.mu_ / d.slack_.array();
     // modification of jacobian
     size_t j_idx = 0;
     for (auto &j : d.jac_) {
         if (j.rows() != 0 && j.cols() != 0) { // skip empty jac
-            d.vjp_[j_idx].noalias() += d.scaled_residual.asDiagonal() * j;
+            d.vjp_[j_idx].noalias() += d.scaled_res_.asDiagonal() * j;
         }
         j_idx++;
     }

@@ -33,13 +33,13 @@ using mapped_matrix = Eigen::Map<matrix>;
 #define def_unique_ptr(name) typedef std::unique_ptr<name> name##_ptr_t
 #define def_unique_ptr_named(name, type_name) typedef std::unique_ptr<type_name> name##_ptr_t
 
-inline auto range(size_t st, size_t ed) {
+inline constexpr auto range(size_t st, size_t ed) {
     return std::views::iota(st, ed);
 }
-inline auto range(size_t n) {
+inline constexpr auto range(size_t n) {
     return std::views::iota(size_t(0), n);
 }
-inline auto range_n(size_t st, size_t n) {
+inline constexpr auto range_n(size_t st, size_t n) {
     return std::views::iota(st, st + n);
 }
 }  // namespace moto

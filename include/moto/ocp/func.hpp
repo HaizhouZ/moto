@@ -32,7 +32,7 @@ struct sp_arg_map {
     sp_arg_map(std::vector<vector_ref> &&primal, shared_data &shared, func_impl &f);
 
     virtual ~sp_arg_map() = default;
-    func_impl &f_;        ///< pointer to the func
+    func_impl &func_;        ///< pointer to the func
     shared_data &shared_; ///< ref to shared data
     /**
      * @brief get the input argument values

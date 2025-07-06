@@ -7,9 +7,9 @@
 namespace moto {
 
 struct ns_sqp {
-    struct node_type : public shooting_node<ns_riccati::riccati_data> {
+    struct node_type : public shooting_node<nullsp_kkt_solve::riccati_data> {
         node_type(const ocp_ptr_t &prob)
-            : shooting_node<ns_riccati::riccati_data>(prob) {}
+            : shooting_node<nullsp_kkt_solve::riccati_data>(prob) {}
         node_type(const node_type &rhs) = default;
         node_type(node_type &&rhs) = default;
     };

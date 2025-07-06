@@ -8,16 +8,18 @@ namespace ipm {
 
 struct ipm_data : public constr_data {
     vector slack_;          ///< slack variables for the constraints
+    vector comp_res_;
     vector diag_scaling;    ///< Nesterov-Todd scaling T^{-1} N
-    vector scaled_residual; ///< residuals after NT scaling (Nr_g - r_s) T^{-1} = T{-1} N r_g + T^{-1} mu
+    vector scaled_res_; ///< residuals after NT scaling (Nr_g - r_s) T^{-1} = T{-1} N r_g + T^{-1} mu
     double mu_;             ///< barrier parameter
     vector d_slack_;        // newton step for slack variables
     vector d_multipler_;    // newton step for multipliers
     ipm_data(approx_storage &raw, constr_data &&d, constr_impl *f)
         : constr_data(raw, std::move(d), f) {
         slack_.resize(f->dim_);
+        comp_res_.resize(f->dim_);
         diag_scaling.resize(f->dim_);
-        scaled_residual.resize(f->dim_);
+        scaled_res_.resize(f->dim_);
     }
 };
 

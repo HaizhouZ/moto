@@ -3,9 +3,9 @@
 #include <moto/solver/nullspace_data.hpp>
 
 namespace moto {
-namespace ns_riccati {
+namespace nullsp_kkt_solve {
 riccati_data::riccati_data(const ocp_ptr_t &prob)
-    : solver::solver_data(prob),
+    : solver::data_base(prob),
       ns(dense_->prob_->dim_[__eq_x]),
       nc(dense_->prob_->dim_[__eq_xu]), ncstr(ns + nc), d_u(nu, nx),
       d_y(nx, nx), d_lbd_f(nx), d_lbd_s_c_pre_solve(nu), d_lbd_s_c(ncstr) {
@@ -25,12 +25,12 @@ riccati_data::riccati_data(const ocp_ptr_t &prob)
     nsp_->s_c_stacked_0_k.resize(ncstr);
     nsp_->s_c_stacked_0_K.resize(ncstr, nx);
     // set rollout data for hard constraints
-    dual_rollout_[__dyn].resize(nx);
-    dual_rollout_[__eq_x].resize(ns);
-    dual_rollout_[__eq_xu].resize(nc);
+    dual_step[__dyn].resize(nx);
+    dual_step[__eq_x].resize(ns);
+    dual_step[__eq_xu].resize(nc);
 }
 riccati_data::~riccati_data() {
     delete nsp_;
 }
-} // namespace ns_riccati
+} // namespace nullsp_kkt_solve
 } // namespace moto
