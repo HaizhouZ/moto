@@ -5,13 +5,14 @@ namespace ipm {
 void ipn_constr_impl::value_impl(sp_approx_map &data) {
     constr_impl::value_impl(data);
     auto &d = static_cast<ipm_data &>(data);
+    d.slack_ = d.slack_.cwiseMax(1e-8); // slack = max(1e-8, v)
     d.comp_res_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.mu_;
 }
 void ipn_constr_impl::jacobian_impl(sp_approx_map &data) {
     constr_impl::jacobian_impl(data);
     auto &d = static_cast<ipm_data &>(data);
     // setup T^{-1} N
-    d.diag_scaling.noalias() = d.multiplier_.cwiseQuotient(d.slack_);
+    d.diag_scaling.array() = d.multiplier_.array() / d.slack_.array();
     // set scaled residual
     d.scaled_res_ = d.diag_scaling.cwiseProduct(d.v_);
     d.scaled_res_.array() += d.mu_ / d.slack_.array();

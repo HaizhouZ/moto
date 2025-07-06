@@ -9,7 +9,7 @@ void post_rollout(solver::data_base *cur) {
         auto &d = static_cast<ipm_data &>(*p);
         size_t arg_idx = 0;
         // update slack newton step
-        d.d_slack_ = d.v_ + d.slack_; // +r_g
+        d.d_slack_ = -(d.v_ + d.slack_); // +r_g
         // compute linear step
         for (const auto &arg : d.func_.in_args()) {
             if (arg->field_ < field::num_prim) {
@@ -18,7 +18,8 @@ void post_rollout(solver::data_base *cur) {
             arg_idx++;
         }
         // update dual newton step
-        d.d_multipler_.array() = - d.comp_res_.array() - d.diag_scaling.array() * d.d_slack_.array();
+        d.d_multipler_.array() = -d.multiplier_.array() + d.mu_ / d.slack_.array() - d.diag_scaling.array() * d.d_slack_.array();
+        /// @todo iterative refinement for better accuracy?
     }
 }
 
