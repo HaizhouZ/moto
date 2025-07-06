@@ -6,7 +6,41 @@
 #include <moto/ocp/sym_data.hpp>
 
 namespace moto {
-class shared_data; // forward declaration
+struct sp_arg_map;
+def_unique_ptr(sp_arg_map);
+class func_impl;
+/**
+ * @brief shared data for all funcs in one problem formulation
+ * @note it will store (class derived from) sp_arg_map
+ */
+class shared_data {
+    std::unordered_map<size_t, sp_arg_map_ptr_t> data_;
+
+  public:
+    shared_data(const ocp_ptr_t &prob, sym_data &primal);
+
+    ocp_ptr_t prob_;
+    /// @brief add data by uid of the func (owner of the data)
+    void add(size_t uid, sp_arg_map_ptr_t &&data) { data_.try_emplace(uid, std::move(data)); }
+    /// @brief add data by func shared pointer (owner of the data)
+    template <typename derived>
+        requires std::is_base_of_v<func_impl, derived>
+    void add(const std::shared_ptr<derived> &expr, sp_arg_map_ptr_t &&data) {
+        assert(expr->field_ == __pre_comp || expr->field_ == __usr_func);
+        add(expr->uid, std::move(data));
+    }
+    /// @brief get the data by uid
+    auto &get(size_t uid) { return *data_.at(uid); }
+    /// @brief get the data by func shared pointer (owner of the data)
+    template <typename derived>
+        requires std::is_base_of_v<func_impl, derived>
+    auto &operator[](const std::shared_ptr<derived> &expr) { return get(expr->uid_); }
+    template <typename derived>
+        requires std::is_base_of_v<func_impl, derived>
+    auto &operator[](const derived &expr) { return get(expr.uid_); }
+};
+def_unique_ptr(shared_data);
+/////////////////////////////////////////////////////////////////////
 
 enum class approx_order { zero = 0,
                           first,
@@ -32,7 +66,7 @@ struct sp_arg_map {
     sp_arg_map(std::vector<vector_ref> &&primal, shared_data &shared, func_impl &f);
 
     virtual ~sp_arg_map() = default;
-    func_impl &func_;        ///< pointer to the func
+    func_impl &func_;     ///< pointer to the func
     shared_data &shared_; ///< ref to shared data
     /**
      * @brief get the input argument values
@@ -42,17 +76,18 @@ struct sp_arg_map {
     auto operator[](const sym &in) {
         return in_args_[sym_uid_idx_.at(in->uid_)];
     }
-    
+
     auto operator[](size_t i) const { return in_args_.at(i); }
 
     const auto &in_args() const { return in_args_; }
+
+    const auto &problem() const { return shared_.prob_; }
 
   protected:
     /// use ref to exploit sparsity (avoid copy)
     std::vector<vector_ref> in_args_;
     std::unordered_map<size_t, size_t> &sym_uid_idx_;
 };
-def_unique_ptr(sp_arg_map);
 /////////////////////////////////////////////////////////////////////
 /**
  * @brief sparse approximation data
@@ -177,8 +212,8 @@ class func_impl : public expr_impl {
      * @return sp_approx_map_ptr_t
      */
     virtual sp_approx_map_ptr_t make_approx_map(sym_data &primal,
-                                                         approx_storage &raw,
-                                                         shared_data &shared);
+                                                approx_storage &raw,
+                                                shared_data &shared);
     /**
      * @brief evaluate the func
      * @param data sp_approx_map to be evaluated
@@ -248,38 +283,6 @@ class func_impl : public expr_impl {
     /// @brief callback to make data（for non-approx) @note will not be called in @ref make_approx_map
     std::function<sp_arg_map_ptr_t(sym_data &, shared_data &)> make_data;
 };
-/////////////////////////////////////////////////////////////////////
-/**
- * @brief shared data for all funcs in one problem formulation
- * @note it will store (class derived from) sp_arg_map
- */
-class shared_data {
-    std::unordered_map<size_t, sp_arg_map_ptr_t> data_;
-
-  public:
-    shared_data(const ocp_ptr_t &prob, sym_data &primal);
-
-    ocp_ptr_t prob_;
-    /// @brief add data by uid of the func (owner of the data)
-    void add(size_t uid, sp_arg_map_ptr_t &&data) { data_.try_emplace(uid, std::move(data)); }
-    /// @brief add data by func shared pointer (owner of the data)
-    template <typename derived>
-        requires std::is_base_of_v<func_impl, derived>
-    void add(const std::shared_ptr<derived> &expr, sp_arg_map_ptr_t &&data) {
-        assert(expr->field_ == __pre_comp || expr->field_ == __usr_func);
-        add(expr->uid, std::move(data));
-    }
-    /// @brief get the data by uid
-    auto &get(size_t uid) { return *data_.at(uid); }
-    /// @brief get the data by func shared pointer (owner of the data)
-    template <typename derived>
-        requires std::is_base_of_v<func_impl, derived>
-    auto &operator[](const std::shared_ptr<derived> &expr) { return get(expr->uid_); }
-    template <typename derived>
-        requires std::is_base_of_v<func_impl, derived>
-    auto &operator[](const derived &expr) { return get(expr.uid_); }
-};
-def_unique_ptr(shared_data);
 } // namespace moto
 
 #endif /*__approx_*/

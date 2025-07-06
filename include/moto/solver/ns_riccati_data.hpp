@@ -12,8 +12,6 @@ enum rank_status : int { unconstrained = 0,
 // fwd declaration
 struct nullspace_data;
 
-constexpr field_t hard_constr_fields[] = {__dyn, __eq_x, __eq_xu};
-
 struct riccati_data : public solver::data_base {
     // dim
     size_t ns, nc, ncstr;
@@ -31,7 +29,7 @@ struct riccati_data : public solver::data_base {
     // multiplier sensitivity
     vector d_lbd_f, d_lbd_s_c_pre_solve, d_lbd_s_c;
 
-    shifted_array<vector, std::size(hard_constr_fields), __dyn> dual_step; // dual rollout
+    shifted_array<vector, std::size(solver::hard_constr_fields), __dyn> dual_step; // dual rollout
 
     riccati_data(const ocp_ptr_t &prob);
     ~riccati_data();

@@ -2,10 +2,33 @@
 
 namespace moto {
 namespace ipm {
+void ipn_constr_impl::initialize(soft_constr_data &data) {
+    constr_impl::value_impl(data);
+    auto &d = static_cast<ipm_data &>(data);
+    d.slack_ = (-data.v_).cwiseMax(1e-8); // clip
+    d.multiplier_.setConstant(1.0);
+}
+void ipn_constr_impl::post_rollout(soft_constr_data &data) {
+    auto &d = static_cast<ipm_data &>(data);
+    size_t arg_idx = 0;
+    // update slack newton step
+    d.d_slack_ = -(d.v_ + d.slack_); // +r_g
+    // ensure slack + step >= 1e-8
+    d.d_slack_ = d.d_slack_.array().max(1e-8 - d.slack_.array());
+    // compute linear step
+    for (const auto &arg : d.func_.in_args()) {
+        if (arg->field_ < field::num_prim) {
+            d.d_slack_.noalias() -= d.jac_[arg_idx] * d.prim_step_[arg_idx];
+        }
+        arg_idx++;
+    }
+    // update dual newton step
+    d.d_multipler_.array() = -d.multiplier_.array() + d.mu_ / d.slack_.array() - d.diag_scaling.array() * d.d_slack_.array();
+    /// @todo iterative refinement for better accuracy?
+}
 void ipn_constr_impl::value_impl(sp_approx_map &data) {
     constr_impl::value_impl(data);
     auto &d = static_cast<ipm_data &>(data);
-    d.slack_ = d.slack_.cwiseMax(1e-8); // slack = max(1e-8, v)
     d.comp_res_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.mu_;
 }
 void ipn_constr_impl::jacobian_impl(sp_approx_map &data) {

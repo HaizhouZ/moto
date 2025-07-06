@@ -1,4 +1,5 @@
 #include <moto/solver/data_base.hpp>
+#include <moto/ocp/soft_constr.hpp>
 
 namespace moto {
 namespace solver {
@@ -12,6 +13,18 @@ data_base::data_base(const ocp_ptr_t &prob)
     prim_step[__x].setZero();
     prim_step[__u].resize(nu);
     prim_step[__y].resize(nx);
+    // initialize soft constraint data
+    for (auto f : {__ineq_x, __ineq_xu, __eq_x_soft, __eq_xu_soft}) {
+        for (auto &d : sparse_[f]) {
+            auto &sd = static_cast<soft_constr_data &>(*d);
+            sd.prim_step_.clear();
+            for (const auto &arg : sd.func_.in_args()) {
+                if (arg->field_ < field::num_prim) {
+                    sd.prim_step_.push_back(sd.problem()->extract(prim_step[arg->field_], *arg));
+                }
+            }
+        }
+    }
 }
 } // namespace solver
 } // namespace moto
