@@ -3,6 +3,7 @@
 
 #include <moto/ocp/func.hpp>
 #include <moto/utils/tri_state.hpp>
+#include <future>
 
 namespace moto {
 struct constr_impl; // fwd
@@ -31,6 +32,7 @@ class constr_impl : public func_impl {
         utils::tri_state_bool is_eq;
         utils::tri_state_bool is_soft;
     } field_hint_;
+    std::future<void> gen_worker;
 
   public:
     /// @brief constructor used for type deduction
@@ -43,7 +45,7 @@ class constr_impl : public func_impl {
                 size_t dim = dim_tbd, field_t field = __undefined)
         : func_impl(name, order, dim, field) {
     }
-
+    void set_from_casadi(std::initializer_list<sym> in_args, const cs::SX &out);
     /**
      * @brief wrapped data maker for constr
      *
@@ -66,6 +68,12 @@ struct constr : public std::shared_ptr<constr_impl> {
     using impl_ptr_t = std::shared_ptr<constr_impl>;
     constr(const std::string &name, approx_order order = approx_order::first, size_t dim = dim_tbd, field_t field = __undefined)
         : impl_ptr_t(new constr_impl(name, order, dim, field)) {}
+    constr(const std::string &name, std::initializer_list<sym> in_args, const cs::SX &out,
+           approx_order order = approx_order::first, field_t field = __undefined)
+        : impl_ptr_t(new constr_impl(name, order, out.size1(), field)) {
+        assert(out.size2() == 1 && "constr output must be a column vector");
+        (*this)->set_from_casadi(in_args, out);
+    }
     constr() = default;
     using impl_ptr_t::operator=;
     template <typename derived_impl>

@@ -12,6 +12,7 @@ add_project_dependency(magic_enum REQUIRED)
 add_project_dependency(fmt REQUIRED)
 add_project_dependency(OpenMP REQUIRED)
 add_project_dependency(CASADI REQUIRED)
+add_project_dependency(pybind11 REQUIRED)
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
 
@@ -44,6 +45,7 @@ list(APPEND MOTO_DEP_LIBS
     magic_enum::magic_enum
     fmt::fmt
     OpenMP::OpenMP_CXX
+    pybind11::embed
 )
 
 include(cmake/subObjectHelpers.cmake)

@@ -115,6 +115,8 @@ def generate_and_compile(
     jac_compile_flag: str = RELEASE_FLAG + ARCH_NATIVE_FLAG,
     hess_compile_flag: str = RELEASE_FLAG + ARCH_NATIVE_FLAG,
     prefix: str = "",
+    ret_process=False,
+    print_level=0,
 ):
     """
     generate and compile the evaluation and derivatives of a function
@@ -122,7 +124,7 @@ def generate_and_compile(
     call wait_until_generated() to ensure the compilation is done
     """
     in_arg_check(sx_inputs)
-    func_name = prefix + '_' + func_name if prefix else func_name
+    func_name = prefix + "_" + func_name if prefix else func_name
     worker = []
     if gen_eval:
         worker = [
@@ -392,8 +394,8 @@ def generate_and_compile(
             f.write("\n\n#ifdef __cplusplus\n")
             f.write("}\n")
             f.write("#endif\n\n")
-
-        print(f"Generated: {final_cpp_path}")
+        if not print_level > 0:
+            print(f"Generated: {final_cpp_path}")
         # generate json file for the function
         with open(final_cpp_path, "rb") as f_md5:
             md5_hash = hashlib.md5(f_md5.read()).hexdigest()
@@ -418,28 +420,43 @@ def generate_and_compile(
                 print(f"Compiled:  {so_file_path}")
         if not keep_raw:
             os.remove(cpp_path + "raw.c")
-            print(f"Removed:   {cpp_path + 'raw.c'}")
+            if not print_level > 0:
+                print(f"Removed:   {cpp_path + 'raw.c'}")
         if not keep_c_src:
             os.remove(final_cpp_path)
-            print(f"Removed:   {final_cpp_path}")
+            if not print_level > 0:
+                print(f"Removed:   {final_cpp_path}")
         make_func_json(func_name, sx_inputs, sx_outputs, output_dir, md5_hash, compile_flag)
 
-    for name, inputs, outputs, kwargs_ in worker:
-        process_.append(
-            Process(
-                target=impl,
-                args=(name, inputs, outputs),
-                kwargs=kwargs_,
+    if ret_process:
+        _process = []
+        for name, inputs, outputs, kwargs_ in worker:
+            _process.append(
+                Process(
+                    target=impl,
+                    args=(name, inputs, outputs),
+                    kwargs=kwargs_,
+                )
             )
-        )
-        process_[-1].start()
+            _process[-1].start()
+        return _process
+    else:
+        for name, inputs, outputs, kwargs_ in worker:
+            process_.append(
+                Process(
+                    target=impl,
+                    args=(name, inputs, outputs),
+                    kwargs=kwargs_,
+                )
+            )
+            process_[-1].start()
 
 
-def wait_until_generated():
+def wait_until_generated(process_pool: list[Process] = process_):
     """
     must call this to ensure all tests are done
     """
-    for p in process_:
+    for p in process_pool:
         p.join()
-    process_.clear()
+    process_pool.clear()
     print("All code generation completed.")
