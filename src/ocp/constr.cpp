@@ -1,5 +1,5 @@
 #include <moto/ocp/constr.hpp>
-#include <moto/utils/codegen_bind.hpp>
+
 namespace moto {
 constr_data::constr_data(approx_storage &raw,
                          sp_approx_map &&d,
@@ -16,20 +16,8 @@ constr_data::constr_data(approx_storage &raw,
         in_args_.push_back(multiplier_);
     }
 }
-void constr_impl::set_from_casadi(std::initializer_list<sym> in_args, const cs::SX &out) {
-    // call to external script for codegen
-    add_arguments(in_args);
-    gen_worker = std::async(std::launch::async,
-                            &utils::generate_n_compile,
-                            name_, std::vector(in_args), out, true,
-                            order_ >= approx_order::first,
-                            order_ >= approx_order::second);
-}
 void constr_impl::finalize_impl() {
-    if (gen_worker.valid()) {
-        gen_worker.wait(); // wait until codegen is done
-        load_external();
-    }
+    func_impl::finalize_impl();
     if (field_ == __undefined) {
         bool has_[3] = {false, false, false}; // x, u, y
         for (const auto &arg : in_args_) {
@@ -38,6 +26,9 @@ void constr_impl::finalize_impl() {
         }
         // make this long enough so that people will not easily remove the const :D
         auto &field = const_cast<field_t &>(field_);
+        if (field_hint_.is_eq == utils::Unset) {
+            throw std::runtime_error(fmt::format("constr {} eq/ineq hint unset, please set it using as_eq() or as_ineq()", name_));
+        }
         if (field_hint_.is_eq) {
             if (has_[__u] && !has_[__y])
                 field = field_hint_.is_soft ? __eq_xu_soft : __eq_xu;

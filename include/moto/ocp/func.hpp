@@ -1,6 +1,7 @@
 #ifndef __approx__
 #define __approx__
 
+#include <future>
 #include <moto/ocp/approx_storage.hpp>
 #include <moto/ocp/problem.hpp>
 #include <moto/ocp/sym_data.hpp>
@@ -160,11 +161,18 @@ class func_impl : public expr_impl {
   protected:
     approx_order order_;
     expr_list in_args_;
+    std::future<void> gen_worker;
+
     std::unordered_map<size_t, size_t> sym_uid_idx_;
     friend struct sp_arg_map;
 
     /// @todo to be implemented
     virtual void setup_sparsity([[maybe_unused]] sp_approx_map &data) {}
+    /**
+     * @brief finalize the function
+     * @details it will wait until the codegen is done if set_from_casadi is used
+     */
+    virtual void finalize_impl();
 
   public:
     virtual void value_impl([[maybe_unused]] sp_approx_map &data) { value(data); };
@@ -188,6 +196,14 @@ class func_impl : public expr_impl {
             add_argument(in);
         }
     }
+    /**
+     * @brief generate the function from casadi expression
+     *
+     * @param in_args input arguments, must be a list of sym
+     * @param out output casadi SX expression
+     */
+    void set_from_casadi(std::initializer_list<sym> in_args, const cs::SX &out);
+
     /// @brief get input argument values
     const auto &in_args() const { return in_args_; }
     const auto &in_args(size_t i) const { return in_args_[i]; }

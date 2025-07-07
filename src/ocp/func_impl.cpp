@@ -2,6 +2,7 @@
 #include <moto/ocp/approx_storage.hpp>
 #include <moto/ocp/func.hpp>
 #include <moto/ocp/sym_data.hpp>
+#include <moto/utils/codegen_bind.hpp>
 
 namespace moto {
 sp_arg_map::sp_arg_map(sym_data &primal, shared_data &shared, func_impl &f)
@@ -123,5 +124,20 @@ void func_impl::load_external(const std::string &path) {
     hessian = [hess = funcs[2]](sp_approx_map &d) {
         hess.invoke(d.in_args(), d.hess_);
     };
+}
+void func_impl::set_from_casadi(std::initializer_list<sym> in_args, const cs::SX &out) {
+    // call to external script for codegen
+    add_arguments(in_args);
+    gen_worker = std::async(std::launch::async,
+                            &utils::generate_n_compile,
+                            name_, std::vector(in_args), out, true,
+                            order_ >= approx_order::first,
+                            order_ >= approx_order::second);
+}
+void func_impl::finalize_impl() {
+    if (gen_worker.valid()) {
+        gen_worker.wait(); // wait until codegen is done
+        load_external();
+    }
 }
 } // namespace moto
