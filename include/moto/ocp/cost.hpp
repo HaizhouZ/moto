@@ -28,10 +28,31 @@ inline auto make_terminal_cost(cost_type *cst) {
  *
  */
 struct cost : public cost_impl_ptr_t {
+    /**
+     * @brief Construct a new cost object
+     *
+     * @param name name of the cost
+     */
     cost(const std::string &name)
         : cost_impl_ptr_t(new cost_impl(name)) {
     }
-    cost(cost_impl *impl) : cost_impl_ptr_t(impl) {}
-    cost(const cost &rhs) = default;
+    /**
+     * @brief Construct a new cost object from casadi expression
+     *
+     * @param name name of the cost
+     * @param in_args input arguments
+     * @param out output casadi SX expression
+     */
+    cost(const std::string &name, std::initializer_list<sym> in_args, const cs::SX &out)
+        : cost_impl_ptr_t(new cost_impl(name)) {
+        assert(out.is_scalar() && "cost output must be a scalar");
+        (*this)->set_from_casadi(in_args, out);
+    }
+    cost() = default;
+    using cost_impl_ptr_t::operator=;
+    template <typename derived_impl>
+        requires(std::derived_from<derived_impl, cost_impl>)
+    /// @brief will get the shared ownership of impl_rval
+    cost(derived_impl *impl_rval) : cost_impl_ptr_t(impl_rval) {}
 };
 }; // namespace moto

@@ -60,20 +60,48 @@ def_ptr(constr_impl);
  */
 struct constr : public std::shared_ptr<constr_impl> {
     using impl_ptr_t = std::shared_ptr<constr_impl>;
+    /**
+     * @brief Construct a new constr object
+     *
+     * @param name name of the constraint
+     * @param order approximation order
+     * @param dim dimension of the constraint (0 for to be determined)
+     * @param field field type, default to __undefined
+     */
     constr(const std::string &name, approx_order order = approx_order::first, size_t dim = dim_tbd, field_t field = __undefined)
         : impl_ptr_t(new constr_impl(name, order, dim, field)) {}
+    /**
+     * @brief Construct a new constr object from casadi SX expression
+     *
+     * @param name  name of the constraint
+     * @param in_args  input arguments
+     * @param out output casadi SX expression
+     * @param order approximation order
+     * @param field field type, default to __undefined
+     */
     constr(const std::string &name, std::initializer_list<sym> in_args, const cs::SX &out,
            approx_order order = approx_order::first, field_t field = __undefined)
         : impl_ptr_t(new constr_impl(name, order, out.size1(), field)) {
         assert(out.size2() == 1 && "constr output must be a column vector");
         (*this)->set_from_casadi(in_args, out);
     }
+    /**
+     * @brief set the constraint as equality constraint
+     *
+     * @param soft if true, set as soft equality constraint
+     * @return constr& *this
+     */
     constr &as_eq(bool soft = false) {
         if (soft)
             (*this)->field_hint_.is_soft = true;
         (*this)->field_hint_.is_eq = true;
         return *this;
     }
+    /**
+     * @brief set the constraint as inequality constraint
+     *
+     * @return constr& *this
+     */
     constr &as_ineq() {
         (*this)->field_hint_.is_eq = false;
         return *this;
