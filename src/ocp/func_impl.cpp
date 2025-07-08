@@ -90,7 +90,7 @@ sp_approx_map::sp_approx_map(sym_data &primal,
                              func_impl &f)
     : v_(v), jac_(jac), sp_arg_map(primal, shared, f) {
 }
-shared_data::shared_data(const ocp_ptr_t &prob, sym_data &primal) {
+shared_data::shared_data(const ocp_ptr_t &prob, sym_data &primal) : prob_(prob) {
     data_.reserve(prob->expr_[__pre_comp].size() + prob->expr_[__usr_func].size());
     for (const auto &expr : prob->expr_[__pre_comp]) {
         add(expr->uid_, static_cast<func_impl *>(expr.get())->make_data(primal, *this));

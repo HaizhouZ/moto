@@ -1,7 +1,7 @@
-#include <moto/ocp/approx_storage.hpp>
-#include <moto/solver/nullspace_data.hpp>
-#include <moto/solver/ns_riccati_solve.hpp>
 #include <Eigen/Eigenvalues>
+#include <moto/ocp/approx_storage.hpp>
+#include <moto/solver/ns_riccati_solve.hpp>
+#include <moto/solver/nullspace_data.hpp>
 
 namespace moto {
 namespace nullsp_kkt_solve {
@@ -64,6 +64,9 @@ void pre_solving_steps_1(riccati_data *cur) {
         } else {
             nsp.Z = nsp.lu_eq_.kernel();
             d.rank_status_ = rank_status::constrained;
+            nsp.U_z.conservativeResize(nsp.Z.cols(), nsp.Z.cols());
+            nsp.u_z_k.conservativeResize(nsp.Z.cols());
+            nsp.u_z_K.conservativeResize(nsp.Z.cols(), Eigen::NoChange);
         }
         nsp.u_y_k.noalias() = nsp.lu_eq_.solve(nsp.s_c_stacked_0_k);
         nsp.u_y_K.noalias() = nsp.lu_eq_.solve(nsp.s_c_stacked_0_K);

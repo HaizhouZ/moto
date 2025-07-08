@@ -9,8 +9,13 @@ constr_data::constr_data(approx_storage &raw,
                                                f->dim_)) {
     const auto &in_args = f->in_args();
     for (size_t i = 0; i < in_args_.size(); i++) {
-        vjp_.push_back(raw.jac_[in_args[i]->field_].segment(
-            raw.prob_->get_expr_start(in_args[i]), in_args[i]->dim_));
+        if (in_args[i]->field_ < field::num_prim)
+            vjp_.push_back(raw.jac_[in_args[i]->field_].segment(
+                raw.prob_->get_expr_start(in_args[i]), in_args[i]->dim_));
+        else {
+            static row_vector empty;
+            vjp_.push_back(empty); // no jacobian for this field
+        }
     }
     if (f->order() >= approx_order::second) {
         in_args_.push_back(multiplier_);
@@ -87,8 +92,9 @@ void constr_impl::jacobian_impl(sp_approx_map &data) {
     // update multiplier - jacobian product
     auto &d = static_cast<constr_data &>(data);
     for (size_t i = 0; i < d.in_args().size(); i++) {
-        // fmt::print("{}\t{}:i\t{:.3}\n", i, name_, d.in_args_[i].transpose());
-        d.vjp_[i].noalias() += d.multiplier_.transpose() * d.jac_[i];
+        if (d.vjp_[i].cols()) // skip if no jacobian for this input
+            // fmt::print("{}\t{}:i\t{:.3}\n", i, name_, d.in_args_[i].transpose());
+            d.vjp_[i].noalias() += d.multiplier_.transpose() * d.jac_[i];
         // fmt::print("{}\t{}:jac\n{:.3}\n", i, name_, d.jac_[i]);
     }
 }

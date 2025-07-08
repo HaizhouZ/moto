@@ -20,7 +20,7 @@ data_base::data_base(const ocp_ptr_t &prob)
             sd.prim_step_.clear();
             for (const auto &arg : sd.func_.in_args()) {
                 if (arg->field_ < field::num_prim) {
-                    sd.prim_step_.push_back(sd.problem()->extract(prim_step[arg->field_], *arg));
+                    sd.prim_step_.push_back(prob->extract(prim_step[arg->field_], *arg));
                 }
             }
         }
