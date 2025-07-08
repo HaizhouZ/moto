@@ -17,7 +17,6 @@ constr_data::constr_data(approx_storage &raw,
     }
 }
 void constr_impl::finalize_impl() {
-    func_impl::finalize_impl();
     if (field_ == __undefined) {
         bool has_[3] = {false, false, false}; // x, u, y
         for (const auto &arg : in_args_) {
@@ -34,7 +33,7 @@ void constr_impl::finalize_impl() {
                 field = field_hint_.is_soft ? __eq_xu_soft : __eq_xu;
             else if (has_[__x] && has_[__y] && !field_hint_.is_soft) // we dont assume x can be converted to y
                 field = __dyn;
-            else if (!has_[__u] && !has_[__x] && has_[__y])
+            else if (!has_[__u] && has_[__x] ^ has_[__y])
                 field = field_hint_.is_soft ? __eq_x_soft : __eq_x;
             else
                 throw std::runtime_error(fmt::format("unsupported eq constr \"{}\" type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set field or hints?",
@@ -42,7 +41,7 @@ void constr_impl::finalize_impl() {
         } else {
             if (has_[__u] && !has_[__y] && !field_hint_.is_soft)
                 field = __ineq_xu;
-            else if (!has_[__u] && !has_[__x] && has_[__y] && !field_hint_.is_soft)
+            else if (!has_[__u] && has_[__x] ^ has_[__y] && !field_hint_.is_soft)
                 field = __ineq_x;
             else
                 throw std::runtime_error(fmt::format("unsupported ineq constr \"{}\" type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set field or hints?",
@@ -64,6 +63,7 @@ void constr_impl::finalize_impl() {
             throw;
         }
     }
+    func_impl::finalize_impl();
     assert(field_ >= __dyn && field_ - __dyn < field::num_constr);
 }
 
