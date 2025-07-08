@@ -1,13 +1,16 @@
-#include <iostream>
 #include <dynamics.hpp>
+#include <iostream>
 #include <moto/ocp/problem.hpp>
 
 int main() {
     biped_srbd::srbd_dynamics dyn;
-    auto euler_constr = dyn.euler();
     std::cout << "Hello, Biped SRBD!" << std::endl;
     auto prob = moto::ocp::make();
-    prob->add(euler_constr);
-    fmt::print("Problem has {} constraints.\n", prob->expr_[moto::__dyn].size());
+    prob->add(dyn.euler());
+    prob->add(dyn.friction_cone());
+    prob->add(dyn.running_cost());
+    prob->add(dyn.terminal_cost());
+    prob->add(dyn.stance_foot_constr());
+    prob->add(dyn.foot_loc_constr());
     return 0;
 }

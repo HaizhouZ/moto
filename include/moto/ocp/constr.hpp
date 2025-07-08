@@ -30,7 +30,7 @@ class constr_impl : public func_impl {
     void finalize_impl() override;
     struct type_hint {
         utils::tri_state_bool is_eq;
-        bool is_soft;
+        bool is_soft = false;
     } field_hint_;
     friend class constr;
 

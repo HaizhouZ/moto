@@ -34,7 +34,7 @@ std::future<void> generate_n_compile(const std::string &func_name, std::vector<s
             new_obj.attr("name") = a->name_;
             new_obj.attr("field") = g.py_moto->attr("field")((int)a->field_);
         }
-        cs::Function tmp_func("tmp_func", sx_in_args, {out});
+        cs::Function tmp_func(func_name + "_tmp", sx_in_args, {out});
         auto py_func = g.py_cs->attr("Function").attr("deserialize")(tmp_func.serialize()); // cs function in python
         py::list in_args_pylist = py::cast(py_sx_in_args);
         auto py_cs_out = py_func.attr("call")(in_args_pylist); // sx output in python

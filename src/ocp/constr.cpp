@@ -32,21 +32,21 @@ void constr_impl::finalize_impl() {
         if (field_hint_.is_eq) {
             if (has_[__u] && !has_[__y])
                 field = field_hint_.is_soft ? __eq_xu_soft : __eq_xu;
-            else if (has_[__x] && has_[__y] && !field_hint_.is_soft)
+            else if (has_[__x] && has_[__y] && !field_hint_.is_soft) // we dont assume x can be converted to y
                 field = __dyn;
             else if (!has_[__u] && !has_[__x] && has_[__y])
                 field = field_hint_.is_soft ? __eq_x_soft : __eq_x;
             else
-                throw std::runtime_error(fmt::format("unsupported eq constr type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set field or hints?",
-                                                     has_[__x], has_[__u], has_[__y], field_hint_.is_soft));
+                throw std::runtime_error(fmt::format("unsupported eq constr \"{}\" type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set field or hints?",
+                                                     name_, has_[__x], has_[__u], has_[__y], field_hint_.is_soft));
         } else {
             if (has_[__u] && !has_[__y] && !field_hint_.is_soft)
                 field = __ineq_xu;
             else if (!has_[__u] && !has_[__x] && has_[__y] && !field_hint_.is_soft)
                 field = __ineq_x;
             else
-                throw std::runtime_error(fmt::format("unsupported ineq constr type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set field or hints?",
-                                                     has_[__x], has_[__u], has_[__y], field_hint_.is_soft));
+                throw std::runtime_error(fmt::format("unsupported ineq constr \"{}\" type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set field or hints?",
+                                                     name_, has_[__x], has_[__u], has_[__y], field_hint_.is_soft));
         }
     }
     if (field_ == __eq_x || field_ == __ineq_x || field_ == __eq_x_soft) {
