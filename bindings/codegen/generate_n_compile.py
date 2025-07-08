@@ -138,7 +138,12 @@ def generate_and_compile(
                 ),
             )
         ]
+            
     excluded = [e.name for e in exclude]
+    # exclude inputs in field p
+    for s in sx_inputs:
+        if s.field == moto.field_p and s.name not in excluded:
+            excluded.append(s.name)
     external_jac = {in_arg.name: jac for (in_arg, jac) in ext_jac}
     external_hess = {(arg0.name, arg1.name): hess for (arg0, arg1, hess) in ext_hess}
     if ext_jac:

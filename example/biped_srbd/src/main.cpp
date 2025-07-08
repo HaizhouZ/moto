@@ -51,12 +51,10 @@ int main() {
                         if (steps < 3)
                             phase = 1 - phase;
                     }
-                    std::cout << "at step " << steps << std::endl;
                 }
             } else
                 phase = -1;
         }
-        std::cout << "phase " << phase << " at step " << n << std::endl;
         if (phase == -1) {
             data->value(dyn.active_l) << 1;
             data->value(dyn.active_r) << 1;
@@ -83,6 +81,8 @@ int main() {
     graph.apply_all_unary_forward([&](node_data *data) {
         std::cout << data->value(dyn.active_r) << ',';
     });
+
+    solver.update(10);
 
     return 0;
 }

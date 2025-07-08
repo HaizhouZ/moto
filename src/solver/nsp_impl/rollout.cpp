@@ -34,8 +34,8 @@ void post_rollout_steps(riccati_data *cur) {
     d.d_lbd_f.noalias() = -d.Q_y.transpose() - d.Q_yx * d.prim_step[__x] - d.Q_yy * d.prim_step[__y];
     if (d.ns > 0) {
         // append last term in dynamics multipler computation
-        d.d_lbd_f.noalias() -= nsp.s_y.transpose() * d.d_lbd_s_c;
         d.dual_step[__eq_x] = d.d_lbd_s_c.head(d.ns);
+        d.d_lbd_f.noalias() -= nsp.s_y.transpose() * d.dual_step[__eq_x];
         d.dense_->dual_[__eq_x].noalias() += d.dual_step[__eq_x];
     }
     if (d.nc > 0) {

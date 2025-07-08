@@ -43,7 +43,7 @@ void ipm_constr_impl::jacobian_impl(sp_approx_map &data) {
     size_t j_idx = 0;
     for (auto &j : d.jac_) {
         if (j.rows() != 0 && j.cols() != 0) { // skip empty jac
-            d.vjp_[j_idx].noalias() += d.scaled_res_.asDiagonal() * j;
+            d.vjp_[j_idx].noalias() += d.scaled_res_.transpose() * j;
         }
         j_idx++;
     }
