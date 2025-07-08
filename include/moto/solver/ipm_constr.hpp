@@ -1,10 +1,10 @@
 #ifndef MOTO_SOLVER_IPM_CONSTR_HPP
 #define MOTO_SOLVER_IPM_CONSTR_HPP
 
-#include <moto/ocp/soft_constr.hpp>
+#include <moto/ocp/constr.hpp>
 
 namespace moto {
-namespace ipm {
+namespace ipm_impl {
 
 struct ipm_data : public soft_constr_data {
     vector slack_; ///< slack variables for the constraints
@@ -23,7 +23,7 @@ struct ipm_data : public soft_constr_data {
     }
 };
 
-class ipn_constr_impl : public soft_constr_impl {
+class ipm_constr_impl : public soft_constr_impl {
   private:
     void value_impl(sp_approx_map &data) override final;
     void jacobian_impl(sp_approx_map &data) override final;
@@ -45,7 +45,8 @@ class ipn_constr_impl : public soft_constr_impl {
     }
 };
 
-} // namespace ipm
+} // namespace ipm_impl
+using ipm = ipm_impl::ipm_constr_impl;
 } // namespace moto
 
 #endif // MOTO_SOLVER_IPM_HPP

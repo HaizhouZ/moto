@@ -1,4 +1,4 @@
-#include <moto/ocp/soft_constr.hpp>
+#include <moto/ocp/constr.hpp>
 #include <moto/solver/ineq_soft_solve.hpp>
 
 namespace moto {

@@ -40,6 +40,10 @@ class constr_impl : public func_impl {
                 size_t dim = dim_tbd, field_t field = __undefined)
         : func_impl(name, order, dim, field) {
     }
+
+    constr_impl(constr_impl &&impl_rval)
+        : func_impl(std::move(impl_rval)) {
+    }
     /**
      * @brief wrapped data maker for constr
      *
@@ -54,6 +58,30 @@ class constr_impl : public func_impl {
     }
 };
 def_ptr(constr_impl);
+
+/**
+ * @brief soft constraint data, contains additional primal step data for splitting post-rollout operation
+ *
+ */
+struct soft_constr_data : public constr_data {
+    std::vector<vector_ref> prim_step_; // to be set
+    soft_constr_data(constr_data &&d)
+        : constr_data(std::move(d)) {
+    }
+};
+/**
+ * @brief soft constraint interface class
+ * @note must implement make_approx_map
+ */
+class soft_constr_impl : public constr_impl {
+  public:
+    using constr_impl::constr_impl; // inherit constr_impl constructor
+    virtual void initialize(soft_constr_data &data) {}
+    virtual void post_rollout(soft_constr_data &data) {};
+    soft_constr_impl(constr_impl &&rhs) : constr_impl(std::move(rhs)) {}
+    sp_approx_map_ptr_t make_approx_map(sym_data &primal, approx_storage &raw, shared_data &shared) = 0;
+};
+def_ptr(soft_constr_impl);
 /**
  * @brief wrapper of constr_impl, in fact a pointer
  *
@@ -85,13 +113,27 @@ struct constr : public std::shared_ptr<constr_impl> {
         assert(out.size2() == 1 && "constr output must be a column vector");
         (*this)->set_from_casadi(in_args, out);
     }
+    template <typename derived_impl>
+        requires(std::derived_from<derived_impl, constr_impl>)
+    /// @brief will get the shared ownership of impl_rval
+    constr(derived_impl *impl_rval) : impl_ptr_t(impl_rval) {}
     /**
      * @brief set the constraint as equality constraint
      *
      * @param soft if true, set as soft equality constraint
      * @return constr& *this
      */
+    template <typename derived_impl = constr_impl>
+        requires(std::derived_from<derived_impl, constr_impl>)
     constr &as_eq(bool soft = false) {
+        if (soft == true) {
+            if (!std::derived_from<derived_impl, soft_constr_impl>) {
+                throw std::runtime_error("as_eq(true) requires derived_impl to be soft_constr_impl");
+            }
+        }
+        if constexpr (!std::is_same_v<derived_impl, constr_impl>) {
+            this->reset(new derived_impl(std::move(**this)));
+        }
         if (soft)
             (*this)->field_hint_.is_soft = true;
         (*this)->field_hint_.is_eq = true;
@@ -102,16 +144,15 @@ struct constr : public std::shared_ptr<constr_impl> {
      *
      * @return constr& *this
      */
+    template <typename derived_impl>
+        requires(std::derived_from<derived_impl, constr_impl>)
     constr &as_ineq() {
+        this->reset(new derived_impl(std::move(**this)));
         (*this)->field_hint_.is_eq = false;
         return *this;
     }
     constr() = default;
     using impl_ptr_t::operator=;
-    template <typename derived_impl>
-        requires(std::derived_from<derived_impl, constr_impl>)
-    /// @brief will get the shared ownership of impl_rval
-    constr(derived_impl *impl_rval) : impl_ptr_t(impl_rval) {}
 };
 } // namespace moto
 

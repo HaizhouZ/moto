@@ -1,14 +1,14 @@
 #include <moto/solver/ipm_constr.hpp>
 
 namespace moto {
-namespace ipm {
-void ipn_constr_impl::initialize(soft_constr_data &data) {
+namespace ipm_impl {
+void ipm_constr_impl::initialize(soft_constr_data &data) {
     constr_impl::value_impl(data);
     auto &d = static_cast<ipm_data &>(data);
     d.slack_ = (-data.v_).cwiseMax(1e-8); // clip
     d.multiplier_.setConstant(1.0);
 }
-void ipn_constr_impl::post_rollout(soft_constr_data &data) {
+void ipm_constr_impl::post_rollout(soft_constr_data &data) {
     auto &d = static_cast<ipm_data &>(data);
     size_t arg_idx = 0;
     // update slack newton step
@@ -26,12 +26,12 @@ void ipn_constr_impl::post_rollout(soft_constr_data &data) {
     d.d_multipler_.array() = -d.multiplier_.array() + d.mu_ / d.slack_.array() - d.diag_scaling.array() * d.d_slack_.array();
     /// @todo iterative refinement for better accuracy?
 }
-void ipn_constr_impl::value_impl(sp_approx_map &data) {
+void ipm_constr_impl::value_impl(sp_approx_map &data) {
     constr_impl::value_impl(data);
     auto &d = static_cast<ipm_data &>(data);
     d.comp_res_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.mu_;
 }
-void ipn_constr_impl::jacobian_impl(sp_approx_map &data) {
+void ipm_constr_impl::jacobian_impl(sp_approx_map &data) {
     constr_impl::jacobian_impl(data);
     auto &d = static_cast<ipm_data &>(data);
     // setup T^{-1} N
@@ -62,5 +62,5 @@ void ipn_constr_impl::jacobian_impl(sp_approx_map &data) {
         outer_idx++;
     }
 }
-} // namespace ipm
+} // namespace ipm_impl
 } // namespace moto

@@ -1,5 +1,5 @@
+#include <moto/ocp/constr.hpp>
 #include <moto/solver/data_base.hpp>
-#include <moto/ocp/soft_constr.hpp>
 
 namespace moto {
 namespace solver {
