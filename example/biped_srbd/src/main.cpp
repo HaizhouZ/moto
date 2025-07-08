@@ -21,17 +21,68 @@ int main() {
     utils::print_problem(prob);
     ns_sqp solver;
     auto &graph = solver.graph_;
-    auto &init_node = graph.add(ns_sqp::node_type(prob));
-    auto &end_node = graph.add(ns_sqp::node_type(terminal_prob));
+    auto &init_node = graph.set_head(graph.add(ns_sqp::node_type(prob)));
+    auto &end_node = graph.set_tail(graph.add(ns_sqp::node_type(terminal_prob)));
 
-    graph.add_edge(init_node, end_node, 100);
+    graph.add_edge(init_node, end_node, 100); // 100 steps
 
     init_node->value(dyn.r) << 0, 0, 0.5;     // initial position of the com
     init_node->value(dyn.r_l) << 0, 0.1, 0.;  // initial position of the left foot
     init_node->value(dyn.r_r) << 0, -0.1, 0.; // initial position of the right foot
-    init_node->value(dyn.active_l).setOnes();
-    init_node->value(dyn.active_r).setOnes();
+    init_node->value(dyn.active_l_cur).setOnes();
+    init_node->value(dyn.active_r_cur).setOnes();
     init_node->value(dyn.r_d) << 1.0, 0, 0.5; // desired position of the com
+
+    graph.apply_all_unary_parallel([&](node_data *data) {
+        *data->sym_ = *init_node->sym_; // initialize symbolic data
+    });
+    // set gait
+    int n = -10;
+    int phase = -1; // -1 stance, 0 left swing, 1 right swing
+    int steps = 0;
+    graph.apply_all_unary_forward([&](node_data *data) {
+        if (n >= 0) {
+            if (steps < 3) {
+                if (n % 25 == 0) { // every 25 steps, switch phase
+                    if (phase == -1)
+                        phase = 0;
+                    else {
+                        steps++;
+                        if (steps < 3)
+                            phase = 1 - phase;
+                    }
+                    std::cout << "at step " << steps << std::endl;
+                }
+            } else
+                phase = -1;
+        }
+        std::cout << "phase " << phase << " at step " << n << std::endl;
+        if (phase == -1) {
+            data->value(dyn.active_l) << 1;
+            data->value(dyn.active_r) << 1;
+        } else if (phase == 0) {
+            data->value(dyn.active_l) << 0;
+            data->value(dyn.active_r) << 1;
+        } else if (phase == 1) {
+            data->value(dyn.active_l) << 1;
+            data->value(dyn.active_r) << 0;
+        }
+        n++;
+    });
+    // propogate parameters
+    graph.apply_all_binary_forward([&](node_data *cur, node_data *next) {
+        next->value(dyn.active_l_cur) = cur->value(dyn.active_l);
+        next->value(dyn.active_r_cur) = cur->value(dyn.active_r);
+    });
+
+    std::cout << "\nleft\n";
+    graph.apply_all_unary_forward([&](node_data *data) {
+        std::cout << data->value(dyn.active_l) << ',';
+    });
+    std::cout << "\nright\n";
+    graph.apply_all_unary_forward([&](node_data *data) {
+        std::cout << data->value(dyn.active_r) << ',';
+    });
 
     return 0;
 }

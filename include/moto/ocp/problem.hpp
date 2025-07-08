@@ -14,7 +14,7 @@ namespace moto {
  *
  */
 class ocp {
-  private:
+  protected:
     inline static size_t max_uid = 0;
     ocp() : uid_(max_uid++) {}
     ocp(const ocp &rhs)

@@ -32,13 +32,13 @@ struct edge_base {
      * it will clone the start node for each intermediate node
      * @param start start node
      * @param end end node
-     * @param length length of the edge, i.e., number of nodes in between = length - 1
+     * @param length number of intermediate nodes
      */
-    edge_base(node *start, node *end, size_t length)
+    edge_base(node *start, node *end, int length)
         : st(start), ed(end) {
         st->out_edges.emplace(this);
         ed->in_edges.emplace(this);
-        while (--length) {                                   // exclude ed node
+        while (length--) {                                   // exclude ed node
             nodes.emplace_back(std::make_unique<node>(*st)); // clone the start node
         }
     }
@@ -94,17 +94,20 @@ class directed_graph {
      * @ref graph_types::edge_base
      * @param st start node
      * @param ed end node
-     * @param len length of the edge, i.e., number of intermediate nodes + 1
+     * @param len length of the edge including start and end nodes
      * @return const auto& const reference to the added edge
      */
-    const auto &add_edge(node &st, node &ed, size_t len) {
-        edges_.emplace_back(std::make_unique<edge>(&st, &ed, len));
+    const auto &add_edge(node &st, node &ed, size_t len = 2) {
+        if (len < 2) {
+            throw std::invalid_argument("Edge length must be no less than 2");
+        }
+        edges_.emplace_back(std::make_unique<edge>(&st, &ed, len - 2));
         return edges_.back();
     }
 
     /**
      * @brief add a node to the graph
-     * 
+     *
      * @param d node to be added (movable)
      * @return node& reference to the added node
      */
@@ -113,8 +116,8 @@ class directed_graph {
         return *nodes_.back();
     }
 
-    void set_tail(node &tail) { tail_ = &tail; }
-    void set_head(node &head) { head_ = &head; }
+    node &set_tail(node &tail) { return *(tail_ = &tail); }
+    node &set_head(node &head) { return *(head_ = &head); }
     /**
      * @brief get the flattened list of all nodes in the graph
      *
@@ -165,6 +168,7 @@ class directed_graph {
         // std::vector<std::pair<data_type *, data_type *>> binary_in_;
         // std::vector<edge *> cur_edges;                               // st nodes for this round
         // std::vector<edge *> next_edges;                              // st nodes for next round
+        assert(head_ != nullptr && tail_ != nullptr && "head node must be set before applying binary function");
         cur_edges.assign(head_->out_edges.begin(), head_->out_edges.end()); // Ensure thread-local cur_edges is initialized
         next_edges.clear();                                                 // Clear thread-local next_edges
         binary_in_.clear();
@@ -211,6 +215,7 @@ class directed_graph {
         // std::vector<std::pair<data_type *, data_type *>> binary_in_;
         // std::vector<edge *> cur_edges;                             // st nodes for this round
         // std::vector<edge *> next_edges;                            // st nodes for next round
+        assert(head_ != nullptr && tail_ != nullptr && "head node must be set before applying binary function");
         cur_edges.assign(tail_->in_edges.begin(), tail_->in_edges.end()); // Ensure thread-local cur_edges is initialized
         next_edges.clear();                                               // Clear thread-local next_edges
         binary_in_.clear();
