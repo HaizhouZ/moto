@@ -1,13 +1,46 @@
 #ifndef __EXPRESSION_BASE__
 #define __EXPRESSION_BASE__
 
-#include <moto/core/fields.hpp>
 #include <casadi/casadi.hpp>
+#include <moto/core/fields.hpp>
 
 namespace moto {
 class expr_impl; // forward declaration of expr_impl
 def_ptr_named(expr, expr_impl);
 struct expr_list; // forward declaration of expr_list
+/**
+ * @brief a wrapper of std::vector<expr_ptr_t> to allow easy construction
+ *
+ */
+struct expr_list : public std::vector<expr_ptr_t> {
+    /**
+     * @brief construct a new expr list object
+     * will construct std::shared_ptr(expr)
+     * @param exprs initializer list of raw expr pointers
+     */
+    expr_list(std::initializer_list<expr_impl *> exprs) {
+        for (auto expr : exprs) {
+            emplace_back(expr);
+        }
+    }
+    /**
+     * @brief extend the list with another list
+     *
+     * @param rhs lvalue ref, i.e., not movable, will be copied
+     */
+    void extend(const expr_list &rhs) {
+        insert(end(), rhs.begin(), rhs.end());
+    }
+    /**
+     * @brief extend the list with another list
+     *
+     * @param rhs rvalue ref, i.e., movable, will be moved
+     */
+    void extend(expr_list &&rhs) {
+        insert(end(), std::make_move_iterator(rhs.begin()), std::make_move_iterator(rhs.end()));
+    }
+    using std::vector<expr_ptr_t>::vector; /// < inherit constructors
+};
 /**
  * @brief index of all syms
  *
@@ -37,6 +70,7 @@ class expr_impl : public std::enable_shared_from_this<expr_impl> {
     void add_to_index();
 
   protected:
+    expr_list aux_;
     virtual void finalize_impl() {}
 
   public:
@@ -79,7 +113,7 @@ class expr_impl : public std::enable_shared_from_this<expr_impl> {
      * @brief get other variables related to this expression
      * @return pointer to std::vector<expr_ptr_t> list of expressions, default is nullptr
      */
-    virtual expr_list *get_aux() { return nullptr; }
+    expr_list &get_aux() { return aux_; }
 };
 namespace cs = casadi;
 
@@ -123,39 +157,6 @@ struct sym : public expr_ptr_t, public cs::SX {
      * @return expr_impl pointer
      */
     expr_impl *get() const { return expr_ptr_t::get(); }
-};
-/**
- * @brief a wrapper of std::vector<expr_ptr_t> to allow easy construction
- *
- */
-struct expr_list : public std::vector<expr_ptr_t> {
-    /**
-     * @brief construct a new expr list object
-     * will construct std::shared_ptr(expr)
-     * @param exprs initializer list of raw expr pointers
-     */
-    expr_list(std::initializer_list<expr_impl *> exprs) {
-        for (auto expr : exprs) {
-            emplace_back(expr);
-        }
-    }
-    /**
-     * @brief extend the list with another list
-     *
-     * @param rhs lvalue ref, i.e., not movable, will be copied
-     */
-    void extend(const expr_list &rhs) {
-        insert(end(), rhs.begin(), rhs.end());
-    }
-    /**
-     * @brief extend the list with another list
-     *
-     * @param rhs rvalue ref, i.e., movable, will be moved
-     */
-    void extend(expr_list &&rhs) {
-        insert(end(), std::make_move_iterator(rhs.begin()), std::make_move_iterator(rhs.end()));
-    }
-    using std::vector<expr_ptr_t>::vector; /// < inherit constructors
 };
 } // namespace moto
 

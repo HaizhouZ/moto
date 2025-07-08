@@ -125,16 +125,23 @@ void func_impl::load_external(const std::string &path) {
         hess.invoke(d.in_args(), d.hess_);
     };
 }
+void func_impl::substitute(sym &arg, const sym &rhs) {
+    if (!gen_.out_.is_empty()) {
+        gen_.out_ = cs::SX::substitute(gen_.out_, arg, rhs);
+    }
+    arg = rhs;
+}
 void func_impl::set_from_casadi(std::initializer_list<sym> in_args, const cs::SX &out) {
-    // call to external script for codegen
     add_arguments(in_args);
-    gen_worker = utils::generate_n_compile(name_, std::vector(in_args), out, true,
-                                           order_ >= approx_order::first,
-                                           order_ >= approx_order::second);
+    gen_.out_ = out;
 }
 void func_impl::finalize_impl() {
-    if (gen_worker.valid()) {
-        gen_worker.wait(); // wait until codegen is done
+    if (!gen_.out_.is_empty()) {
+        gen_.res_ = utils::generate_n_compile(name_, in_args_, {gen_.out_},
+                                              order_ >= approx_order::zero,
+                                              order_ >= approx_order::first,
+                                              order_ >= approx_order::second);
+        gen_.res_.wait(); // wait until codegen is done
         load_external();
     }
 }

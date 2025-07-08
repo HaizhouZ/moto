@@ -7,7 +7,7 @@ namespace utils {
 
 namespace py = pybind11;
 
-std::future<void> generate_n_compile(const std::string &func_name, std::vector<sym> in_args, const cs::SX &out,
+std::future<void> generate_n_compile(const std::string &func_name, const std::vector<sym>& in_args, const cs::SX &out,
                                      bool gen_eval, bool gen_jacobian, bool gen_hessian) {
     struct gen_module {
         std::mutex mutex_;

@@ -42,7 +42,7 @@ class ocp {
     scalar_t *get_data_ptr(scalar_t *data, expr_impl &expr, size_t offset) const {
         return data + get_expr_start(expr) * offset;
     }
-    vector_ref extract(vector_ref data, const expr_impl& expr) const {
+    vector_ref extract(vector_ref data, const expr_impl &expr) const {
         return data.segment(get_expr_start(expr), expr.dim_);
     }
     /**
@@ -69,17 +69,6 @@ class ocp {
     template <typename derived>
         requires std::is_base_of_v<expr_impl, derived>
     void add(std::vector<std::shared_ptr<derived>> &&exprs) {
-        for (auto &expr_ : exprs) {
-            add(std::move(expr_));
-        }
-    }
-
-    /**
-     * @brief add a expr_list to the problem
-     * will be called if argument is a list of raw pointers
-     * @param exprs
-     */
-    void add(expr_list &&exprs) {
         for (auto &expr_ : exprs) {
             add(std::move(expr_));
         }

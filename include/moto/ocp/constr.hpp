@@ -132,8 +132,11 @@ struct constr : public std::shared_ptr<constr_impl> {
             }
         }
         if constexpr (!std::is_same_v<derived_impl, constr_impl>) {
-            this->reset(new derived_impl(std::move(**this)));
+            if (dynamic_cast<derived_impl *>(this->get()) == nullptr) { // check if the type is the same
+                this->reset(new derived_impl(std::move(**this)));
+            }
         }
+        // setup hints
         if (soft)
             (*this)->field_hint_.is_soft = true;
         (*this)->field_hint_.is_eq = true;
@@ -147,7 +150,9 @@ struct constr : public std::shared_ptr<constr_impl> {
     template <typename derived_impl>
         requires(std::derived_from<derived_impl, constr_impl>)
     constr &as_ineq() {
-        this->reset(new derived_impl(std::move(**this)));
+        if (dynamic_cast<derived_impl *>(this->get()) == nullptr) { // check if the type is the same
+            this->reset(new derived_impl(std::move(**this)));
+        }
         (*this)->field_hint_.is_eq = false;
         return *this;
     }

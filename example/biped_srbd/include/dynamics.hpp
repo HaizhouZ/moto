@@ -70,14 +70,14 @@ struct srbd_dynamics : public dynamics {
                             cs::SX::norm_2(v) +                                  // velocity cost
                             1e-3 * (cs::SX::norm_2(f_l) + cs::SX::norm_2(f_r)) + // force cost
                             0.1 * (cs::SX::norm_2(v_l) + cs::SX::norm_2(v_r));   // foot velocity cost
-        return {cost("running_cost", {r, v, f_l, f_r, v_l, v_r, r_d}, dt * running_cost)};
+        return {cost("srbd_cost", {r, v, f_l, f_r, v_l, v_r, r_d}, dt * running_cost)};
     }
     expr_list terminal_cost() {
         auto running_cost = 100 * cs::SX::norm_2(r - r_d) +              // position cost
                             cs::SX::norm_2(v) +                          // velocity cost
                             cs::SX::norm_2((r_l - r)(cs::Slice(0, 2))) + // foot position cost
                             cs::SX::norm_2((r_r - r)(cs::Slice(0, 2)));  // foot position cost
-        return {cost("terminal_cost", {r, v, r_l, r_r, r_d}, running_cost)};
+        return {cost("srbd_cost", {r, v, r_l, r_r, r_d}, running_cost).as_terminal()};
     }
 };
 

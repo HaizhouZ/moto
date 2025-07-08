@@ -1,6 +1,7 @@
 #include <dynamics.hpp>
 #include <iostream>
 #include <moto/ocp/problem.hpp>
+#include <moto/solver/ns_sqp.hpp>
 
 int main() {
     biped_srbd::srbd_dynamics dyn;
@@ -9,8 +10,9 @@ int main() {
     prob->add(dyn.euler());
     prob->add(dyn.friction_cone());
     prob->add(dyn.running_cost());
-    prob->add(dyn.terminal_cost());
     prob->add(dyn.stance_foot_constr());
     prob->add(dyn.foot_loc_constr());
+    
+    prob->add(dyn.terminal_cost());
     return 0;
 }

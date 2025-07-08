@@ -12,9 +12,9 @@ bool ocp::add_impl(const expr_ptr_t &expr) {
         d_idx_[_uid] = std::make_pair(n0, n1);
         n0 = d_idx_[_uid].second;
         pos_by_uid_.try_emplace(_uid, expr_[expr->field_].size());
-        auto aux = expr->get_aux();
-        if (aux != nullptr) {
-            add(*aux);
+        auto &aux = expr->get_aux();
+        if (!aux.empty()) {
+            add(aux);
         }
         return true;
     }

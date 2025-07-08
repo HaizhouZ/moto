@@ -54,7 +54,7 @@ struct doubleIntegratorCosts {
         return {new state_cost(r, v), new input_cost(a)};
     }
     expr_list terminal(sym r, sym v) {
-        return {make_terminal_cost(new state_cost(r, v))};
+        return {cost(new state_cost(r, v)).as_terminal()};
     }
 };
 

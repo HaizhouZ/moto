@@ -43,10 +43,10 @@ class shared_data {
 def_unique_ptr(shared_data);
 /////////////////////////////////////////////////////////////////////
 
-enum class approx_order { zero = 0,
+enum class approx_order { none = 0,
+                          zero,
                           first,
-                          second,
-                          none };
+                          second };
 struct func_impl;
 def_ptr(func_impl);
 /////////////////////////////////////////////////////////////////////
@@ -158,10 +158,15 @@ auto make_composed(data_type &&...other_data) {
  * @todo: change to differentiable for precompute
  */
 class func_impl : public expr_impl {
+  private:
+    struct gen {
+        cs::SX out_;
+        std::future<void> res_;
+    } gen_;
+
   protected:
     approx_order order_;
-    expr_list in_args_;
-    std::future<void> gen_worker;
+    std::vector<sym> in_args_;
 
     std::unordered_map<size_t, size_t> sym_uid_idx_;
     friend struct sp_arg_map;
@@ -174,6 +179,8 @@ class func_impl : public expr_impl {
      */
     virtual void finalize_impl();
 
+    void substitute(sym &arg, const sym &rhs);
+
   public:
     virtual void value_impl([[maybe_unused]] sp_approx_map &data) { value(data); };
     virtual void jacobian_impl([[maybe_unused]] sp_approx_map &data) { jacobian(data); };
@@ -182,6 +189,7 @@ class func_impl : public expr_impl {
   public:
     void add_argument(const sym &in) {
         in_args_.push_back(in);
+        aux_.push_back(in);
         sym_uid_idx_[in->uid_] = sym_uid_idx_.size();
     }
     template <typename T>
@@ -215,13 +223,6 @@ class func_impl : public expr_impl {
      * @return true if field is not __pre_comp or __usr_func and field value is greater than __dyn
      */
     bool is_approx() const { return (field_ != __pre_comp && field_ != __usr_func) && field_ > __dyn; }
-
-    /**
-     * @brief get other variables related to this approximation
-     * @details here it is the input arguments, probably also parameters in the future
-     * @return list of expressions
-     */
-    expr_list *get_aux() override { return &in_args_; }
     /**
      * @brief setup the sparse func data
      * @details will setup the mapping from the dense approx_storage to sp_approx_map
