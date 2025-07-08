@@ -153,16 +153,26 @@ auto make_composed(data_type &&...other_data) {
     return std::make_unique<composed_data<data_type...>>(std::forward<data_type>(other_data)...);
 }
 /////////////////////////////////////////////////////////////////////
+class func_codegen_helper {
+  private:
+    inline static std::vector<func_impl *> funcs_{}; ///< list of functions to be compiled
+  public:
+    static void add(func_impl *f) { funcs_.push_back(f); }
+    static void wait_until_all_compiled(size_t njobs = 4);
+    static void enable();
+};
 /**
  * @brief approximation class for generic functions
  * @todo: change to differentiable for precompute
  */
 class func_impl : public expr_impl {
   private:
+    inline static bool gen_delegated_ = false; ///< if the codegen is delegated to the helper
     struct gen {
         cs::SX out_;
         std::future<void> res_;
     } gen_;
+    friend class func_codegen_helper;
 
   protected:
     approx_order order_;

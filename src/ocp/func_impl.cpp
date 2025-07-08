@@ -137,12 +137,44 @@ void func_impl::set_from_casadi(std::initializer_list<sym> in_args, const cs::SX
 }
 void func_impl::finalize_impl() {
     if (!gen_.out_.is_empty()) {
-        gen_.res_ = utils::generate_n_compile(name_, in_args_, {gen_.out_},
-                                              order_ >= approx_order::zero,
-                                              order_ >= approx_order::first,
-                                              order_ >= approx_order::second);
-        gen_.res_.wait(); // wait until codegen is done
-        load_external();
+        if (!gen_delegated_) {
+            gen_.res_ = utils::generate_n_compile(name_, in_args_, {gen_.out_},
+                                                  order_ >= approx_order::zero,
+                                                  order_ >= approx_order::first,
+                                                  order_ >= approx_order::second);
+            gen_.res_.wait(); // wait until codegen is done
+            load_external();
+        } else
+            func_codegen_helper::add(this);
     }
+}
+void func_codegen_helper::enable() {
+    func_impl::gen_delegated_ = true; // enable codegen delegation
+}
+void func_codegen_helper::wait_until_all_compiled(size_t njobs) {
+    std::vector<func_impl *> jobs;
+    size_t cnt = 0;
+    for (auto it_f = funcs_.begin(); it_f != funcs_.end(); ++it_f) {
+        jobs.push_back(*it_f);
+        cnt++;
+        if (cnt == njobs || it_f + 1 == funcs_.end()) {
+            for (auto f : jobs) {
+                f->gen_.res_ = utils::generate_n_compile(f->name_, f->in_args_, {f->gen_.out_},
+                                                         f->order_ >= approx_order::zero,
+                                                         f->order_ >= approx_order::first,
+                                                         f->order_ >= approx_order::second);
+            }
+            for (auto f : jobs) {
+                if (f->gen_.res_.valid()) {
+                    f->gen_.res_.wait(); // wait until codegen is done
+                    f->load_external();
+                }
+            }
+            cnt = 0; // reset counter
+            jobs.clear();
+        }
+    }
+
+    funcs_.clear();
 }
 } // namespace moto
