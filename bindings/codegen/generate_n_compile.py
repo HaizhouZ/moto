@@ -413,11 +413,13 @@ def generate_and_compile(
                     match_prev = md5_hash == md5_existing and compile_flag_previous == compile_flag
             # check if the existing function is up-to-date (by md5 and by compile flag)
             if match_prev and not force_recompile and os.path.exists(so_file_path):
-                print(f"Skipping {func_name} as it is already up-to-date.")
+                if print_level < 2:
+                    print(f"Skipping {func_name} as it is already up-to-date.")
             else:
                 compile_command = f"g++ -shared -fPIC -std=gnu++20 {compile_flag} -o {so_file_path} {final_cpp_path} -I /usr/include/eigen3"
                 os.system(compile_command)
-                print(f"Compiled:  {so_file_path}")
+                if print_level < 2:
+                    print(f"Compiled:  {so_file_path}")
         if not keep_raw:
             os.remove(cpp_path + "raw.c")
             if not print_level > 0:
@@ -439,7 +441,7 @@ def generate_and_compile(
                 )
             )
             _process[-1].start()
-        return _process
+        return partial(wait_until_generated, _process, False)
     else:
         for name, inputs, outputs, kwargs_ in worker:
             process_.append(
@@ -452,11 +454,12 @@ def generate_and_compile(
             process_[-1].start()
 
 
-def wait_until_generated(process_pool: list[Process] = process_):
+def wait_until_generated(process_pool: list[Process] = process_, glob: bool = True):
     """
     must call this to ensure all tests are done
     """
     for p in process_pool:
         p.join()
-    process_pool.clear()
-    print("All code generation completed.")
+    if glob:
+        process_pool.clear()
+        print("All code generation completed.")

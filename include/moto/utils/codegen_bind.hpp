@@ -2,11 +2,12 @@
 #define MOTO_UTILS_CODEGEN_BIND_HPP
 
 #include <moto/core/expr.hpp>
+#include <future>
 
 namespace moto {
 namespace utils {
 
-void generate_n_compile(const std::string &func_name, std::vector<sym> in_args, const cs::SX &out,
+std::future<void> generate_n_compile(const std::string &func_name, std::vector<sym> in_args, const cs::SX &out,
                         bool gen_eval = true, bool gen_jac = false, bool gen_hess = false);
 
 } // namespace utils

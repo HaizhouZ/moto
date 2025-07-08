@@ -23,8 +23,13 @@ struct srbd_dynamics : public dynamics {
         dt = 0.01;
     }
 
-    auto euler() {
-        return constr("euler_pos", {r_n, r, v_n}, r_n - (r + v_n * dt), approx_order::first, __dyn);
+    expr_list euler() {
+        return {constr("euler_pos", {r_n, r, v_n}, r_n - (r + v_n * dt), approx_order::first, __dyn),
+                constr("euler_ps", {r_n, r, v_n}, r_n - (r + v_n * dt), approx_order::first, __dyn),
+                constr("euler_p", {r_n, r, v_n}, r_n - (r + v_n * dt), approx_order::first, __dyn),
+                constr("euler_b", {r_n, r, v_n}, r_n - (r + v_n * dt), approx_order::first, __dyn),
+                constr("euler_s", {r_n, r, v_n}, r_n - (r + v_n * dt), approx_order::first, __dyn),
+                constr("euler_vel", {v_n, v, f_l, f_r}, m * (v_n - v) - (f_l + f_r) * dt, approx_order::first, __dyn)};
     }
 };
 

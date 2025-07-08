@@ -8,5 +8,6 @@ int main() {
     std::cout << "Hello, Biped SRBD!" << std::endl;
     auto prob = moto::ocp::make();
     prob->add(euler_constr);
+    fmt::print("Problem has {} constraints.\n", prob->expr_[moto::__dyn].size());
     return 0;
 }
