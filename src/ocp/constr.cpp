@@ -8,6 +8,7 @@ constr_data::constr_data(approx_storage &raw,
       multiplier_(raw.dual_[f->field_].segment(raw.prob_->get_expr_start(*f),
                                                f->dim_)) {
     const auto &in_args = f->in_args();
+    multiplier_.setConstant(1.);
     for (size_t i = 0; i < in_args_.size(); i++) {
         if (in_args[i]->field_ < field::num_prim)
             vjp_.push_back(raw.jac_[in_args[i]->field_].segment(

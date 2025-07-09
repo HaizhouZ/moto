@@ -1,6 +1,6 @@
 #include <Eigen/Eigenvalues>
-#include <moto/solver/nullspace_data.hpp>
 #include <moto/solver/ns_riccati_solve.hpp>
+#include <moto/solver/nullspace_data.hpp>
 
 namespace moto {
 namespace nullsp_kkt_solve {
@@ -20,11 +20,20 @@ void backward_pass(riccati_data *cur, riccati_data *prev) {
     d.Q_yy.array() /= 2;
     /// @todo: temporary
     d.Q_yy = d.Q_yy + d.Q_yy.transpose().eval();
+    if (d.Q_yy.hasNaN()) {
+        fmt::print("Q_yy: \n {}\n", d.Q_yy);
+        fmt::print("Q_yy has NaN\n");
+    }
     nsp.U.noalias() = d.Q_uu + nsp.F_u.transpose() * d.Q_yy * nsp.F_u;
     // compute bar{u}_0
     nsp.u_0_p_k.noalias() = d.Q_u.transpose() - nsp.F_u.transpose() * (d.Q_y.transpose() - d.Q_yy * nsp.F_0_k);
     nsp.Q_yy_F_0_K.noalias() = d.Q_yy * nsp.F_0_K;
     nsp.u_0_p_K.noalias() = d.Q_ux - nsp.F_u.transpose() * (d.Q_yx - nsp.Q_yy_F_0_K);
+    // compute u_y
+
+    fmt::print("u_0_p_k: \n{}\n", nsp.u_0_p_k.transpose());
+    fmt::print("u_0_p_K: \n{}\n", nsp.u_0_p_K.transpose());
+    fmt::print("u_y_K: \n{}\n", nsp.u_y_K.transpose());
     // compute z_u
     if (d.rank_status_ == rank_status::unconstrained) {
         nsp.z_u_k.noalias() = nsp.u_0_p_k;

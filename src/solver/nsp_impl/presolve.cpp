@@ -83,7 +83,13 @@ void pre_solving_steps_2(riccati_data *prev, riccati_data *cur) {
     d_pre.Q_y.noalias() += d.Q_x - nsp.F_0_k.transpose() * d.Q_yx;
     // +d.Q_y * d.F_0_K is done in backward pass
     // because Q_y has V_y in it
+    if (nsp.F_0_K.array().isNaN().any() || d.Q_xx.array().isNaN().any()) {
+        std::cerr << "F_0_K:\n" << nsp.F_0_K << "\n";
+        std::cerr << "Q_xx:\n" << d.Q_xx << "\n";
+        throw std::runtime_error("NaN detected in F_0_K or Q_xx");
+    }
     d_pre.Q_yy.noalias() += d.Q_xx - (d.Q_yx.transpose() * nsp.F_0_K + nsp.F_0_K.transpose() * d.Q_yx);
+    
 }
 /// @todo set terminal Q_y, Q_yy
 

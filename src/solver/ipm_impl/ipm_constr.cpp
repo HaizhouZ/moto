@@ -58,10 +58,10 @@ void ipm_constr_impl::jacobian_impl(sp_approx_map &data) {
             // fmt::print("jac: \n{:.3}\n", j);
             d.vjp_[j_idx].noalias() += d.scaled_res_.transpose() * j;
             // fmt::print("vjp: {:.3}\n", d.vjp_[j_idx]);
-            // if (d.vjp_[j_idx].hasNaN()) {
-            //     fmt::print("vjp: {:.3}\n", d.vjp_[j_idx]);
-            //     fmt::print("NaN in vjp[{}]\n", j_idx);
-            // }
+            if (d.vjp_[j_idx].hasNaN()) {
+                fmt::print("vjp: {:.3}\n", d.vjp_[j_idx]);
+                fmt::print("NaN in vjp[{}]\n", j_idx);
+            }
         }
         j_idx++;
     }
@@ -73,10 +73,10 @@ void ipm_constr_impl::jacobian_impl(sp_approx_map &data) {
             for (auto &inner : outer) {
                 if (inner.rows() != 0 && inner.cols() != 0) {
                     inner.noalias() += d.jac_[outer_idx].transpose() * d.diag_scaling.asDiagonal() * d.jac_[inner_idx];
+                    if (inner.hasNaN() || d.diag_scaling.hasNaN() || d.jac_[inner_idx].hasNaN() || d.jac_[outer_idx].hasNaN()) {
+                        fmt::print("NaN in hess[{}][{}]\n", outer_idx, inner_idx);
+                    }
                 }
-                // if (inner.hasNaN()) {
-                //     fmt::print("NaN in hess[{}][{}]\n", outer_idx, inner_idx);
-                // }
                 inner_idx++;
             }
         }
