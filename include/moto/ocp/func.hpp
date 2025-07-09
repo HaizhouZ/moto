@@ -199,7 +199,7 @@ class func_impl : public expr_impl {
   public:
     void add_argument(const sym &in) {
         in_args_.push_back(in);
-        aux_.push_back(in);
+        dep_.push_back(in);
         sym_uid_idx_[in->uid_] = sym_uid_idx_.size();
     }
     template <typename T>

@@ -71,7 +71,7 @@ int main() {
     graph.apply_all_binary_forward([&](node_data *cur, node_data *next) {
         cur->value(__y) = next->value(__x);
         for (auto &arg : cur->ocp_->expr_[__x]) {
-            auto &next_arg = expr_index::get<sym>(arg->name_ + "_nxt");
+            auto &next_arg = expr_lookup::get<sym>(arg->name_ + "_nxt");
             cur->value(next_arg) = next->value(arg);
         }
         next->value(dyn.active_l_cur) = cur->value(dyn.active_l);

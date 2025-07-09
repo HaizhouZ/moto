@@ -18,11 +18,7 @@ struct expr_list : public std::vector<expr_ptr_t> {
      * will construct std::shared_ptr(expr)
      * @param exprs initializer list of raw expr pointers
      */
-    expr_list(std::initializer_list<expr_impl *> exprs) {
-        for (auto expr : exprs) {
-            emplace_back(expr);
-        }
-    }
+    expr_list(std::initializer_list<expr_impl *> exprs);
     /**
      * @brief extend the list with another list
      *
@@ -58,22 +54,35 @@ def_ptr(shared_base);
  * @brief index of all syms
  *
  */
-struct expr_index {
+class expr_lookup {
+  protected:
     /// all expressions, indexed by uid, nullptr if not finalized (only placeholder)
     inline static std::vector<shared_base_ptr_t> all_;
     /// all expressions, indexed by name
     inline static std::unordered_map<std::string, shared_base_ptr_t> by_name_{};
+    friend class expr_impl;
 
+  public:
     /// @brief get an expression by name
-    template <typename T = shared_ptr_<expr_impl>,
-              typename derived = std::remove_reference_t<decltype(*std::declval<T>())>>
-        requires(std::is_base_of_v<shared_ptr_<derived>, T> && std::is_base_of_v<expr_impl, derived>)
-    static const T &get(const std::string &name) { return static_cast<T &>(*by_name_.at(name)); }
+    template <typename T = shared_base>
+        requires(std::is_base_of_v<shared_base, T>)
+    static const T &get(const std::string &name) {
+        auto &p = by_name_.at(name);
+        if (by_name_.at(name) == nullptr) {
+            throw std::runtime_error(fmt::format("expression with name {} not created from / owned by shared_<T>", name));
+        }
+        return dynamic_cast<T &>(*p);
+    }
     /// @brief get an expression by uid
-    template <typename T = shared_ptr_<expr_impl>,
-              typename derived = std::remove_reference_t<decltype(*std::declval<T>())>>
-        requires(std::is_base_of_v<shared_ptr_<derived>, T> && std::is_base_of_v<expr_impl, derived>)
-    static const auto &get(size_t uid) { return static_cast<T &>(*all_.at(uid)); }
+    template <typename T = shared_base>
+        requires(std::is_base_of_v<shared_base, T>)
+    static const auto &get(size_t uid) {
+        auto &p = all_[uid];
+        if (all_.at(uid) == nullptr) {
+            throw std::runtime_error(fmt::format("expression with uid {} not created from / owned by shared_<T>", uid));
+        }
+        return dynamic_cast<T &>(*p);
+    }
 };
 constexpr size_t dim_tbd = 0;
 /**
@@ -85,7 +94,7 @@ class expr_impl {
     bool finalized = false;
 
   protected:
-    expr_list aux_;
+    expr_list dep_;
     virtual void finalize_impl() {}
 
   public:
@@ -102,7 +111,7 @@ class expr_impl {
      * @param field
      */
     expr_impl(const std::string &name, size_t dim, field_t field)
-        : name_(name), dim_(dim), uid_(max_uid++), field_(field) { expr_index::all_.push_back(nullptr); }
+        : name_(name), dim_(dim), uid_(max_uid++), field_(field) { expr_lookup::all_.push_back(nullptr); }
     /**
      * @brief make a const vector from a pointer
      * @param ptr pointer to the data
@@ -128,38 +137,52 @@ class expr_impl {
      * @brief get other variables related to this expression
      * @return pointer to std::vector<expr_ptr_t> list of expressions, default is nullptr
      */
-    expr_list &get_aux() { return aux_; }
+    expr_list &get_dep() { return dep_; }
 };
-template <typename derived, typename derived_shared = shared_ptr_<derived>>
+template <typename derived, typename derived_shared = void>
     requires std::derived_from<derived, expr_impl>
-struct shared_ : public shared_ptr_<derived> {
+class shared_ : public shared_ptr_<derived>, private expr_lookup {
+  private:
+    void copy_to(size_t uid) {
+        if constexpr (std::is_void_v<derived_shared>) {
+            expr_lookup::all_[uid].reset(new shared_(*this));
+        } else {
+            const auto &cur = static_cast<derived_shared &>(*this);
+            expr_lookup::all_[uid].reset(new derived_shared(cur));
+        }
+    }
+
+  public:
     using shared_ptr = shared_ptr_<derived>;
     shared_(derived *p) : shared_ptr(p) {
         copy_to((*this)->uid_);
     }
-    void copy_to(size_t uid) {
-        const auto &cur = static_cast<derived_shared &>(*this);
-        expr_index::all_[uid].reset(new derived_shared(cur));
-    }
     void reset(derived *p) {
         // clear previous one
-        expr_index::all_[(*this)->uid_].reset();
-        expr_index::by_name_.erase((*this)->name_);
+        expr_lookup::all_[(*this)->uid_].reset();
+        expr_lookup::by_name_.erase((*this)->name_);
         shared_ptr::reset(p);
         copy_to(p->uid_);
         finalize(p);
     }
     void finalize(expr_impl *p) const override final {
-        auto [it, inserted] = expr_index::by_name_.try_emplace(p->name_, expr_index::all_[p->uid_]);
+        auto [it, inserted] = expr_lookup::by_name_.try_emplace(p->name_, expr_lookup::all_[p->uid_]);
         if (!inserted and it->second->val().uid_ != p->uid_) {
             throw std::runtime_error(
                 fmt::format("expr name conflicts {} of uid {} with existing uid {}",
                             p->name_, p->uid_, it->second->val().uid_));
         }
     }
-    using shared_ptr::operator->;
+    using shared_ptr::get;
     shared_() = default;
 };
+
+inline expr_list::expr_list(std::initializer_list<expr_impl *> exprs) {
+    for (auto expr : exprs) {
+        emplace_back(shared_<expr_impl>(expr));
+    }
+}
+
 namespace cs = casadi;
 
 /**

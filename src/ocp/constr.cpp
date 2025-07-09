@@ -61,7 +61,7 @@ void constr_impl::finalize_impl() {
                 if (arg->field_ == __x) {
                     fmt::print("substitution in constr {} of type {}: inarg {} with {}\n",
                                name_, magic_enum::enum_name(field_), arg->name_, arg->name_ + "_nxt");
-                    substitute(arg, expr_index::get<sym>(arg->name_ + "_nxt"));
+                    substitute(arg, expr_lookup::get<sym>(arg->name_ + "_nxt"));
                 }
             }
         } catch (const std::exception &ex) {
