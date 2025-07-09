@@ -10,6 +10,8 @@ bool ocp::add_impl(const expr_ptr_t &expr) {
         size_t &n0 = dim_[expr->field_];
         size_t n1 = n0 + expr->dim_;
         d_idx_[_uid] = std::make_pair(n0, n1);
+        // fmt::print("add expr {} uid {} field {} dim {} to problem {} n0 {}, n1 {}\n",
+        //            expr->name_, _uid, magic_enum::enum_name(expr->field_), expr->dim_, uid_, n0, n1);
         n0 = d_idx_[_uid].second;
         pos_by_uid_.try_emplace(_uid, expr_[expr->field_].size());
         auto &aux = expr->get_aux();

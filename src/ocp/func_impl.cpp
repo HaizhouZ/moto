@@ -125,11 +125,14 @@ void func_impl::load_external(const std::string &path) {
         hess.invoke(d.in_args(), d.hess_);
     };
 }
-void func_impl::substitute(sym &arg, const sym &rhs) {
+void func_impl::substitute(const sym &arg, const sym &rhs) {
     if (!gen_.out_.is_empty()) {
         gen_.out_ = cs::SX::substitute(gen_.out_, arg, rhs);
     }
-    arg = rhs;
+    auto nh = sym_uid_idx_.extract(arg->uid_);
+    nh.key() = rhs->uid_;
+    sym_uid_idx_.insert(std::move(nh)); // update the uid index
+    in_args_[sym_uid_idx_.at(rhs->uid_)] = rhs; // update the in_args_ to point to the new sym
 }
 void func_impl::set_from_casadi(std::initializer_list<sym> in_args, const cs::SX &out) {
     add_arguments(in_args);

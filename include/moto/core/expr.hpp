@@ -43,6 +43,7 @@ struct expr_list : public std::vector<expr_ptr_t> {
 };
 struct shared_base {
     virtual expr_impl &val() const = 0;
+    virtual void finalize(expr_impl *p) const = 0;
 };
 
 template <typename derived>
@@ -133,16 +134,22 @@ template <typename derived, typename derived_shared = shared_ptr_<derived>>
     requires std::derived_from<derived, expr_impl>
 struct shared_ : public shared_ptr_<derived> {
     using shared_ptr = shared_ptr_<derived>;
-    shared_(derived *p) : shared_ptr(p) { set_shared_from(p); }
-    void reset(derived *p) {
-        expr_index::all_[(*this)->uid_].reset(); // clear previous one
-        expr_index::by_name_.erase((*this)->name_); // clear previous one
-        shared_ptr::reset(p);
-        set_shared_from(p);
+    shared_(derived *p) : shared_ptr(p) {
+        copy_to((*this)->uid_);
     }
-    void set_shared_from(derived *p) {
-        const auto &cur = static_cast<derived_shared&>(*this);
-        expr_index::all_[p->uid_].reset(new derived_shared(cur));
+    void copy_to(size_t uid) {
+        const auto &cur = static_cast<derived_shared &>(*this);
+        expr_index::all_[uid].reset(new derived_shared(cur));
+    }
+    void reset(derived *p) {
+        // clear previous one
+        expr_index::all_[(*this)->uid_].reset();
+        expr_index::by_name_.erase((*this)->name_);
+        shared_ptr::reset(p);
+        copy_to(p->uid_);
+        finalize(p);
+    }
+    void finalize(expr_impl *p) const override final {
         auto [it, inserted] = expr_index::by_name_.try_emplace(p->name_, expr_index::all_[p->uid_]);
         if (!inserted and it->second->val().uid_ != p->uid_) {
             throw std::runtime_error(

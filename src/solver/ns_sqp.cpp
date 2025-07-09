@@ -1,3 +1,4 @@
+#include <moto/solver/ineq_soft_solve.hpp>
 #include <moto/solver/ns_riccati_data.hpp>
 #include <moto/solver/ns_riccati_solve.hpp>
 #include <moto/solver/ns_sqp.hpp>
@@ -13,13 +14,17 @@ void ns_sqp::update(size_t n_iter) {
 
     // timed_block_labeled("all", {
     // timed_block(
-    {
+    { // rollout for initialization
+        fmt::print("Initialization for SQP...\n");
+        graph_.apply_all_unary_parallel([](solver::data_base *cur) {
+            cur->update_approximation(true);
+            ineq_soft_solve::initialize(cur);
+        });
         graph_.apply_all_unary_parallel(nullsp_kkt_solve::pre_solving_steps_0);
         std::atomic<double> cost_all{0.};
         graph_.apply_all_unary_parallel([&cost_all](auto *n) {
             cost_all += n->dense_->cost_;
         });
-
         fmt::print("initial cost_total: {}\n", cost_all);
     }
     // );
@@ -28,27 +33,27 @@ void ns_sqp::update(size_t n_iter) {
         fmt::print("Iteration: {}\n", i_iter);
         timed_block_labeled("all",
 
-        // timed_block(
-        graph_.apply_all_unary_parallel(nullsp_kkt_solve::pre_solving_steps_1);
-        // );
-        // timed_block(
-        graph_.apply_all_binary_forward<true>(nullsp_kkt_solve::pre_solving_steps_2);
-        // );
-        // timed_block(
-        graph_.apply_all_binary_backward<true>(nullsp_kkt_solve::backward_pass);
-        // );
-        // timed_block(
-        graph_.apply_all_unary_parallel(nullsp_kkt_solve::post_solving_steps);
-        // );
-        // timed_block(
-        graph_.apply_all_binary_forward<false, true>(nullsp_kkt_solve::forward_rollout);
-        // );
-        // timed_block(
-        graph_.apply_all_unary_parallel(nullsp_kkt_solve::post_rollout_steps);
-        // );
-        // timed_block(
-        graph_.apply_all_unary_parallel(nullsp_kkt_solve::pre_solving_steps_0);
-        // );
+                            // timed_block(
+                            graph_.apply_all_unary_parallel(nullsp_kkt_solve::pre_solving_steps_1);
+                            // );
+                            // timed_block(
+                            graph_.apply_all_binary_forward<true>(nullsp_kkt_solve::pre_solving_steps_2);
+                            // );
+                            // timed_block(
+                            graph_.apply_all_binary_backward<true>(nullsp_kkt_solve::backward_pass);
+                            // );
+                            // timed_block(
+                            graph_.apply_all_unary_parallel(nullsp_kkt_solve::post_solving_steps);
+                            // );
+                            // timed_block(
+                            graph_.apply_all_binary_forward<false, true>(nullsp_kkt_solve::forward_rollout);
+                            // );
+                            // timed_block(
+                            graph_.apply_all_unary_parallel(nullsp_kkt_solve::post_rollout_steps);
+                            // );
+                            // timed_block(
+                            graph_.apply_all_unary_parallel(nullsp_kkt_solve::pre_solving_steps_0);
+                            // );
         );
         std::atomic<double> cost_all{0.};
         graph_.apply_all_unary_parallel([&cost_all](auto *n) {

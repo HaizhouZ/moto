@@ -48,7 +48,7 @@ node_data_ptr_t data_mgr::get_data(const ocp_ptr_t &prob) {
     }
 }
 
-node_data* data_mgr::acquire(const ocp_ptr_t &prob) {
+node_data *data_mgr::acquire(const ocp_ptr_t &prob) {
     auto p = get_data(prob);
     if (p) {
         return p.release();
@@ -57,17 +57,17 @@ node_data* data_mgr::acquire(const ocp_ptr_t &prob) {
     }
 }
 
-node_data* data_mgr::acquire(const node_data* rhs) {
+node_data *data_mgr::acquire(const node_data *rhs) {
     return acquire(rhs->ocp_);
 }
 
-void data_mgr::release(node_data* data) {
+void data_mgr::release(node_data *data) {
     auto &pool = data_[data->sym_->prob_->uid_];
     std::lock_guard _lock(pool.mtx_);
     pool.emplace(data);
 }
 
-void node_data::update_approximation() {
+void node_data::update_approximation(bool eval_only) {
     /// @todo: always eval residual?
     // call to precompute
     for (const auto &expr : ocp_->expr_[__pre_comp]) {
@@ -75,10 +75,10 @@ void node_data::update_approximation() {
         f.call((*shared_)[f]);
     }
     for_funcs(ocp_,
-              [this](size_t field, size_t idx_expr, func_impl &_f) {
-                  _f.evaluate_approx(*sparse_[field][idx_expr],
-                                      true, _f.order() >= approx_order::first,
-                                      _f.order() >= approx_order::second);
+              [this, eval_only](size_t field, size_t idx_expr, func_impl &_f) {
+                  _f.evaluate_approx(*sparse_[field][idx_expr], true,
+                                     !eval_only && _f.order() >= approx_order::first,
+                                     !eval_only && _f.order() >= approx_order::second);
               });
 }
 

@@ -5,8 +5,10 @@ namespace ipm_impl {
 void ipm_constr_impl::initialize(soft_constr_data &data) {
     constr_impl::value_impl(data);
     auto &d = static_cast<ipm_data &>(data);
-    d.slack_ = (-data.v_).cwiseMax(1e-8); // clip
-    d.multiplier_.setConstant(1.0);
+    d.slack_ = (-data.v_).cwiseMax(1e-3); // clip
+    d.mu_ = 1e-2;
+    d.multiplier_.array() = d.mu_ / d.slack_.array();
+    d.multiplier_ = d.multiplier_.cwiseMin(1e3); // clip
 }
 void ipm_constr_impl::post_rollout(soft_constr_data &data) {
     auto &d = static_cast<ipm_data &>(data);
@@ -40,10 +42,26 @@ void ipm_constr_impl::jacobian_impl(sp_approx_map &data) {
     d.scaled_res_ = d.diag_scaling.cwiseProduct(d.v_);
     d.scaled_res_.array() += d.mu_ / d.slack_.array();
     // modification of jacobian
+    // fmt::print("--------------------\n");
+    // fmt::print("constraint name: {}\n", d.func_.name_);
+    // for (auto &arg : d.func_.in_args()) {
+    //     fmt::print("arg: {}: {}\n", arg->name_, d[arg].transpose());
+    // }
     size_t j_idx = 0;
     for (auto &j : d.jac_) {
         if (j.rows() != 0 && j.cols() != 0) { // skip empty jac
+                                              // if (d.vjp_[j_idx].hasNaN()) {
+            // fmt::print("scaled_res: {:.3}\n", d.scaled_res_.transpose());
+            // fmt::print("NaN in vjp[{}]\n", j_idx);
+            // }
+            // fmt::print("scaled_res: {:.3}\n", d.scaled_res_.transpose());
+            // fmt::print("jac: \n{:.3}\n", j);
             d.vjp_[j_idx].noalias() += d.scaled_res_.transpose() * j;
+            // fmt::print("vjp: {:.3}\n", d.vjp_[j_idx]);
+            // if (d.vjp_[j_idx].hasNaN()) {
+            //     fmt::print("vjp: {:.3}\n", d.vjp_[j_idx]);
+            //     fmt::print("NaN in vjp[{}]\n", j_idx);
+            // }
         }
         j_idx++;
     }
@@ -56,6 +74,9 @@ void ipm_constr_impl::jacobian_impl(sp_approx_map &data) {
                 if (inner.rows() != 0 && inner.cols() != 0) {
                     inner.noalias() += d.jac_[outer_idx].transpose() * d.diag_scaling.asDiagonal() * d.jac_[inner_idx];
                 }
+                // if (inner.hasNaN()) {
+                //     fmt::print("NaN in hess[{}][{}]\n", outer_idx, inner_idx);
+                // }
                 inner_idx++;
             }
         }

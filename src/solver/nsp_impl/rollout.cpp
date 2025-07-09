@@ -1,7 +1,7 @@
 #include <moto/ocp/approx_storage.hpp>
 #include <moto/solver/nullspace_data.hpp>
 #include <moto/solver/ns_riccati_solve.hpp>
-#include <iostream>
+#include <moto/solver/ineq_soft_solve.hpp>
 
 #define a 1
 
@@ -19,6 +19,7 @@ void post_rollout_steps(riccati_data *cur) {
     auto &d = *cur;
     auto &nsp = *d.nsp_;
     d.prim_step[__u].noalias() = d.d_u.k + d.d_u.K * d.prim_step[__x];
+    ineq_soft_solve::post_rollout(cur);
     d.sym_->value_[__x].noalias() += a * d.prim_step[__x];
     d.sym_->value_[__u].noalias() += a * d.prim_step[__u];
     d.sym_->value_[__y].noalias() += a * d.prim_step[__y];

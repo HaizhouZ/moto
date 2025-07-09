@@ -25,9 +25,11 @@ struct node_data {
     node_data(const ocp_ptr_t &prob);
     virtual ~node_data() = default;
     // get value of the whole field
-    auto& value(field_t f) { return sym_->value_[f]; }
+    auto &value(field_t f) { return sym_->value_[f]; }
     // get value of the sym variable
-    auto value(const sym &sym) { return (*sym_)[sym]; }
+    template <typename derived>
+        requires(std::derived_from<derived, expr_impl>)
+    auto value(const std::shared_ptr<derived> &sym) { return (*sym_)[sym]; }
     /**
      * @brief get the sparse func data by pointer
      *

@@ -69,18 +69,24 @@ int main() {
     });
     // propogate parameters
     graph.apply_all_binary_forward([&](node_data *cur, node_data *next) {
+        cur->value(__y) = next->value(__x);
+        for (auto &arg : cur->ocp_->expr_[__x]) {
+            auto &next_arg = expr_index::get<sym>(arg->name_ + "_nxt");
+            cur->value(next_arg) = next->value(arg);
+        }
         next->value(dyn.active_l_cur) = cur->value(dyn.active_l);
         next->value(dyn.active_r_cur) = cur->value(dyn.active_r);
     });
 
-    std::cout << "\nleft\n";
-    graph.apply_all_unary_forward([&](node_data *data) {
-        std::cout << data->value(dyn.active_l) << ',';
-    });
-    std::cout << "\nright\n";
-    graph.apply_all_unary_forward([&](node_data *data) {
-        std::cout << data->value(dyn.active_r) << ',';
-    });
+    // std::cout << "\nleft\n";
+    // graph.apply_all_unary_forward([&](node_data *data) {
+    //     std::cout << data->value(dyn.active_l) << ',';
+    // });
+    // std::cout << "\nright\n";
+    // graph.apply_all_unary_forward([&](node_data *data) {
+    //     std::cout << data->value(dyn.active_r) << ',';
+    // });
+    // std::cout << "\n";
 
     solver.update(10);
 

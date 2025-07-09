@@ -8,7 +8,7 @@ void cost_impl::substitute_x_to_y() {
         case __x:
             fmt::print("substitution in cost {}: inarg {} with {}\n",
                        name_, arg->name_, arg->name_ + "_nxt");
-            substitute(arg, sym(expr_index::get(arg->name_ + "_nxt")));
+            substitute(arg, expr_index::get<sym>(arg->name_ + "_nxt"));
             break;
         case __u:
             throw std::runtime_error(fmt::format(
