@@ -86,8 +86,8 @@ def_ptr(soft_constr_impl);
  * @brief wrapper of constr_impl, in fact a pointer
  *
  */
-struct constr : public std::shared_ptr<constr_impl> {
-    using impl_ptr_t = std::shared_ptr<constr_impl>;
+struct constr : public shared_<constr_impl, constr> {
+    using shared = shared_<constr_impl, constr>;
     /**
      * @brief Construct a new constr object
      *
@@ -97,7 +97,7 @@ struct constr : public std::shared_ptr<constr_impl> {
      * @param field field type, default to __undefined
      */
     constr(const std::string &name, approx_order order = approx_order::first, size_t dim = dim_tbd, field_t field = __undefined)
-        : impl_ptr_t(new constr_impl(name, order, dim, field)) {}
+        : shared(new constr_impl(name, order, dim, field)) {}
     /**
      * @brief Construct a new constr object from casadi SX expression
      *
@@ -109,14 +109,14 @@ struct constr : public std::shared_ptr<constr_impl> {
      */
     constr(const std::string &name, std::initializer_list<sym> in_args, const cs::SX &out,
            approx_order order = approx_order::first, field_t field = __undefined)
-        : impl_ptr_t(new constr_impl(name, order, out.size1(), field)) {
+        : shared(new constr_impl(name, order, out.size1(), field)) {
         assert(out.size2() == 1 && "constr output must be a column vector");
         (*this)->set_from_casadi(in_args, out);
     }
     template <typename derived_impl>
         requires(std::derived_from<derived_impl, constr_impl>)
     /// @brief will get the shared ownership of impl_rval
-    constr(derived_impl *impl_rval) : impl_ptr_t(impl_rval) {}
+    constr(derived_impl *impl_rval) : shared(impl_rval) {}
     /**
      * @brief set the constraint as equality constraint
      *
@@ -157,7 +157,7 @@ struct constr : public std::shared_ptr<constr_impl> {
         return *this;
     }
     constr() = default;
-    using impl_ptr_t::operator=;
+    using shared::operator=;
 };
 } // namespace moto
 

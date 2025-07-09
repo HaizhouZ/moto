@@ -41,33 +41,47 @@ struct expr_list : public std::vector<expr_ptr_t> {
     }
     using std::vector<expr_ptr_t>::vector; /// < inherit constructors
 };
+struct shared_base {
+    virtual expr_impl &val() const = 0;
+};
+
+template <typename derived>
+    requires std::derived_from<derived, expr_impl>
+struct shared_ptr_ : public std::shared_ptr<derived>, public shared_base {
+    using std::shared_ptr<derived>::shared_ptr;
+    expr_impl &val() const override { return *(*this); }
+};
+
+def_ptr(shared_base);
 /**
  * @brief index of all syms
  *
  */
-class expr_index {
+struct expr_index {
     /// all expressions, indexed by uid, nullptr if not finalized (only placeholder)
-    inline static std::vector<expr_ptr_t> all_;
+    inline static std::vector<shared_base_ptr_t> all_;
     /// all expressions, indexed by name
-    inline static std::unordered_map<std::string, expr_ptr_t> by_name_{};
-    /// allow expr_impl to access private members
-    friend class expr_impl;
+    inline static std::unordered_map<std::string, shared_base_ptr_t> by_name_{};
 
-  public:
     /// @brief get an expression by name
-    static const auto &get(const std::string &name) { return by_name_.at(name); }
+    template <typename T = shared_ptr_<expr_impl>,
+              typename derived = std::remove_reference_t<decltype(*std::declval<T>())>>
+        requires(std::is_base_of_v<shared_ptr_<derived>, T> && std::is_base_of_v<expr_impl, derived>)
+    static const T &get(const std::string &name) { return static_cast<T &>(*by_name_.at(name)); }
     /// @brief get an expression by uid
-    static const auto &get(size_t uid) { return all_.at(uid); }
+    template <typename T = shared_ptr_<expr_impl>,
+              typename derived = std::remove_reference_t<decltype(*std::declval<T>())>>
+        requires(std::is_base_of_v<shared_ptr_<derived>, T> && std::is_base_of_v<expr_impl, derived>)
+    static const auto &get(size_t uid) { return static_cast<T &>(*all_.at(uid)); }
 };
 constexpr size_t dim_tbd = 0;
 /**
  * @brief general expression base class
  */
-class expr_impl : public std::enable_shared_from_this<expr_impl> {
+class expr_impl {
   private:
     inline static size_t max_uid = 0; /// < uid used to index global expressions
     bool finalized = false;
-    void add_to_index();
 
   protected:
     expr_list aux_;
@@ -115,13 +129,38 @@ class expr_impl : public std::enable_shared_from_this<expr_impl> {
      */
     expr_list &get_aux() { return aux_; }
 };
+template <typename derived, typename derived_shared = shared_ptr_<derived>>
+    requires std::derived_from<derived, expr_impl>
+struct shared_ : public shared_ptr_<derived> {
+    using shared_ptr = shared_ptr_<derived>;
+    shared_(derived *p) : shared_ptr(p) { set_shared_from(p); }
+    void reset(derived *p) {
+        expr_index::all_[(*this)->uid_].reset(); // clear previous one
+        expr_index::by_name_.erase((*this)->name_); // clear previous one
+        shared_ptr::reset(p);
+        set_shared_from(p);
+    }
+    void set_shared_from(derived *p) {
+        const auto &cur = static_cast<derived_shared&>(*this);
+        expr_index::all_[p->uid_].reset(new derived_shared(cur));
+        auto [it, inserted] = expr_index::by_name_.try_emplace(p->name_, expr_index::all_[p->uid_]);
+        if (!inserted and it->second->val().uid_ != p->uid_) {
+            throw std::runtime_error(
+                fmt::format("expr name conflicts {} of uid {} with existing uid {}",
+                            p->name_, p->uid_, it->second->val().uid_));
+        }
+    }
+    using shared_ptr::operator->;
+    shared_() = default;
+};
 namespace cs = casadi;
 
 /**
  * @brief pointer wrapper of symbolic expressions like primal variables or parameters
  * @warning symbolic computation is via cs::SX, so dont cast expr_ptr_t back to sym! (unless you know it is safe)
  */
-struct sym : public expr_ptr_t, public cs::SX {
+struct sym : public cs::SX, public shared_<expr_impl, sym> {
+    using base = shared_<expr_impl, sym>;
     /**
      * @brief Construct a new sym object
      *
@@ -130,16 +169,9 @@ struct sym : public expr_ptr_t, public cs::SX {
      * @param type type of the symbolic variable, must be one of the symbolic fields
      */
     sym(const std::string &name, size_t dim, field_t type)
-        : expr_ptr_t(new expr_impl(name, dim, type)), cs::SX(cs::SX::sym(name, dim)) {
+        : base(new expr_impl(name, dim, type)), cs::SX(cs::SX::sym(name, dim)) {
         assert(size_t(type) <= field::num_sym || type == __usr_var);
     }
-    /**
-     * @brief Construct a new sym object from an existing expr_ptr_t
-     * @note this will not copy the expr, but use the ones from rhs
-     * @param rhs another expr_ptr_t to copy from
-     */
-    sym(const expr_ptr_t &rhs)
-        : expr_ptr_t(rhs), cs::SX(cs::SX::sym(rhs->name_, rhs->dim_)) {}
     sym() = default;
     /**
      * @brief check if this sym is equal to another sym
@@ -150,13 +182,8 @@ struct sym : public expr_ptr_t, public cs::SX {
         return expr_ptr_t::get() == rhs.get();
     }
 
-    using expr_ptr_t::operator->; // inherit operator-> to access expr_impl methods
-    using cs::SX::get;            // deal with the ambiguity of get() in cs::SX and expr_ptr_t
-    /**
-     * @brief get the underlying expr_impl pointer
-     * @return expr_impl pointer
-     */
-    expr_impl *get() const { return expr_ptr_t::get(); }
+    using base::operator->; // inherit operator-> to access expr_impl methods
+    using base::get;
 };
 } // namespace moto
 

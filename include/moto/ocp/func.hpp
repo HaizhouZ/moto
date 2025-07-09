@@ -189,7 +189,7 @@ class func_impl : public expr_impl {
      */
     virtual void finalize_impl();
 
-    void substitute(sym &arg, const sym &rhs);
+    void substitute(const sym &arg, const sym &rhs);
 
   public:
     virtual void value_impl([[maybe_unused]] sp_approx_map &data) { value(data); };

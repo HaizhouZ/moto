@@ -24,7 +24,8 @@ struct node_data {
         sparse_; /// < sparse view per func
     node_data(const ocp_ptr_t &prob);
     virtual ~node_data() = default;
-
+    // get value of the whole field
+    auto& value(field_t f) { return sym_->value_[f]; }
     // get value of the sym variable
     auto value(const sym &sym) { return (*sym_)[sym]; }
     /**
@@ -47,8 +48,8 @@ struct node_data {
     auto &data(const std::shared_ptr<derived> &f) {
         return data(*f);
     }
-    
-    void update_approximation();
+
+    void update_approximation(bool eval_only = false);
 };
 
 } // namespace moto

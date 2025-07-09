@@ -20,14 +20,14 @@ def_ptr(cost_impl);
  * @brief wrapper of cost_impl, in fact a pointer
  *
  */
-struct cost : public cost_impl_ptr_t {
+struct cost : public shared_<cost_impl, cost> {
     /**
      * @brief Construct a new cost object
      *
      * @param name name of the cost
      */
     cost(const std::string &name)
-        : cost_impl_ptr_t(new cost_impl(name)) {
+        : shared_(new cost_impl(name)) {
     }
     /**
      * @brief Construct a new cost object from casadi expression
@@ -37,16 +37,16 @@ struct cost : public cost_impl_ptr_t {
      * @param out output casadi SX expression
      */
     cost(const std::string &name, std::initializer_list<sym> in_args, const cs::SX &out)
-        : cost_impl_ptr_t(new cost_impl(name)) {
+        : shared_(new cost_impl(name)) {
         assert(out.is_scalar() && "cost output must be a scalar");
         (*this)->set_from_casadi(in_args, out);
     }
     cost() = default;
-    using cost_impl_ptr_t::operator=;
+    using shared_::operator=;
     template <typename derived_impl>
         requires(std::derived_from<derived_impl, cost_impl>)
     /// @brief will get the shared ownership of impl_rval
-    cost(derived_impl *impl_rval) : cost_impl_ptr_t(impl_rval) {}
+    cost(derived_impl *impl_rval) : shared_(impl_rval) {}
     /**
      * @brief make state-only cost, appending suffix "_terminal" to costs
      *
