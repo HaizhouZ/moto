@@ -12,11 +12,11 @@ void compute_primal_sensitivity(riccati_data *cur) {
         d.d_u.k = -nsp.z_u_k;
         nsp.llt_ns_.solveInPlace(d.d_u.k);
     } else if (d.rank_status_ == rank_status::fully_constrained) {
-        d.d_u.k = -nsp.u_y_k;
+        d.d_u.k = nsp.u_y_k;
     } else {
         nsp.u_z_k.noalias() = -nsp.Z.transpose() * nsp.z_u_k;
         nsp.llt_ns_.solveInPlace(nsp.u_z_k);
-        d.d_u.k.noalias() = nsp.Z * nsp.u_z_k - nsp.u_y_k;
+        d.d_u.k.noalias() = nsp.Z * nsp.u_z_k + nsp.u_y_k;
     }
 
     // compute k_y

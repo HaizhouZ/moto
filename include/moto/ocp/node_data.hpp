@@ -54,6 +54,8 @@ struct node_data {
         return data(*f);
     }
 
+    scalar_t cost() const { return dense_->cost_; }
+
     void update_approximation(bool eval_only = false);
 };
 

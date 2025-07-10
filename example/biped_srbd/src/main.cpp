@@ -35,7 +35,7 @@ int main() {
     init_node->value(dyn.r_r) << 0, -0.1, 0.; // initial position of the right foot
     init_node->value(dyn.active_l_cur).setOnes();
     init_node->value(dyn.active_r_cur).setOnes();
-    init_node->value(dyn.r_d) << 1.0, 0, 0.5; // desired position of the com
+    init_node->value(dyn.r_d) << 0., 0., 0.; // desired position of the com
 
     graph.apply_all_unary_parallel([&](node_data *data) {
         *data->sym_ = *init_node->sym_; // initialize symbolic data
@@ -87,14 +87,25 @@ int main() {
     //     std::cout << data->value(dyn.active_r) << ',';
     // });
     // std::cout << "\n";
-
     solver.update(1);
     size_t step = 0;
     graph.apply_all_unary_forward([&](node_data *data) {
         std::cout << "------------- Step: " << step++ << '\n';
-        std::cout << "cost: " << data->dense_->cost_ << '\n';
-        std::cout << "dyn_res: " << data->dense_->approx_[__dyn].v_.transpose() << '\n';
+        std::cout << "cost: " << data->cost() << '\n';
+        std::cout << "dyn_res: " << data->value(__dyn).transpose() << '\n';
         std::cout << "dual: " << data->dense_->dual_[__dyn].transpose() << '\n';
+        // std::cout << "dynjacx: \n" << data->dense_->approx_[__dyn].jac_[__x] << '\n';
+        // std::cout << "dynjacu: \n" << data->dense_->approx_[__dyn].jac_[__u] << '\n';
+        // std::cout << "dynjacy: \n" << data->dense_->approx_[__dyn].jac_[__y] << '\n';
+        // std::cout << "costx: " << data->dense_->jac_[__x] << '\n';
+        // std::cout << "costu: " << data->dense_->jac_[__u] << '\n';
+        // std::cout << "costy: " << data->dense_->jac_[__y] << '\n';
+        // std::cout << "costxx: \n" << data->dense_->hessian_[__x][__x] << '\n';
+        // std::cout << "costxu: \n" << data->dense_->hessian_[__u][__x] << '\n';
+        // std::cout << "costuu: \n" << data->dense_->hessian_[__u][__u] << '\n';
+        // std::cout << "costyy: \n" << data->dense_->hessian_[__y][__y] << '\n';
+        // std::cout << "costyx: \n" << data->dense_->hessian_[__y][__x] << '\n';
+        // std::cout << "costyu: \n" << data->dense_->hessian_[__y][__u] << '\n';
         std::cout << "r: " << data->value(dyn.r).transpose() << '\n';
         std::cout << "r_n: " << data->value(dyn.r_n).transpose() << '\n';
         std::cout << "v: " << data->value(dyn.v).transpose() << '\n';

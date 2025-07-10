@@ -1,5 +1,5 @@
 #include <Eigen/Eigenvalues>
-#include <moto/ocp/approx_storage.hpp>
+#include <moto/ocp/dynamics.hpp>
 #include <moto/solver/ns_riccati_solve.hpp>
 #include <moto/solver/nullspace_data.hpp>
 
@@ -68,8 +68,8 @@ void ns_factorization(riccati_data *cur) {
             nsp.u_z_k.conservativeResize(nsp.Z.cols());
             nsp.u_z_K.conservativeResize(nsp.Z.cols(), Eigen::NoChange);
         }
-        nsp.u_y_k.noalias() = nsp.lu_eq_.solve(nsp.s_c_stacked_0_k);
-        nsp.u_y_K.noalias() = nsp.lu_eq_.solve(nsp.s_c_stacked_0_K);
+        nsp.u_y_k.noalias() = -nsp.lu_eq_.solve(nsp.s_c_stacked_0_k);
+        nsp.u_y_K.noalias() = -nsp.lu_eq_.solve(nsp.s_c_stacked_0_K);
     }
 }
 
@@ -80,7 +80,10 @@ void partial_value_derivative(riccati_data *prev, riccati_data *cur) {
     auto &d_pre = *prev;
     auto &nsp = *d.nsp_;
     // add P part of V_x/V_xx to Q_y/Q_yy of previous node
-    d_pre.Q_y.noalias() += d.Q_x - nsp.F_0_k.transpose() * d.Q_yx;
+    // use Q_x/Q_xx as V_x/V_xx
+    d.Q_x.noalias() += -nsp.F_0_k.transpose() * d.Q_yx;
+    // d_pre.Q_y.noalias() += (d.Q_x - nsp.F_0_k.transpose() * d.Q_yx) *
+    //                        dynamics::permutation_from_y_to_x(prev->ocp_, cur->ocp_);
     // +d.Q_y * d.F_0_K is done in backward pass
     // because Q_y has V_y in it
     if (nsp.F_0_K.array().isNaN().any() || d.Q_xx.array().isNaN().any()) {
@@ -90,7 +93,14 @@ void partial_value_derivative(riccati_data *prev, riccati_data *cur) {
                   << d.Q_xx << "\n";
         throw std::runtime_error("NaN detected in F_0_K or Q_xx");
     }
-    d_pre.Q_yy.noalias() += d.Q_xx - (d.Q_yx.transpose() * nsp.F_0_K + nsp.F_0_K.transpose() * d.Q_yx);
+    if (d.Q_xx.ldlt().info() != Eigen::Success) {
+        fmt::print("Q_xx is not positive definite\n");
+        fmt::print("Eigenvalues of Q_xx: \n{}\n", d.Q_xx.eigenvalues().transpose());
+    }
+    d.Q_xx.noalias() += -(d.Q_yx.transpose() * nsp.F_0_K + nsp.F_0_K.transpose() * d.Q_yx);
+    // d_pre.Q_yy.noalias() += (d.Q_xx -
+    //                          (d.Q_yx.transpose() * nsp.F_0_K + nsp.F_0_K.transpose() * d.Q_yx)) *
+    //                         dynamics::permutation_from_y_to_x(prev->ocp_, cur->ocp_);
 }
 /// @todo set terminal Q_y, Q_yy
 
