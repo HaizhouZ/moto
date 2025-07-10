@@ -73,7 +73,7 @@ int main() {
     });
     // propogate parameters
     graph.apply_all_binary_forward([&](node_data *cur, node_data *next) {
-        dynamics::copy_x_to_y(next->value(__x), cur->value(__y), next->ocp_, cur->ocp_);
+        copy_x_to_y(next->value(__x), cur->value(__y), next->ocp_, cur->ocp_);
         next->value(dyn.active_l_cur) = cur->value(dyn.active_l);
         next->value(dyn.active_r_cur) = cur->value(dyn.active_r);
     });

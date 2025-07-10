@@ -30,4 +30,27 @@ void ocp::add(expr_ptr_t &&expr) {
     if (add_impl(expr))
         expr_[expr->field_].emplace_back(std::move(expr));
 }
+
+Eigen::PermutationMatrix<-1, -1> &permutation_from_y_to_x(const ocp_ptr_t &prob_y, const ocp_ptr_t &prob_x) {
+    using perm_type = Eigen::PermutationMatrix<-1, -1>;
+    static std::unordered_map<size_t, std::unordered_map<size_t, perm_type>> perm_cache;
+    assert(prob_y->dim_[__y] == prob_x->dim_[__x] && "dimension between states must match!");
+    perm_cache.try_emplace(prob_y->uid_);
+    auto [it, inserted] = perm_cache[prob_y->uid_].try_emplace(prob_x->uid_, prob_x->dim_[__x]);
+    if (!inserted)
+        return it->second; // already exists
+    else {
+        auto &perm = it->second;
+        size_t col_y = 0;
+        for (auto &y : prob_y->expr_[__y]) {
+            auto &x = expr_lookup::get<sym>(y->uid_ - 1);
+            size_t x0 = prob_x->get_expr_start(*x);
+            size_t x1 = x0 + x->dim_;
+            for (size_t i : range(x0, x1)) {
+                perm.indices()[col_y++] = i;
+            }
+        }
+        return perm;
+    }
+}
 } // namespace moto

@@ -57,19 +57,31 @@ void ns_factorization(riccati_data *cur) {
         }
         nsp.lu_eq_.compute(nsp.s_c_stacked);
         size_t rank = nsp.lu_eq_.rank();
+        // fmt::print("rank of equality constraints: {}\n", rank);
+
         if (rank == 0)
             d.rank_status_ = rank_status::unconstrained;
-        else if (rank == d.ncstr) {
-            d.rank_status_ = rank_status::fully_constrained;
-        } else {
-            nsp.Z = nsp.lu_eq_.kernel();
-            d.rank_status_ = rank_status::constrained;
-            nsp.U_z.conservativeResize(nsp.Z.cols(), nsp.Z.cols());
-            nsp.u_z_k.conservativeResize(nsp.Z.cols());
-            nsp.u_z_K.conservativeResize(nsp.Z.cols(), Eigen::NoChange);
+        else {
+            // pre compute
+            nsp.u_y_k.noalias() = -nsp.lu_eq_.solve(nsp.s_c_stacked_0_k);
+            nsp.u_y_K.noalias() = -nsp.lu_eq_.solve(nsp.s_c_stacked_0_K);
+            if (rank == d.ncstr) {
+                d.rank_status_ = rank_status::fully_constrained;
+                d.d_u.K = nsp.u_y_K;
+            } else {
+                nsp.Z = nsp.lu_eq_.kernel();
+                // fmt::print("nullspace :\n {}\n", nsp.Z);
+                // fmt::print("jac: \n {}\n", nsp.s_c_stacked);
+                // fmt::print("scstacked_0_k :\n {}\n", nsp.s_c_stacked_0_k.transpose());
+                // fmt::print("nyk :\n {}\n", nsp.u_y_k.transpose());
+                // fmt::print("scstacked_0_K :\n {}\n", nsp.s_c_stacked_0_K);
+                // fmt::print("nyK :\n {}\n", nsp.u_y_K);
+                d.rank_status_ = rank_status::constrained;
+                nsp.U_z.conservativeResize(nsp.Z.cols(), nsp.Z.cols());
+                nsp.u_z_k.conservativeResize(nsp.Z.cols());
+                nsp.u_z_K.conservativeResize(nsp.Z.cols(), Eigen::NoChange);
+            }
         }
-        nsp.u_y_k.noalias() = -nsp.lu_eq_.solve(nsp.s_c_stacked_0_k);
-        nsp.u_y_K.noalias() = -nsp.lu_eq_.solve(nsp.s_c_stacked_0_K);
     }
 }
 

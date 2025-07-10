@@ -57,7 +57,6 @@ void riccati_recursion(riccati_data *cur, riccati_data *prev) {
         nsp.z_u_K.noalias() = nsp.u_0_p_K - nsp.U * nsp.u_y_K;
         if (d.rank_status_ == rank_status::fully_constrained) {
             // fully constrained
-            d.d_u.K = nsp.u_y_K;
         } else {
             // solve nullspace system
             nsp.U_z.noalias() = nsp.Z.transpose() * nsp.U * nsp.Z;
@@ -70,14 +69,14 @@ void riccati_recursion(riccati_data *cur, riccati_data *prev) {
     d.Q_x.noalias() += -d.Q_y * nsp.F_0_K + nsp.F_0_k.transpose() * nsp.Q_yy_F_0_K +
                        nsp.z_u_k.transpose() * d.d_u.K;
     d.Q_xx.noalias() += nsp.F_0_K.transpose() * nsp.Q_yy_F_0_K + nsp.z_u_K.transpose() * d.d_u.K;
-    if (d.ncstr > 0) {
+    if (d.rank_status_ != rank_status::unconstrained) {
         d.Q_x.noalias() += nsp.u_y_k.transpose() * nsp.u_0_p_K;
         d.Q_xx.noalias() += nsp.u_y_K.transpose() * nsp.u_0_p_K;
     }
     // update value function derivatives of previous node
     if (prev != nullptr) [[likely]] {
         auto &d_pre = *prev;
-        auto& perm = dynamics::permutation_from_y_to_x(prev->ocp_, cur->ocp_);
+        auto& perm = permutation_from_y_to_x(prev->ocp_, cur->ocp_);
         d.Q_x *= perm;
         d.Q_xx *= perm;
         d.Q_xx.applyOnTheLeft(perm.transpose());
