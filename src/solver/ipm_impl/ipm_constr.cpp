@@ -61,11 +61,16 @@ void ipm_constr_impl::jacobian_impl(sp_approx_map &data) {
             // fmt::print("scaled_res: {:.3}\n", d.scaled_res_.transpose());
             // fmt::print("NaN in vjp[{}]\n", j_idx);
             // }
-            // fmt::print("scaled_res: {:.3}\n", d.scaled_res_.transpose());
-            // fmt::print("jac: \n{:.3}\n", j);
             d.vjp_[j_idx].noalias() += d.scaled_res_.transpose() * j;
             // fmt::print("vjp: {:.3}\n", d.vjp_[j_idx]);
             if (d.vjp_[j_idx].hasNaN()) {
+                fmt::print("--------------------\n");
+                fmt::print("constraint name: {}\n", d.func_.name_);
+                for (auto &arg : d.func_.in_args()) {
+                    fmt::print("arg: {}: {}\n", arg->name_, d[arg].transpose());
+                }
+                fmt::print("jac: \n{:.3}\n", j);
+                fmt::print("scaled_res: {:.3}\n", d.scaled_res_.transpose());
                 fmt::print("vjp: {:.3}\n", d.vjp_[j_idx]);
                 fmt::print("NaN in vjp[{}]\n", j_idx);
             }

@@ -19,6 +19,7 @@ struct constr_data : public sp_approx_map {
     vector_ref multiplier_;
     std::vector<row_vector_ref> vjp_;
     constr_data(approx_storage &raw, sp_approx_map &&d, constr_impl *cstr);
+    constr_data(sp_approx_map_ptr_t &&rhs) : constr_data(std::move(dynamic_cast<constr_data &>(*rhs))) {}
 };
 def_unique_ptr(constr_data);
 /**
@@ -66,10 +67,11 @@ def_ptr(constr_impl);
  */
 struct soft_constr_data : public constr_data {
     std::vector<vector_ref> prim_step_; // to be set
-    soft_constr_data(constr_data &&d)
+    soft_constr_data(sp_approx_map_ptr_t &&d)
         : constr_data(std::move(d)) {
     }
 };
+def_unique_ptr(soft_constr_data);
 /**
  * @brief soft constraint interface class
  * @note must implement make_approx_map
@@ -81,7 +83,9 @@ class soft_constr_impl : public constr_impl {
     virtual void post_rollout(soft_constr_data &data) = 0;
     virtual void line_search_step(soft_constr_data &data, scalar_t alpha) = 0;
     soft_constr_impl(constr_impl &&rhs) : constr_impl(std::move(rhs)) {}
-    sp_approx_map_ptr_t make_approx_map(sym_data &primal, approx_storage &raw, shared_data &shared) = 0;
+    sp_approx_map_ptr_t make_approx_map(sym_data &primal, approx_storage &raw, shared_data &shared) override {
+        return std::make_unique<soft_constr_data>(constr_impl::make_approx_map(primal, raw, shared));
+    };
 };
 def_ptr(soft_constr_impl);
 /**

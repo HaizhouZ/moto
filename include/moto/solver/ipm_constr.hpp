@@ -14,7 +14,7 @@ struct ipm_data : public soft_constr_data {
     double mu_;          ///< barrier parameter
     vector d_slack_;     // newton step for slack variables
     vector d_multipler_; // newton step for multipliers
-    ipm_data(constr_data &&d)
+    ipm_data(sp_approx_map_ptr_t &&d)
         : soft_constr_data(std::move(d)) {
         slack_.resize(func_.dim_);
         comp_res_.resize(func_.dim_);
@@ -42,7 +42,7 @@ class ipm_constr_impl : public soft_constr_impl {
      * @return sp_approx_map_ptr_t
      */
     sp_approx_map_ptr_t make_approx_map(sym_data &primal, approx_storage &raw, shared_data &shared) override {
-        return sp_approx_map_ptr_t(new ipm_data(static_cast<soft_constr_data&&>(*constr_impl::make_approx_map(primal, raw, shared))));
+        return std::make_unique<ipm_data>(soft_constr_impl::make_approx_map(primal, raw, shared));
     }
 };
 

@@ -20,14 +20,14 @@ void ns_sqp::update(size_t n_iter) {
             cur->update_approximation(true);
             ineq_soft_solve::initialize(cur);
         });
-        graph_.apply_all_unary_parallel(nullsp_kkt_solve::update_approx);
         std::atomic<double> cost_all{0.};
         graph_.apply_all_unary_parallel([&cost_all](auto *n) {
             cost_all += n->dense_->cost_;
         });
         fmt::print("initial cost_total: {}\n", cost_all);
+        graph_.apply_all_unary_parallel(nullsp_kkt_solve::update_approx);
     }
-    constexpr scalar_t a = 1.0; // line search step size
+    constexpr scalar_t a = 0.3; // line search step size
     // );
     for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
         fmt::print("------------------------------------\n");
