@@ -32,11 +32,9 @@ void finalize_newton_step(riccati_data *cur) {
         // append last term in dynamics multipler computation
         d.dual_step[__eq_x] = d.d_lbd_s_c.head(d.ns);
         d.d_lbd_f.noalias() -= nsp.s_y.transpose() * d.dual_step[__eq_x];
-        d.dense_->dual_[__eq_x].noalias() += d.dual_step[__eq_x];
     }
     if (d.nc > 0) {
         d.dual_step[__eq_xu] = d.d_lbd_s_c.tail(d.nc);
-        d.dense_->dual_[__eq_xu].noalias() += d.dual_step[__eq_xu];
     }
     d.dual_step[__dyn].noalias() = nsp.lu_dyn_.transpose().solve(d.d_lbd_f);
 }
