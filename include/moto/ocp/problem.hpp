@@ -82,7 +82,13 @@ class ocp {
     inline size_t get_expr_start(const std::shared_ptr<derived> &expr) const {
         return get_expr_start(*expr);
     }
-    size_t get_expr_start(const expr_impl &expr) const;
+    size_t get_expr_start(const expr_impl &expr) const {
+        try {
+            return d_idx_.at(expr.uid_).first;
+        } catch (const std::exception &e) {
+            throw std::runtime_error(fmt::format("expr {} uid {} cannot be found", expr.name_, expr.dim_));
+        }
+    }
 };
 
 def_ptr(ocp);

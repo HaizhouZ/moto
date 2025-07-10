@@ -6,7 +6,7 @@
 namespace moto {
 namespace nullsp_kkt_solve {
 
-void pre_solving_steps_0(riccati_data *cur) {
+void update_approx(riccati_data *cur) {
     // collect constraint residuals and jacobians
     auto &d = *cur;
     d.dense_->cost_ = 0.;
@@ -22,7 +22,7 @@ void pre_solving_steps_0(riccati_data *cur) {
     cur->update_approximation();
 }
 
-void pre_solving_steps_1(riccati_data *cur) {
+void ns_factorization(riccati_data *cur) {
     // collect constraint residuals and jacobians
     auto &d = *cur;
     auto &nsp = *d.nsp_;
@@ -75,7 +75,7 @@ void pre_solving_steps_1(riccati_data *cur) {
 
 // these two cannot merge, because Q_y/yy should first be updated with
 // constr derivatives
-void pre_solving_steps_2(riccati_data *prev, riccati_data *cur) {
+void partial_value_derivative(riccati_data *prev, riccati_data *cur) {
     auto &d = *cur;
     auto &d_pre = *prev;
     auto &nsp = *d.nsp_;
@@ -84,12 +84,13 @@ void pre_solving_steps_2(riccati_data *prev, riccati_data *cur) {
     // +d.Q_y * d.F_0_K is done in backward pass
     // because Q_y has V_y in it
     if (nsp.F_0_K.array().isNaN().any() || d.Q_xx.array().isNaN().any()) {
-        std::cerr << "F_0_K:\n" << nsp.F_0_K << "\n";
-        std::cerr << "Q_xx:\n" << d.Q_xx << "\n";
+        std::cerr << "F_0_K:\n"
+                  << nsp.F_0_K << "\n";
+        std::cerr << "Q_xx:\n"
+                  << d.Q_xx << "\n";
         throw std::runtime_error("NaN detected in F_0_K or Q_xx");
     }
     d_pre.Q_yy.noalias() += d.Q_xx - (d.Q_yx.transpose() * nsp.F_0_K + nsp.F_0_K.transpose() * d.Q_yx);
-    
 }
 /// @todo set terminal Q_y, Q_yy
 

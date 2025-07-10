@@ -20,16 +20,21 @@ static inline void for_funcs(solver::data_base *data, Callback &&callback) {
         inner(f);
 }
 
-void initialize(solver::data_base *data) {
-    for_funcs(data, [data](auto &sf, auto &sd) {
+void initialize(solver::data_base *cur) {
+    for_funcs(cur, [cur](auto &sf, auto &sd) {
         sf.initialize(sd);
     });
 }
-void post_rollout(solver::data_base *data) {
-    for_funcs(data, [data](auto &sf, auto &sd) {
+void post_rollout(solver::data_base *cur) {
+    for_funcs(cur, [cur](auto &sf, auto &sd) {
         sf.post_rollout(sd);
     });
 }
-
+void line_search_step(solver::data_base *cur, scalar_t alpha) {
+    for_funcs(cur, [cur, alpha](soft_constr_impl &sf, soft_constr_data &sd) {
+        sf.line_search_step(sd, alpha);
+    });
+}
+ 
 } // namespace ineq_soft_solve
 } // namespace moto

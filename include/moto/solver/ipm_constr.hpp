@@ -32,6 +32,7 @@ class ipm_constr_impl : public soft_constr_impl {
     using soft_constr_impl::soft_constr_impl;
     void initialize(soft_constr_data &data) override final;
     void post_rollout(soft_constr_data &data) override final;
+    void line_search_step(soft_constr_data &data, scalar_t alpha) override final;
 
     /**
      * @brief make the sparse approximation data for the IPM
@@ -41,7 +42,7 @@ class ipm_constr_impl : public soft_constr_impl {
      * @return sp_approx_map_ptr_t
      */
     sp_approx_map_ptr_t make_approx_map(sym_data &primal, approx_storage &raw, shared_data &shared) override {
-        return sp_approx_map_ptr_t(new ipm_data(dynamic_cast<constr_data &&>(*constr_impl::make_approx_map(primal, raw, shared))));
+        return sp_approx_map_ptr_t(new ipm_data(static_cast<soft_constr_data&&>(*constr_impl::make_approx_map(primal, raw, shared))));
     }
 };
 

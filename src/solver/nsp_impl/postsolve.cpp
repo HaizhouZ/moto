@@ -4,7 +4,7 @@
 
 namespace moto {
 namespace nullsp_kkt_solve {
-void post_solving_steps(riccati_data *cur) {
+void compute_primal_sensitivity(riccati_data *cur) {
     auto &d = *cur;
     auto &nsp = *d.nsp_;
     // compute k_u

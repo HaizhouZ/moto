@@ -12,7 +12,7 @@ void kkt_diagnosis(riccati_data *cur) {
     }
     /// @todo some more maybe about constraints
 }
-void backward_pass(riccati_data *cur, riccati_data *prev) {
+void riccati_recursion(riccati_data *cur, riccati_data *prev) {
     auto &d = *cur;
     auto &nsp = *d.nsp_;
     // check positiveness
@@ -31,9 +31,9 @@ void backward_pass(riccati_data *cur, riccati_data *prev) {
     nsp.u_0_p_K.noalias() = d.Q_ux - nsp.F_u.transpose() * (d.Q_yx - nsp.Q_yy_F_0_K);
     // compute u_y
 
-    fmt::print("u_0_p_k: \n{}\n", nsp.u_0_p_k.transpose());
-    fmt::print("u_0_p_K: \n{}\n", nsp.u_0_p_K.transpose());
-    fmt::print("u_y_K: \n{}\n", nsp.u_y_K.transpose());
+    // fmt::print("u_0_p_k: \n{}\n", nsp.u_0_p_k.transpose());
+    // fmt::print("u_0_p_K: \n{}\n", nsp.u_0_p_K.transpose());
+    // fmt::print("u_y_K: \n{}\n", nsp.u_y_K.transpose());
     // compute z_u
     if (d.rank_status_ == rank_status::unconstrained) {
         nsp.z_u_k.noalias() = nsp.u_0_p_k;

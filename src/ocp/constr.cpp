@@ -5,8 +5,7 @@ constr_data::constr_data(approx_storage &raw,
                          sp_approx_map &&d,
                          constr_impl *f)
     : sp_approx_map(std::move(d)), merit_(&raw.cost_),
-      multiplier_(raw.dual_[f->field_].segment(raw.prob_->get_expr_start(*f),
-                                               f->dim_)) {
+      multiplier_(raw.prob_->extract(raw.dual_[f->field_], *f)) {
     const auto &in_args = f->in_args();
     multiplier_.setConstant(1.);
     for (size_t i = 0; i < in_args_.size(); i++) {

@@ -3,11 +3,9 @@
 #include <moto/solver/ns_riccati_solve.hpp>
 #include <moto/solver/ineq_soft_solve.hpp>
 
-#define a 1
-
 namespace moto {
 namespace nullsp_kkt_solve {
-void forward_rollout(riccati_data *cur, riccati_data *next) {
+void fwd_linear_rollout(riccati_data *cur, riccati_data *next) {
     // get_data(nodes_.front()).prim_step[__x].setZero();
     auto &d = *cur;
     d.prim_step[__y].noalias() = d.d_y.k + d.d_y.K * d.prim_step[__x];
@@ -15,14 +13,11 @@ void forward_rollout(riccati_data *cur, riccati_data *next) {
         next->prim_step[__x] = d.prim_step[__y];
     }
 }
-void post_rollout_steps(riccati_data *cur) {
+void finalize_newton_step(riccati_data *cur) {
     auto &d = *cur;
     auto &nsp = *d.nsp_;
     d.prim_step[__u].noalias() = d.d_u.k + d.d_u.K * d.prim_step[__x];
     ineq_soft_solve::post_rollout(cur);
-    d.sym_->value_[__x].noalias() += a * d.prim_step[__x];
-    d.sym_->value_[__u].noalias() += a * d.prim_step[__u];
-    d.sym_->value_[__y].noalias() += a * d.prim_step[__y];
     // multiplier
     // update hard constraint multipliers
     if (d.ncstr > 0) {
@@ -44,7 +39,6 @@ void post_rollout_steps(riccati_data *cur) {
         d.dense_->dual_[__eq_xu].noalias() += d.dual_step[__eq_xu];
     }
     d.dual_step[__dyn].noalias() = nsp.lu_dyn_.transpose().solve(d.d_lbd_f);
-    d.dense_->dual_[__dyn].noalias() += a * d.dual_step[__dyn];
 }
 } // namespace ns_riccati
 } // namespace moto

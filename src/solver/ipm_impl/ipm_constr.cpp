@@ -28,6 +28,13 @@ void ipm_constr_impl::post_rollout(soft_constr_data &data) {
     d.d_multipler_.array() = -d.multiplier_.array() + d.mu_ / d.slack_.array() - d.diag_scaling.array() * d.d_slack_.array();
     /// @todo iterative refinement for better accuracy?
 }
+void ipm_constr_impl::line_search_step(soft_constr_data &data, scalar_t alpha) {
+    auto &d = static_cast<ipm_data &>(data);
+    d.slack_.array() += alpha * d.d_slack_.array();
+    d.multiplier_.array() *= alpha * d.d_multipler_.array();
+    // ensure slack + step >= 1e-8
+    d.slack_ = d.slack_.array().max(1e-8);
+}
 void ipm_constr_impl::value_impl(sp_approx_map &data) {
     constr_impl::value_impl(data);
     auto &d = static_cast<ipm_data &>(data);

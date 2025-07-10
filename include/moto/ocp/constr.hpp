@@ -3,6 +3,7 @@
 
 #include <moto/ocp/func.hpp>
 #include <moto/utils/tri_state.hpp>
+#include <optional>
 
 namespace moto {
 struct constr_impl; // fwd
@@ -76,8 +77,9 @@ struct soft_constr_data : public constr_data {
 class soft_constr_impl : public constr_impl {
   public:
     using constr_impl::constr_impl; // inherit constr_impl constructor
-    virtual void initialize(soft_constr_data &data) {}
-    virtual void post_rollout(soft_constr_data &data) {};
+    virtual void initialize(soft_constr_data &data) = 0;
+    virtual void post_rollout(soft_constr_data &data) = 0;
+    virtual void line_search_step(soft_constr_data &data, scalar_t alpha) = 0;
     soft_constr_impl(constr_impl &&rhs) : constr_impl(std::move(rhs)) {}
     sp_approx_map_ptr_t make_approx_map(sym_data &primal, approx_storage &raw, shared_data &shared) = 0;
 };

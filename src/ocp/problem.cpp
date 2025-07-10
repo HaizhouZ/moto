@@ -30,11 +30,4 @@ void ocp::add(expr_ptr_t &&expr) {
     if (add_impl(expr))
         expr_[expr->field_].emplace_back(std::move(expr));
 }
-size_t ocp::get_expr_start(const expr_impl &expr) const {
-    try {
-        return d_idx_.at(expr.uid_).first;
-    } catch (const std::exception &e) {
-        throw std::runtime_error(fmt::format("expr {} uid {} cannot be found", expr.name_, expr.dim_));
-    }
-}
 } // namespace moto
