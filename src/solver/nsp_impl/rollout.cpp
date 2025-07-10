@@ -1,7 +1,7 @@
-#include <moto/ocp/approx_storage.hpp>
-#include <moto/solver/nullspace_data.hpp>
-#include <moto/solver/ns_riccati_solve.hpp>
+#include <moto/ocp/dynamics.hpp>
 #include <moto/solver/ineq_soft_solve.hpp>
+#include <moto/solver/ns_riccati_solve.hpp>
+#include <moto/solver/nullspace_data.hpp>
 
 namespace moto {
 namespace nullsp_kkt_solve {
@@ -10,7 +10,7 @@ void fwd_linear_rollout(riccati_data *cur, riccati_data *next) {
     auto &d = *cur;
     d.prim_step[__y].noalias() = d.d_y.k + d.d_y.K * d.prim_step[__x];
     if (next != nullptr) [[likely]] {
-        next->prim_step[__x] = d.prim_step[__y];
+        dynamics::copy_y_to_x(d.prim_step[__y], next->prim_step[__x], d.ocp_, next->ocp_);
     }
 }
 void finalize_newton_step(riccati_data *cur) {
@@ -40,5 +40,5 @@ void finalize_newton_step(riccati_data *cur) {
     }
     d.dual_step[__dyn].noalias() = nsp.lu_dyn_.transpose().solve(d.d_lbd_f);
 }
-} // namespace ns_riccati
+} // namespace nullsp_kkt_solve
 } // namespace moto

@@ -70,6 +70,9 @@ void ipm_constr_impl::jacobian_impl(sp_approx_map &data) {
                     fmt::print("arg: {}: {}\n", arg->name_, d[arg].transpose());
                 }
                 fmt::print("jac: \n{:.3}\n", j);
+                fmt::print("slack: {:.3}\n", d.slack_.transpose());
+                fmt::print("multiplier: {:.3}\n", d.multiplier_.transpose());
+                fmt::print("diag_scaling: {:.3}\n", d.diag_scaling.transpose());
                 fmt::print("scaled_res: {:.3}\n", d.scaled_res_.transpose());
                 fmt::print("vjp: {:.3}\n", d.vjp_[j_idx]);
                 fmt::print("NaN in vjp[{}]\n", j_idx);

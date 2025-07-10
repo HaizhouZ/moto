@@ -27,7 +27,7 @@ void ns_sqp::update(size_t n_iter) {
         fmt::print("initial cost_total: {}\n", cost_all);
         graph_.apply_all_unary_parallel(nullsp_kkt_solve::update_approx);
     }
-    constexpr scalar_t a = 0.3; // line search step size
+    constexpr scalar_t a = 1.0; // line search step size
     // );
     for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
         fmt::print("------------------------------------\n");

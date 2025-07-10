@@ -10,10 +10,14 @@ int main() {
     std::cout << "Hello, Biped SRBD!" << std::endl;
     auto prob = moto::ocp::make();
     prob->add(dyn.euler());
-    prob->add(dyn.friction_cone());
+    prob->add(dyn.active_l);
+    prob->add(dyn.active_r);
+    prob->add(dyn.active_l_cur);
+    prob->add(dyn.active_r_cur);
+    // prob->add(dyn.friction_cone());
     prob->add(dyn.running_cost());
-    prob->add(dyn.stance_foot_constr());
-    prob->add(dyn.foot_loc_constr());
+    // prob->add(dyn.stance_foot_constr());
+    // prob->add(dyn.foot_loc_constr());
     auto terminal_prob = prob->copy();
     terminal_prob->add(dyn.terminal_cost());
     // moto::func_codegen_helper::wait_until_all_compiled(8);
@@ -55,25 +59,21 @@ int main() {
             } else
                 phase = -1;
         }
-        if (phase == -1) {
-            data->value(dyn.active_l) << 1;
-            data->value(dyn.active_r) << 1;
-        } else if (phase == 0) {
-            data->value(dyn.active_l) << 0;
-            data->value(dyn.active_r) << 1;
-        } else if (phase == 1) {
-            data->value(dyn.active_l) << 1;
-            data->value(dyn.active_r) << 0;
-        }
+        // if (phase == -1) {
+        data->value(dyn.active_l) << 1;
+        data->value(dyn.active_r) << 1;
+        // } else if (phase == 0) {
+        //     data->value(dyn.active_l) << 0;
+        //     data->value(dyn.active_r) << 1;
+        // } else if (phase == 1) {
+        //     data->value(dyn.active_l) << 1;
+        //     data->value(dyn.active_r) << 0;
+        // }
         n++;
     });
     // propogate parameters
     graph.apply_all_binary_forward([&](node_data *cur, node_data *next) {
-        cur->value(__y) = next->value(__x);
-        for (auto &arg : cur->ocp_->expr_[__x]) {
-            auto &next_arg = expr_lookup::get<sym>(arg->name_ + "_nxt");
-            cur->value(next_arg) = next->value(arg);
-        }
+        dynamics::copy_x_to_y(next->value(__x), cur->value(__y), next->ocp_, cur->ocp_);
         next->value(dyn.active_l_cur) = cur->value(dyn.active_l);
         next->value(dyn.active_r_cur) = cur->value(dyn.active_r);
     });
@@ -88,7 +88,28 @@ int main() {
     // });
     // std::cout << "\n";
 
-    solver.update(10);
+    solver.update(1);
+    size_t step = 0;
+    graph.apply_all_unary_forward([&](node_data *data) {
+        std::cout << "------------- Step: " << step++ << '\n';
+        std::cout << "cost: " << data->dense_->cost_ << '\n';
+        std::cout << "dyn_res: " << data->dense_->approx_[__dyn].v_.transpose() << '\n';
+        std::cout << "dual: " << data->dense_->dual_[__dyn].transpose() << '\n';
+        std::cout << "r: " << data->value(dyn.r).transpose() << '\n';
+        std::cout << "r_n: " << data->value(dyn.r_n).transpose() << '\n';
+        std::cout << "v: " << data->value(dyn.v).transpose() << '\n';
+        std::cout << "v_n: " << data->value(dyn.v_n).transpose() << '\n';
+        std::cout << "r_d: " << data->value(dyn.r_d).transpose() << '\n';
+        std::cout << "r_l: " << data->value(dyn.r_l).transpose() << '\n';
+        std::cout << "r_l_n: " << data->value(dyn.r_l_n).transpose() << '\n';
+        std::cout << "r_r: " << data->value(dyn.r_r).transpose() << '\n';
+        std::cout << "r_r_n: " << data->value(dyn.r_r_n).transpose() << '\n';
+        std::cout << "v_l: " << data->value(dyn.v_l).transpose() << '\n';
+        std::cout << "v_r: " << data->value(dyn.v_r).transpose() << '\n';
+        std::cout << "v_d: " << data->value(dyn.v_n).transpose() << '\n';
+        std::cout << "f_l: " << data->value(dyn.f_l).transpose() << '\n';
+        std::cout << "f_r: " << data->value(dyn.f_r).transpose() << '\n';
+    });
 
     return 0;
 }

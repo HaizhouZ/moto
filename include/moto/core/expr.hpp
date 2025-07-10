@@ -191,6 +191,8 @@ namespace cs = casadi;
  */
 struct sym : public cs::SX, public shared_<expr_impl, sym> {
     using base = shared_<expr_impl, sym>;
+    using base::operator->; // inherit operator-> to access expr_impl methods
+    using base::get;
     /**
      * @brief Construct a new sym object
      *
@@ -201,6 +203,12 @@ struct sym : public cs::SX, public shared_<expr_impl, sym> {
     sym(const std::string &name, size_t dim, field_t type)
         : base(new expr_impl(name, dim, type)), cs::SX(cs::SX::sym(name, dim)) {
         assert(size_t(type) <= field::num_sym || type == __usr_var);
+        if (type == __y) {
+            auto &prev_sym = moto::expr_lookup::get<sym>((*this)->uid_ - 1);
+            assert(prev_sym->field_ == __x &&
+                   prev_sym->name_ + "_nxt" == (*this)->name_ && 
+                   "make sure you create a pair of states from make_state()"); // ensure expr of uid - 1 is the x field
+        }
     }
     sym() = default;
     /**
@@ -211,9 +219,6 @@ struct sym : public cs::SX, public shared_<expr_impl, sym> {
     bool operator==(const sym &rhs) {
         return expr_ptr_t::get() == rhs.get();
     }
-
-    using base::operator->; // inherit operator-> to access expr_impl methods
-    using base::get;
 };
 } // namespace moto
 

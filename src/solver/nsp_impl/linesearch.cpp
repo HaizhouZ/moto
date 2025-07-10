@@ -11,7 +11,7 @@ void line_search_step(riccati_data *cur, scalar_t alpha) {
     for (auto f : solver::hard_constr_fields) {
         cur->dense_->dual_[f].noalias() += alpha * d.dual_step[f];
     }
-    ineq_soft_solve::line_search_step(cur, alpha);
+    // ineq_soft_solve::line_search_step(cur, alpha);
 }
 
 } // namespace nullsp_kkt_solve
