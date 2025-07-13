@@ -36,7 +36,7 @@ int main() {
     init_node->value(dyn.r).setConstant(6);
     init_node->value(dyn.v).setZero();
 
-    size_t n_iter = 10;
+    size_t n_iter = 100;
 
     auto start_time = std::chrono::high_resolution_clock::now();
     sqp.update(n_iter);

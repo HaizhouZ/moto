@@ -105,10 +105,6 @@ void partial_value_derivative(riccati_data *prev, riccati_data *cur) {
                   << d.Q_xx << "\n";
         throw std::runtime_error("NaN detected in F_0_K or Q_xx");
     }
-    if (d.Q_xx.ldlt().info() != Eigen::Success) {
-        fmt::print("Q_xx is not positive definite\n");
-        fmt::print("Eigenvalues of Q_xx: \n{}\n", d.Q_xx.eigenvalues().transpose());
-    }
     d.Q_xx.noalias() += -(d.Q_yx.transpose() * nsp.F_0_K + nsp.F_0_K.transpose() * d.Q_yx);
     // d_pre.Q_yy.noalias() += (d.Q_xx -
     //                          (d.Q_yx.transpose() * nsp.F_0_K + nsp.F_0_K.transpose() * d.Q_yx)) *
