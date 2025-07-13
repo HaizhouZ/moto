@@ -13,7 +13,7 @@ template <typename derived>
 struct formatter<derived> {
     int precision = 2;
 
-    constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
+    constexpr auto parse(format_parse_context &ctx) -> format_parse_context::iterator {
         auto it = ctx.begin();
         auto end = ctx.end();
 
@@ -35,8 +35,7 @@ struct formatter<derived> {
     }
 
     template <typename FormatContext>
-    auto format(const Eigen::MatrixBase<derived> &mat,
-                FormatContext &ctx) -> decltype(ctx.out()) {
+    auto format(const Eigen::MatrixBase<derived> &mat, FormatContext &ctx) const -> FormatContext::iterator {
         std::ostringstream oss;
         if (precision >= 0) {
             Eigen::IOFormat cleanFmt(precision, 0, ", ", "\n", "[", "]");

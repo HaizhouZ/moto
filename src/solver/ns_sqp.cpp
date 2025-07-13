@@ -24,7 +24,7 @@ void ns_sqp::update(size_t n_iter) {
         graph_.apply_all_unary_parallel([&cost_all](auto *n) {
             cost_all += n->dense_->cost_;
         });
-        fmt::print("initial cost_total: {}\n", cost_all);
+        fmt::print("initial cost_total: {}\n", cost_all.load());
         graph_.apply_all_unary_parallel(nullsp_kkt_solve::update_approx);
     }
     constexpr scalar_t a = 1.0; // line search step size
@@ -65,7 +65,7 @@ void ns_sqp::update(size_t n_iter) {
             cost_all += n->dense_->cost_;
         });
 
-        fmt::print("cost_total: {}\n", cost_all);
+        fmt::print("cost_total: {}\n", cost_all.load());
         /// @todo: check langrangian
     }
     // });
