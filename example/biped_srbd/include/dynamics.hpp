@@ -43,7 +43,7 @@ struct srbd_dynamics : public dynamics {
         return {constr("euler_pos", {r_n, r, v_n}, r_n - (r + v_n * dt), approx_order::first, __dyn),
                 constr("euler_pos_l", {r_l_n, r_l, v_l}, r_l_n - (r_l + v_l * dt), approx_order::first, __dyn),
                 constr("euler_pos_r", {r_r_n, r_r, v_r}, r_r_n - (r_r + v_r * dt), approx_order::first, __dyn),
-                constr("euler_vel", {v_n, v, f_l, f_r}, m * (v_n - v) - (f_l + f_r) * dt, approx_order::first, __dyn)};
+                constr("euler_vel", {v_n, v, f_l, f_r}, m * (v_n - v) - (f_l + f_r + cs::SX({0, 0, -9.81})) * dt, approx_order::first, __dyn)};
     }
     expr_list friction_cone(scalar_t mu = 0.5) {
         auto make_fric_cone = [mu](const sym &f) {

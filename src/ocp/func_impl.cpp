@@ -54,7 +54,7 @@ sp_approx_map::sp_approx_map(sym_data &primal,
         }
     }
 
-    if (f.order() >= approx_order::second) {
+    if (f.order() >= approx_order::second || f.field_ - __dyn < field::num_constr) {
         size_t field_1, field_2;
         hess_.resize(in_args_.size());
         for (size_t i : range(in_args_.size())) {

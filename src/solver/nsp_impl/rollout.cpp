@@ -25,8 +25,19 @@ void finalize_newton_step(riccati_data *cur) {
     if (d.ncstr > 0 && d.rank_status_ != rank_status::unconstrained) {
         // LU.solve([rhs])
         d.d_lbd_s_c_pre_solve.noalias() = -nsp.u_0_p_k - nsp.u_0_p_K * d.prim_step[__x] - nsp.U * d.prim_step[__u];
+        // fmt::print("u_0_p_k: \n{}\n", nsp.u_0_p_k.transpose());
+        // fmt::print("u_0_p_K: \n{}\n", nsp.u_0_p_K.transpose());
+        // fmt::print("d.prim_step[__x]: \n{}\n", d.prim_step[__x].transpose());
+        // fmt::print("d.prim_step[__u]: \n{}\n", d.prim_step[__u].transpose());
+        // for(auto &arg:cur->ocp_->expr_[__y]){
+        //     fmt::print("{}({}) ", arg->name_, arg->dim_);
+        // }
+        // fmt::print("\nd.Q_y: \n{}\n", d.Q_y.transpose());
+        // fmt::print("d.Q_yy: \n{}\n", d.Q_yy.transpose());
         // solve for hard constraint multiplers
         d.d_lbd_s_c.noalias() = nsp.lu_eq_.transpose().solve(d.d_lbd_s_c_pre_solve);
+        // fmt::print("d_lbd_s_c_pre_solve: \n{}\n", d.d_lbd_s_c_pre_solve.transpose());
+        // fmt::print("d_lbd_s_c: \n{}\n", d.d_lbd_s_c.transpose());
         if (d.ns > 0) {
             // append last term in dynamics multipler computation
             d.dual_step[__eq_x] = d.d_lbd_s_c.head(d.ns);

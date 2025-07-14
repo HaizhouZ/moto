@@ -34,7 +34,7 @@ set(INCLUDE_DIRS
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-set(MOTO_COMPILE_OPTS -march=native -fPIC)
+set(MOTO_COMPILE_OPTS -march=native -fPIC -Wno-interference-size)
 set(MOTO_COMPILE_DEFS MOTO_USE_OMP)
 set(MOTO_COMPILE_FEATURES cxx_std_20)
 list(APPEND MOTO_DEP_LIBS

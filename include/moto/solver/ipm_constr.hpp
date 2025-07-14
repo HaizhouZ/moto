@@ -32,7 +32,8 @@ class ipm_constr_impl : public soft_constr_impl {
     using soft_constr_impl::soft_constr_impl;
     void initialize(soft_constr_data &data) override final;
     void post_rollout(soft_constr_data &data) override final;
-    void line_search_step(soft_constr_data &data, scalar_t alpha) override final;
+    void line_search_step(soft_constr_data &data, solver::line_search_cfg *cfg) override final;
+    void update_line_search_cfg(soft_constr_data &data, solver::line_search_cfg *cfg) override final;
 
     /**
      * @brief make the sparse approximation data for the IPM

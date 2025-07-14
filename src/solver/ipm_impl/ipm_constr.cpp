@@ -1,11 +1,12 @@
 #include <moto/solver/ipm_constr.hpp>
+#include <moto/solver/line_search.hpp>
 
 namespace moto {
 namespace ipm_impl {
 void ipm_constr_impl::initialize(soft_constr_data &data) {
     constr_impl::value_impl(data);
     auto &d = static_cast<ipm_data &>(data);
-    d.slack_ = (-data.v_).cwiseMax(1e-3); // clip
+    d.slack_ = (-data.v_).cwiseMax(1e-2); // clip
     d.mu_ = 1e-2;
     d.multiplier_.array() = d.mu_ / d.slack_.array();
     d.multiplier_ = d.multiplier_.cwiseMin(1e3); // clip
@@ -16,7 +17,6 @@ void ipm_constr_impl::post_rollout(soft_constr_data &data) {
     // update slack newton step
     d.d_slack_ = -(d.v_ + d.slack_); // +r_g
     // ensure slack + step >= 1e-8
-    d.d_slack_ = d.d_slack_.array().max(1e-8 - d.slack_.array());
     // compute linear step
     for (const auto &arg : d.func_.in_args()) {
         if (arg->field_ < field::num_prim) {
@@ -24,14 +24,47 @@ void ipm_constr_impl::post_rollout(soft_constr_data &data) {
         }
         arg_idx++;
     }
+    // d.d_slack_ = d.d_slack_.array().max(1e-8 - d.slack_.array());
     // update dual newton step
     d.d_multipler_.array() = -d.multiplier_.array() + d.mu_ / d.slack_.array() - d.diag_scaling.array() * d.d_slack_.array();
     /// @todo iterative refinement for better accuracy?
 }
-void ipm_constr_impl::line_search_step(soft_constr_data &data, scalar_t alpha) {
+void ipm_constr_impl::update_line_search_cfg(soft_constr_data &data, solver::line_search_cfg *cfg) {
+    constexpr scalar_t tau = 0.995; // scaling factor
+    scalar_t alpha_max = 1.0;       // default max step size
     auto &d = static_cast<ipm_data &>(data);
-    d.slack_.array() += alpha * d.d_slack_.array();
-    d.multiplier_.array() *= alpha * d.d_multipler_.array();
+    // compute alpha_max
+    for (size_t idx : range(dim_)) {
+        if (d.d_slack_(idx) < 0) {
+            alpha_max = (-tau) * d.slack_(idx) / d.d_slack_(idx);
+            cfg->primal.clip(alpha_max);
+            cfg->primal.alpha_max = alpha_max;
+        }
+        if (d.d_multipler_(idx) < 0) {
+            alpha_max = (-tau) * d.multiplier_(idx) / d.d_multipler_(idx);
+            cfg->dual.clip(alpha_max);
+            cfg->dual.alpha_max = alpha_max;
+        }
+    }
+}
+void ipm_constr_impl::line_search_step(soft_constr_data &data, solver::line_search_cfg *cfg) {
+    auto &d = static_cast<ipm_data &>(data);
+    d.slack_.array() += cfg->alpha_primal * d.d_slack_.array();
+    d.multiplier_.array() += cfg->alpha_dual * d.d_multipler_.array();
+    fmt::print("-----------line search---------\n");
+    fmt::print("constraint name: {}\n", d.func_.name_);
+    size_t arg_idx = 0;
+    for (auto &arg : d.func_.in_args()) {
+        fmt::print("arg: {}: {}\n", arg->name_, d.prim_step_[arg_idx].transpose());
+        arg_idx++;
+    }
+    fmt::print("v: {:.3}\n", d.v_.transpose());
+    fmt::print("d_slack: {:.3}\n", d.d_slack_.transpose());
+    fmt::print("slack: {:.3}\n", d.slack_.transpose());
+    fmt::print("multiplier: {:.3}\n", d.multiplier_.transpose());
+    d.comp_res_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.mu_;
+    fmt::print("d.comp_res_: {:.3}\n", d.comp_res_.transpose());
+    fmt::print("scaling : {:.3}\n", d.multiplier_.cwiseQuotient(d.slack_));
     // ensure slack + step >= 1e-8
     d.slack_ = d.slack_.array().max(1e-8);
 }

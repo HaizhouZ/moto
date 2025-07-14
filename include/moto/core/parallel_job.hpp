@@ -11,7 +11,16 @@
 #endif
 
 namespace moto {
-
+template <class... T>
+constexpr bool always_false = false;
+/**
+ * @brief Get the number of threads available for parallel execution
+ *
+ * @return size_t number of threads
+ */
+inline size_t get_num_threads() {
+    return MAX_THREADS;
+}
 /**
  * @brief parallel job for a range [start, stop)
  *
@@ -21,7 +30,6 @@ namespace moto {
  * @param callback
  */
 template <typename callback_t, bool reverse_block = true>
-    requires std::invocable<callback_t, size_t>
 inline void parallel_for(size_t start, size_t stop, callback_t &&callback) {
 
     size_t n_threads = MAX_THREADS;
@@ -38,7 +46,13 @@ inline void parallel_for(size_t start, size_t stop, callback_t &&callback) {
         size_t end = std::min(begin + chunk_size, stop); // Ensure bounds are within _nodes size
         for (size_t i = begin; i < end; ++i) {
             // for (size_t i = end-1; i >= begin && i < end; i--) {
-            callback(i);
+            if constexpr (std::invocable<callback_t, size_t>)
+                callback(i);
+            else if constexpr (std::invocable<callback_t, size_t, size_t>)
+                callback(j, i); // pass thread id as second argument
+            else
+                static_assert(always_false<callback_t>,
+                              "callback must be invocable with size_t or [size_t, size_t]");
         }
     }
 }

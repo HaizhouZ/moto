@@ -11,9 +11,6 @@ void ns_sqp::forward() {
     timed_block(graph_.apply_all_unary_parallel(nullsp_kkt_solve::update_approx));
 }
 void ns_sqp::update(size_t n_iter) {
-
-    // timed_block_labeled("all", {
-    // timed_block(
     { // rollout for initialization
         fmt::print("Initialization for SQP...\n");
         graph_.apply_all_unary_parallel([](solver::data_base *cur) {
@@ -27,38 +24,34 @@ void ns_sqp::update(size_t n_iter) {
         fmt::print("initial cost_total: {}\n", cost_all.load());
         graph_.apply_all_unary_parallel(nullsp_kkt_solve::update_approx);
     }
-    constexpr scalar_t a = 1.0; // line search step size
-    // );
+    solver::line_search_cfg ls_config[get_num_threads()];
+    solver::line_search_cfg ls_final_cfg;
+    auto finalize_bound = [&]() {
+        for (size_t i = 0; i < get_num_threads(); ++i) {
+            ls_final_cfg.primal.merge_from(ls_config[i].primal);
+            ls_final_cfg.dual.merge_from(ls_config[i].dual);
+        }
+        ls_final_cfg.alpha_primal = ls_final_cfg.primal.alpha_max;
+        ls_final_cfg.alpha_dual = ls_final_cfg.dual.alpha_max;
+        fmt::print("Final primal step size: {}\n", ls_final_cfg.alpha_primal);
+        fmt::print("Final dual step size: {}\n", ls_final_cfg.alpha_dual);
+    };
     for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
         fmt::print("------------------------------------\n");
         fmt::print("Iteration: {}\n", i_iter);
         timed_block_labeled("all",
-
-                            // timed_block(
                             graph_.apply_all_unary_parallel(nullsp_kkt_solve::ns_factorization);
-                            // );
-                            // timed_block(
                             graph_.apply_all_binary_forward<true>(nullsp_kkt_solve::partial_value_derivative);
-                            // );
-                            // timed_block(
                             graph_.apply_all_binary_backward<true>(nullsp_kkt_solve::riccati_recursion);
-                            // );
-                            // timed_block(
                             graph_.apply_all_unary_parallel(nullsp_kkt_solve::compute_primal_sensitivity);
-                            // );
-                            // timed_block(
                             graph_.apply_all_binary_forward<false, true>(nullsp_kkt_solve::fwd_linear_rollout);
-                            // );
-                            // timed_block(
                             graph_.apply_all_unary_parallel(nullsp_kkt_solve::finalize_newton_step);
-                            // );
-                            // timed_block(
-                            graph_.apply_all_unary_parallel([a](auto *d) { nullsp_kkt_solve::line_search_step(d, a); });
-                            // );
-                            // timed_block(
-                            graph_.apply_all_unary_parallel(nullsp_kkt_solve::update_approx);
-                            // );
-        );
+                            graph_.apply_all_unary_parallel([&ls_config](size_t tid, auto *d) {
+                                ineq_soft_solve::calculate_line_search_bounds(d, ls_config[tid]);
+                            });
+                            finalize_bound();
+                            graph_.apply_all_unary_parallel([&ls_final_cfg](auto *d) { nullsp_kkt_solve::line_search_step(d, &ls_final_cfg); });
+                            graph_.apply_all_unary_parallel(nullsp_kkt_solve::update_approx););
         std::atomic<double> cost_all{0.};
         graph_.apply_all_unary_parallel([&cost_all](auto *n) {
             // fmt::print("v:{}\n", n->data_->dense_->cost_);

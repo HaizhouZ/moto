@@ -63,19 +63,21 @@ void ns_factorization(riccati_data *cur) {
             d.rank_status_ = rank_status::unconstrained;
         else {
             // pre compute
-            nsp.u_y_k.noalias() = -nsp.lu_eq_.solve(nsp.s_c_stacked_0_k);
-            nsp.u_y_K.noalias() = -nsp.lu_eq_.solve(nsp.s_c_stacked_0_K);
+            nsp.u_y_k.noalias() = nsp.lu_eq_.solve(nsp.s_c_stacked_0_k);
+            nsp.u_y_K.noalias() = nsp.lu_eq_.solve(nsp.s_c_stacked_0_K);
+            // fmt::print("jac: \n {}\n", nsp.s_c_stacked);
+            // fmt::print("scstacked_0_k :\n {}\n", nsp.s_c_stacked_0_k.transpose());
+            // fmt::print("nyk :\n {}\n", nsp.u_y_k.transpose());
+            // fmt::print("scstacked_0_K :\n {}\n", nsp.s_c_stacked_0_K);
+            // fmt::print("nyK :\n {}\n", nsp.u_y_K);
+            // fmt::print("F_u: \n{}\n", nsp.F_u.transpose());
+            // fmt::print("F_0_K: \n{}\n", nsp.F_0_K.transpose());
             if (rank == d.ncstr) {
                 d.rank_status_ = rank_status::fully_constrained;
-                d.d_u.K = nsp.u_y_K;
+                d.d_u.K = -nsp.u_y_K;
             } else {
                 nsp.Z = nsp.lu_eq_.kernel();
                 // fmt::print("nullspace :\n {}\n", nsp.Z);
-                // fmt::print("jac: \n {}\n", nsp.s_c_stacked);
-                // fmt::print("scstacked_0_k :\n {}\n", nsp.s_c_stacked_0_k.transpose());
-                // fmt::print("nyk :\n {}\n", nsp.u_y_k.transpose());
-                // fmt::print("scstacked_0_K :\n {}\n", nsp.s_c_stacked_0_K);
-                // fmt::print("nyK :\n {}\n", nsp.u_y_K);
                 d.rank_status_ = rank_status::constrained;
                 nsp.U_z.conservativeResize(nsp.Z.cols(), nsp.Z.cols());
                 nsp.u_z_k.conservativeResize(nsp.Z.cols());

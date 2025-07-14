@@ -146,6 +146,17 @@ class directed_graph {
         parallel_for(0, unary_in_.size(), [this, &callback](size_t i) { callback(unary_in_[i]); });
     }
     /**
+     * @brief apply unary function for all shooting nodes in parallel
+     *
+     * @param callback function [tid, node]
+     */
+    template <typename callback_t>
+        requires std::invocable<callback_t, size_t, data_type *>
+    void apply_all_unary_parallel(callback_t &&callback) {
+        unary_unordered_flatten();
+        parallel_for(0, unary_in_.size(), [this, &callback](size_t tid, size_t i) { callback(tid, unary_in_[i]); });
+    }
+    /**
      * @brief apply unary function for all shooting nodes sequentially
      *
      * @param callback function [node]

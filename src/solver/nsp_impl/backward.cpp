@@ -20,7 +20,7 @@ void riccati_recursion(riccati_data *cur, riccati_data *prev) {
     d.Q_yy.array() /= 2;
     /// @todo: temporary
     d.Q_yy = d.Q_yy + d.Q_yy.transpose().eval();
-    // d.Q_yy.diagonal().array() += 1e-6; // ensure positive definiteness
+    d.Q_yy.diagonal().array() += 1e-6; // ensure positive definiteness
     if (d.Q_yy.hasNaN()) {
         fmt::print("Q_yy: \n {}\n", d.Q_yy);
         fmt::print("Q_yy has NaN\n");
@@ -61,23 +61,23 @@ void riccati_recursion(riccati_data *cur, riccati_data *prev) {
             nsp.u_z_K.noalias() = -nsp.Z.transpose() * nsp.z_u_K;
             nsp.llt_ns_.compute(nsp.U_z);
             nsp.llt_ns_.solveInPlace(nsp.u_z_K);
-            d.d_u.K.noalias() = nsp.Z * nsp.u_z_K + nsp.u_y_K;
+            d.d_u.K.noalias() = nsp.Z * nsp.u_z_K - nsp.u_y_K;
         }
     }
     d.Q_x.noalias() += -d.Q_y * nsp.F_0_K + nsp.F_0_k.transpose() * nsp.Q_yy_F_0_K +
                        nsp.z_u_k.transpose() * d.d_u.K;
     d.Q_xx.noalias() += nsp.F_0_K.transpose() * nsp.Q_yy_F_0_K + nsp.z_u_K.transpose() * d.d_u.K;
     if (d.rank_status_ != rank_status::unconstrained) {
-        d.Q_x.noalias() += nsp.u_y_k.transpose() * nsp.u_0_p_K;
-        d.Q_xx.noalias() += nsp.u_y_K.transpose() * nsp.u_0_p_K;
+        d.Q_x.noalias() -= nsp.u_y_k.transpose() * nsp.u_0_p_K;
+        d.Q_xx.noalias() -= nsp.u_y_K.transpose() * nsp.u_0_p_K;
     }
     // update value function derivatives of previous node
     if (prev != nullptr) [[likely]] {
         auto &d_pre = *prev;
-        // auto& perm = permutation_from_y_to_x(prev->ocp_, cur->ocp_);
-        // d.Q_x *= perm;
-        // d.Q_xx *= perm;
-        // d.Q_xx.applyOnTheLeft(perm.transpose());
+        auto& perm = permutation_from_y_to_x(prev->ocp_, cur->ocp_);
+        d.Q_x *= perm;
+        d.Q_xx *= perm;
+        d.Q_xx.applyOnTheLeft(perm.transpose());
         d_pre.Q_y.noalias() += d.Q_x;
         d_pre.Q_yy.noalias() += d.Q_xx;
     }

@@ -14,9 +14,9 @@ int main() {
     prob->add(dyn.active_r);
     prob->add(dyn.active_l_cur);
     prob->add(dyn.active_r_cur);
-    // prob->add(dyn.friction_cone());
+    prob->add(dyn.friction_cone());
     prob->add(dyn.running_cost());
-    // prob->add(dyn.stance_foot_constr());
+    prob->add(dyn.stance_foot_constr());
     // prob->add(dyn.foot_loc_constr());
     auto terminal_prob = prob->copy();
     terminal_prob->add(dyn.terminal_cost());
@@ -36,6 +36,8 @@ int main() {
     init_node->value(dyn.active_l_cur).setOnes();
     init_node->value(dyn.active_r_cur).setOnes();
     init_node->value(dyn.r_d) << 0., 0., 0.; // desired position of the com
+    init_node->value(dyn.f_l) << 0, 0, 0.1;  // initial force (regularized)
+    init_node->value(dyn.f_r) << 0, 0, 0.1;  // initial force (regularized)
 
     graph.apply_all_unary_parallel([&](node_data *data) {
         *data->sym_ = *init_node->sym_; // initialize symbolic data
@@ -76,6 +78,8 @@ int main() {
         copy_x_to_y(next->value(__x), cur->value(__y), next->ocp_, cur->ocp_);
         next->value(dyn.active_l_cur) = cur->value(dyn.active_l);
         next->value(dyn.active_r_cur) = cur->value(dyn.active_r);
+        next->value(dyn.f_l) = cur->value(dyn.f_l);
+        next->value(dyn.f_r) = cur->value(dyn.f_r);
     });
 
     // std::cout << "\nleft\n";
@@ -87,13 +91,14 @@ int main() {
     //     std::cout << data->value(dyn.active_r) << ',';
     // });
     // std::cout << "\n";
-    solver.update(1);
+    solver.update(3);
     size_t step = 0;
     graph.apply_all_unary_forward([&](node_data *data) {
         std::cout << "------------- Step: " << step++ << '\n';
         std::cout << "cost: " << data->cost() << '\n';
         std::cout << "dyn_res: " << data->value(__dyn).transpose() << '\n';
-        std::cout << "dual: " << data->dense_->dual_[__dyn].transpose() << '\n';
+        std::cout << "dual_eq: " << data->dense_->dual_[__dyn].transpose() << '\n';
+        std::cout << "dual_iq: " << data->dense_->dual_[__ineq_xu].transpose() << '\n';
         // std::cout << "dynjacx: \n" << data->dense_->approx_[__dyn].jac_[__x] << '\n';
         // std::cout << "dynjacu: \n" << data->dense_->approx_[__dyn].jac_[__u] << '\n';
         // std::cout << "dynjacy: \n" << data->dense_->approx_[__dyn].jac_[__y] << '\n';
@@ -117,7 +122,6 @@ int main() {
         std::cout << "r_r_n: " << data->value(dyn.r_r_n).transpose() << '\n';
         std::cout << "v_l: " << data->value(dyn.v_l).transpose() << '\n';
         std::cout << "v_r: " << data->value(dyn.v_r).transpose() << '\n';
-        std::cout << "v_d: " << data->value(dyn.v_n).transpose() << '\n';
         std::cout << "f_l: " << data->value(dyn.f_l).transpose() << '\n';
         std::cout << "f_r: " << data->value(dyn.f_r).transpose() << '\n';
     });

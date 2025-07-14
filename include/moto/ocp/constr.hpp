@@ -72,6 +72,9 @@ struct soft_constr_data : public constr_data {
     }
 };
 def_unique_ptr(soft_constr_data);
+namespace solver {
+struct line_search_cfg;
+}
 /**
  * @brief soft constraint interface class
  * @note must implement make_approx_map
@@ -81,7 +84,8 @@ class soft_constr_impl : public constr_impl {
     using constr_impl::constr_impl; // inherit constr_impl constructor
     virtual void initialize(soft_constr_data &data) = 0;
     virtual void post_rollout(soft_constr_data &data) = 0;
-    virtual void line_search_step(soft_constr_data &data, scalar_t alpha) = 0;
+    virtual void line_search_step(soft_constr_data &data, solver::line_search_cfg* cfg) = 0;
+    virtual void update_line_search_cfg(soft_constr_data &data, solver::line_search_cfg* cfg) {}
     soft_constr_impl(constr_impl &&rhs) : constr_impl(std::move(rhs)) {}
     sp_approx_map_ptr_t make_approx_map(sym_data &primal, approx_storage &raw, shared_data &shared) override {
         return std::make_unique<soft_constr_data>(constr_impl::make_approx_map(primal, raw, shared));
