@@ -15,6 +15,11 @@ struct ns_sqp {
     };
     void update(size_t n_iter);
     void forward();
+    struct kkt_info {
+        scalar_t objective = 0.;    // objective value
+        scalar_t inf_prim_res = 0.; // primal residual (constraint violation)
+        scalar_t inf_dual_res = 0.; // dual residual (stationary condition)
+    };
 
     directed_graph<node_type> graph_;
 };

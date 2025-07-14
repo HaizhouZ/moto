@@ -58,7 +58,6 @@ int main() {
         // std::cout << "state " << node->sym_->value_[__x].transpose() << '\n';
         // std::cout << "input " << node->sym_->value_[__u].transpose() << '\n';
         std::cout << "inf_prim_res: " << node->inf_prim_res() << '\n';
-        std::cout << "inf_dual_res: " << node->inf_dual_res() << '\n';
         // std::cout << "nexts " << data.sym_->value_[__y].transpose() << '\n';
         // std::cout << "rescs " << node->data(dyn.vel_zero_constr).v_.transpose() << '\n';
         // std::cout << "dual  " << static_cast<constr_data &>(node->data(dyn.vel_zero_constr)).multiplier_.transpose() << '\n';

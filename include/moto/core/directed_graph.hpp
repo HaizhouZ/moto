@@ -135,6 +135,15 @@ class directed_graph {
         }
     }
     /**
+     * @brief Get the unordered flattened nodes list
+     * 
+     * @return auto& the unordered flattened nodes list
+     */
+    auto& get_unordered_flattened_nodes() {
+        unary_unordered_flatten();
+        return unary_in_;
+    }
+    /**
      * @brief apply unary function for all shooting nodes in parallel
      *
      * @param callback function [node]

@@ -95,7 +95,6 @@ int main() {
         // std::cout << "cost: " << data->objective() << '\n';
         // std::cout << "merit: " << data->dense_->merit_ << '\n';
         std::cout << "inf_prim_res: " << data->inf_prim_res() << '\n';
-        std::cout << "inf_dual_res: " << data->inf_dual_res() << '\n';
         // std::cout << "dyn_res: " << data->value(__dyn).transpose() << '\n';
         // std::cout << "dual_eq: " << data->dense_->dual_[__dyn].transpose() << '\n';
         // std::cout << "dual_iq: " << data->dense_->dual_[__ineq_xu].transpose() << '\n';

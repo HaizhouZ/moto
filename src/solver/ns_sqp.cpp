@@ -33,12 +33,12 @@ void ns_sqp::update(size_t n_iter) {
         }
         ls_final_cfg.alpha_primal = ls_final_cfg.primal.alpha_max;
         ls_final_cfg.alpha_dual = ls_final_cfg.dual.alpha_max;
-        fmt::print("Final primal step size: {}\n", ls_final_cfg.alpha_primal);
-        fmt::print("Final dual step size: {}\n", ls_final_cfg.alpha_dual);
+        fmt::print("\talpha_pr:\t{}\n", ls_final_cfg.alpha_primal);
+        fmt::print("\talpha_du:\t{}\n", ls_final_cfg.alpha_dual);
     };
     for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
         fmt::print("------------------------------------\n");
-        fmt::print("Iteration: {}\n", i_iter);
+        fmt::print("SQP Iteration no. {}\n", i_iter);
         timed_block_labeled("all",
                             graph_.apply_all_unary_parallel(nullsp_kkt_solve::ns_factorization);
                             graph_.apply_all_binary_forward<true>(nullsp_kkt_solve::partial_value_derivative);
@@ -52,13 +52,25 @@ void ns_sqp::update(size_t n_iter) {
                             finalize_bound();
                             graph_.apply_all_unary_parallel([&ls_final_cfg](auto *d) { nullsp_kkt_solve::line_search_step(d, &ls_final_cfg); });
                             graph_.apply_all_unary_parallel(nullsp_kkt_solve::update_approx););
-        std::atomic<double> cost_all{0.};
-        graph_.apply_all_unary_parallel([&cost_all](auto *n) {
-            // fmt::print("v:{}\n", n->data_->dense_->cost_);
-            cost_all += n->dense_->cost_;
+        kkt_info info;
+        for (auto &n : graph_.get_unordered_flattened_nodes()) {
+            info.objective += n->objective();
+            info.inf_prim_res = std::max(n->inf_prim_res(), info.inf_prim_res);
+            info.inf_dual_res = std::max(info.inf_dual_res, n->dense_->jac_[__u].cwiseAbs().maxCoeff());
+        }
+        graph_.apply_all_binary_forward<false, true>([&info](node_data *cur, node_data *next) {
+            if (next != nullptr) [[likely]] {
+                // cancellation of jacobian from y to x
+                static row_vector tmp;
+                tmp.conservativeResize(next->dense_->jac_[__x].cols());
+                tmp.noalias() = next->dense_->jac_[__x] * permutation_from_y_to_x(cur->ocp_, next->ocp_) + cur->dense_->jac_[__y];
+                info.inf_dual_res = std::max(info.inf_dual_res, tmp.cwiseAbs().maxCoeff());
+            } else /// @todo: include initial jac[__x] inf norm if init is optimized
+                info.inf_dual_res = std::max(info.inf_dual_res, cur->dense_->jac_[__y].cwiseAbs().maxCoeff());
         });
-
-        fmt::print("cost_total: {}\n", cost_all.load());
+        fmt::print("\tobjective:\t{}\n", info.objective);
+        fmt::print("\tinf_prim:\t{}\n", info.inf_prim_res);
+        fmt::print("\tinf_dual:\t{}\n", info.inf_dual_res);
         /// @todo: check langrangian
     }
     // });
