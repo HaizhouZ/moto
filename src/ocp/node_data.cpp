@@ -70,6 +70,8 @@ void data_mgr::release(node_data *data) {
 void node_data::update_approximation(bool eval_only) {
     /// @todo: always eval residual?
     // call to precompute
+    dense_->cost_ = 0.;
+    dense_->merit_ = 0.;
     for (const auto &expr : ocp_->expr_[__pre_comp]) {
         auto &f = static_cast<func_impl &>(*expr);
         f.call((*shared_)[f]);
@@ -80,6 +82,22 @@ void node_data::update_approximation(bool eval_only) {
                                      !eval_only && _f.order() >= approx_order::first,
                                      !eval_only && _f.order() >= approx_order::second);
               });
+    dense_->merit_ += dense_->cost_;
 }
-
+scalar_t node_data::inf_prim_res() const {
+    scalar_t res = 0.;
+    for (const auto &field_data : dense_->approx_) {
+        if (field_data.v_.size() == 0) continue; // skip empty fields
+        res = std::max(field_data.v_.cwiseAbs().maxCoeff(), res);
+    }
+    return res;
+}
+scalar_t node_data::inf_dual_res() const {
+    scalar_t res = 0.;
+    for (const auto &jac : dense_->jac_) {
+        if (jac.size() == 0) continue; // skip empty fields
+        res = std::max(jac.cwiseAbs().maxCoeff(), res);
+    }
+    return res;
+}
 } // namespace moto

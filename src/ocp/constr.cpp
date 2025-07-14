@@ -4,7 +4,7 @@ namespace moto {
 constr_data::constr_data(approx_storage &raw,
                          sp_approx_map &&d,
                          constr_impl *f)
-    : sp_approx_map(std::move(d)), merit_(&raw.cost_),
+    : sp_approx_map(std::move(d)), merit_(&raw.merit_),
       multiplier_(raw.prob_->extract(raw.dual_[f->field_], *f)) {
     const auto &in_args = f->in_args();
     for (size_t i = 0; i < in_args_.size(); i++) {
@@ -75,11 +75,12 @@ void constr_impl::value_impl(sp_approx_map &data) {
     value(data);
     // compute contribution to merit function
     auto &d = static_cast<constr_data &>(data);
+    scalar_t res = d.multiplier_.dot(d.v_);
     // fmt::print("\t{}:\tv:{}\n", name_, d.v_.transpose());
     // #pragma omp critical
     // {
     // fmt::print("pre {}\n", *d.merit_);
-    *d.merit_ += d.multiplier_.dot(d.v_);
+    *d.merit_ += res;
     //     fmt::print("\t{}:\tv:{}\n", name_, d.multiplier_.dot(d.v_));
     //     fmt::print("after {}\n", *d.merit_);
     // }

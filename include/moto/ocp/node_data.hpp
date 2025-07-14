@@ -54,7 +54,10 @@ struct node_data {
         return data(*f);
     }
 
-    scalar_t cost() const { return dense_->cost_; }
+    scalar_t objective() const { return dense_->cost_; }
+
+    scalar_t inf_prim_res() const; // constraint violation residual
+    scalar_t inf_dual_res() const; // stationary condition residual
 
     void update_approximation(bool eval_only = false);
 };

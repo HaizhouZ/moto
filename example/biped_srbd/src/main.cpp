@@ -14,7 +14,7 @@ int main() {
     prob->add(dyn.active_r);
     prob->add(dyn.active_l_cur);
     prob->add(dyn.active_r_cur);
-    prob->add(dyn.friction_cone());
+    // prob->add(dyn.friction_cone());
     prob->add(dyn.running_cost());
     prob->add(dyn.stance_foot_constr());
     // prob->add(dyn.foot_loc_constr());
@@ -91,11 +91,14 @@ int main() {
     //     std::cout << data->value(dyn.active_r) << ',';
     // });
     // std::cout << "\n";
-    solver.update(3);
+    solver.update(2);
     size_t step = 0;
     graph.apply_all_unary_forward([&](node_data *data) {
         std::cout << "------------- Step: " << step++ << '\n';
-        std::cout << "cost: " << data->cost() << '\n';
+        std::cout << "cost: " << data->objective() << '\n';
+        std::cout << "merit: " << data->dense_->merit_ << '\n';
+        std::cout << "inf_prim_res: " << data->inf_prim_res() << '\n';
+        std::cout << "inf_dual_res: " << data->inf_dual_res() << '\n';
         std::cout << "dyn_res: " << data->value(__dyn).transpose() << '\n';
         std::cout << "dual_eq: " << data->dense_->dual_[__dyn].transpose() << '\n';
         std::cout << "dual_iq: " << data->dense_->dual_[__ineq_xu].transpose() << '\n';

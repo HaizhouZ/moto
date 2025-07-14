@@ -22,6 +22,7 @@ struct approx_storage {
     shifted_array<raw_approx, field::num_constr, __dyn> approx_;
     /// dual variables of constratins, indexed by field
     shifted_array<vector, field::num_constr, __dyn> dual_;
+    scalar_t merit_;
     scalar_t cost_;
     /// cost jacobian
     array<row_vector, field::num_prim> jac_;

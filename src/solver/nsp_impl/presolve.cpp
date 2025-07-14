@@ -9,7 +9,6 @@ namespace nullsp_kkt_solve {
 void update_approx(riccati_data *cur) {
     // collect constraint residuals and jacobians
     auto &d = *cur;
-    d.dense_->cost_ = 0.;
     d.Q_x.setZero();
     d.Q_u.setZero();
     d.Q_y.setZero();

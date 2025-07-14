@@ -51,20 +51,20 @@ void ipm_constr_impl::line_search_step(soft_constr_data &data, solver::line_sear
     auto &d = static_cast<ipm_data &>(data);
     d.slack_.array() += cfg->alpha_primal * d.d_slack_.array();
     d.multiplier_.array() += cfg->alpha_dual * d.d_multipler_.array();
-    fmt::print("-----------line search---------\n");
-    fmt::print("constraint name: {}\n", d.func_.name_);
-    size_t arg_idx = 0;
-    for (auto &arg : d.func_.in_args()) {
-        fmt::print("arg: {}: {}\n", arg->name_, d.prim_step_[arg_idx].transpose());
-        arg_idx++;
-    }
-    fmt::print("v: {:.3}\n", d.v_.transpose());
-    fmt::print("d_slack: {:.3}\n", d.d_slack_.transpose());
-    fmt::print("slack: {:.3}\n", d.slack_.transpose());
-    fmt::print("multiplier: {:.3}\n", d.multiplier_.transpose());
-    d.comp_res_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.mu_;
-    fmt::print("d.comp_res_: {:.3}\n", d.comp_res_.transpose());
-    fmt::print("scaling : {:.3}\n", d.multiplier_.cwiseQuotient(d.slack_));
+    // fmt::print("-----------line search---------\n");
+    // fmt::print("constraint name: {}\n", d.func_.name_);
+    // size_t arg_idx = 0;
+    // for (auto &arg : d.func_.in_args()) {
+    //     fmt::print("arg: {}: {}\n", arg->name_, d.prim_step_[arg_idx].transpose());
+    //     arg_idx++;
+    // }
+    // fmt::print("v: {:.3}\n", d.v_.transpose());
+    // fmt::print("d_slack: {:.3}\n", d.d_slack_.transpose());
+    // fmt::print("slack: {:.3}\n", d.slack_.transpose());
+    // fmt::print("multiplier: {:.3}\n", d.multiplier_.transpose());
+    // d.comp_res_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.mu_;
+    // fmt::print("d.comp_res_: {:.3}\n", d.comp_res_.transpose());
+    // fmt::print("scaling : {:.3}\n", d.multiplier_.cwiseQuotient(d.slack_));
     // ensure slack + step >= 1e-8
     d.slack_ = d.slack_.array().max(1e-8);
 }
@@ -89,7 +89,7 @@ void ipm_constr_impl::jacobian_impl(sp_approx_map &data) {
     // }
     size_t j_idx = 0;
     for (auto &j : d.jac_) {
-        if (j.rows() != 0 && j.cols() != 0) { // skip empty jac
+        if (j.size() != 0) { // skip empty jac
                                               // if (d.vjp_[j_idx].hasNaN()) {
             // fmt::print("scaled_res: {:.3}\n", d.scaled_res_.transpose());
             // fmt::print("NaN in vjp[{}]\n", j_idx);
@@ -119,7 +119,7 @@ void ipm_constr_impl::jacobian_impl(sp_approx_map &data) {
         size_t inner_idx = 0;
         if (outer.size()) { // skip empty hess
             for (auto &inner : outer) {
-                if (inner.rows() != 0 && inner.cols() != 0) {
+                if (inner.size() != 0) {
                     inner.noalias() += d.jac_[outer_idx].transpose() * d.diag_scaling.asDiagonal() * d.jac_[inner_idx];
                     if (inner.hasNaN() || d.diag_scaling.hasNaN() || d.jac_[inner_idx].hasNaN() || d.jac_[outer_idx].hasNaN()) {
                         fmt::print("NaN in hess[{}][{}]\n", outer_idx, inner_idx);
