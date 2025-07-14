@@ -7,8 +7,8 @@
 namespace moto {
 namespace utils {
 
-std::future<void> generate_n_compile(expr_impl &func, const std::vector<sym> &in_args, const cs::SX &out,
-                                     bool gen_eval = true, bool gen_jac = false, bool gen_hess = false);
+std::future<void> generate_n_compile(const std::string &func_name, const std::vector<sym> &in_args, const cs::SX &out,
+                                     bool gen_eval = true, bool gen_jac = false, bool gen_hess = false, bool append = false);
 
 } // namespace utils
 } // namespace moto
