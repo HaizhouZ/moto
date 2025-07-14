@@ -7,7 +7,7 @@ namespace utils {
 
 namespace py = pybind11;
 
-std::future<void> generate_n_compile(const std::string &func_name, const std::vector<sym>& in_args, const cs::SX &out,
+std::future<void> generate_n_compile(expr_impl &func, const std::vector<sym> &in_args, const cs::SX &out,
                                      bool gen_eval, bool gen_jacobian, bool gen_hessian) {
     struct gen_module {
         std::mutex mutex_;
@@ -22,6 +22,7 @@ std::future<void> generate_n_compile(const std::string &func_name, const std::ve
         }
     };
     static gen_module g;
+    std::string func_name = func.name_;
     py::object p; // process handle
     {
         py::gil_scoped_acquire acquire;
@@ -42,6 +43,8 @@ std::future<void> generate_n_compile(const std::string &func_name, const std::ve
         p = g.py_moto->attr("generate_and_compile")(func_name, in_args_pylist, py_cs_out.cast<py::list>()[0],
                                                     py::arg("gen_eval") = gen_eval,
                                                     py::arg("gen_jacobian") = gen_jacobian,
+                                                    py::arg("append_value") = func.field_ == field_t::__cost,
+                                                    py::arg("append_jac") = func.field_ == field_t::__cost,
                                                     py::arg("gen_hessian") = gen_hessian,
                                                     py::arg("ret_process") = true,
                                                     py::arg("print_level") = 2);

@@ -62,7 +62,7 @@ class doubleIntegratorDyn : public dynamics, public expr_list {
         // trial->add_argument(r);
         // trial->value = [=](auto &d) { d.v_ = d(r); };
         // trial->jacobian = [](sp_approx_map &d) { d.jac_[0].setIdentity(); };
-        extend({dyn_pos, dyn_vel, vel_zero_constr});
+        extend({dyn_pos, dyn_vel});
     }
 };
 // another way

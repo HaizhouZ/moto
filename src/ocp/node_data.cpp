@@ -94,10 +94,15 @@ scalar_t node_data::inf_prim_res() const {
 }
 scalar_t node_data::inf_dual_res() const {
     scalar_t res = 0.;
+    fmt::print("jac:\n");
+    size_t idx = 0;
     for (const auto &jac : dense_->jac_) {
         if (jac.size() == 0) continue; // skip empty fields
+        // fmt::print("{}: {}\n", magic_enum::enum_name<field_t>(field_t(idx)), value(field_t(idx)).transpose());
+        fmt::print("{}: {}\n", magic_enum::enum_name<field_t>(field_t(idx++)), jac);
         res = std::max(jac.cwiseAbs().maxCoeff(), res);
     }
+    fmt::print("\n");
     return res;
 }
 } // namespace moto

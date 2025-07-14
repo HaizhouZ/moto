@@ -141,7 +141,7 @@ void func_impl::set_from_casadi(std::initializer_list<sym> in_args, const cs::SX
 void func_impl::finalize_impl() {
     if (!gen_.out_.is_empty()) {
         if (!gen_delegated_) {
-            gen_.res_ = utils::generate_n_compile(name_, in_args_, {gen_.out_},
+            gen_.res_ = utils::generate_n_compile(*this, in_args_, {gen_.out_},
                                                   order_ >= approx_order::zero,
                                                   order_ >= approx_order::first,
                                                   order_ >= approx_order::second);
@@ -162,7 +162,7 @@ void func_codegen_helper::wait_until_all_compiled(size_t njobs) {
         cnt++;
         if (cnt == njobs || it_f + 1 == funcs_.end()) {
             for (auto f : jobs) {
-                f->gen_.res_ = utils::generate_n_compile(f->name_, f->in_args_, {f->gen_.out_},
+                f->gen_.res_ = utils::generate_n_compile(*f, f->in_args_, {f->gen_.out_},
                                                          f->order_ >= approx_order::zero,
                                                          f->order_ >= approx_order::first,
                                                          f->order_ >= approx_order::second);

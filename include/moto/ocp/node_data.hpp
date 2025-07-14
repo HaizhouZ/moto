@@ -25,21 +25,21 @@ struct node_data {
     node_data(const ocp_ptr_t &prob);
     virtual ~node_data() = default;
     // get value of the whole field
-    auto &value(field_t f) {
+    auto &value(field_t f) const {
         if (f >= field::num_sym && f - __dyn <= field::num_constr)
             return dense_->approx_[f].v_;
         else
             return sym_->value_[f];
     }
     // get value of the sym variable
-    auto value(const sym &sym) { return (*sym_)[sym]; }
+    auto value(const sym &sym) const { return (*sym_)[sym]; }
     /**
      * @brief get the sparse func data by pointer
      *
      * @param f
      * @return auto&
      */
-    auto &data(const func_impl &f) {
+    auto &data(const func_impl &f) const {
         return *sparse_[f.field_][ocp_->pos_by_uid_[f.uid_]];
     }
     /**
@@ -50,7 +50,7 @@ struct node_data {
      */
     template <typename derived>
         requires std::is_base_of_v<func_impl, derived>
-    auto &data(const std::shared_ptr<derived> &f) {
+    auto &data(const std::shared_ptr<derived> &f) const {
         return data(*f);
     }
 

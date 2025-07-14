@@ -92,7 +92,7 @@ void constr_impl::jacobian_impl(sp_approx_map &data) {
     // update multiplier - jacobian product
     auto &d = static_cast<constr_data &>(data);
     for (size_t i = 0; i < d.in_args().size(); i++) {
-        if (d.vjp_[i].cols()) // skip if no jacobian for this input
+        if (d.vjp_[i].size() != 0) // skip if no jacobian for this input
             // fmt::print("{}\t{}:i\t{:.3}\n", i, name_, d.in_args_[i].transpose());
             d.vjp_[i].noalias() += d.multiplier_.transpose() * d.jac_[i];
         // fmt::print("{}\t{}:jac\n{:.3}\n", i, name_, d.jac_[i]);
