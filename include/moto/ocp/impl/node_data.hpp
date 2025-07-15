@@ -1,12 +1,9 @@
-#ifndef __NODE_DATA__
-#define __NODE_DATA__
+#ifndef __MOTO_NODE_DATA_HPP__
+#define __MOTO_NODE_DATA_HPP__
 
-#include <array>
-#include <moto/core/array.hpp>
-#include <moto/ocp/func.hpp>
+#include <moto/ocp/impl/func.hpp>
 
 namespace moto {
-
 struct node_data;
 def_unique_ptr(node_data);
 
@@ -16,7 +13,7 @@ def_unique_ptr(node_data);
  * @note to use your own data class with data_mgr, inherit this class and implement constructor C(ocp_ptr_t)
  */
 struct node_data {
-    ocp_ptr_t ocp_;              /// < pointer to the problem
+    ocp_ptr_t prob_;             /// < pointer to the problem
     sym_data_ptr_t sym_;         /// < dense storage of symbolic data
     approx_storage_ptr_t dense_; /// <dense storage of the func data
     shared_data_ptr_t shared_;   /// < shared data
@@ -39,8 +36,8 @@ struct node_data {
      * @param f
      * @return auto&
      */
-    auto &data(const func_impl &f) const {
-        return *sparse_[f.field_][ocp_->pos_by_uid_[f.uid_]];
+    auto &data(const impl::func &f) const {
+        return *sparse_[f.field_][prob_->pos_by_uid_[f.uid_]];
     }
     /**
      * @brief get the sparse func data by pointer
@@ -49,18 +46,17 @@ struct node_data {
      * @return auto&
      */
     template <typename derived>
-        requires std::is_base_of_v<func_impl, derived>
+        requires std::is_base_of_v<impl::func, derived>
     auto &data(const std::shared_ptr<derived> &f) const {
         return data(*f);
     }
 
-    scalar_t objective() const { return dense_->cost_; }
+    scalar_t cost() const { return dense_->cost_; }
 
     scalar_t inf_prim_res() const; // constraint violation residual
 
     void update_approximation(bool eval_only = false);
 };
-
 } // namespace moto
 
 #endif

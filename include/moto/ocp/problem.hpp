@@ -36,13 +36,13 @@ class ocp {
     static auto make() { return std::shared_ptr<ocp>(new ocp()); }
     auto copy() { return std::shared_ptr<ocp>(new ocp(*this)); }
 
-    scalar_t *get_data_ptr(scalar_t *data, expr_impl &expr) const {
+    scalar_t *get_data_ptr(scalar_t *data, impl::expr &expr) const {
         return data + get_expr_start(expr);
     }
-    scalar_t *get_data_ptr(scalar_t *data, expr_impl &expr, size_t offset) const {
+    scalar_t *get_data_ptr(scalar_t *data, impl::expr &expr, size_t offset) const {
         return data + get_expr_start(expr) * offset;
     }
-    vector_ref extract(vector_ref data, const expr_impl &expr) const {
+    vector_ref extract(vector_ref data, const impl::expr &expr) const {
         return data.segment(get_expr_start(expr), expr.dim_);
     }
     /**
@@ -59,7 +59,7 @@ class ocp {
     void add(expr_ptr_t &&expr);
 
     template <typename derived>
-        requires std::is_base_of_v<expr_impl, derived>
+        requires std::is_base_of_v<impl::expr, derived>
     void add(const std::vector<std::shared_ptr<derived>> &exprs) {
         for (const auto &expr_ : exprs) {
             add(expr_);
@@ -67,7 +67,7 @@ class ocp {
     }
 
     template <typename derived>
-        requires std::is_base_of_v<expr_impl, derived>
+        requires std::is_base_of_v<impl::expr, derived>
     void add(std::vector<std::shared_ptr<derived>> &&exprs) {
         for (auto &expr_ : exprs) {
             add(std::move(expr_));
@@ -78,11 +78,11 @@ class ocp {
      * @brief get start index of expr in its field
      */
     template <typename derived>
-        requires std::is_base_of_v<expr_impl, derived>
+        requires std::is_base_of_v<impl::expr, derived>
     inline size_t get_expr_start(const std::shared_ptr<derived> &expr) const {
         return get_expr_start(*expr);
     }
-    size_t get_expr_start(const expr_impl &expr) const {
+    size_t get_expr_start(const impl::expr &expr) const {
         try {
             return d_idx_.at(expr.uid_).first;
         } catch (const std::exception &e) {
@@ -95,11 +95,6 @@ def_ptr(ocp);
 
 /**
  * @brief backward copy from next stacked y to current x, usually to ensure consistency of initialization
- *
- * @param _y
- * @param _x
- * @param prob_cur
- * @param prob_next
  */
 inline void copy_y_to_x(vector_ref from_y, vector_ref to_x,
                         const ocp_ptr_t &prob_y, const ocp_ptr_t &prob_x) {
@@ -109,11 +104,6 @@ inline void copy_y_to_x(vector_ref from_y, vector_ref to_x,
 }
 /**
  * @brief forward copy from stacked x to y
- *
- * @param _x
- * @param _y
- * @param prob_next
- * @param prob_cur
  */
 inline void copy_x_to_y(vector_ref from_x, vector_ref to_y,
                         const ocp_ptr_t &prob_x, const ocp_ptr_t &prob_y) {
@@ -132,4 +122,4 @@ inline void copy_x_to_y(vector_ref from_x, vector_ref to_y,
 Eigen::PermutationMatrix<-1, -1> &permutation_from_y_to_x(const ocp_ptr_t &prob_y, const ocp_ptr_t &prob_x);
 } // namespace moto
 
-#endif /*__problem_FORMULATION_*/
+#endif // __MOTO_PROBLEM_HPP__

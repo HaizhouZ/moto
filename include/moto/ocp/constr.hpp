@@ -1,103 +1,14 @@
 #ifndef MOTO_CONSTR_HPP
 #define MOTO_CONSTR_HPP
 
-#include <moto/ocp/func.hpp>
-#include <moto/utils/tri_state.hpp>
-#include <optional>
+#include <moto/ocp/impl/constr.hpp>
 
 namespace moto {
-struct constr_impl; // fwd
-class constr;
 /**
- * @brief constraint data
- * derived from sp_approx_map with multipler and vjp (for cost) mapping in addition
- */
-struct constr_data : public sp_approx_map {
-    /// @todo: add this to raw
-    // vector_ref slack_;
-    double *merit_;
-    vector_ref multiplier_;
-    std::vector<row_vector_ref> vjp_;
-    constr_data(approx_storage &raw, sp_approx_map &&d, constr_impl *cstr);
-    constr_data(sp_approx_map_ptr_t &&rhs) : constr_data(std::move(dynamic_cast<constr_data &>(*rhs))) {}
-};
-def_unique_ptr(constr_data);
-/**
- * @brief constraint approximation with multipliers (and slack variables)
- */
-class constr_impl : public func_impl {
-  protected:
-    void value_impl(sp_approx_map &data) override;
-    void jacobian_impl(sp_approx_map &data) override;
-    void finalize_impl() override;
-    struct type_hint {
-        utils::tri_state_bool is_eq;
-        bool is_soft = false;
-    } field_hint_;
-    friend class constr;
-
-  public:
-    /// @brief constructor with explicit field type
-    constr_impl(const std::string &name, approx_order order = approx_order::first,
-                size_t dim = dim_tbd, field_t field = __undefined)
-        : func_impl(name, order, dim, field) {
-    }
-
-    constr_impl(constr_impl &&impl_rval)
-        : func_impl(std::move(impl_rval)) {
-    }
-    /**
-     * @brief wrapped data maker for constr
-     *
-     * @param primal ptr to primal data
-     * @param raw ptr to approximation data
-     * @param shared ptr to shared data
-     * @return sp_approx_map_ptr_t
-     */
-    sp_approx_map_ptr_t make_approx_map(sym_data &primal, approx_storage &raw, shared_data &shared) override {
-        return constr_data_ptr_t(
-            new constr_data(raw, std::move(*func_impl::make_approx_map(primal, raw, shared)), this));
-    }
-};
-def_ptr(constr_impl);
-
-/**
- * @brief soft constraint data, contains additional primal step data for splitting post-rollout operation
+ * @brief pointer wrapper of expr_type
  *
  */
-struct soft_constr_data : public constr_data {
-    std::vector<vector_ref> prim_step_; // to be set
-    soft_constr_data(sp_approx_map_ptr_t &&d)
-        : constr_data(std::move(d)) {
-    }
-};
-def_unique_ptr(soft_constr_data);
-namespace solver {
-struct line_search_cfg;
-}
-/**
- * @brief soft constraint interface class
- * @note must implement make_approx_map
- */
-class soft_constr_impl : public constr_impl {
-  public:
-    using constr_impl::constr_impl; // inherit constr_impl constructor
-    virtual void initialize(soft_constr_data &data) = 0;
-    virtual void post_rollout(soft_constr_data &data) = 0;
-    virtual void line_search_step(soft_constr_data &data, solver::line_search_cfg* cfg) = 0;
-    virtual void update_line_search_cfg(soft_constr_data &data, solver::line_search_cfg* cfg) {}
-    soft_constr_impl(constr_impl &&rhs) : constr_impl(std::move(rhs)) {}
-    sp_approx_map_ptr_t make_approx_map(sym_data &primal, approx_storage &raw, shared_data &shared) override {
-        return std::make_unique<soft_constr_data>(constr_impl::make_approx_map(primal, raw, shared));
-    };
-};
-def_ptr(soft_constr_impl);
-/**
- * @brief wrapper of constr_impl, in fact a pointer
- *
- */
-struct constr : public shared_<constr_impl, constr> {
-    using shared = shared_<constr_impl, constr>;
+struct constr : public impl::shared_<impl::constr, constr> {
     /**
      * @brief Construct a new constr object
      *
@@ -107,7 +18,7 @@ struct constr : public shared_<constr_impl, constr> {
      * @param field field type, default to __undefined
      */
     constr(const std::string &name, approx_order order = approx_order::first, size_t dim = dim_tbd, field_t field = __undefined)
-        : shared(new constr_impl(name, order, dim, field)) {}
+        : shared_(new expr_type(name, order, dim, field)) {}
     /**
      * @brief Construct a new constr object from casadi SX expression
      *
@@ -119,29 +30,29 @@ struct constr : public shared_<constr_impl, constr> {
      */
     constr(const std::string &name, std::initializer_list<sym> in_args, const cs::SX &out,
            approx_order order = approx_order::first, field_t field = __undefined)
-        : shared(new constr_impl(name, order, out.size1(), field)) {
+        : shared_(new expr_type(name, order, out.size1(), field)) {
         assert(out.size2() == 1 && "constr output must be a column vector");
         (*this)->set_from_casadi(in_args, out);
     }
     template <typename derived_impl>
-        requires(std::derived_from<derived_impl, constr_impl>)
+        requires(std::derived_from<derived_impl, expr_type>)
     /// @brief will get the shared ownership of impl_rval
-    constr(derived_impl *impl_rval) : shared(impl_rval) {}
+    constr(derived_impl *impl_rval) : shared_(impl_rval) {}
     /**
      * @brief set the constraint as equality constraint
      *
      * @param soft if true, set as soft equality constraint
      * @return constr& *this
      */
-    template <typename derived_impl = constr_impl>
-        requires(std::derived_from<derived_impl, constr_impl>)
+    template <typename derived_impl = expr_type>
+        requires(std::derived_from<derived_impl, expr_type>)
     constr &as_eq(bool soft = false) {
         if (soft == true) {
-            if (!std::derived_from<derived_impl, soft_constr_impl>) {
-                throw std::runtime_error("as_eq(true) requires derived_impl to be soft_constr_impl");
+            if (!std::derived_from<derived_impl, impl::soft_constr_base>) {
+                throw std::runtime_error("as_eq(true) requires derived_impl to be soft_impl::expr_type");
             }
         }
-        if constexpr (!std::is_same_v<derived_impl, constr_impl>) {
+        if constexpr (!std::is_same_v<derived_impl, expr_type>) {
             if (dynamic_cast<derived_impl *>(this->get()) == nullptr) { // check if the type is the same
                 this->reset(new derived_impl(std::move(**this)));
             }
@@ -158,7 +69,7 @@ struct constr : public shared_<constr_impl, constr> {
      * @return constr& *this
      */
     template <typename derived_impl>
-        requires(std::derived_from<derived_impl, constr_impl>)
+        requires(std::derived_from<derived_impl, impl::soft_constr_base>)
     constr &as_ineq() {
         if (dynamic_cast<derived_impl *>(this->get()) == nullptr) { // check if the type is the same
             this->reset(new derived_impl(std::move(**this)));
@@ -166,8 +77,10 @@ struct constr : public shared_<constr_impl, constr> {
         (*this)->field_hint_.is_eq = false;
         return *this;
     }
+    constr &as_eq(std::string_view type_name, bool soft = false);
+    constr &as_ineq(std::string_view type_name);
     constr() = default;
-    using shared::operator=;
+    using shared_::operator=;
 };
 } // namespace moto
 

@@ -1,12 +1,12 @@
 #ifndef __MOTO_OCP_DATA_MGR__
 #define __MOTO_OCP_DATA_MGR__
 
-#include <moto/ocp/node_data.hpp>
+#include <moto/ocp/impl/node_data.hpp>
 #include <mutex>
 #include <stack>
 
 namespace moto {
-
+namespace impl {
 /**
  * @brief data management. this class controls the data access and allocation.
  * 1. each data_mgr controls a data_type
@@ -84,6 +84,6 @@ class data_mgr {
     /// mapping [uid of problem, data pool]
     std::unordered_map<size_t, data_pool> data_;
 };
-
+} // namespace impl
 } // namespace moto
 #endif

@@ -1,9 +1,10 @@
-#include <moto/ocp/constr.hpp>
+#include <moto/ocp/impl/constr.hpp>
 
 namespace moto {
+namespace impl {
 constr_data::constr_data(approx_storage &raw,
                          sp_approx_map &&d,
-                         constr_impl *f)
+                         constr *f)
     : sp_approx_map(std::move(d)), merit_(&raw.merit_),
       multiplier_(raw.prob_->extract(raw.dual_[f->field_], *f)) {
     const auto &in_args = f->in_args();
@@ -20,7 +21,7 @@ constr_data::constr_data(approx_storage &raw,
         in_args_.push_back(multiplier_);
     }
 }
-void constr_impl::finalize_impl() {
+void constr::finalize_impl() {
     if (field_ == __undefined) {
         bool has_[3] = {false, false, false}; // x, u, y
         for (const auto &arg : in_args_) {
@@ -29,7 +30,7 @@ void constr_impl::finalize_impl() {
         }
         // make this long enough so that people will not easily remove the const :D
         auto &field = const_cast<field_t &>(field_);
-        if (field_hint_.is_eq == utils::Unset) {
+        if (field_hint_.is_eq == utils::optional_bool::Unset) {
             throw std::runtime_error(fmt::format("constr {} eq/ineq hint unset, please set it using as_eq() or as_ineq()", name_));
         }
         if (field_hint_.is_eq) {
@@ -59,7 +60,7 @@ void constr_impl::finalize_impl() {
                 if (arg->field_ == __x) {
                     fmt::print("substitution in constr {} of type {}: inarg {} with {}\n",
                                name_, magic_enum::enum_name(field_), arg->name_, arg->name_ + "_nxt");
-                    substitute(arg, expr_lookup::get<sym>(arg->name_ + "_nxt"));
+                    substitute(arg, expr_lookup::get<sym>(arg->uid_ + "_nxt"));
                 }
             }
         } catch (const std::exception &ex) {
@@ -67,11 +68,11 @@ void constr_impl::finalize_impl() {
             throw;
         }
     }
-    func_impl::finalize_impl();
+    impl::func::finalize_impl();
     assert(field_ >= __dyn && field_ - __dyn < field::num_constr);
 }
 
-void constr_impl::value_impl(sp_approx_map &data) {
+void constr::value_impl(sp_approx_map &data) {
     value(data);
     // compute contribution to merit function
     auto &d = static_cast<constr_data &>(data);
@@ -86,16 +87,17 @@ void constr_impl::value_impl(sp_approx_map &data) {
     // }
     // fmt::print("\t{}:\tm:{}\n", name_, d.multiplier_.transpose());
 } // namespace moto
-void constr_impl::jacobian_impl(sp_approx_map &data) {
+void constr::jacobian_impl(sp_approx_map &data) {
     // compute jacobian first
     jacobian(data);
     // update multiplier - jacobian product
     auto &d = static_cast<constr_data &>(data);
-    for (size_t i = 0; i < d.in_args().size(); i++) {
+    for (size_t i = 0; i < d.in_arg_data().size(); i++) {
         if (d.vjp_[i].size() != 0) // skip if no jacobian for this input
             // fmt::print("{}\t{}:i\t{:.3}\n", i, name_, d.in_args_[i].transpose());
             d.vjp_[i].noalias() += d.multiplier_.transpose() * d.jac_[i];
         // fmt::print("{}\t{}:jac\n{:.3}\n", i, name_, d.jac_[i]);
     }
 }
+} // namespace impl
 } // namespace moto

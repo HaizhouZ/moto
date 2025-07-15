@@ -1,7 +1,7 @@
 #ifndef MOTO_SOLVER_DATA_BASE_HPP
 #define MOTO_SOLVER_DATA_BASE_HPP
 
-#include <moto/ocp/node_data.hpp>
+#include <moto/ocp/impl/node_data.hpp>
 
 namespace moto {
 namespace solver {
@@ -28,8 +28,7 @@ struct data_base : public node_data {
     matrix &Q_yy;
     array<vector, std::size(primal_fields)> prim_step; ///< primal (newton) step
     /// @brief create solver data
-    /// @param prob ocp to initialize nx, nu
-    /// @param dense_ to initialize Q_ ref and rollout_ primal data
+    /// @param prob ocp to initialize nx, nu and the Q-derivative refs
     data_base(const ocp_ptr_t &prob);
 };
 

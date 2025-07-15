@@ -77,11 +77,11 @@ struct srbd_dynamics : public dynamics {
         return {cost("srbd_cost", {r, v, r_l, r_r, f_l, f_r, v_l, v_r, r_d}, dt * running_cost)};
     }
     expr_list terminal_cost() {
-        auto running_cost = 100 * cs::SX::sumsqr(r_n) + // position cost
-                            cs::SX::sumsqr(v_n) +             // velocity cost
-                            cs::SX::sumsqr((r_l_n)) +         // foot position cost )(cs::Slice(0, 2)
-                            cs::SX::sumsqr((r_r_n));          // foot position cost )(cs::Slice(0, 2)
-        return {cost("srbd_cost", {r_n, v_n, r_l_n, r_r_n, r_d}, running_cost).as_terminal()};
+        auto running_cost = 100 * cs::SX::sumsqr(r) + // position cost
+                            cs::SX::sumsqr(v) +       // velocity cost
+                            cs::SX::sumsqr((r_l)) +   // foot position cost )(cs::Slice(0, 2)
+                            cs::SX::sumsqr((r_r));    // foot position cost )(cs::Slice(0, 2)
+        return {cost("srbd_cost", {r, v, r_l, r_r, r_d}, running_cost).as_terminal()};
     }
 };
 

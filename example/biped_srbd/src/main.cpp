@@ -5,10 +5,11 @@
 #include <moto/utils/print.hpp>
 
 int main() {
-    // moto::func_codegen_helper::enable();
+    // moto::func_codegen::enable();
     biped_srbd::srbd_dynamics dyn;
     std::cout << "Hello, Biped SRBD!" << std::endl;
     auto prob = moto::ocp::make();
+    prob->add(dyn.stance_foot_constr());
     prob->add(dyn.euler());
     prob->add(dyn.active_l);
     prob->add(dyn.active_r);
@@ -16,11 +17,10 @@ int main() {
     prob->add(dyn.active_r_cur);
     prob->add(dyn.friction_cone());
     prob->add(dyn.running_cost());
-    prob->add(dyn.stance_foot_constr());
     // prob->add(dyn.foot_loc_constr());
     auto terminal_prob = prob->copy();
     terminal_prob->add(dyn.terminal_cost());
-    // moto::func_codegen_helper::wait_until_all_compiled(8);
+    // moto::func_codegen::wait_until_all_compiled(8);
     using namespace moto;
     utils::print_problem(prob);
     ns_sqp solver;
@@ -74,7 +74,7 @@ int main() {
     graph.apply_all_binary_forward([&](node_data *cur, node_data *next) {
         next->value(__u) = cur->value(__u);
         next->value(__x) = cur->value(__x);
-        copy_x_to_y(next->value(__x), cur->value(__y), next->ocp_, cur->ocp_);
+        copy_x_to_y(next->value(__x), cur->value(__y), next->prob_, cur->prob_);
         next->value(dyn.active_l_cur) = cur->value(dyn.active_l);
         next->value(dyn.active_r_cur) = cur->value(dyn.active_r);
     });
@@ -92,27 +92,27 @@ int main() {
     size_t step = 0;
     graph.apply_all_unary_forward([&](node_data *data) {
         std::cout << "------------- Step: " << step++ << '\n';
-        // std::cout << "cost: " << data->objective() << '\n';
+        // std::cout << "cost: " << data->cost() << '\n';
         // std::cout << "merit: " << data->dense_->merit_ << '\n';
-        std::cout << "inf_prim_res: " << data->inf_prim_res() << '\n';
-        std::cout << "dyn_res: " << data->value(__dyn).transpose() << '\n';
-        std::cout << "ieq_res: " << data->value(__ineq_xu).transpose() << '\n';
-        std::cout << "ieq_lbd: " << data->dense_->dual_[__ineq_xu].transpose() << '\n';
+        // std::cout << "inf_prim_res: " << data->inf_prim_res() << '\n';
+        // std::cout << "dyn_res: " << data->value(__dyn).transpose() << '\n';
+        // std::cout << "ieq_res: " << data->value(__ineq_xu).transpose() << '\n';
+        // std::cout << "ieq_lbd: " << data->dense_->dual_[__ineq_xu].transpose() << '\n';
         // std::cout << "dual_eq: " << data->dense_->dual_[__dyn].transpose() << '\n';
         // std::cout << "dual_iq: " << data->dense_->dual_[__ineq_xu].transpose() << '\n';
-        // std::cout << "r: " << data->value(dyn.r).transpose() << '\n';
-        // std::cout << "r_n: " << data->value(dyn.r_n).transpose() << '\n';
-        // std::cout << "v: " << data->value(dyn.v).transpose() << '\n';
-        // std::cout << "v_n: " << data->value(dyn.v_n).transpose() << '\n';
-        // std::cout << "r_d: " << data->value(dyn.r_d).transpose() << '\n';
-        // std::cout << "r_l: " << data->value(dyn.r_l).transpose() << '\n';
-        // std::cout << "r_l_n: " << data->value(dyn.r_l_n).transpose() << '\n';
-        // std::cout << "r_r: " << data->value(dyn.r_r).transpose() << '\n';
-        // std::cout << "r_r_n: " << data->value(dyn.r_r_n).transpose() << '\n';
-        // std::cout << "v_l: " << data->value(dyn.v_l).transpose() << '\n';
-        // std::cout << "v_r: " << data->value(dyn.v_r).transpose() << '\n';
-        // std::cout << "f_l: " << data->value(dyn.f_l).transpose() << '\n';
-        // std::cout << "f_r: " << data->value(dyn.f_r).transpose() << '\n';
+        std::cout << "r: " << data->value(dyn.r).transpose() << '\n';
+        std::cout << "r_n: " << data->value(dyn.r_n).transpose() << '\n';
+        std::cout << "v: " << data->value(dyn.v).transpose() << '\n';
+        std::cout << "v_n: " << data->value(dyn.v_n).transpose() << '\n';
+        std::cout << "r_d: " << data->value(dyn.r_d).transpose() << '\n';
+        std::cout << "r_l: " << data->value(dyn.r_l).transpose() << '\n';
+        std::cout << "r_l_n: " << data->value(dyn.r_l_n).transpose() << '\n';
+        std::cout << "r_r: " << data->value(dyn.r_r).transpose() << '\n';
+        std::cout << "r_r_n: " << data->value(dyn.r_r_n).transpose() << '\n';
+        std::cout << "v_l: " << data->value(dyn.v_l).transpose() << '\n';
+        std::cout << "v_r: " << data->value(dyn.v_r).transpose() << '\n';
+        std::cout << "f_l: " << data->value(dyn.f_l).transpose() << '\n';
+        std::cout << "f_r: " << data->value(dyn.f_r).transpose() << '\n';
     });
 
     return 0;

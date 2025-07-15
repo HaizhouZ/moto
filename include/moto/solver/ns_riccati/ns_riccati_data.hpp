@@ -4,7 +4,7 @@
 #include <moto/solver/data_base.hpp>
 
 namespace moto {
-namespace nullsp_kkt_solve {
+namespace ns_riccati {
 enum rank_status : int { unconstrained = 0,
                          constrained,
                          fully_constrained };
@@ -12,7 +12,7 @@ enum rank_status : int { unconstrained = 0,
 // fwd declaration
 struct nullspace_data;
 
-struct riccati_data : public solver::data_base {
+struct ns_node_data : public solver::data_base {
     // dim
     size_t ns, nc, ncstr;
     size_t nz;
@@ -31,10 +31,10 @@ struct riccati_data : public solver::data_base {
 
     shifted_array<vector, std::size(solver::hard_constr_fields), __dyn> dual_step; // dual rollout
 
-    riccati_data(const ocp_ptr_t &prob);
-    ~riccati_data();
+    ns_node_data(const ocp_ptr_t &prob);
+    ~ns_node_data();
 };
-} // namespace nullsp_kkt_solve
+} // namespace ns_riccati
 } // namespace moto
 
 #endif

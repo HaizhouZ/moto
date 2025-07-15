@@ -3,8 +3,8 @@
 
 namespace moto {
 namespace ipm_impl {
-void ipm_constr_impl::initialize(soft_constr_data &data) {
-    constr_impl::value_impl(data);
+void ipm_constr::initialize(ipm::data_type &data) {
+    impl::constr::value_impl(data);
     auto &d = static_cast<ipm_data &>(data);
     ;
     d.g_ = d.v_;
@@ -15,7 +15,7 @@ void ipm_constr_impl::initialize(soft_constr_data &data) {
     d.multiplier_ = d.multiplier_.cwiseMin(1e3); // clip
     d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.mu_;
 }
-void ipm_constr_impl::post_rollout(soft_constr_data &data) {
+void ipm_constr::post_rollout(ipm::data_type &data) {
     auto &d = static_cast<ipm_data &>(data);
     size_t arg_idx = 0;
     // update slack newton step
@@ -33,7 +33,7 @@ void ipm_constr_impl::post_rollout(soft_constr_data &data) {
     d.d_multipler_.array() = -d.multiplier_.array() + d.mu_ / d.slack_.array() - d.diag_scaling.array() * d.d_slack_.array();
     /// @todo iterative refinement for better accuracy?
 }
-void ipm_constr_impl::update_line_search_cfg(soft_constr_data &data, solver::line_search_cfg *cfg) {
+void ipm_constr::update_line_search_cfg(ipm::data_type &data, solver::line_search_cfg *cfg) {
     constexpr scalar_t tau = 0.995; // scaling factor
     scalar_t alpha_max = 1.0;       // default max step size
     auto &d = static_cast<ipm_data &>(data);
@@ -51,7 +51,7 @@ void ipm_constr_impl::update_line_search_cfg(soft_constr_data &data, solver::lin
         }
     }
 }
-void ipm_constr_impl::line_search_step(soft_constr_data &data, solver::line_search_cfg *cfg) {
+void ipm_constr::line_search_step(ipm::data_type &data, solver::line_search_cfg *cfg) {
     auto &d = static_cast<ipm_data &>(data);
     d.slack_.array() += cfg->alpha_primal * d.d_slack_.array();
     d.multiplier_.array() += cfg->alpha_dual * d.d_multipler_.array();
@@ -72,15 +72,15 @@ void ipm_constr_impl::line_search_step(soft_constr_data &data, solver::line_sear
     // ensure slack + step >= 1e-8
     d.slack_ = d.slack_.array().max(1e-8);
 }
-void ipm_constr_impl::value_impl(sp_approx_map &data) {
-    constr_impl::value_impl(data);
+void ipm_constr::value_impl(sp_approx_map &data) {
+    impl::constr::value_impl(data);
     auto &d = static_cast<ipm_data &>(data);
     d.g_ = d.v_;
     d.v_ = d.g_ + d.slack_; // r_g = g_ + slack
     d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.mu_;
 }
-void ipm_constr_impl::jacobian_impl(sp_approx_map &data) {
-    constr_impl::jacobian_impl(data);
+void ipm_constr::jacobian_impl(sp_approx_map &data) {
+    impl::constr::jacobian_impl(data);
     auto &d = static_cast<ipm_data &>(data);
     // setup T^{-1} N
     d.diag_scaling.array() = d.multiplier_.array() / d.slack_.array();

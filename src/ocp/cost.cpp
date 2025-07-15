@@ -2,7 +2,8 @@
 #include <moto/ocp/cost.hpp>
 
 namespace moto {
-void cost_impl::substitute_x_to_y() {
+namespace impl {
+void cost::substitute_x_to_y() {
     for (auto &arg : in_args_) {
         switch (arg->field_) {
         case __x:
@@ -20,4 +21,5 @@ void cost_impl::substitute_x_to_y() {
         }
     }
 }
+} // namespace impl
 } // namespace moto

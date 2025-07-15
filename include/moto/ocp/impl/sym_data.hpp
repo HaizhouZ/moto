@@ -27,17 +27,17 @@ struct sym_data {
         }
     }
     /// get the symbolic variable value of the sym
-    vector_ref get(expr_impl *sym) {
+    vector_ref get(impl::expr *sym) {
         if (sym->field_ == __usr_var)
             return usr_value_.at(sym->uid_);
         else
             return prob_->extract(value_.at(sym->field_), *sym);
     }
-    auto operator[](expr_impl *sym) {
+    auto operator[](impl::expr *sym) {
         return get(sym);
     }
     template <typename derived>
-        requires(std::derived_from<derived, expr_impl>)
+        requires(std::derived_from<derived, impl::expr>)
     auto operator[](const std::shared_ptr<derived> &sym) {
         return get(sym.get());
     }

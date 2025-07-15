@@ -1,29 +1,27 @@
 #ifndef MOTO_OCP_PRE_COMP_HPP
 #define MOTO_OCP_PRE_COMP_HPP
 
-#include <moto/ocp/func.hpp>
+#include <moto/ocp/impl/func.hpp>
 
 namespace moto {
+namespace impl {
 /////////////////////////////////////////////////////////////////////
 /**
  * @brief pre-compute function helper class
  */
-struct pre_compute_impl : public func_impl {
-    pre_compute_impl(const std::string &name)
-        : func_impl(name, __pre_comp) {
+struct pre_compute : public impl::func {
+    pre_compute(const std::string &name)
+        : impl::func(name, __pre_comp) {
     }
 };
-def_ptr(pre_compute_impl);
+} // namespace impl
 /////////////////////////////////////////////////////////////////////
 /**
  * @brief pre-compute function pointer wrapper
  */
-struct pre_compute : public pre_compute_impl_ptr_t {
+struct pre_compute : public impl::shared_<impl::pre_compute, pre_compute> {
     pre_compute(const std::string &name)
-        : pre_compute_impl_ptr_t(new pre_compute_impl(name)) {
-    }
-    pre_compute(pre_compute_impl *impl)
-        : pre_compute_impl_ptr_t(impl) {
+        : shared_(new expr_type(name)) {
     }
 };
 } // namespace moto

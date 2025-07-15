@@ -1,18 +1,18 @@
 #include <Eigen/Eigenvalues>
 #include <moto/ocp/dynamics.hpp>
-#include <moto/solver/ns_riccati_solve.hpp>
-#include <moto/solver/nullspace_data.hpp>
+#include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
+#include <moto/solver/ns_riccati/nullspace_data.hpp>
 
 namespace moto {
-namespace nullsp_kkt_solve {
-void kkt_diagnosis(riccati_data *cur) {
+namespace ns_riccati {
+void kkt_diagnosis(ns_node_data *cur) {
     auto &d = *cur;
     fmt::print("U is not positive definite\n");
     fmt::print("Eigenvalues of U: \n{}\n", d.nsp_->U.eigenvalues().transpose());
     fmt::print("Eigenvalues of Q_yy: \n{}\n", d.Q_yy.eigenvalues().transpose());
     /// @todo some more maybe about constraints
 }
-void riccati_recursion(riccati_data *cur, riccati_data *prev) {
+void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
     auto &d = *cur;
     auto &nsp = *d.nsp_;
     // check positiveness
@@ -74,7 +74,7 @@ void riccati_recursion(riccati_data *cur, riccati_data *prev) {
     // update value function derivatives of previous node
     if (prev != nullptr) [[likely]] {
         auto &d_pre = *prev;
-        auto& perm = permutation_from_y_to_x(prev->ocp_, cur->ocp_);
+        auto& perm = permutation_from_y_to_x(prev->prob_, cur->prob_);
         d.Q_x *= perm;
         d.Q_xx *= perm;
         d.Q_xx.applyOnTheLeft(perm.transpose());
@@ -82,5 +82,5 @@ void riccati_recursion(riccati_data *cur, riccati_data *prev) {
         d_pre.Q_yy.noalias() += d.Q_xx;
     }
 }
-} // namespace nullsp_kkt_solve
+} // namespace ns_riccati
 } // namespace moto

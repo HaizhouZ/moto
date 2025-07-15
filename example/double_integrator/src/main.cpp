@@ -1,7 +1,4 @@
-#include <moto/core/directed_graph.hpp>
-#include <moto/ocp/approx_storage.hpp>
-#include <moto/ocp/shooting_node.hpp>
-#include <moto/solver/nullspace_data.hpp>
+#include <moto/solver/ns_riccati/nullspace_data.hpp>
 #include <moto/solver/ns_sqp.hpp>
 #include <moto/utils/print.hpp>
 #include <double_integrator/cost.hpp>
@@ -49,7 +46,7 @@ int main() {
     //     fmt::print("Timing[{}]: {}us\n", i, sqp.timings[i] / n_iter);
     // }
 
-    // auto &data = nullsp_kkt_solve::get_data(init_node.get());
+    // auto &data = ns_riccati::get_data(init_node.get());
     // std::cout << data.rollout_->prim_[__x].transpose() << '\n';
     // sqp.update();
     sqp.graph_.apply_all_unary_forward([&dyn](auto *node) {

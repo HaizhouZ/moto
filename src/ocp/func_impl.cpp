@@ -1,106 +1,10 @@
 #include <moto/core/external_function.hpp>
-#include <moto/ocp/approx_storage.hpp>
-#include <moto/ocp/func.hpp>
-#include <moto/ocp/sym_data.hpp>
+#include <moto/ocp/impl/func.hpp>
 #include <moto/utils/codegen_bind.hpp>
 
 namespace moto {
-sp_arg_map::sp_arg_map(sym_data &primal, shared_data &shared, func_impl &f)
-    : func_(f), shared_(shared), sym_uid_idx_(f.sym_uid_idx_) {
-    auto &in_args = f.in_args();
-    in_args_.reserve(in_args.size());
-    for (auto &arg : in_args) {
-        in_args_.push_back(primal[arg]);
-    }
-}
-sp_arg_map::sp_arg_map(std::vector<vector_ref> &&primal, shared_data &shared, func_impl &f)
-    : in_args_(std::move(primal)), func_(f), shared_(shared), sym_uid_idx_(f.sym_uid_idx_) {
-}
-sp_approx_map::sp_approx_map(sym_data &primal,
-                             approx_storage &raw,
-                             shared_data &shared,
-                             func_impl &f)
-    : sp_arg_map(primal, shared, f),
-      v_(f.field_ == __cost
-             ? vector_ref(mapped_vector(&raw.cost_, 1))
-             : raw.approx_[f.field_].v_.segment(raw.prob_->get_expr_start(f), f.dim_)) {
-    auto &in_args = f.in_args();
-    size_t f_st = raw.prob_->get_expr_start(f);
-    // for non-cost
-    if (f.field_ - __dyn < field::num_constr) {
-        if (f.order() >= approx_order::first) {
-            jac_.reserve(in_args_.size());
-            for (size_t i : range(in_args_.size())) {
-                if (in_args[i]->field_ < field::num_prim) {
-                    jac_.push_back(raw.approx_[f.field_].jac_[in_args[i]->field_].block(
-                        f_st, raw.prob_->get_expr_start(in_args[i]),
-                        f.dim_, in_args[i]->dim_));
-                } else { // useless
-                    static matrix empty;
-                    jac_.push_back(empty);
-                }
-            }
-        }
-    } else { // for cost
-        jac_.reserve(in_args_.size());
-        for (size_t i : range(in_args_.size())) {
-            if (in_args[i]->field_ < field::num_prim) {
-                jac_.push_back(raw.jac_[in_args[i]->field_].segment(
-                    raw.prob_->get_expr_start(in_args[i]), in_args[i]->dim_));
-            } else { // useless
-                static matrix empty;
-                jac_.push_back(empty);
-            }
-        }
-    }
-
-    if (f.order() >= approx_order::second || f.field_ - __dyn < field::num_constr) {
-        size_t field_1, field_2;
-        hess_.resize(in_args_.size());
-        for (size_t i : range(in_args_.size())) {
-            if (in_args[i]->field_ < field::num_prim) {
-                hess_[i].reserve(in_args_.size());
-                for (size_t j : range(in_args_.size())) {
-                    field_1 = in_args[i]->field_;
-                    field_2 = in_args[j]->field_;
-                    if (field_2 < field::num_prim) {
-                        /// @note order matches approx_storage
-                        /// h[i][j] = h[j][i] if i, j in the same field or field(i) < field(j)
-                        /// otherwise only keep h[i][j] (empty)
-                        if (field_1 >= field_2) {
-                            hess_[i].push_back(raw.hessian_[field_1][field_2].block(
-                                raw.prob_->get_expr_start(in_args[i]),
-                                raw.prob_->get_expr_start(in_args[j]),
-                                in_args[i]->dim_, in_args[j]->dim_));
-                            continue;
-                        }
-                    }
-                    // this should be empty. do this anyway to make the shape of hess_ right
-                    static matrix empty;
-                    hess_[i].push_back(empty);
-                }
-            }
-        }
-    }
-}
-sp_approx_map::sp_approx_map(sym_data &primal,
-                             vector_ref v,
-                             const std::vector<matrix_ref> &jac,
-                             shared_data &shared,
-                             func_impl &f)
-    : v_(v), jac_(jac), sp_arg_map(primal, shared, f) {
-}
-shared_data::shared_data(const ocp_ptr_t &prob, sym_data &primal) : prob_(prob) {
-    data_.reserve(prob->expr_[__pre_comp].size() + prob->expr_[__usr_func].size());
-    for (const auto &expr : prob->expr_[__pre_comp]) {
-        add(expr->uid_, static_cast<func_impl *>(expr.get())->make_data(primal, *this));
-    }
-    for (const auto &expr : prob->expr_[__usr_func]) {
-        add(expr->uid_, static_cast<func_impl *>(expr.get())->make_data(primal, *this));
-    }
-}
-
-sp_approx_map_ptr_t func_impl::make_approx_map(sym_data &primal, approx_storage &raw, shared_data &shared) {
+namespace impl {
+sp_approx_map_ptr_t func::make_approx_map(sym_data &primal, approx_storage &raw, shared_data &shared) {
     if (field_ - __dyn >= field::num_func)
         throw std::runtime_error(fmt::format("make_approx_map cannot be called for func {} type {}",
                                              name_, magic_enum::enum_name(field_)));
@@ -112,20 +16,20 @@ sp_approx_map_ptr_t func_impl::make_approx_map(sym_data &primal, approx_storage 
     setup_sparsity(*approx_data);
     return approx_data;
 }
-void func_impl::load_external(const std::string &path) {
+void func::load_external(const std::string &path) {
     auto funcs = load_approx(name_, true, order() >= approx_order::first, order() >= approx_order::second);
     value = [eval = funcs[0]](sp_approx_map &d) {
-        eval.invoke(d.in_args(), d.v_);
+        eval.invoke(d.in_arg_data(), d.v_);
     };
     jacobian = [jac = funcs[1]](sp_approx_map &d) {
-        jac.invoke(d.in_args(), d.jac_);
+        jac.invoke(d.in_arg_data(), d.jac_);
     };
 
     hessian = [hess = funcs[2]](sp_approx_map &d) {
-        hess.invoke(d.in_args(), d.hess_);
+        hess.invoke(d.in_arg_data(), d.hess_);
     };
 }
-void func_impl::substitute(const sym &arg, const sym &rhs) {
+void func::substitute(const sym &arg, const sym &rhs) {
     if (!gen_.out_.is_empty()) {
         gen_.out_ = cs::SX::substitute(gen_.out_, arg, rhs);
     }
@@ -134,11 +38,11 @@ void func_impl::substitute(const sym &arg, const sym &rhs) {
     sym_uid_idx_.insert(std::move(nh));         // update the uid index
     in_args_[sym_uid_idx_.at(rhs->uid_)] = rhs; // update the in_args_ to point to the new sym
 }
-void func_impl::set_from_casadi(std::initializer_list<sym> in_args, const cs::SX &out) {
+void func::set_from_casadi(std::initializer_list<sym> in_args, const cs::SX &out) {
     add_arguments(in_args);
     gen_.out_ = out;
 }
-void func_impl::finalize_impl() {
+void func::finalize_impl() {
     if (!gen_.out_.is_empty()) {
         if (!gen_delegated_) {
             gen_.res_ = utils::generate_n_compile(name_, in_args_, {gen_.out_},
@@ -149,14 +53,15 @@ void func_impl::finalize_impl() {
             gen_.res_.wait();                                        // wait until codegen is done
             load_external();
         } else
-            func_codegen_helper::add(this);
+            func_codegen::add(this);
     }
 }
-void func_codegen_helper::enable() {
-    func_impl::gen_delegated_ = true; // enable codegen delegation
+} // namespace impl
+void func_codegen::enable() {
+    impl::func::gen_delegated_ = true; // enable codegen delegation
 }
-void func_codegen_helper::wait_until_all_compiled(size_t njobs) {
-    std::vector<func_impl *> jobs;
+void func_codegen::wait_until_all_compiled(size_t njobs) {
+    std::vector<impl::func *> jobs;
     size_t cnt = 0;
     for (auto it_f = funcs_.begin(); it_f != funcs_.end(); ++it_f) {
         jobs.push_back(*it_f);

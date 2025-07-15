@@ -136,10 +136,10 @@ class directed_graph {
     }
     /**
      * @brief Get the unordered flattened nodes list
-     * 
+     *
      * @return auto& the unordered flattened nodes list
      */
-    auto& get_unordered_flattened_nodes() {
+    auto &get_unordered_flattened_nodes() {
         unary_unordered_flatten();
         return unary_in_;
     }
@@ -220,7 +220,7 @@ class directed_graph {
             next_edges.clear();
         }
         if constexpr (tail_null_edge) {
-            callback(tail_->data_, nullptr);
+            callback(tail_->data_, (data_type *)nullptr);
         }
     }
     /**
@@ -264,7 +264,7 @@ class directed_graph {
             next_edges.clear();
         }
         if constexpr (head_null_edge) {
-            callback(head_->data_, nullptr);
+            callback(head_->data_, (data_type *)nullptr);
         }
     }
 

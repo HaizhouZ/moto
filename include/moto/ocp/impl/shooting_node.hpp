@@ -1,9 +1,10 @@
 #ifndef __MOTO_OCP_SHOOTING_NODE__
 #define __MOTO_OCP_SHOOTING_NODE__
 #include <moto/core/directed_graph.hpp>
-#include <moto/ocp/data_mgr.hpp>
+#include <moto/ocp/impl/data_mgr.hpp>
 
 namespace moto {
+namespace impl {
 /**
  * @brief shooting node in an OCP
  * it will acquire data from data_mgr and release it upon destruction (if not moved)
@@ -20,7 +21,7 @@ struct shooting_node : public graph_types::node_base<T, shooting_node<T>> {
      * @param formulation problem formulation of this shootin gnode
      */
     shooting_node(const ocp_ptr_t &formulation)
-        : mem_(data_mgr::get<data_type>()) {
+        : mem_(impl::data_mgr::get<data_type>()) {
         base::data_ = dynamic_cast<data_type *>(mem_.acquire(formulation));
     }
     /**
@@ -40,9 +41,9 @@ struct shooting_node : public graph_types::node_base<T, shooting_node<T>> {
         if (base::data_)
             mem_.release(base::data_);
     }
-    data_mgr &mem_;
+    impl::data_mgr &mem_;
 };
-
+} // namespace impl
 } // namespace moto
 
 #endif /*__NODE_*/

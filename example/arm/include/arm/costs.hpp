@@ -6,11 +6,11 @@
 
 namespace moto {
 struct armCosts {
-    struct ee_cost : public cost_impl {
+    struct ee_cost : public impl::cost {
         vector d_r;
         inline static sym r_des{"r_des", 3, __p};
         inline static sym W_kin{"W_kin", 1, __p};
-        ee_cost(sym q) : cost_impl("kin_cost") {
+        ee_cost(sym q) : impl::cost("kin_cost") {
             d_r.resize(3);
             d_r.setConstant(100);
 
@@ -18,9 +18,9 @@ struct armCosts {
             load_external();
         }
     };
-    struct state_cost : public cost_impl {
+    struct state_cost : public impl::cost {
         vector d_q, d_v;
-        state_cost(sym q, sym v) : cost_impl("dI_state_cost") {
+        state_cost(sym q, sym v) : impl::cost("dI_state_cost") {
             d_q.resize(7);
             d_q.setConstant(10);
             d_v.resize(7);
@@ -41,9 +41,9 @@ struct armCosts {
             };
         }
     };
-    struct input_cost : public cost_impl {
+    struct input_cost : public impl::cost {
         vector d_a;
-        input_cost(sym a) : cost_impl("dI_input_cost") {
+        input_cost(sym a) : impl::cost("dI_input_cost") {
             d_a.resize(7);
             d_a.setConstant(1e-2);
             add_arguments({a});

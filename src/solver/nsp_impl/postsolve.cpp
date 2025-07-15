@@ -1,10 +1,9 @@
-#include <moto/ocp/approx_storage.hpp>
-#include <moto/solver/nullspace_data.hpp>
-#include <moto/solver/ns_riccati_solve.hpp>
+#include <moto/solver/ns_riccati/nullspace_data.hpp>
+#include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
 
 namespace moto {
-namespace nullsp_kkt_solve {
-void compute_primal_sensitivity(riccati_data *cur) {
+namespace ns_riccati {
+void compute_primal_sensitivity(ns_node_data *cur) {
     auto &d = *cur;
     auto &nsp = *d.nsp_;
     // compute k_u
@@ -23,5 +22,5 @@ void compute_primal_sensitivity(riccati_data *cur) {
     d.d_y.k.noalias() = -nsp.F_0_k - nsp.F_u * d.d_u.k;
     d.d_y.K.noalias() = -nsp.F_0_K - nsp.F_u * d.d_u.K;
 }
-} // namespace nullsp_kkt_solve
+} // namespace ns_riccati
 } // namespace moto

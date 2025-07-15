@@ -1,19 +1,19 @@
 #include <moto/ocp/dynamics.hpp>
 #include <moto/solver/ineq_soft_solve.hpp>
-#include <moto/solver/ns_riccati_solve.hpp>
-#include <moto/solver/nullspace_data.hpp>
+#include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
+#include <moto/solver/ns_riccati/nullspace_data.hpp>
 
 namespace moto {
-namespace nullsp_kkt_solve {
-void fwd_linear_rollout(riccati_data *cur, riccati_data *next) {
+namespace ns_riccati {
+void fwd_linear_rollout(ns_node_data *cur, ns_node_data *next) {
     // get_data(nodes_.front()).prim_step[__x].setZero();
     auto &d = *cur;
     d.prim_step[__y].noalias() = d.d_y.k + d.d_y.K * d.prim_step[__x];
     if (next != nullptr) [[likely]] {
-        copy_y_to_x(d.prim_step[__y], next->prim_step[__x], d.ocp_, next->ocp_);
+        copy_y_to_x(d.prim_step[__y], next->prim_step[__x], d.prob_, next->prob_);
     }
 }
-void finalize_newton_step(riccati_data *cur) {
+void finalize_newton_step(ns_node_data *cur) {
     auto &d = *cur;
     auto &nsp = *d.nsp_;
     d.prim_step[__u].noalias() = d.d_u.k + d.d_u.K * d.prim_step[__x];
@@ -49,5 +49,5 @@ void finalize_newton_step(riccati_data *cur) {
     }
     d.dual_step[__dyn].noalias() = nsp.lu_dyn_.transpose().solve(d.d_lbd_f);
 }
-} // namespace nullsp_kkt_solve
+} // namespace ns_riccati
 } // namespace moto

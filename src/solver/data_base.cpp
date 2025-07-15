@@ -1,4 +1,4 @@
-#include <moto/ocp/constr.hpp>
+#include <moto/ocp/impl/soft_constr.hpp>
 #include <moto/solver/data_base.hpp>
 
 namespace moto {
@@ -16,7 +16,7 @@ data_base::data_base(const ocp_ptr_t &prob)
     // initialize soft constraint data
     for (auto f : {__ineq_x, __ineq_xu, __eq_x_soft, __eq_xu_soft}) {
         for (auto &d : sparse_[f]) {
-            auto &sd = static_cast<soft_constr_data &>(*d);
+            auto &sd = static_cast<impl::soft_constr_data &>(*d);
             sd.prim_step_.clear();
             for (const auto &arg : sd.func_.in_args()) {
                 if (arg->field_ < field::num_prim) {

@@ -16,8 +16,8 @@ class doubleIntegratorDyn : public dynamics, public expr_list {
     // position, velocity, acceleration, position, velocity
     sym r, v, a, r_next, v_next;
     constr dyn_pos, dyn_vel, vel_zero_constr;
-    struct pos : public constr_impl {
-        pos() : constr_impl("doubleIntegratorDynamics_pos", approx_order::first, 3, __dyn) {
+    struct pos : public impl::constr {
+        pos() : impl::constr("doubleIntegratorDynamics_pos", approx_order::first, 3, __dyn) {
             value = [](sp_approx_map &data) {
                 data.v_ = -data[0] + data[1] - 0.01 * data[2];
             };
@@ -28,8 +28,8 @@ class doubleIntegratorDyn : public dynamics, public expr_list {
             };
         }
     };
-    struct vel : public constr_impl {
-        vel() : constr_impl("doubleIntegratorDynamics_vel", approx_order::first, 3, __dyn) {
+    struct vel : public impl::constr {
+        vel() : impl::constr("doubleIntegratorDynamics_vel", approx_order::first, 3, __dyn) {
             value = [](sp_approx_map &data) {
                 data.v_ = -data[0] + data[1] - 0.01 * data[2];
             };
@@ -40,8 +40,8 @@ class doubleIntegratorDyn : public dynamics, public expr_list {
             };
         }
     };
-    struct zero_vel: public constr_impl{
-        zero_vel() : constr_impl("doubleIntegratorDynamics_zero_vel", approx_order::first, 3, __eq_x) {
+    struct zero_vel: public impl::constr{
+        zero_vel() : impl::constr("doubleIntegratorDynamics_zero_vel", approx_order::first, 3, __eq_x) {
             value = [](sp_approx_map &data) {
                 data.v_ = data[0];
             };

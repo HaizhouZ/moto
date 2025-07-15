@@ -7,7 +7,7 @@
 #include <Eigen/LU>
 
 namespace moto {
-namespace nullsp_kkt_solve {
+namespace ns_riccati {
 /**
  * @brief null space data struct, contains all the elements in null-space based KKT solving
  *
@@ -42,7 +42,7 @@ struct nullspace_data {
     Eigen::PartialPivLU<matrix> lu_dyn_; ///< LU solver of the dynamics derivative \f$f_y\f$
     nullspace_data(matrix& _s_y) : s_y(_s_y) {}
 };
-} // namespace nullsp_kkt_solve
+} // namespace ns_riccati
 } // namespace moto
 
 #endif

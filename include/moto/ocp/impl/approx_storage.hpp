@@ -5,7 +5,6 @@
 #include <moto/ocp/problem.hpp>
 
 namespace moto {
-
 /**
  * @brief dense raw approximation data
  * deserialized data storage of all function fields

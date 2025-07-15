@@ -1,12 +1,12 @@
 #include <Eigen/Eigenvalues>
 #include <moto/ocp/dynamics.hpp>
-#include <moto/solver/ns_riccati_solve.hpp>
-#include <moto/solver/nullspace_data.hpp>
+#include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
+#include <moto/solver/ns_riccati/nullspace_data.hpp>
 
 namespace moto {
-namespace nullsp_kkt_solve {
+namespace ns_riccati {
 
-void update_approx(riccati_data *cur) {
+void update_approx(ns_node_data *cur) {
     // collect constraint residuals and jacobians
     auto &d = *cur;
     d.Q_x.setZero();
@@ -21,7 +21,7 @@ void update_approx(riccati_data *cur) {
     cur->update_approximation();
 }
 
-void ns_factorization(riccati_data *cur) {
+void ns_factorization(ns_node_data *cur) {
     // collect constraint residuals and jacobians
     auto &d = *cur;
     auto &nsp = *d.nsp_;
@@ -88,7 +88,7 @@ void ns_factorization(riccati_data *cur) {
 
 // these two cannot merge, because Q_y/yy should first be updated with
 // constr derivatives
-void partial_value_derivative(riccati_data *prev, riccati_data *cur) {
+void partial_value_derivative(ns_node_data *prev, ns_node_data *cur) {
     auto &d = *cur;
     auto &d_pre = *prev;
     auto &nsp = *d.nsp_;
@@ -113,5 +113,5 @@ void partial_value_derivative(riccati_data *prev, riccati_data *cur) {
 }
 /// @todo set terminal Q_y, Q_yy
 
-} // namespace nullsp_kkt_solve
+} // namespace ns_riccati
 } // namespace moto

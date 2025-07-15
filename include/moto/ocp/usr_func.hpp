@@ -1,29 +1,27 @@
 #ifndef MOTO_OCP_USR_FUNC_HPP
 #define MOTO_OCP_USR_FUNC_HPP
 
-#include <moto/ocp/func.hpp>
+#include <moto/ocp/impl/func.hpp>
 
 namespace moto {
 /////////////////////////////////////////////////////////////////////
 /**
  * @brief user function helper class
  */
-struct usr_func_impl : public func_impl {
-    usr_func_impl(const std::string &name, approx_order order, size_t dim = 0)
-        : func_impl(name, order, dim, __usr_func) {
+namespace impl {
+struct usr_func : public func {
+    usr_func(const std::string &name, approx_order order, size_t dim = 0)
+        : func(name, order, dim, __usr_func) {
     }
 };
-def_ptr(usr_func_impl);
+}
 /////////////////////////////////////////////////////////////////////
 /**
  * @brief user function pointer wrapper
  */
-struct usr_func : public usr_func_impl_ptr_t {
+struct usr_func : public impl::shared_<impl::usr_func, usr_func> {
     usr_func(const std::string &name, approx_order order, size_t dim = 0)
-        : usr_func_impl_ptr_t(new usr_func_impl(name, order, dim)) {
-    }
-    usr_func(usr_func_impl *impl)
-        : usr_func_impl_ptr_t(impl) {
+        : shared_(new expr_type(name, order, dim)) {
     }
 };
 } // namespace moto

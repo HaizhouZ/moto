@@ -1,15 +1,15 @@
 #ifndef __NS_SQP__
 #define __NS_SQP__
 
-#include <moto/ocp/shooting_node.hpp>
-#include <moto/solver/ns_riccati_data.hpp>
+#include <moto/ocp/impl/shooting_node.hpp>
+#include <moto/solver/ns_riccati/ns_riccati_data.hpp>
 
 namespace moto {
 
 struct ns_sqp {
-    struct node_type : public shooting_node<nullsp_kkt_solve::riccati_data> {
+    struct node_type : public impl::shooting_node<ns_riccati::ns_node_data> {
         node_type(const ocp_ptr_t &prob)
-            : shooting_node<nullsp_kkt_solve::riccati_data>(prob) {}
+            : impl::shooting_node<ns_riccati::ns_node_data>(prob) {}
         node_type(const node_type &rhs) = default;
         node_type(node_type &&rhs) = default;
     };

@@ -1,10 +1,9 @@
-#include <moto/ocp/approx_storage.hpp>
-#include <moto/solver/ns_riccati_data.hpp>
-#include <moto/solver/nullspace_data.hpp>
+#include <moto/solver/ns_riccati/ns_riccati_data.hpp>
+#include <moto/solver/ns_riccati/nullspace_data.hpp>
 
 namespace moto {
-namespace nullsp_kkt_solve {
-riccati_data::riccati_data(const ocp_ptr_t &prob)
+namespace ns_riccati {
+ns_node_data::ns_node_data(const ocp_ptr_t &prob)
     : solver::data_base(prob),
       ns(dense_->prob_->dim_[__eq_x]),
       nc(dense_->prob_->dim_[__eq_xu]), ncstr(ns + nc), d_u(nu, nx),
@@ -36,8 +35,8 @@ riccati_data::riccati_data(const ocp_ptr_t &prob)
     dual_step[__eq_x].resize(ns);
     dual_step[__eq_xu].resize(nc);
 }
-riccati_data::~riccati_data() {
+ns_node_data::~ns_node_data() {
     delete nsp_;
 }
-} // namespace nullsp_kkt_solve
+} // namespace ns_riccati
 } // namespace moto

@@ -1,4 +1,4 @@
-#include <moto/ocp/approx_storage.hpp>
+#include <moto/ocp/impl/approx_storage.hpp>
 
 namespace moto {
 
