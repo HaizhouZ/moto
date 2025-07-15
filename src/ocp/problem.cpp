@@ -4,7 +4,7 @@ namespace moto {
 bool ocp::add_impl(const expr_ptr_t &expr) {
     size_t _uid = expr->uid_;
     if (d_idx_.find(_uid) == d_idx_.end()) { // skip repeated
-        // add dependencies first
+        // add dependencies
         auto &dep = expr->get_dep();
         if (!dep.empty()) {
             add(dep);
@@ -44,9 +44,9 @@ Eigen::PermutationMatrix<-1, -1> &permutation_from_y_to_x(const ocp_ptr_t &prob_
         auto &perm = it->second;
         size_t col_y = 0;
         for (auto &y : prob_y->expr_[__y]) {
-            auto &x = expr_lookup::get<sym>(y->uid_ - 1);
-            size_t x0 = prob_x->get_expr_start(*x);
-            size_t x1 = x0 + x->dim_;
+            auto &x = expr_lookup::get(y->uid_ - 1).val();
+            size_t x0 = prob_x->get_expr_start(x);
+            size_t x1 = x0 + x.dim_;
             for (size_t i : range(x0, x1)) {
                 perm.indices()[col_y++] = i;
             }

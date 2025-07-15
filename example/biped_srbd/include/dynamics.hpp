@@ -22,19 +22,19 @@ struct srbd_dynamics : public dynamics {
     sym active_l, active_r;         // left/right foot active
     sym active_l_cur, active_r_cur; // left/right foot active
     srbd_dynamics() {
-        std::tie(r, r_n) = make_state("r", 3);
-        std::tie(r_l, r_l_n) = make_state("r_l", 3);
-        std::tie(r_r, r_r_n) = make_state("r_r", 3);
-        std::tie(v, v_n) = make_state("v", 3);
-        v_l = make_input("v_l", 3);
-        v_r = make_input("v_r", 3);
-        r_d = make_param("r_d", 3);
-        active_l = make_param("active_l", 1);
-        active_r = make_param("active_r", 1);
-        active_l_cur = make_param("active_l_cur", 1);
-        active_r_cur = make_param("active_r_cur", 1);
-        f_l = make_input("f_l", 3);
-        f_r = make_input("f_r", 3);
+        std::tie(r, r_n) = sym::states("r", 3);
+        std::tie(r_l, r_l_n) = sym::states("r_l", 3);
+        std::tie(r_r, r_r_n) = sym::states("r_r", 3);
+        std::tie(v, v_n) = sym::states("v", 3);
+        v_l = sym::inputs("v_l", 3);
+        v_r = sym::inputs("v_r", 3);
+        r_d = sym::params("r_d", 3);
+        active_l = sym::params("active_l", 1);
+        active_r = sym::params("active_r", 1);
+        active_l_cur = sym::params("active_l_cur", 1);
+        active_r_cur = sym::params("active_r_cur", 1);
+        f_l = sym::inputs("f_l", 3);
+        f_r = sym::inputs("f_r", 3);
         m = 1.0;
         dt = 0.01;
     }

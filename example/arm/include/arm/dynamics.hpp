@@ -9,9 +9,9 @@ struct armDynamics {
     sym q, v, tau, q_next, v_next;
     constr dyn_pos, dyn_vel;
     armDynamics() {
-        std::tie(q, q_next) = dynamics::make_state("q", 7);
-        std::tie(v, v_next) = dynamics::make_state("v", 7);
-        tau = dynamics::make_input("tau", 7);
+        std::tie(q, q_next) = sym::states("q", 7);
+        std::tie(v, v_next) = sym::states("v", 7);
+        tau = sym::inputs("tau", 7);
 
         dyn_pos = constr("euler", approx_order::first, 7).as_eq();
         dyn_pos->add_arguments({q, q_next, v_next});

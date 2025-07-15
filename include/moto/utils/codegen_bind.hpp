@@ -2,7 +2,7 @@
 #define MOTO_UTILS_CODEGEN_BIND_HPP
 
 #include <future>
-#include <moto/core/expr.hpp>
+#include <moto/ocp/sym.hpp>
 
 namespace moto {
 namespace utils {

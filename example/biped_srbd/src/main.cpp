@@ -9,15 +9,15 @@ int main() {
     biped_srbd::srbd_dynamics dyn;
     std::cout << "Hello, Biped SRBD!" << std::endl;
     auto prob = moto::ocp::make();
-    prob->add(dyn.stance_foot_constr());
     prob->add(dyn.euler());
     prob->add(dyn.active_l);
     prob->add(dyn.active_r);
     prob->add(dyn.active_l_cur);
     prob->add(dyn.active_r_cur);
     prob->add(dyn.friction_cone());
-    prob->add(dyn.running_cost());
+    prob->add(dyn.stance_foot_constr());
     // prob->add(dyn.foot_loc_constr());
+    prob->add(dyn.running_cost());
     auto terminal_prob = prob->copy();
     terminal_prob->add(dyn.terminal_cost());
     // moto::func_codegen::wait_until_all_compiled(8);

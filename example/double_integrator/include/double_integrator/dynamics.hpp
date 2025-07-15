@@ -2,7 +2,6 @@
 #define DOUBLE_INTEGRATOR_DYNAMICS_HPP
 
 #include <moto/ocp/constr.hpp>
-#include <moto/ocp/dynamics.hpp>
 
 namespace moto {
 
@@ -11,7 +10,7 @@ namespace moto {
  * v_next - v - a * dt = 0
  * r_next - r - v_next * dt = 0
  */
-class doubleIntegratorDyn : public dynamics, public expr_list {
+class doubleIntegratorDyn : public expr_list {
   public:
     // position, velocity, acceleration, position, velocity
     sym r, v, a, r_next, v_next;
@@ -52,9 +51,9 @@ class doubleIntegratorDyn : public dynamics, public expr_list {
     };
     doubleIntegratorDyn()
         : dyn_pos(new pos()), dyn_vel(new vel()), vel_zero_constr(new zero_vel()) {
-        std::tie(r, r_next) = make_state("pos", 3);
-        std::tie(v, v_next) = make_state("vel", 3);
-        a = make_input("acc", 3);
+        std::tie(r, r_next) = sym::states("pos", 3);
+        std::tie(v, v_next) = sym::states("vel", 3);
+        a = sym::inputs("acc", 3);
         dyn_pos->add_arguments({r, r_next, v_next});
         dyn_vel->add_arguments({v, v_next, a});
         vel_zero_constr->add_arguments({v});

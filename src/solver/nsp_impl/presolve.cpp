@@ -96,7 +96,7 @@ void partial_value_derivative(ns_node_data *prev, ns_node_data *cur) {
     // use Q_x/Q_xx as V_x/V_xx
     d.Q_x.noalias() += -nsp.F_0_k.transpose() * d.Q_yx;
     // d_pre.Q_y.noalias() += (d.Q_x - nsp.F_0_k.transpose() * d.Q_yx) *
-    //                        dynamics::permutation_from_y_to_x(prev->ocp_, cur->ocp_);
+    //                        sym::permutation_from_y_to_x(prev->ocp_, cur->ocp_);
     // +d.Q_y * d.F_0_K is done in backward pass
     // because Q_y has V_y in it
     if (nsp.F_0_K.array().isNaN().any() || d.Q_xx.array().isNaN().any()) {
@@ -109,7 +109,7 @@ void partial_value_derivative(ns_node_data *prev, ns_node_data *cur) {
     d.Q_xx.noalias() += -(d.Q_yx.transpose() * nsp.F_0_K + nsp.F_0_K.transpose() * d.Q_yx);
     // d_pre.Q_yy.noalias() += (d.Q_xx -
     //                          (d.Q_yx.transpose() * nsp.F_0_K + nsp.F_0_K.transpose() * d.Q_yx)) *
-    //                         dynamics::permutation_from_y_to_x(prev->ocp_, cur->ocp_);
+    //                         sym::permutation_from_y_to_x(prev->ocp_, cur->ocp_);
 }
 /// @todo set terminal Q_y, Q_yy
 

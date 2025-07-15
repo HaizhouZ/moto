@@ -9,10 +9,12 @@ namespace impl {
  */
 class cost : public func {
   protected:
-    void substitute_x_to_y();
-    friend struct moto::cost;
+    void finalize_impl() override;
 
   public:
+    struct finalize_hint {
+        bool substitute_x_to_y = false; ///< whether to substitute x to y
+    } hint_;
     cost(const std::string &name, approx_order order = approx_order::second)
         : func(name, order, 1, __cost) {}
 };
@@ -64,7 +66,6 @@ struct cost : public impl::shared_<impl::cost, cost> {
             }
         }
         *const_cast<std::string *>(&(*this)->name_) += "_terminal";
-        (*this)->substitute_x_to_y();
         return *this;
     }
 };

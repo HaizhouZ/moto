@@ -99,7 +99,7 @@ def_ptr(ocp);
 inline void copy_y_to_x(vector_ref from_y, vector_ref to_x,
                         const ocp_ptr_t &prob_y, const ocp_ptr_t &prob_x) {
     for (auto &y : prob_y->expr_[__y]) {
-        prob_x->extract(to_x, *expr_lookup::get<sym>(y->uid_ - 1)) = prob_y->extract(from_y, *y);
+        prob_x->extract(to_x, expr_lookup::get(y->uid_ - 1).val()) = prob_y->extract(from_y, *y);
     }
 }
 /**
@@ -108,7 +108,7 @@ inline void copy_y_to_x(vector_ref from_y, vector_ref to_x,
 inline void copy_x_to_y(vector_ref from_x, vector_ref to_y,
                         const ocp_ptr_t &prob_x, const ocp_ptr_t &prob_y) {
     for (auto &x : prob_x->expr_[__x]) {
-        prob_y->extract(to_y, *expr_lookup::get<sym>(x->uid_ + 1)) = prob_x->extract(from_x, *x);
+        prob_y->extract(to_y, expr_lookup::get(x->uid_ + 1).val()) = prob_x->extract(from_x, *x);
     }
 }
 

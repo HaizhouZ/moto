@@ -2,6 +2,7 @@
 #define MOTO_OCP_CORE_SYM_DATA_HPP
 
 #include <moto/ocp/problem.hpp>
+#include <moto/ocp/sym.hpp>
 
 namespace moto {
 /**

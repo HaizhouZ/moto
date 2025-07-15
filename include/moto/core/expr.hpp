@@ -1,7 +1,6 @@
 #ifndef __EXPRESSION_BASE__
 #define __EXPRESSION_BASE__
 
-#include <casadi/casadi.hpp>
 #include <moto/core/fields.hpp>
 
 namespace moto {
@@ -14,12 +13,7 @@ class expr; // forward declaration of expr
 struct expr_handle {
     /// @brief get the expression value
     virtual expr &val() const = 0;
-    /**
-     * @brief add expression to the expr_lookup
-     * @param p pointer to the derived object
-     * @note will check if the name is already used, if so, should throw an error
-     */
-    virtual void finalize_index_by_name(const expr *p) const = 0;
+    virtual void lock_index_by_name() const = 0;
 };
 } // namespace impl
 def_ptr_named(expr, impl::expr);
@@ -59,32 +53,31 @@ struct expr_list : public std::vector<expr_ptr_t> {
  */
 class expr_lookup {
   protected:
-    using expr_handle = impl::expr_handle;
-    using shared_expr_handle_ptr = std::unique_ptr<expr_handle>;
     /// all expressions, indexed by uid, nullptr if not finalized (only placeholder)
-    inline static std::vector<shared_expr_handle_ptr> all_;
+    using expr_handle = impl::expr_handle;                /// < type of expr handle
+    using expr_handle_ptr = std::shared_ptr<expr_handle>; /// < type of expr handle
+    inline static std::vector<expr_handle_ptr> all_;
     /// all expressions, indexed by name
-    inline static std::unordered_map<std::string, expr_handle &> by_name_{};
+    inline static std::unordered_map<std::string, expr_handle_ptr> by_name_{};
     friend class impl::expr;
 
   public:
     /// @brief get an expression by name
     template <typename T = expr_handle>
         requires(std::is_base_of_v<expr_handle, T>)
-    static const T &get(const std::string &name) {
-        try {
-            auto &p = by_name_.at(name);
-            return dynamic_cast<T &>(p);
-        } catch (const std::out_of_range &e) {
-            throw std::runtime_error(fmt::format("expression with name {} not found", name));
+    static T &get(const std::string &name) {
+        const auto &p = by_name_[name];
+        if (p == nullptr) {
+            throw std::runtime_error(fmt::format("expression name {} not locked by shared_<T>", name));
         }
+        return dynamic_cast<T &>(*p);
     }
     /// @brief get an expression by uid
     template <typename T = expr_handle>
         requires(std::is_base_of_v<expr_handle, T>)
-    static const auto &get(size_t uid) {
-        auto &p = all_[uid];
-        if (all_.at(uid) == nullptr) {
+    static T &get(size_t uid) {
+        const auto &p = all_[uid];
+        if (!p) {
             throw std::runtime_error(fmt::format("expression with uid {} not created from / owned by shared_<T>", uid));
         }
         return dynamic_cast<T &>(*p);
@@ -136,7 +129,7 @@ class expr {
 
     /**
      * @brief finalize this expression. Will be called upon added to a problem
-     * @note derived classes
+     * @warning if one is finalized before dependencies, failure may happen
      * @retval true if successfully finalized
      */
     bool finalize();
@@ -168,25 +161,23 @@ class shared_ : public std::shared_ptr<derived>, public expr_handle, private exp
             const auto &cur = static_cast<derived_shared &>(*this);
             expr_lookup::all_[uid].reset(new derived_shared(cur));
         }
-        dynamic_cast<shared_&>(*expr_lookup::all_[uid]).linked_ = true; // mark this shared_ as linked to expr_lookup
+        dynamic_cast<shared_ &>(*expr_lookup::all_[uid]).linked_ = true; // mark this shared_ as linked to expr_lookup
     }
     /**
      * @brief finalize the expression's global index by name in @ref expr_lookup
      * @param p pointer to the derived object
      * @note will check if the name is already used, if so, will throw an error
      */
-    void finalize_index_by_name(const expr *p) const {
-        if (!linked()) /// only the linked shared_ can be used to finalize the index
-            throw std::runtime_error(fmt::format("shared_ of {} is not linked to expr_lookup", p->name_));
-        auto [it, inserted] = expr_lookup::by_name_.try_emplace(p->name_, *expr_lookup::all_[p->uid_]);
-        if (!inserted and it->second.val().uid_ != p->uid_) {
+    void lock_index_by_name() const override {
+        auto p = this->get();
+        auto [it, inserted] = expr_lookup::by_name_.try_emplace(p->name_, expr_lookup::all_[p->uid_]);
+        if (!inserted) {
             throw std::runtime_error(
-                fmt::format("expr name conflicts {} of uid {} with existing uid {}",
-                            p->name_, p->uid_, it->second.val().uid_));
+                fmt::format("expr name conflicts {} between to-add uid {} and existing uid {}",
+                            p->name_, p->uid_, it->second->val().uid_));
         }
     }
     friend class expr;
-
     bool linked_ = false; // whether this shared_ is linked to an expr in expr_lookup
 
   public:
@@ -198,6 +189,7 @@ class shared_ : public std::shared_ptr<derived>, public expr_handle, private exp
     /// @param p raw pointer to the derived object from new derived(...)
     void reset(derived *p) {
         // reset the shared pointer
+        size_t prev_uid = this->val().uid_;
         shared_ptr::reset(p);
         add_index_by_uid(p->uid_);
     }
@@ -225,43 +217,6 @@ inline expr_list::expr_list(std::initializer_list<impl::expr *> exprs) {
         emplace_back(impl::shared_<impl::expr>(expr));
     }
 }
-
-namespace cs = casadi;
-
-/**
- * @brief pointer wrapper of symbolic expressions like primal variables or parameters
- * @warning symbolic computation is via cs::SX, so dont cast expr_ptr_t back to sym! (unless you know it is safe)
- */
-struct sym : public cs::SX, public impl::shared_<impl::expr, sym> {
-    using shared_::operator->; // inherit operator-> to access expr methods
-    using shared_::get;
-    /**
-     * @brief Construct a new sym object
-     *
-     * @param name name of the symbolic variable
-     * @param dim dimension of the symbolic variable
-     * @param type type of the symbolic variable, must be one of the symbolic fields
-     */
-    sym(const std::string &name, size_t dim, field_t type)
-        : shared_(new expr_type(name, dim, type)), cs::SX(cs::SX::sym(name, dim)) {
-        assert(size_t(type) <= field::num_sym || type == __usr_var);
-        if (type == __y) {
-            auto &prev_sym = moto::expr_lookup::get<sym>((*this)->uid_ - 1);
-            assert(prev_sym->field_ == __x &&
-                   prev_sym->name_ + "_nxt" == (*this)->name_ &&
-                   "make sure you create a pair of states from make_state()"); // ensure expr of uid - 1 is the x field
-        }
-    }
-    sym() = default;
-    /**
-     * @brief check if this sym is equal to another sym
-     * only check by pointer to the expression_impl, not by name or uid or cs::SX
-     * @param rhs another sym to compare with
-     */
-    bool operator==(const sym &rhs) {
-        return expr_ptr_t::get() == rhs.get();
-    }
-};
 } // namespace moto
 
 #endif /*__EXPRESSION_BASE_*/
