@@ -24,19 +24,19 @@ void ns_sqp::update(size_t n_iter) {
         fmt::print("initial cost_total: {}\n", cost_all.load());
         graph_.apply_all_unary_parallel(nullsp_kkt_solve::update_approx);
     }
-    solver::line_search_cfg ls_config[get_num_threads()];
-    solver::line_search_cfg ls_final_cfg;
-    auto finalize_bound = [&]() {
-        for (size_t i = 0; i < get_num_threads(); ++i) {
-            ls_final_cfg.primal.merge_from(ls_config[i].primal);
-            ls_final_cfg.dual.merge_from(ls_config[i].dual);
-        }
-        ls_final_cfg.alpha_primal = ls_final_cfg.primal.alpha_max;
-        ls_final_cfg.alpha_dual = ls_final_cfg.dual.alpha_max;
-        fmt::print("\talpha_pr:\t{}\n", ls_final_cfg.alpha_primal);
-        fmt::print("\talpha_du:\t{}\n", ls_final_cfg.alpha_dual);
-    };
     for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
+        solver::line_search_cfg ls_config[get_num_threads()];
+        solver::line_search_cfg ls_final_cfg;
+        auto finalize_bound = [&]() {
+            for (size_t i = 0; i < get_num_threads(); ++i) {
+                ls_final_cfg.primal.merge_from(ls_config[i].primal);
+                ls_final_cfg.dual.merge_from(ls_config[i].dual);
+            }
+            ls_final_cfg.alpha_primal = ls_final_cfg.primal.alpha_max;
+            ls_final_cfg.alpha_dual = ls_final_cfg.dual.alpha_max;
+            fmt::print("\talpha_pr:\t{}\n", ls_final_cfg.alpha_primal);
+            fmt::print("\talpha_du:\t{}\n", ls_final_cfg.alpha_dual);
+        };
         fmt::print("------------------------------------\n");
         fmt::print("SQP Iteration no. {}\n", i_iter);
         timed_block_labeled("all",

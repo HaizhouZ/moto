@@ -6,16 +6,20 @@ namespace ipm_impl {
 void ipm_constr_impl::initialize(soft_constr_data &data) {
     constr_impl::value_impl(data);
     auto &d = static_cast<ipm_data &>(data);
-    d.slack_ = (-data.v_).cwiseMax(1e-2); // clip
+    ;
+    d.g_ = d.v_;
+    d.slack_ = (-d.g_).cwiseMax(1e-2); // clip
+    d.v_ = d.g_ + d.slack_;            // r_g = g_ + slack
     d.mu_ = 1e-2;
     d.multiplier_.array() = d.mu_ / d.slack_.array();
     d.multiplier_ = d.multiplier_.cwiseMin(1e3); // clip
+    d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.mu_;
 }
 void ipm_constr_impl::post_rollout(soft_constr_data &data) {
     auto &d = static_cast<ipm_data &>(data);
     size_t arg_idx = 0;
     // update slack newton step
-    d.d_slack_ = -(d.v_ + d.slack_); // +r_g
+    d.d_slack_ = -d.v_; // -r_g
     // ensure slack + step >= 1e-8
     // compute linear step
     for (const auto &arg : d.func_.in_args()) {
@@ -71,7 +75,9 @@ void ipm_constr_impl::line_search_step(soft_constr_data &data, solver::line_sear
 void ipm_constr_impl::value_impl(sp_approx_map &data) {
     constr_impl::value_impl(data);
     auto &d = static_cast<ipm_data &>(data);
-    d.comp_res_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.mu_;
+    d.g_ = d.v_;
+    d.v_ = d.g_ + d.slack_; // r_g = g_ + slack
+    d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.mu_;
 }
 void ipm_constr_impl::jacobian_impl(sp_approx_map &data) {
     constr_impl::jacobian_impl(data);
@@ -79,7 +85,7 @@ void ipm_constr_impl::jacobian_impl(sp_approx_map &data) {
     // setup T^{-1} N
     d.diag_scaling.array() = d.multiplier_.array() / d.slack_.array();
     // set scaled residual
-    d.scaled_res_ = d.diag_scaling.cwiseProduct(d.v_);
+    d.scaled_res_ = d.diag_scaling.cwiseProduct(d.g_);
     d.scaled_res_.array() += d.mu_ / d.slack_.array();
     // modification of jacobian
     // fmt::print("--------------------\n");
@@ -90,7 +96,7 @@ void ipm_constr_impl::jacobian_impl(sp_approx_map &data) {
     size_t j_idx = 0;
     for (auto &j : d.jac_) {
         if (j.size() != 0) { // skip empty jac
-                                              // if (d.vjp_[j_idx].hasNaN()) {
+                             // if (d.vjp_[j_idx].hasNaN()) {
             // fmt::print("scaled_res: {:.3}\n", d.scaled_res_.transpose());
             // fmt::print("NaN in vjp[{}]\n", j_idx);
             // }

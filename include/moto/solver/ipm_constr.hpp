@@ -7,17 +7,17 @@ namespace moto {
 namespace ipm_impl {
 
 struct ipm_data : public soft_constr_data {
-    vector slack_; ///< slack variables for the constraints
-    vector comp_res_;
+    vector g_; ///< ipm primal value
+    vector r_s_; ///< ipm residuals g + t
+    vector slack_;   ///< slack variables for the constraints
     vector diag_scaling; ///< Nesterov-Todd scaling T^{-1} N
     vector scaled_res_;  ///< residuals after NT scaling (Nr_g - r_s) T^{-1} = T{-1} N r_g + T^{-1} mu
     double mu_;          ///< barrier parameter
-    vector d_slack_;     // newton step for slack variables
-    vector d_multipler_; // newton step for multipliers
+    vector d_slack_;     ///< newton step for slack variables
+    vector d_multipler_; ///< newton step for multipliers
     ipm_data(sp_approx_map_ptr_t &&d)
         : soft_constr_data(std::move(d)) {
         slack_.resize(func_.dim_);
-        comp_res_.resize(func_.dim_);
         diag_scaling.resize(func_.dim_);
         scaled_res_.resize(func_.dim_);
     }
