@@ -8,15 +8,13 @@ namespace moto {
 namespace impl {
 struct constr;
 /**
- * @brief constraint data
+ * @brief constraint approximation map
  * derived from sp_approx_map with multipler and vjp (for cost) mapping in addition
  */
 struct constr_approx_map : public sp_approx_map {
-    /// @todo: add this to raw
-    // vector_ref slack_;
-    double *merit_;
-    vector_ref multiplier_;
-    std::vector<row_vector_ref> vjp_;
+    double *merit_;                   ///< pointer to the merit value
+    vector_ref multiplier_;           ///< multiplier vector reference
+    std::vector<row_vector_ref> vjp_; ///< multiplier-jacobian product references (cost jacobian)
     /**
      * @brief construct a new constr data object by moving from another sparse approximation map
      * @param multiplier reference to the multiplier vector
@@ -33,7 +31,10 @@ struct constr_approx_map : public sp_approx_map {
     /// @brief short-cut for nested moving construct
     constr_approx_map(sp_approx_map_ptr_t &&rhs) : constr_approx_map(std::move(dynamic_cast<constr_approx_map &>(*rhs))) {}
 };
-
+/**
+ * @brief independent constraint approximation data
+ * @note this is used to store the value and jacobian of the constraint
+ */
 struct constr_approx_data {
     vector v_data_;                ///< value data for the independent constraint
     std::vector<matrix> jac_data_; ///< jacobian data for the independent constraint
@@ -82,8 +83,8 @@ class constr : public func {
     /**
      * @brief constraint data
      *
-     * @tparam approx_map_t mapping type, default is constr_approx_map
-     * @tparam data_t data type, default is constr_approx_data
+     * @tparam approx_map_t mapping type, default is @ref constr_approx_map
+     * @tparam data_t data type, default is @ref constr_approx_data
      */
     template <typename approx_map_t = constr_approx_map,
               typename data_t = constr_approx_data>
@@ -97,8 +98,8 @@ class constr : public func {
     };
     /**
      * @brief make an approximation data for the constraint
-     *
-     * @tparam data_type type of the data, default is constr_data<>
+     * 
+     * @tparam data_type type of the data, @b MUST be instantiation of @ref constr_data, default is constr_data<>
      * @param primal primal data
      * @param raw raw approximation data
      * @param shared shared data
@@ -116,8 +117,8 @@ class constr : public func {
     }
     /**
      * @brief wrapped data maker for constr
-     * @details if field approx is in @ref approx_storage::stored_constr_fields, it will return constr_approx_map
-     * otherwise it will call @ref make_approx to generate @ref constr_data (with independent storage)
+     * @details if field_ is in @ref approx_storage::stored_constr_fields, it will return constr_approx_map
+     * otherwise it will call @ref make_approx to generate @ref constr::constr_data (with independent storage)
      * @param primal primal data
      * @param raw approximation data
      * @param shared shared data

@@ -26,16 +26,24 @@ struct ipm_approx_data : public impl::constr_approx_data {
 class ipm_constr final : public impl::soft_constr {
   private:
     using base = impl::soft_constr;
-    void value_impl(sp_approx_map &data) override final;
-    void jacobian_impl(sp_approx_map &data) override final;
-    using data_type = constr_data<base::data_type::mtype, ipm_approx_data>;
+    /// + update the IPM slack and residuals
+	void value_impl(sp_approx_map &data) override final;                    
+    /// + update the IPM-modified cost jacobian and hessian
+	void jacobian_impl(sp_approx_map &data) override final;                 
+    /// data type for the IPM constraint
+	using data_type = constr_data<base::data_type::mtype, ipm_approx_data>; 
 
   public:
     using base::base;
+    /// @brief initialize the IPM constraint data
     void initialize(soft_constr_data &data) override final;
+    /// @brief post rollout operation for the IPM constraint to compute the newton step
     void post_rollout(soft_constr_data &data) override final;
+    /// @brief line search step for the IPM constraint
     void line_search_step(soft_constr_data &data, solver::line_search_cfg *cfg) override final;
+    /// @brief update the line search configuration (if necessary)
     void update_line_search_cfg(soft_constr_data &data, solver::line_search_cfg *cfg) override final;
+
     using ipm_data = data_type;
 
     /**

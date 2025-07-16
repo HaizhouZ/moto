@@ -62,11 +62,11 @@ struct node_base {
     std::set<edge_type *> out_edges;           ///< outgoing edges
     std::atomic<size_t> in_cnt{0}, out_cnt{0}; ///< counts of in and out edges
     data_type *data_;                          ///< pointer to the data
-    /// necessary as proxy, e.g., node->(member of @ref data_type)
+    /// necessary as proxy, e.g., node->(member of @ref node_base::data_type)
     data_type *operator->() { return data_; }
-    /// @brief default constructor, initializes data_ to nullptr
+    /// @brief default constructor, initializes @ref data_ to nullptr
     node_base() : data_(nullptr) {}
-    /// @brief copy constructor (not really copied), initializes data_ to nullptr
+    /// @brief copy constructor (not really copied), initializes @ref data_ to nullptr
     node_base(const node_base &rhs) : data_(nullptr) {}
     /// @brief default move constructor
     node_base(node_base &&rhs) = default;
