@@ -1,4 +1,3 @@
-#include <moto/ocp/dynamics.hpp>
 #include <moto/solver/ineq_soft_solve.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
 #include <moto/solver/ns_riccati/nullspace_data.hpp>

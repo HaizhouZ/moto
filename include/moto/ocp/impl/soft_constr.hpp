@@ -20,7 +20,6 @@ struct soft_constr_approx_map : public constr_approx_map {
 
 /**
  * @brief soft constraint interface class
- * @property soft_constr_data is a public type alias for @ref soft_constr_approx_map to ensure common interface of all soft constraints
  */
 class soft_constr : public impl::soft_constr_base {
   protected:
@@ -30,7 +29,8 @@ class soft_constr : public impl::soft_constr_base {
   public:
     using base = impl::soft_constr_base;
     using base::base;                                ///< inherit impl::constr constructor
-    using soft_constr_data = soft_constr_approx_map; ///< public data type for virtual function override
+    /// public type alias for @ref soft_constr_approx_map to ensure common interface of all soft constraints
+    using soft_constr_data = soft_constr_approx_map;
 
     /// initialize the soft constraint data
     virtual void initialize(soft_constr_data &data) = 0;

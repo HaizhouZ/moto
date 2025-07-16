@@ -2,7 +2,6 @@
 #define __MOTO_EXAMPLE_ARM_DYNAMICS_HPP__
 
 #include <moto/ocp/constr.hpp>
-#include <moto/ocp/dynamics.hpp>
 
 namespace moto {
 struct armDynamics {
