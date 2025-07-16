@@ -5,7 +5,7 @@
 
 namespace moto {
 /**
- * @brief pointer wrapper of expr_type
+ * @brief pointer wrapper of @ref impl::constr
  *
  */
 struct constr : public impl::shared_<impl::constr, constr> {

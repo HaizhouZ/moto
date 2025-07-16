@@ -14,9 +14,9 @@ data_base::data_base(const ocp_ptr_t &prob)
     prim_step[__u].resize(nu);
     prim_step[__y].resize(nx);
     // initialize soft constraint data
-    for (auto f : {__ineq_x, __ineq_xu, __eq_x_soft, __eq_xu_soft}) {
+    for (auto f : concat_fields(ineq_constr_fields, soft_constr_fields)) {
         for (auto &d : sparse_[f]) {
-            auto &sd = static_cast<impl::soft_constr_data &>(*d);
+            auto &sd = dynamic_cast<impl::soft_constr::soft_constr_data &>(*d);
             sd.prim_step_.clear();
             for (const auto &arg : sd.func_.in_args()) {
                 if (arg->field_ < field::num_prim) {

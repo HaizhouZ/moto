@@ -32,6 +32,14 @@ using mapped_matrix = Eigen::Map<matrix>;
 #define def_ptr_in_namespace(name, name_sp) typedef std::shared_ptr<name_sp::name> name##_ptr_t
 #define def_unique_ptr(name) typedef std::unique_ptr<name> name##_ptr_t
 #define def_unique_ptr_named(name, type_name) typedef std::unique_ptr<type_name> name##_ptr_t
+inline auto to_matrix_ref_list(std::vector<matrix> &matrices) {
+    std::vector<matrix_ref> refs;
+    refs.reserve(matrices.size());
+    for (auto &m : matrices) {
+        refs.emplace_back(m);
+    }
+    return refs;
+} // to_matrix_ref_list
 
 inline constexpr auto range(size_t st, size_t ed) {
     return std::views::iota(st, ed);

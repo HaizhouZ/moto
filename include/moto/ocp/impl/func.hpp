@@ -29,9 +29,6 @@ class func : public expr {
 
     std::unordered_map<size_t, size_t> sym_uid_idx_; /// < map from sym uid to index in in_args_
     friend struct moto::sp_arg_map;
-
-    /// @todo to be implemented
-    virtual void setup_sparsity([[maybe_unused]] sp_approx_map &data) {}
     /**
      * @brief finalize the function
      * @details it will wait until the codegen is done if set_from_casadi is used

@@ -1,5 +1,5 @@
-#include <moto/ocp/impl/func_data.hpp>
 #include <moto/ocp/impl/func.hpp>
+#include <moto/ocp/impl/func_data.hpp>
 
 namespace moto {
 sp_arg_map::sp_arg_map(sym_data &primal, shared_data &shared, impl::func &f)
@@ -50,7 +50,18 @@ sp_approx_map::sp_approx_map(sym_data &primal,
             }
         }
     }
-
+    setup_hessian(raw);
+}
+sp_approx_map::sp_approx_map(sym_data &primal,
+                             vector_ref v,
+                             std::vector<matrix_ref> &&jac,
+                             shared_data &shared,
+                             impl::func &f)
+    : v_(v), jac_(jac), sp_arg_map(primal, shared, f) {
+}
+void sp_approx_map::setup_hessian(approx_storage &raw) {
+    auto &f = func_;
+    auto &in_args = f.in_args();
     if (f.order() >= approx_order::second || f.field_ - __dyn < field::num_constr) {
         size_t field_1, field_2;
         hess_.resize(in_args_.size());
@@ -79,13 +90,6 @@ sp_approx_map::sp_approx_map(sym_data &primal,
             }
         }
     }
-}
-sp_approx_map::sp_approx_map(sym_data &primal,
-                             vector_ref v,
-                             const std::vector<matrix_ref> &jac,
-                             shared_data &shared,
-                             impl::func &f)
-    : v_(v), jac_(jac), sp_arg_map(primal, shared, f) {
 }
 shared_data::shared_data(const ocp_ptr_t &prob, sym_data &primal) : prob_(prob) {
     data_.reserve(prob->expr_[__pre_comp].size() + prob->expr_[__usr_func].size());

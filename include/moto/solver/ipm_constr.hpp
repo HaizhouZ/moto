@@ -6,35 +6,37 @@
 namespace moto {
 namespace ipm_impl {
 
-struct ipm_data : public impl::soft_constr_data {
-    vector g_; ///< ipm primal value
-    vector r_s_; ///< ipm residuals g + t
-    vector slack_;   ///< slack variables for the constraints
+struct ipm_approx_data : public impl::constr_approx_data {
+    vector g_;           ///< ipm primal value
+    vector r_s_;         ///< ipm residuals g + t
+    vector slack_;       ///< slack variables for the constraints
     vector diag_scaling; ///< Nesterov-Todd scaling T^{-1} N
     vector scaled_res_;  ///< residuals after NT scaling (Nr_g - r_s) T^{-1} = T{-1} N r_g + T^{-1} mu
     double mu_;          ///< barrier parameter
     vector d_slack_;     ///< newton step for slack variables
     vector d_multipler_; ///< newton step for multipliers
-    ipm_data(sp_approx_map_ptr_t &&d)
-        : impl::soft_constr_data(std::move(d)) {
-        slack_.resize(func_.dim_);
-        diag_scaling.resize(func_.dim_);
-        scaled_res_.resize(func_.dim_);
+    ipm_approx_data(constr_approx_data &&rhs)
+        : impl::constr_approx_data(std::move(rhs)) {
+        slack_.resize(f_->dim_);
+        diag_scaling.resize(f_->dim_);
+        scaled_res_.resize(f_->dim_);
     }
 };
 
-class ipm_constr : public impl::soft_constr {
+class ipm_constr final : public impl::soft_constr {
   private:
+    using base = impl::soft_constr;
     void value_impl(sp_approx_map &data) override final;
     void jacobian_impl(sp_approx_map &data) override final;
+    using data_type = constr_data<base::data_type::mtype, ipm_approx_data>;
 
   public:
-	using base = impl::soft_constr;
     using base::base;
-    void initialize(data_type &data) override final;
-    void post_rollout(data_type &data) override final;
-    void line_search_step(data_type &data, solver::line_search_cfg *cfg) override final;
-    void update_line_search_cfg(data_type &data, solver::line_search_cfg *cfg) override final;
+    void initialize(soft_constr_data &data) override final;
+    void post_rollout(soft_constr_data &data) override final;
+    void line_search_step(soft_constr_data &data, solver::line_search_cfg *cfg) override final;
+    void update_line_search_cfg(soft_constr_data &data, solver::line_search_cfg *cfg) override final;
+    using ipm_data = data_type;
 
     /**
      * @brief make the sparse approximation data for the IPM
@@ -44,7 +46,7 @@ class ipm_constr : public impl::soft_constr {
      * @return sp_approx_map_ptr_t
      */
     sp_approx_map_ptr_t make_approx_map(sym_data &primal, approx_storage &raw, shared_data &shared) override {
-        return std::make_unique<ipm_data>(impl::soft_constr::make_approx_map(primal, raw, shared));
+        return sp_approx_map_ptr_t(make_approx<data_type>(primal, raw, shared));
     }
 };
 

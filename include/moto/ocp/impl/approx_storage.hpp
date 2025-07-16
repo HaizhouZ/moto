@@ -17,8 +17,10 @@ struct approx_storage {
         vector v_;                           ///< dense value
         array<matrix, field::num_prim> jac_; ///< dense jacobian
     };
+    /// field approximation stored in here
+    static constexpr auto stored_constr_fields = std::array{__dyn, __eq_x, __eq_xu};
     /// raw approximation data of constraints, indexed by field
-    shifted_array<raw_approx, field::num_constr, __dyn> approx_;
+    array_type<raw_approx, stored_constr_fields> approx_;
     /// dual variables of constratins, indexed by field
     shifted_array<vector, field::num_constr, __dyn> dual_;
     scalar_t merit_;

@@ -124,10 +124,9 @@ struct sp_approx_map : public sp_arg_map {
      * @param f approximation function implementation pointer (unique_ptr const ref)
      * @note this constructor is used for approximations not mapped from @ref approx_storage
      */
-    sp_approx_map(sym_data &primal, vector_ref v, const std::vector<matrix_ref> &jac, shared_data &shared, impl::func &f);
-    /// constructor for sparse approx data with already created sp_arg_map
-    sp_approx_map(sp_arg_map &&rhs, vector_ref v, std::vector<matrix_ref> &&jac)
-        : sp_arg_map(std::move(rhs)), v_(v), jac_(std::move(jac)) {}
+    sp_approx_map(sym_data &primal, vector_ref v, std::vector<matrix_ref> &&jac, shared_data &shared, impl::func &f);
+    /// @brief setup hessian from raw approx storage
+    void setup_hessian(approx_storage &raw);
 
     auto jac(const sym &in) const {
         return jac_[sym_uid_idx_.at(in->uid_)];

@@ -2,11 +2,16 @@
 
 namespace moto {
 namespace impl {
-constr_data::constr_data(approx_storage &raw,
-                         sp_approx_map &&d,
-                         constr *f)
+constr_approx_map::constr_approx_map(approx_storage &raw,
+                                     sp_approx_map &&d)
+    : constr_approx_map(raw.prob_->extract(raw.dual_[d.func_.field_], d.func_), raw, std::move(d)) {
+}
+constr_approx_map::constr_approx_map(vector_ref multiplier,
+                                     approx_storage &raw,
+                                     sp_approx_map &&d)
     : sp_approx_map(std::move(d)), merit_(&raw.merit_),
-      multiplier_(raw.prob_->extract(raw.dual_[f->field_], *f)) {
+      multiplier_(multiplier) {
+    auto f = &func_;
     const auto &in_args = f->in_args();
     for (size_t i = 0; i < in_args_.size(); i++) {
         if (in_args[i]->field_ < field::num_prim)
@@ -19,6 +24,20 @@ constr_data::constr_data(approx_storage &raw,
     }
     if (f->order() >= approx_order::second) {
         in_args_.push_back(multiplier_);
+    }
+}
+constr_approx_data::constr_approx_data(func &f) : f_(&f) {
+    v_data_.resize(f.dim_);
+    v_data_.setZero();
+    jac_data_.reserve(f.in_args().size());
+    for (auto &arg : f.in_args()) {
+        if (arg->field_ < field::num_prim) {
+            jac_data_.emplace_back(f.dim_, arg->dim_);
+            jac_data_.back().setZero();
+        } else { // useless
+            static matrix empty;
+            jac_data_.emplace_back(empty);
+        };
     }
 }
 void constr::finalize_impl() {
@@ -75,7 +94,7 @@ void constr::finalize_impl() {
 void constr::value_impl(sp_approx_map &data) {
     value(data);
     // compute contribution to merit function
-    auto &d = static_cast<constr_data &>(data);
+    auto &d = static_cast<constr_approx_map &>(data);
     scalar_t res = d.multiplier_.dot(d.v_);
     // fmt::print("\t{}:\tv:{}\n", name_, d.v_.transpose());
     // #pragma omp critical
@@ -91,7 +110,7 @@ void constr::jacobian_impl(sp_approx_map &data) {
     // compute jacobian first
     jacobian(data);
     // update multiplier - jacobian product
-    auto &d = static_cast<constr_data &>(data);
+    auto &d = static_cast<constr_approx_map &>(data);
     for (size_t i = 0; i < d.in_arg_data().size(); i++) {
         if (d.vjp_[i].size() != 0) // skip if no jacobian for this input
             // fmt::print("{}\t{}:i\t{:.3}\n", i, name_, d.in_args_[i].transpose());

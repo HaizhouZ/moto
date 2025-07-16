@@ -8,11 +8,13 @@ approx_storage::approx_storage(const ocp_ptr_t &prob) : prob_(prob) {
             continue;
         }
         size_t dim = prob_->dim_[i];
-        approx_[i].v_.resize(dim);
-        approx_[i].v_.setZero();
-        for (auto j : range(field::num_prim)) {
-            approx_[i].jac_[j].resize(dim, prob_->dim_[j]);
-            approx_[i].jac_[j].setZero();
+        if (in_field(approx_storage::stored_constr_fields, i)) {
+            approx_[i].v_.resize(dim);
+            approx_[i].v_.setZero();
+            for (auto j : range(field::num_prim)) {
+                approx_[i].jac_[j].resize(dim, prob_->dim_[j]);
+                approx_[i].jac_[j].setZero();
+            }
         }
         // dual variables
         dual_[i].resize(prob_->dim_[i]);

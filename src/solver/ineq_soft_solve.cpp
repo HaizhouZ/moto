@@ -4,20 +4,18 @@
 namespace moto {
 namespace ineq_soft_solve {
 using soft_constr = impl::soft_constr;
-using soft_constr_data = impl::soft_constr_data;
+using soft_constr_data = soft_constr::soft_constr_data;
 template <typename Callback>
     requires std::is_invocable_v<Callback, soft_constr &, soft_constr_data &>
 static inline void for_funcs(solver::data_base *data, Callback &&callback) {
     auto inner = [&](field_t f) {
         for (auto &func : data->prob_->expr_[f]) {
             soft_constr &sf = static_cast<soft_constr &>(*func);
-            auto &sd = static_cast<soft_constr_data &>(data->data(sf));
+            auto &sd = dynamic_cast<soft_constr_data &>(data->data(sf));
             callback(sf, sd);
         }
     };
-    for (auto f : solver::ineq_constr_fields)
-        inner(f);
-    for (auto f : solver::soft_constr_fields)
+    for (auto f : concat_fields(ineq_constr_fields, soft_constr_fields))
         inner(f);
 }
 

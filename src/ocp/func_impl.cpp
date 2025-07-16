@@ -11,10 +11,7 @@ sp_approx_map_ptr_t func::make_approx_map(sym_data &primal, approx_storage &raw,
     if (in_args_.empty())
         throw std::runtime_error(fmt::format("in args unset for func {} in field {}",
                                              name_, magic_enum::enum_name(field_)));
-    ;
-    auto approx_data = std::make_unique<sp_approx_map>(primal, raw, shared, *this);
-    setup_sparsity(*approx_data);
-    return approx_data;
+    return std::make_unique<sp_approx_map>(primal, raw, shared, *this);
 }
 void func::load_external(const std::string &path) {
     auto funcs = load_approx(name_, true, order() >= approx_order::first, order() >= approx_order::second);

@@ -49,7 +49,7 @@ int main() {
         std::cout << "nexts " << node->sym_->value_[__y].transpose() << '\n';
         std::cout << "param " << node->sym_->value_[__p].transpose() << '\n';
         // std::cout << "rescs " << node->data(dyn.vel_zero_constr).v_.transpose() << '\n';
-        // std::cout << "dual  " << static_cast<constr_data &>(node->data(dyn.vel_zero_constr)).multiplier_.transpose() << '\n';
+        // std::cout << "dual  " << static_cast<constr_approx_map &>(node->data(dyn.vel_zero_constr)).multiplier_.transpose() << '\n';
         // std::cout << "sy    " << node->nsp_->s_y << '\n';
         // std::cout << "su    " << node->nsp_->s_u << '\n';
         // std::cout << "resdy " << node->dense_->approx_[__dyn].v_.transpose() << '\n';

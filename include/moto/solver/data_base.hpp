@@ -5,10 +5,6 @@
 
 namespace moto {
 namespace solver {
-constexpr field_t primal_fields[] = {__x, __u, __y};
-constexpr field_t hard_constr_fields[] = {__dyn, __eq_x, __eq_xu};
-constexpr field_t ineq_constr_fields[] = {__ineq_x, __ineq_xu};
-constexpr field_t soft_constr_fields[] = {__eq_x_soft, __eq_xu_soft};
 
 /**
  * @brief default solver data class, stores some shortcuts for solver implementation,
@@ -26,7 +22,7 @@ struct data_base : public node_data {
     matrix &Q_uu;
     matrix &Q_yx;
     matrix &Q_yy;
-    array<vector, std::size(primal_fields)> prim_step; ///< primal (newton) step
+    array_type<vector, primal_fields> prim_step; ///< primal (newton) step
     /// @brief create solver data
     /// @param prob ocp to initialize nx, nu and the Q-derivative refs
     data_base(const ocp_ptr_t &prob);

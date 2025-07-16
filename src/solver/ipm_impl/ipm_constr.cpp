@@ -3,10 +3,9 @@
 
 namespace moto {
 namespace ipm_impl {
-void ipm_constr::initialize(ipm::data_type &data) {
-    impl::constr::value_impl(data);
-    auto &d = static_cast<ipm_data &>(data);
-    ;
+void ipm_constr::initialize(ipm::soft_constr_data &data) {
+    soft_constr::value_impl(data);
+    auto &d = dynamic_cast<ipm_data &>(data);
     d.g_ = d.v_;
     d.slack_ = (-d.g_).cwiseMax(1e-2); // clip
     d.v_ = d.g_ + d.slack_;            // r_g = g_ + slack
@@ -15,8 +14,8 @@ void ipm_constr::initialize(ipm::data_type &data) {
     d.multiplier_ = d.multiplier_.cwiseMin(1e3); // clip
     d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.mu_;
 }
-void ipm_constr::post_rollout(ipm::data_type &data) {
-    auto &d = static_cast<ipm_data &>(data);
+void ipm_constr::post_rollout(ipm::soft_constr_data &data) {
+    auto &d = dynamic_cast<ipm_data &>(data);
     size_t arg_idx = 0;
     // update slack newton step
     d.d_slack_ = -d.v_; // -r_g
@@ -24,7 +23,7 @@ void ipm_constr::post_rollout(ipm::data_type &data) {
     // compute linear step
     for (const auto &arg : d.func_.in_args()) {
         if (arg->field_ < field::num_prim) {
-            d.d_slack_.noalias() -= d.jac_[arg_idx] * d.prim_step_[arg_idx];
+            d.d_slack_.noalias() -= d.jac_data_[arg_idx] * d.prim_step_[arg_idx];
         }
         arg_idx++;
     }
@@ -33,10 +32,10 @@ void ipm_constr::post_rollout(ipm::data_type &data) {
     d.d_multipler_.array() = -d.multiplier_.array() + d.mu_ / d.slack_.array() - d.diag_scaling.array() * d.d_slack_.array();
     /// @todo iterative refinement for better accuracy?
 }
-void ipm_constr::update_line_search_cfg(ipm::data_type &data, solver::line_search_cfg *cfg) {
+void ipm_constr::update_line_search_cfg(ipm::soft_constr_data &data, solver::line_search_cfg *cfg) {
     constexpr scalar_t tau = 0.995; // scaling factor
     scalar_t alpha_max = 1.0;       // default max step size
-    auto &d = static_cast<ipm_data &>(data);
+    auto &d = dynamic_cast<ipm_data &>(data);
     // compute alpha_max
     for (size_t idx : range(dim_)) {
         if (d.d_slack_(idx) < 0) {
@@ -51,8 +50,8 @@ void ipm_constr::update_line_search_cfg(ipm::data_type &data, solver::line_searc
         }
     }
 }
-void ipm_constr::line_search_step(ipm::data_type &data, solver::line_search_cfg *cfg) {
-    auto &d = static_cast<ipm_data &>(data);
+void ipm_constr::line_search_step(ipm::soft_constr_data &data, solver::line_search_cfg *cfg) {
+    auto &d = dynamic_cast<ipm_data &>(data);
     d.slack_.array() += cfg->alpha_primal * d.d_slack_.array();
     d.multiplier_.array() += cfg->alpha_dual * d.d_multipler_.array();
     // fmt::print("-----------line search---------\n");
@@ -73,17 +72,17 @@ void ipm_constr::line_search_step(ipm::data_type &data, solver::line_search_cfg 
     d.slack_ = d.slack_.array().max(1e-8);
 }
 void ipm_constr::value_impl(sp_approx_map &data) {
-    impl::constr::value_impl(data);
-    auto &d = static_cast<ipm_data &>(data);
+    soft_constr::value_impl(data);
+    auto &d = dynamic_cast<ipm_data &>(data);
     d.g_ = d.v_;
     d.v_ = d.g_ + d.slack_; // r_g = g_ + slack
-    d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.mu_;
+    d.r_s_.array() = static_cast<soft_constr_data &>(data).multiplier_.cwiseProduct(d.slack_).array() - d.mu_;
 }
 void ipm_constr::jacobian_impl(sp_approx_map &data) {
-    impl::constr::jacobian_impl(data);
-    auto &d = static_cast<ipm_data &>(data);
+    soft_constr::jacobian_impl(data);
+    auto &d = dynamic_cast<ipm_data &>(data);
     // setup T^{-1} N
-    d.diag_scaling.array() = d.multiplier_.array() / d.slack_.array();
+    d.diag_scaling.array() = static_cast<soft_constr_data &>(data).multiplier_.array() / d.slack_.array();
     // set scaled residual
     d.scaled_res_ = d.diag_scaling.cwiseProduct(d.g_);
     d.scaled_res_.array() += d.mu_ / d.slack_.array();
@@ -94,7 +93,7 @@ void ipm_constr::jacobian_impl(sp_approx_map &data) {
     //     fmt::print("arg: {}: {}\n", arg->name_, d[arg].transpose());
     // }
     size_t j_idx = 0;
-    for (auto &j : d.jac_) {
+    for (auto &j : d.jac_data_) {
         if (j.size() != 0) { // skip empty jac
                              // if (d.vjp_[j_idx].hasNaN()) {
             // fmt::print("scaled_res: {:.3}\n", d.scaled_res_.transpose());
@@ -126,8 +125,8 @@ void ipm_constr::jacobian_impl(sp_approx_map &data) {
         if (outer.size()) { // skip empty hess
             for (auto &inner : outer) {
                 if (inner.size() != 0) {
-                    inner.noalias() += d.jac_[outer_idx].transpose() * d.diag_scaling.asDiagonal() * d.jac_[inner_idx];
-                    if (inner.hasNaN() || d.diag_scaling.hasNaN() || d.jac_[inner_idx].hasNaN() || d.jac_[outer_idx].hasNaN()) {
+                    inner.noalias() += d.jac_data_[outer_idx].transpose() * d.diag_scaling.asDiagonal() * d.jac_data_[inner_idx];
+                    if (inner.hasNaN()) {
                         fmt::print("NaN in hess[{}][{}]\n", outer_idx, inner_idx);
                     }
                 }
