@@ -3,7 +3,7 @@
 
 #include <moto/core/expr.hpp>
 #include <moto/ocp/cost.hpp>
-#include <moto/solver/ipm_constr.hpp>
+#include <moto/solver/ipm/ipm_constr.hpp>
 
 namespace biped_srbd {
 using namespace moto;

@@ -6,7 +6,7 @@
 namespace moto {
 
 namespace solver {
-struct line_search_cfg;
+struct solver_settings;
 }
 namespace ns_riccati {
 
@@ -17,7 +17,7 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev);
 void compute_primal_sensitivity(ns_node_data *cur);
 void fwd_linear_rollout(ns_node_data *cur, ns_node_data *next);
 void finalize_newton_step(ns_node_data *cur);
-void line_search_step(ns_node_data *cur, solver::line_search_cfg *cfg);
+void line_search_step(ns_node_data *cur, solver::solver_settings *cfg);
 } // namespace ns_riccati
 
 } // namespace moto

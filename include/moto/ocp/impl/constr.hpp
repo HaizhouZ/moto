@@ -2,6 +2,7 @@
 #define MOTO_CONSTR_IMPL_HPP
 
 #include <moto/ocp/impl/func.hpp>
+#include <moto/solver/solver_setting.hpp>
 #include <moto/utils/optional_boolean.hpp>
 
 namespace moto {
@@ -12,9 +13,10 @@ struct constr;
  * derived from sp_approx_map with multipler and vjp (for cost) mapping in addition
  */
 struct constr_approx_map : public sp_approx_map {
-    double *merit_;                   ///< pointer to the merit value
-    vector_ref multiplier_;           ///< multiplier vector reference
-    std::vector<row_vector_ref> vjp_; ///< multiplier-jacobian product references (cost jacobian)
+    solver::line_search_cfg *ls_cfg = nullptr; ///< line search configuration, can be nullptr
+    double *merit_;                            ///< pointer to the merit value
+    vector_ref multiplier_;                    ///< multiplier vector reference
+    std::vector<row_vector_ref> vjp_;          ///< multiplier-jacobian product references (cost jacobian)
     /**
      * @brief construct a new constr data object by moving from another sparse approximation map
      * @param multiplier reference to the multiplier vector
@@ -59,6 +61,9 @@ class constr : public func {
     void finalize_impl() override;
 
   public:
+    virtual void setup_solver_setting(sp_approx_map &data, solver::solver_settings *settings) {
+        dynamic_cast<constr_approx_map&>(data).ls_cfg = static_cast<solver::line_search_cfg*>(settings);
+    }
     /**
      * @brief type hint for the constraint
      *
@@ -98,7 +103,7 @@ class constr : public func {
     };
     /**
      * @brief make an approximation data for the constraint
-     * 
+     *
      * @tparam data_type type of the data, @b MUST be instantiation of @ref constr_data, default is constr_data<>
      * @param primal primal data
      * @param raw raw approximation data

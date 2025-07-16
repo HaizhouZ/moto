@@ -4,9 +4,6 @@
 #include <moto/ocp/impl/constr.hpp>
 
 namespace moto {
-namespace solver {
-struct line_search_cfg;
-}
 namespace impl {
 /**
  * @brief soft constraint data, contains additional primal step data for splitting post-rollout operation
@@ -28,7 +25,7 @@ class soft_constr : public impl::soft_constr_base {
 
   public:
     using base = impl::soft_constr_base;
-    using base::base;                                ///< inherit impl::constr constructor
+    using base::base; ///< inherit impl::constr constructor
     /// public type alias for @ref soft_constr_approx_map to ensure common interface of all soft constraints
     using soft_constr_data = soft_constr_approx_map;
 
@@ -37,7 +34,7 @@ class soft_constr : public impl::soft_constr_base {
     /// post rollout operation for the soft constraint to compute the newton step
     virtual void post_rollout(soft_constr_data &data) = 0;
     /// line search step for the soft constraint
-    virtual void line_search_step(soft_constr_data &data, solver::line_search_cfg *cfg) = 0;
+    virtual void line_search_step(soft_constr_data &data, solver::line_search_cfg* cfg) = 0;
     /// update the line search configuration (if necessary)
     virtual void update_line_search_cfg(soft_constr_data &data, solver::line_search_cfg *cfg) {}
     /***

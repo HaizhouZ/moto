@@ -1,5 +1,4 @@
-#include <moto/solver/ipm_constr.hpp>
-#include <moto/solver/line_search.hpp>
+#include <moto/solver/ipm/ipm_constr.hpp>
 
 namespace moto {
 namespace ipm_impl {
@@ -9,10 +8,9 @@ void ipm_constr::initialize(ipm::soft_constr_data &data) {
     d.g_ = d.v_;
     d.slack_ = (-d.g_).cwiseMax(1e-2); // clip
     d.v_ = d.g_ + d.slack_;            // r_g = g_ + slack
-    d.mu_ = 1e-2;
-    d.multiplier_.array() = d.mu_ / d.slack_.array();
+    d.multiplier_.array() = d.ipm_cfg->mu / d.slack_.array();
     d.multiplier_ = d.multiplier_.cwiseMin(1e3); // clip
-    d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.mu_;
+    d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.ipm_cfg->mu;
 }
 void ipm_constr::post_rollout(ipm::soft_constr_data &data) {
     auto &d = dynamic_cast<ipm_data &>(data);
@@ -29,7 +27,7 @@ void ipm_constr::post_rollout(ipm::soft_constr_data &data) {
     }
     // d.d_slack_ = d.d_slack_.array().max(1e-8 - d.slack_.array());
     // update dual newton step
-    d.d_multipler_.array() = -d.multiplier_.array() + d.mu_ / d.slack_.array() - d.diag_scaling.array() * d.d_slack_.array();
+    d.d_multipler_.array() = -d.multiplier_.array() + d.ipm_cfg->mu / d.slack_.array() - d.diag_scaling.array() * d.d_slack_.array();
     /// @todo iterative refinement for better accuracy?
 }
 void ipm_constr::update_line_search_cfg(ipm::soft_constr_data &data, solver::line_search_cfg *cfg) {
@@ -54,21 +52,6 @@ void ipm_constr::line_search_step(ipm::soft_constr_data &data, solver::line_sear
     auto &d = dynamic_cast<ipm_data &>(data);
     d.slack_.array() += cfg->alpha_primal * d.d_slack_.array();
     d.multiplier_.array() += cfg->alpha_dual * d.d_multipler_.array();
-    // fmt::print("-----------line search---------\n");
-    // fmt::print("constraint name: {}\n", d.func_.name_);
-    // size_t arg_idx = 0;
-    // for (auto &arg : d.func_.in_args()) {
-    //     fmt::print("arg: {}: {}\n", arg->name_, d.prim_step_[arg_idx].transpose());
-    //     arg_idx++;
-    // }
-    // fmt::print("v: {:.3}\n", d.v_.transpose());
-    // fmt::print("d_slack: {:.3}\n", d.d_slack_.transpose());
-    // fmt::print("slack: {:.3}\n", d.slack_.transpose());
-    // fmt::print("multiplier: {:.3}\n", d.multiplier_.transpose());
-    // d.comp_res_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.mu_;
-    // fmt::print("d.comp_res_: {:.3}\n", d.comp_res_.transpose());
-    // fmt::print("scaling : {:.3}\n", d.multiplier_.cwiseQuotient(d.slack_));
-    // ensure slack + step >= 1e-8
     d.slack_ = d.slack_.array().max(1e-8);
 }
 void ipm_constr::value_impl(sp_approx_map &data) {
@@ -76,7 +59,10 @@ void ipm_constr::value_impl(sp_approx_map &data) {
     auto &d = dynamic_cast<ipm_data &>(data);
     d.g_ = d.v_;
     d.v_ = d.g_ + d.slack_; // r_g = g_ + slack
-    d.r_s_.array() = static_cast<soft_constr_data &>(data).multiplier_.cwiseProduct(d.slack_).array() - d.mu_;
+    if (d.ipm_cfg->mu_method == mehrotra_predictor_corrector || d.ipm_cfg->mu_method == mehrotra_probing)
+        d.r_s_.array() = static_cast<soft_constr_data &>(data).multiplier_.cwiseProduct(d.slack_).array();
+    else
+        d.r_s_.array() = static_cast<soft_constr_data &>(data).multiplier_.cwiseProduct(d.slack_).array() - d.ipm_cfg->mu;
 }
 void ipm_constr::jacobian_impl(sp_approx_map &data) {
     soft_constr::jacobian_impl(data);
@@ -85,7 +71,8 @@ void ipm_constr::jacobian_impl(sp_approx_map &data) {
     d.diag_scaling.array() = static_cast<soft_constr_data &>(data).multiplier_.array() / d.slack_.array();
     // set scaled residual
     d.scaled_res_ = d.diag_scaling.cwiseProduct(d.g_);
-    d.scaled_res_.array() += d.mu_ / d.slack_.array();
+    if (d.ipm_cfg->mu_method > mehrotra_predictor_corrector)
+        d.scaled_res_.array() += d.ipm_cfg->mu / d.slack_.array();
     // modification of jacobian
     // fmt::print("--------------------\n");
     // fmt::print("constraint name: {}\n", d.func_.name_);

@@ -3,7 +3,8 @@
 
 namespace moto {
 namespace ns_riccati {
-void line_search_step(ns_node_data *cur, solver::line_search_cfg *cfg) {
+void line_search_step(ns_node_data *cur, solver::solver_settings *_cfg) {
+    auto cfg = dynamic_cast<solver::line_search_cfg *>(_cfg);
     auto &d = *cur;
     for (auto f : primal_fields) {
         cur->sym_->value_[f].noalias() += cfg->alpha_primal * d.prim_step[f];
@@ -11,7 +12,7 @@ void line_search_step(ns_node_data *cur, solver::line_search_cfg *cfg) {
     for (auto f : hard_constr_fields) {
         cur->dense_->dual_[f].noalias() += cfg->alpha_dual * d.dual_step[f];
     }
-    ineq_soft_solve::line_search_step(cur, *cfg);
+    ineq_soft_solve::line_search_step(cur, _cfg);
 }
 
 } // namespace ns_riccati
