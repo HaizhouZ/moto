@@ -5,6 +5,8 @@
 #define ENABLE_TIMED_BLOCK
 #include <moto/utils/timed_block.hpp>
 
+#define stat_col_width 12
+
 namespace moto {
 void ns_sqp::forward() {
     timed_block(graph_.apply_all_unary_parallel(ns_riccati::update_approx));
@@ -23,6 +25,16 @@ void ns_sqp::update(size_t n_iter) {
         fmt::print("initial cost_total: {}\n", cost_all.load());
         graph_.apply_all_unary_parallel(ns_riccati::update_approx);
     }
+    // print statistics header
+    constexpr std::string_view terms[] = {"objective", "inf_prim_res", "inf_dual_res", "alpha_primal", "alpha_dual"};
+    size_t total_length = 4 + std::size(terms) * (stat_col_width + 4) + 1;
+    fmt::print("{:-<{}}\n", "", total_length);
+    fmt::print("no. |");
+    for (const auto &term : terms) {
+        fmt::print("| {:<{}} |", term, stat_col_width);
+    }
+    fmt::print("\n");
+
     for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
         solver::line_search_cfg ls_config[get_num_threads()];
         solver::line_search_cfg ls_final_cfg;
@@ -33,11 +45,7 @@ void ns_sqp::update(size_t n_iter) {
             }
             ls_final_cfg.alpha_primal = ls_final_cfg.primal.alpha_max;
             ls_final_cfg.alpha_dual = ls_final_cfg.dual.alpha_max;
-            fmt::print("\talpha_pr:\t{}\n", ls_final_cfg.alpha_primal);
-            fmt::print("\talpha_du:\t{}\n", ls_final_cfg.alpha_dual);
         };
-        fmt::print("------------------------------------\n");
-        fmt::print("SQP Iteration no. {}\n", i_iter);
         timed_block_labeled("all",
                             graph_.apply_all_unary_parallel(ns_riccati::ns_factorization);
                             graph_.apply_all_binary_forward<true>(ns_riccati::partial_value_derivative);
@@ -67,10 +75,14 @@ void ns_sqp::update(size_t n_iter) {
             } else /// @todo: include initial jac[__x] inf norm if init is optimized
                 info.inf_dual_res = std::max(info.inf_dual_res, cur->dense_->jac_[__y].cwiseAbs().maxCoeff());
         });
-        fmt::print("\tobjective:\t{}\n", info.objective);
-        fmt::print("\tinf_prim:\t{}\n", info.inf_prim_res);
-        fmt::print("\tinf_dual:\t{}\n", info.inf_dual_res);
-        /// @todo: check langrangian
+        // print statistics
+        scalar_t stats[] = {info.objective, info.inf_prim_res, info.inf_dual_res,
+                            ls_final_cfg.alpha_primal, ls_final_cfg.alpha_dual};
+        fmt::print("{:<3} |", i_iter);
+        for (const auto &stat : stats) {
+            fmt::print("| {:<{}.6e} |", stat, stat_col_width);
+        }
+        fmt::print("\n");
     }
     // });
     moto::utils::timing_storage<"all">::get().count = n_iter;
