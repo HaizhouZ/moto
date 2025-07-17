@@ -28,6 +28,9 @@ struct alignas(std::hardware_destructive_interference_size) linesearch_config {
     using worker_type = linesearch_config;
     scalar_t alpha_primal = 1.0; ///< primal step size
     scalar_t alpha_dual = 1.0;   ///< dual step size
+    void ls_config_reset() {
+        *this = linesearch_config();
+    }
 };
 
 } // namespace solver

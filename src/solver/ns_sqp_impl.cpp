@@ -29,7 +29,7 @@ void ns_sqp::update(size_t n_iter) {
     graph_.apply_all_unary_parallel(ns_riccati::update_approx);
 
     // print statistics header
-    constexpr std::string_view terms[] = {"objective", "inf_prim_res", "inf_dual_res", "alpha_primal", "alpha_dual"};
+    constexpr std::string_view terms[] = {"objective", "inf_prim_res", "inf_dual_res", "alpha_primal", "alpha_dual", "ipm_mu"};
     size_t total_length = 4 + std::size(terms) * (stat_col_width + 4) + 1;
     fmt::print("{:-<{}}\n", "", total_length);
     fmt::print("no. |");
@@ -40,6 +40,7 @@ void ns_sqp::update(size_t n_iter) {
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     //// main loop
     for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
+        settings.ls_config_reset();
         size_t n_worker = get_num_threads();
         settings_t::worker setting_per_thread[n_worker];
         auto finalize_bound_and_set_to_max = [&]() {
@@ -63,26 +64,28 @@ void ns_sqp::update(size_t n_iter) {
         graph_.apply_all_unary_parallel(ns_riccati::compute_primal_sensitivity);
         graph_.apply_all_binary_forward<false, true>(ns_riccati::fwd_linear_rollout);
 
-        if (settings.ipm_compute_affine_step()) // compute the affine step, no need to finalize dual step
+        if (settings.ipm_enable_affine_step()) { // compute the affine step, no need to finalize dual step
+            settings.ipm_compute_affine_step = true;
             graph_.apply_all_unary_parallel([](auto *d) { ns_riccati::finalize_newton_step(d, false); });
-        else // directly finalize the dual step
+        } else // directly finalize the dual step
             graph_.apply_all_unary_parallel([](auto *d) { ns_riccati::finalize_newton_step(d, true); });
         // decide line search bounds (e.g., fraction-to-bounds)
         graph_.apply_all_unary_parallel([&setting_per_thread](size_t tid, auto *d) {
             ineq_soft_solve::calculate_line_search_bounds(d, &setting_per_thread[tid]);
         });
         finalize_bound_and_set_to_max();
-        if (settings.ipm_compute_affine_step()) {
+        if (settings.ipm_enable_affine_step()) {
             // line search with max bounds
             graph_.apply_all_unary_parallel([&setting_per_thread](size_t tid, auto *d) {
                 ineq_soft_solve::line_search_step(d, &setting_per_thread[tid]);
             });
+            settings.ipm_compute_affine_step = false; // ipm affine step computation is done
             // collect worker ipm data
             auto &main_worker = setting_per_thread[0];
             for (size_t i = 1; i < n_worker; ++i) {
                 auto &cfg = setting_per_thread[i];
-                main_worker.prev_normalized_comp += cfg.prev_normalized_comp;
-                main_worker.after_normalized_comp += cfg.after_normalized_comp;
+                main_worker.prev_aff_comp += cfg.prev_aff_comp;
+                main_worker.post_aff_comp += cfg.post_aff_comp;
                 main_worker.n_ipm_cstr += cfg.n_ipm_cstr;
             }
             // adaptive mu update
@@ -120,7 +123,7 @@ void ns_sqp::update(size_t n_iter) {
         });
         // print statistics
         scalar_t stats[] = {info.objective, info.inf_prim_res, info.inf_dual_res,
-                            settings.alpha_primal, settings.alpha_dual};
+                            settings.alpha_primal, settings.alpha_dual, settings.mu};
         fmt::print("{:<3} |", i_iter);
         for (const auto &stat : stats) {
             fmt::print("| {:<{}.6e} |", stat, stat_col_width);

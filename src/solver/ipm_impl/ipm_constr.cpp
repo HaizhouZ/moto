@@ -26,12 +26,15 @@ void ipm_constr::finalize_newton_step(ipm::sp_data_map &data) {
         arg_idx++;
     }
     // update dual newton step
-    d.d_multipler_.array() = -d.multiplier_.array() + d.ipm_cfg->mu / d.slack_.array() - d.diag_scaling.array() * d.d_slack_.array();
+    if (d.ipm_cfg->ipm_compute_affine_step)
+        d.d_multipler_.array() = -d.multiplier_.array() - d.diag_scaling.array() * d.d_slack_.array();
+    else
+        d.d_multipler_.array() = -d.multiplier_.array() + d.ipm_cfg->mu / d.slack_.array() - d.diag_scaling.array() * d.d_slack_.array();
 }
 void ipm_constr::correct_jacobian(sp_data_map &data) {
     auto &d = data.as<ipm_data>();
     d.scaled_res_.array() = d.ipm_cfg->mu / d.slack_.array();
-    if (d.ipm_cfg->ipm_compute_correction()) // add the dual correction term
+    if (d.ipm_cfg->ipm_enable_corrector()) // add the dual correction term
         d.scaled_res_.array() += d.d_multipler_.array() * d.d_slack_.array();
     propagate_jacobian(d);
 }
@@ -56,13 +59,17 @@ void ipm_constr::update_linesearch_config(ipm::sp_data_map &data, workspace_data
 void ipm_constr::line_search_step(ipm::sp_data_map &data, workspace_data *cfg) {
     auto &d = data.as<ipm_data>();
     auto ipm_worker = cfg->try_get<ipm_config::worker_type>();
-    if (ipm_worker && d.ipm_cfg->ipm_compute_affine_step()) {
+    if (ipm_worker && d.ipm_cfg->ipm_enable_affine_step()) {
+        assert(d.ipm_cfg->ipm_compute_affine_step &&
+               "flag must set true for ipm affine step computation in line search");
         // if we are in the affine step mode, we need to update the ipm worker data
         ipm_worker->n_ipm_cstr += dim_;
-        ipm_worker->prev_normalized_comp += d.multiplier_.dot(d.slack_);
-        ipm_worker->after_normalized_comp += (d.multiplier_ + cfg->get<solver::linesearch_config>().alpha_dual * d.d_multipler_)
-                                                 .dot(d.slack_ + cfg->get<solver::linesearch_config>().alpha_primal * d.d_slack_);
+        ipm_worker->prev_aff_comp += d.multiplier_.dot(d.slack_);
+        ipm_worker->post_aff_comp += (d.multiplier_ + cfg->get<solver::linesearch_config>().alpha_dual * d.d_multipler_)
+                                         .dot(d.slack_ + cfg->get<solver::linesearch_config>().alpha_primal * d.d_slack_);
     } else {
+        assert(!d.ipm_cfg->ipm_compute_affine_step &&
+               "flag must set false for ipm full step computation in line search");
         d.slack_.array() += cfg->get<solver::linesearch_config>().alpha_primal * d.d_slack_.array();
         d.multiplier_.array() += cfg->get<solver::linesearch_config>().alpha_dual * d.d_multipler_.array();
         d.slack_ = d.slack_.array().max(1e-8);
@@ -82,7 +89,7 @@ void ipm_constr::jacobian_impl(sp_approx_map &data) {
     d.diag_scaling.array() = data.as<sp_data_map>().multiplier_.array() / d.slack_.array();
     // set scaled residual
     d.scaled_res_ = d.diag_scaling.cwiseProduct(d.g_);
-    if (!d.ipm_cfg->ipm_compute_affine_step())
+    if (!d.ipm_cfg->ipm_enable_affine_step())
         // if we are not in the affine step mode, we need to update the scaled residual with mu
         d.scaled_res_.array() += d.ipm_cfg->mu / d.slack_.array();
     // modification of jacobian
