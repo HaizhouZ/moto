@@ -10,6 +10,7 @@ void initialize(solver::data_base *data);
 void finalize_newton_step(solver::data_base *data);
 void line_search_step(solver::data_base *data, workspace_data *config);
 void calculate_line_search_bounds(solver::data_base *data, workspace_data *config);
+void correct_jacobian(solver::data_base *data);
 template <typename Callback>
 void for_each(solver::data_base *data, Callback &&callback) {
     data->for_each<soft_ineq_constr_fields>(

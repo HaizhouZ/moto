@@ -28,6 +28,8 @@ struct ipm_config {
     bool ipm_compute_correction() {
         return adaptive_mu_allowed && mu_method == mehrotra_predictor_corrector;
     }
+
+    void adaptive_mu_update(worker& ipm_worker);
 };
 } // namespace ipm_impl
 } // namespace moto

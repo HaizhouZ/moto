@@ -49,13 +49,13 @@ void ns_sqp::update(size_t n_iter) {
             }
             settings.alpha_primal = settings.primal.alpha_max;
             settings.alpha_dual = settings.dual.alpha_max;
-            // // copy the settings to each worker
-            // for (size_t i = 0; i < n_worker; ++i) {
-            //     setting_per_thread[i].primal = settings.primal;
-            //     setting_per_thread[i].dual = settings.dual;
-            //     setting_per_thread[i].alpha_primal = settings.alpha_primal;
-            //     setting_per_thread[i].alpha_dual = settings.alpha_dual;
-            // }
+            // copy the settings to each worker
+            for (size_t i = 0; i < n_worker; ++i) {
+                setting_per_thread[i].primal = settings.primal;
+                setting_per_thread[i].dual = settings.dual;
+                setting_per_thread[i].alpha_primal = settings.alpha_primal;
+                setting_per_thread[i].alpha_dual = settings.alpha_dual;
+            }
         };
         // timed_block_labeled("all",
         graph_.apply_all_unary_parallel(ns_riccati::ns_factorization);
@@ -86,16 +86,10 @@ void ns_sqp::update(size_t n_iter) {
                 main_worker.n_ipm_cstr += cfg.n_ipm_cstr;
             }
             // adaptive mu update
-            // eta = after / before
-            scalar_t eta = main_worker.after_normalized_comp / main_worker.prev_normalized_comp;
-            settings.sig = std::max(0., std::min(1., eta));            // clip
-            settings.sig = settings.sig * settings.sig * settings.sig; // cubic
-            settings.mu = settings.sig * main_worker.prev_normalized_comp / main_worker.n_ipm_cstr;
+            settings.adaptive_mu_update(main_worker);
             // use the new mu to update the rhs jacobian
             graph_.apply_all_unary_parallel(solver::prepare_correction);
-            graph_.apply_all_unary_parallel(ineq_soft_solve::for_each([](impl::soft_constr &c, auto &d) {
-                c.correct_jacobian(d);
-            }));
+            graph_.apply_all_unary_parallel(ineq_soft_solve::correct_jacobian);
             // solve the problem again with updated mu
             graph_.apply_all_binary_backward<true>(ns_riccati::riccati_recursion_correction);
             graph_.apply_all_unary_parallel(ns_riccati::compute_primal_sensitivity_correction);
