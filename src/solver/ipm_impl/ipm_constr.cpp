@@ -30,7 +30,7 @@ void ipm_constr::post_rollout(ipm::soft_constr_data &data) {
     d.d_multipler_.array() = -d.multiplier_.array() + d.ipm_cfg->mu / d.slack_.array() - d.diag_scaling.array() * d.d_slack_.array();
     /// @todo iterative refinement for better accuracy?
 }
-void ipm_constr::update_line_search_cfg(ipm::soft_constr_data &data, workspace_data *cfg) {
+void ipm_constr::update_linesearch_config(ipm::soft_constr_data &data, workspace_data *cfg) {
     constexpr scalar_t tau = 0.995; // scaling factor
     scalar_t alpha_max = 1.0;       // default max step size
     auto &d = data.as<ipm_data>();
@@ -38,28 +38,28 @@ void ipm_constr::update_line_search_cfg(ipm::soft_constr_data &data, workspace_d
     for (size_t idx : range(dim_)) {
         if (d.d_slack_(idx) < 0) {
             alpha_max = (-tau) * d.slack_(idx) / d.d_slack_(idx);
-            cfg->get<solver::line_search_cfg>().primal.clip(alpha_max);
-            cfg->get<solver::line_search_cfg>().primal.alpha_max = alpha_max;
+            cfg->get<solver::linesearch_config>().primal.clip(alpha_max);
+            cfg->get<solver::linesearch_config>().primal.alpha_max = alpha_max;
         }
         if (d.d_multipler_(idx) < 0) {
             alpha_max = (-tau) * d.multiplier_(idx) / d.d_multipler_(idx);
-            cfg->get<solver::line_search_cfg>().dual.clip(alpha_max);
-            cfg->get<solver::line_search_cfg>().dual.alpha_max = alpha_max;
+            cfg->get<solver::linesearch_config>().dual.clip(alpha_max);
+            cfg->get<solver::linesearch_config>().dual.alpha_max = alpha_max;
         }
     }
 }
 void ipm_constr::line_search_step(ipm::soft_constr_data &data, workspace_data *cfg) {
     auto &d = data.as<ipm_data>();
-    auto ipm_cfg = &cfg->get<ipm_settings::worker_type>(); // temporary config
-    if (d.ipm_cfg->comp_affine_step()) {
-        ipm_cfg->n_ipm_cstr += dim_;
-        ipm_cfg->prev_normalized_comp += d.multiplier_.dot(d.slack_);
+    auto ipm_worker = cfg->try_get<ipm_config::worker_type>(); // temporary config
+    if (d.ipm_cfg->comp_affine_step() && ipm_worker) {
+        ipm_worker->n_ipm_cstr += dim_;
+        ipm_worker->prev_normalized_comp += d.multiplier_.dot(d.slack_);
     }
-    d.slack_.array() += cfg->get<solver::line_search_cfg>().alpha_primal * d.d_slack_.array();
-    d.multiplier_.array() += cfg->get<solver::line_search_cfg>().alpha_dual * d.d_multipler_.array();
+    d.slack_.array() += cfg->get<solver::linesearch_config>().alpha_primal * d.d_slack_.array();
+    d.multiplier_.array() += cfg->get<solver::linesearch_config>().alpha_dual * d.d_multipler_.array();
     d.slack_ = d.slack_.array().max(1e-8);
-    if (d.ipm_cfg->comp_affine_step())
-        ipm_cfg->after_normalized_comp += d.multiplier_.dot(d.slack_);
+    if (d.ipm_cfg->comp_affine_step() && ipm_worker)
+        ipm_worker->after_normalized_comp += d.multiplier_.dot(d.slack_);
 }
 void ipm_constr::value_impl(sp_approx_map &data) {
     soft_constr::value_impl(data);

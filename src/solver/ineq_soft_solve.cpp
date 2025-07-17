@@ -36,7 +36,7 @@ void line_search_step(solver::data_base *cur, workspace_data *config) {
 }
 void calculate_line_search_bounds(solver::data_base *cur, workspace_data *config) {
     for_funcs(cur, [cur, cfg = config](soft_constr &sf, soft_constr_data &sd) {
-        sf.update_line_search_cfg(sd, cfg);
+        sf.update_linesearch_config(sd, cfg);
     });
 }
 } // namespace ineq_soft_solve

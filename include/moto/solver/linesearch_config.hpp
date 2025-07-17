@@ -7,7 +7,7 @@
 namespace moto {
 namespace solver {
 
-struct alignas(std::hardware_destructive_interference_size) line_search_cfg {
+struct alignas(std::hardware_destructive_interference_size) linesearch_config {
     // bound
     struct bounds {
         scalar_t alpha_max = 1.0; ///< max step size
@@ -25,7 +25,7 @@ struct alignas(std::hardware_destructive_interference_size) line_search_cfg {
             }
         }
     } primal, dual;
-    using worker_type = line_search_cfg;
+    using worker_type = linesearch_config;
     scalar_t alpha_primal = 1.0; ///< primal step size
     scalar_t alpha_dual = 1.0;   ///< dual step size
 };

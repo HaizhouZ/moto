@@ -14,7 +14,7 @@ struct constr;
  * derived from sp_approx_map with multipler and vjp (for cost) mapping in addition
  */
 struct constr_approx_map : public sp_approx_map {
-    solver::line_search_cfg *ls_cfg = nullptr; ///< line search configuration, can be nullptr
+    solver::linesearch_config *ls_cfg = nullptr; ///< line search configuration, can be nullptr
     double *merit_;                            ///< pointer to the merit value
     vector_ref multiplier_;                    ///< multiplier vector reference
     std::vector<row_vector_ref> vjp_;          ///< multiplier-jacobian product references (cost jacobian)
@@ -63,7 +63,7 @@ class constr : public func {
 
   public:
     void setup_setting(sp_arg_map &data, workspace_data *settings) override {
-        data.as<constr_approx_map>().ls_cfg = &settings->get<solver::line_search_cfg>();
+        data.as<constr_approx_map>().ls_cfg = &settings->get<solver::linesearch_config>();
     }
     /**
      * @brief type hint for the constraint

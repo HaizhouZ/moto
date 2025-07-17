@@ -2,7 +2,7 @@
 #define __NS_SQP__
 
 #include <moto/ocp/impl/shooting_node.hpp>
-#include <moto/solver/ipm/ipm_settings.hpp>
+#include <moto/solver/ipm/ipm_config.hpp>
 #include <moto/solver/linesearch_config.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
 
@@ -10,7 +10,7 @@ namespace moto {
 
 struct ns_sqp {
     struct settings_t
-        : public workspace_data_collection<solver::line_search_cfg, ipm_impl::ipm_settings> {
+        : public workspace_data_collection<solver::linesearch_config, ipm_impl::ipm_config> {
     } settings;
 
     struct node_type : public impl::shooting_node<ns_riccati::ns_node_data> {

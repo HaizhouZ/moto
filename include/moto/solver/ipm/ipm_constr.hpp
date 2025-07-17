@@ -2,13 +2,13 @@
 #define MOTO_SOLVER_IPM_CONSTR_HPP
 
 #include <moto/ocp/impl/soft_constr.hpp>
-#include <moto/solver/ipm/ipm_settings.hpp>
+#include <moto/solver/ipm/ipm_config.hpp>
 
 namespace moto {
 namespace ipm_impl {
 
 struct ipm_approx_data : public impl::constr_approx_data {
-    ipm_settings *ipm_cfg = nullptr; ///< pointer to the IPM settings
+    ipm_config *ipm_cfg = nullptr; ///< pointer to the IPM settings
 
     vector g_;           ///< ipm primal value
     vector r_s_;         ///< ipm residuals g + t
@@ -39,7 +39,7 @@ class ipm_constr final : public impl::soft_constr {
     using base::base;
     void setup_setting(sp_arg_map &data,  workspace_data *settings) override {
         base::setup_setting(data, settings);
-        data.as<ipm_approx_data>().ipm_cfg = &settings->get<ipm_settings>();
+        data.as<ipm_approx_data>().ipm_cfg = &settings->get<ipm_config>();
     }
     /// @brief initialize the IPM constraint data
     void initialize(soft_constr_data &data) override final;
@@ -48,7 +48,7 @@ class ipm_constr final : public impl::soft_constr {
     /// @brief line search step for the IPM constraint
     void line_search_step(soft_constr_data &data, workspace_data *cfg) override final;
     /// @brief update the line search configuration (if necessary)
-    void update_line_search_cfg(soft_constr_data &data, workspace_data *cfg) override final;
+    void update_linesearch_config(soft_constr_data &data, workspace_data *cfg) override final;
 
     using ipm_data = data_type;
 

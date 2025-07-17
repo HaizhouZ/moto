@@ -36,7 +36,7 @@ class soft_constr : public impl::soft_constr_base {
     /// line search step for the soft constraint
     virtual void line_search_step(soft_constr_data &data, workspace_data *cfg) = 0;
     /// update the line search configuration (if necessary)
-    virtual void update_line_search_cfg(soft_constr_data &data, workspace_data *cfg) {}
+    virtual void update_linesearch_config(soft_constr_data &data, workspace_data *cfg) {}
     /***
      * @brief make approximation data for the soft constraint, will use default @ref data_type
      */
