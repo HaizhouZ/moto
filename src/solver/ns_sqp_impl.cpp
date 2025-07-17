@@ -14,6 +14,8 @@ void ns_sqp::forward() {
 }
 void ns_sqp::update(size_t n_iter) {
     fmt::print("Initialization for SQP...\n");
+    settings.adaptive_mu_allowed = true; // enable adaptive mu
+
     graph_.apply_all_unary_parallel([this](solver::data_base *cur) {
         // setup solver settings
         cur->for_each_constr([this](auto &c, auto &d) { c.setup_setting(d, &settings); });
@@ -49,41 +51,62 @@ void ns_sqp::update(size_t n_iter) {
             }
             settings.alpha_primal = settings.primal.alpha_max;
             settings.alpha_dual = settings.dual.alpha_max;
+            // copy the settings to each worker
+            for (size_t i = 0; i < n_worker; ++i) {
+                setting_per_thread[i].primal = settings.primal;
+                setting_per_thread[i].dual = settings.dual;
+                setting_per_thread[i].alpha_primal = settings.alpha_primal;
+                setting_per_thread[i].alpha_dual = settings.alpha_dual;
+            }
         };
         // timed_block_labeled("all",
         graph_.apply_all_unary_parallel(ns_riccati::ns_factorization);
-        graph_.apply_all_binary_forward<true>(ns_riccati::partial_value_derivative);
         graph_.apply_all_binary_backward<true>(ns_riccati::riccati_recursion);
         graph_.apply_all_unary_parallel(ns_riccati::compute_primal_sensitivity);
         graph_.apply_all_binary_forward<false, true>(ns_riccati::fwd_linear_rollout);
-        graph_.apply_all_unary_parallel(ns_riccati::finalize_newton_step);
+
+        if (settings.ipm_compute_affine_step()) // compute the affine step, no need to finalize dual step
+            graph_.apply_all_unary_parallel([](auto *d) { ns_riccati::finalize_newton_step(d, false); });
+        else // directly finalize the dual step
+            graph_.apply_all_unary_parallel([](auto *d) { ns_riccati::finalize_newton_step(d, true); });
+        // decide line search bounds (e.g., fraction-to-bounds)
         graph_.apply_all_unary_parallel([&setting_per_thread](size_t tid, auto *d) {
             ineq_soft_solve::calculate_line_search_bounds(d, &setting_per_thread[tid]);
         });
         finalize_bound_and_set_to_max();
-        // first round line search
-        graph_.apply_all_unary_parallel([&setting_per_thread](size_t tid, auto *d) {
-            ineq_soft_solve::line_search_step(d, &setting_per_thread[tid]);
-        });
-        // graph_.apply_all_unary_parallel([this](auto *d) { ns_riccati::line_search_step(d, &settings); });
-        // update ipm adaptive mu
-        // reset the settings
-        if (settings.comp_affine_step()) {
+        if (settings.ipm_compute_affine_step()) {
+            // line search with max bounds
+            graph_.apply_all_unary_parallel([&setting_per_thread](size_t tid, auto *d) {
+                ineq_soft_solve::line_search_step(d, &setting_per_thread[tid]);
+            });
+            // collect worker ipm data
             auto &main_worker = setting_per_thread[0];
-            main_worker.n_ipm_cstr = 0;
-            main_worker.prev_normalized_comp = 0.;
-            main_worker.after_normalized_comp = 0.;
             for (size_t i = 1; i < n_worker; ++i) {
                 auto &cfg = setting_per_thread[i];
                 main_worker.prev_normalized_comp += cfg.prev_normalized_comp;
                 main_worker.after_normalized_comp += cfg.after_normalized_comp;
                 main_worker.n_ipm_cstr += cfg.n_ipm_cstr;
             }
-            scalar_t eta = main_worker.after_normalized_comp / (main_worker.prev_normalized_comp / main_worker.n_ipm_cstr);
-            settings.sig = std::max(0., std::min(1., eta));
+            // adaptive mu update
+            // eta = after / before
+            scalar_t eta = main_worker.after_normalized_comp / main_worker.prev_normalized_comp;
+            settings.sig = std::max(0., std::min(1., eta));            // clip
             settings.sig = settings.sig * settings.sig * settings.sig; // cubic
             settings.mu = settings.sig * main_worker.prev_normalized_comp / main_worker.n_ipm_cstr;
+            // use the new mu to update the rhs jacobian
+            graph_.apply_all_unary_parallel(solver::prepare_correction);
+            graph_.apply_all_unary_parallel(ineq_soft_solve::for_each([](impl::soft_constr &c, auto &d) {
+                c.correct_jacobian(d);
+            }));
+            // solve the problem again with updated mu
+            graph_.apply_all_binary_backward<true>(ns_riccati::riccati_recursion_correction);
+            graph_.apply_all_unary_parallel(ns_riccati::compute_primal_sensitivity_correction);
+            graph_.apply_all_binary_forward<false, true>(ns_riccati::fwd_linear_rollout_correction);
+            graph_.apply_all_unary_parallel(ns_riccati::finalize_newton_step_correction);
         }
+        /// @todo: update the line search stepsize?
+        // real line search step
+        graph_.apply_all_unary_parallel([this](auto *d) { ns_riccati::line_search_step(d, &settings); });
 
         graph_.apply_all_unary_parallel(ns_riccati::update_approx);
         // );

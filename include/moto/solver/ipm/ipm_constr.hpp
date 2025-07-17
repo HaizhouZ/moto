@@ -37,18 +37,20 @@ class ipm_constr final : public impl::soft_constr {
 
   public:
     using base::base;
-    void setup_setting(sp_arg_map &data,  workspace_data *settings) override {
+    void setup_setting(sp_arg_map &data, workspace_data *settings) override {
         base::setup_setting(data, settings);
         data.as<ipm_approx_data>().ipm_cfg = &settings->get<ipm_config>();
     }
     /// @brief initialize the IPM constraint data
-    void initialize(soft_constr_data &data) override final;
+    void initialize(sp_data_map &data) override final;
     /// @brief post rollout operation for the IPM constraint to compute the newton step
-    void post_rollout(soft_constr_data &data) override final;
+    void finalize_newton_step(sp_data_map &data) override final;
+    /// @brief will compute the cost jacobian correction depending on the IPM settings
+    void correct_jacobian(sp_data_map &data) override final;
     /// @brief line search step for the IPM constraint
-    void line_search_step(soft_constr_data &data, workspace_data *cfg) override final;
+    void line_search_step(sp_data_map &data, workspace_data *cfg) override final;
     /// @brief update the line search configuration (if necessary)
-    void update_linesearch_config(soft_constr_data &data, workspace_data *cfg) override final;
+    void update_linesearch_config(sp_data_map &data, workspace_data *cfg) override final;
 
     using ipm_data = data_type;
 
@@ -62,6 +64,10 @@ class ipm_constr final : public impl::soft_constr {
     sp_approx_map_ptr_t make_approx_map(sym_data &primal, approx_storage &raw, shared_data &shared) override {
         return sp_approx_map_ptr_t(make_approx<data_type>(primal, raw, shared));
     }
+
+  private:
+    void propagate_jacobian(ipm_data &d);
+    void propagate_hessian(ipm_data &d);
 };
 } // namespace ipm_impl
 using ipm = ipm_impl::ipm_constr;
