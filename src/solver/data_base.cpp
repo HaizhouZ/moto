@@ -13,10 +13,15 @@ data_base::data_base(const ocp_ptr_t &prob)
     prim_step[__x].setZero();
     prim_step[__u].resize(nu);
     prim_step[__y].resize(nx);
+    prim_corr[__x].resize(nx);
+    prim_corr[__x].setZero();
+    prim_corr[__u].resize(nu);
+    prim_corr[__y].resize(nx);
+    Q_y_cache.resize(Q_y.size());
     // initialize soft constraint data
     for (auto f : concat_fields(ineq_constr_fields, soft_constr_fields)) {
         for (auto &d : sparse_[f]) {
-            auto &sd = dynamic_cast<impl::soft_constr::soft_constr_data &>(*d);
+            auto &sd = dynamic_cast<impl::soft_constr::sp_data_map &>(*d);
             sd.prim_step_.clear();
             for (const auto &arg : sd.func_.in_args()) {
                 if (arg->field_ < field::num_prim) {
@@ -25,6 +30,13 @@ data_base::data_base(const ocp_ptr_t &prob)
             }
         }
     }
+}
+void prepare_correction(data_base *data) {
+    data->Q_y_cache = data->Q_y; // cache the Q_y before correction
+    data->Q_x.setZero();
+    data->Q_u.setZero();
+    data->Q_y.setZero();
+    data->prim_corr[__x].setZero();
 }
 } // namespace solver
 } // namespace moto

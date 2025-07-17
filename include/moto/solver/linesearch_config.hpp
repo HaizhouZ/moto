@@ -1,12 +1,13 @@
-#ifndef MOTO_SOLVER_LINE_SEARCH_HPP
-#define MOTO_SOLVER_LINE_SEARCH_HPP
+#ifndef MOTO_SOLVER_SOLVER_SETTING_HPP
+#define MOTO_SOLVER_SOLVER_SETTING_HPP
 
 #include <moto/core/fwd.hpp>
 #include <new>
 
 namespace moto {
 namespace solver {
-struct alignas(std::hardware_destructive_interference_size) line_search_cfg {
+
+struct alignas(std::hardware_destructive_interference_size) linesearch_config {
     // bound
     struct bounds {
         scalar_t alpha_max = 1.0; ///< max step size
@@ -24,10 +25,15 @@ struct alignas(std::hardware_destructive_interference_size) line_search_cfg {
             }
         }
     } primal, dual;
+    using worker_type = linesearch_config;
     scalar_t alpha_primal = 1.0; ///< primal step size
     scalar_t alpha_dual = 1.0;   ///< dual step size
+    void ls_config_reset() {
+        *this = linesearch_config();
+    }
 };
+
 } // namespace solver
 } // namespace moto
 
-#endif // MOTO_SOLVER_LINE_SEARCH_HPP
+#endif // MOTO_SOLVER_SOLVER_SETTING_HPP

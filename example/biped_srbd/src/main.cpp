@@ -88,32 +88,33 @@ int main() {
     //     std::cout << data->value(dyn.active_r) << ',';
     // });
     // std::cout << "\n";
+    solver.settings.mu_method = ipm_impl::mehrotra_predictor_corrector; // default method
     solver.update(10);
     size_t step = 0;
-    graph.apply_all_unary_forward([&](node_data *data) {
-        std::cout << "------------- Step: " << step++ << '\n';
-        // std::cout << "cost: " << data->cost() << '\n';
-        // std::cout << "merit: " << data->dense_->merit_ << '\n';
-        // std::cout << "inf_prim_res: " << data->inf_prim_res() << '\n';
-        // std::cout << "dyn_res: " << data->value(__dyn).transpose() << '\n';
-        // std::cout << "ieq_res: " << data->value(__ineq_xu).transpose() << '\n';
-        // std::cout << "ieq_lbd: " << data->dense_->dual_[__ineq_xu].transpose() << '\n';
-        // std::cout << "dual_eq: " << data->dense_->dual_[__dyn].transpose() << '\n';
-        // std::cout << "dual_iq: " << data->dense_->dual_[__ineq_xu].transpose() << '\n';
-        std::cout << "r: " << data->value(dyn.r).transpose() << '\n';
-        std::cout << "r_n: " << data->value(dyn.r_n).transpose() << '\n';
-        std::cout << "v: " << data->value(dyn.v).transpose() << '\n';
-        std::cout << "v_n: " << data->value(dyn.v_n).transpose() << '\n';
-        std::cout << "r_d: " << data->value(dyn.r_d).transpose() << '\n';
-        std::cout << "r_l: " << data->value(dyn.r_l).transpose() << '\n';
-        std::cout << "r_l_n: " << data->value(dyn.r_l_n).transpose() << '\n';
-        std::cout << "r_r: " << data->value(dyn.r_r).transpose() << '\n';
-        std::cout << "r_r_n: " << data->value(dyn.r_r_n).transpose() << '\n';
-        std::cout << "v_l: " << data->value(dyn.v_l).transpose() << '\n';
-        std::cout << "v_r: " << data->value(dyn.v_r).transpose() << '\n';
-        std::cout << "f_l: " << data->value(dyn.f_l).transpose() << '\n';
-        std::cout << "f_r: " << data->value(dyn.f_r).transpose() << '\n';
-    });
+    // graph.apply_all_unary_forward([&](node_data *data) {
+    //     std::cout << "------------- Step: " << step++ << '\n';
+    //     // std::cout << "cost: " << data->cost() << '\n';
+    //     // std::cout << "merit: " << data->dense_->merit_ << '\n';
+    //     // std::cout << "inf_prim_res: " << data->inf_prim_res() << '\n';
+    //     // std::cout << "dyn_res: " << data->value(__dyn).transpose() << '\n';
+    //     // std::cout << "ieq_res: " << data->value(__ineq_xu).transpose() << '\n';
+    //     // std::cout << "ieq_lbd: " << data->dense_->dual_[__ineq_xu].transpose() << '\n';
+    //     // std::cout << "dual_eq: " << data->dense_->dual_[__dyn].transpose() << '\n';
+    //     // std::cout << "dual_iq: " << data->dense_->dual_[__ineq_xu].transpose() << '\n';
+    //     std::cout << "r: " << data->value(dyn.r).transpose() << '\n';
+    //     std::cout << "r_n: " << data->value(dyn.r_n).transpose() << '\n';
+    //     std::cout << "v: " << data->value(dyn.v).transpose() << '\n';
+    //     std::cout << "v_n: " << data->value(dyn.v_n).transpose() << '\n';
+    //     std::cout << "r_d: " << data->value(dyn.r_d).transpose() << '\n';
+    //     std::cout << "r_l: " << data->value(dyn.r_l).transpose() << '\n';
+    //     std::cout << "r_l_n: " << data->value(dyn.r_l_n).transpose() << '\n';
+    //     std::cout << "r_r: " << data->value(dyn.r_r).transpose() << '\n';
+    //     std::cout << "r_r_n: " << data->value(dyn.r_r_n).transpose() << '\n';
+    //     std::cout << "v_l: " << data->value(dyn.v_l).transpose() << '\n';
+    //     std::cout << "v_r: " << data->value(dyn.v_r).transpose() << '\n';
+    //     std::cout << "f_l: " << data->value(dyn.f_l).transpose() << '\n';
+    //     std::cout << "f_r: " << data->value(dyn.f_r).transpose() << '\n';
+    // });
 
     return 0;
 }

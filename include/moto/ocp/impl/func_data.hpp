@@ -86,6 +86,9 @@ struct sp_arg_map {
 
     const auto &problem() const { return shared_.prob_; }
 
+    template <typename T>
+    T &as() { return dynamic_cast<T &>(*this); }
+
   protected:
     /// use ref to exploit sparsity (avoid copy)
     std::vector<vector_ref> in_args_;

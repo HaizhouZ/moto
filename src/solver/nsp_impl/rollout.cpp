@@ -1,4 +1,3 @@
-#include <moto/ocp/dynamics.hpp>
 #include <moto/solver/ineq_soft_solve.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
@@ -13,13 +12,9 @@ void fwd_linear_rollout(ns_node_data *cur, ns_node_data *next) {
         copy_y_to_x(d.prim_step[__y], next->prim_step[__x], d.prob_, next->prob_);
     }
 }
-void finalize_newton_step(ns_node_data *cur) {
+void finalize_dual_newton_step(ns_node_data *cur) {
     auto &d = *cur;
     auto &nsp = *d.nsp_;
-    d.prim_step[__u].noalias() = d.d_u.k + d.d_u.K * d.prim_step[__x];
-    ineq_soft_solve::post_rollout(cur);
-    // multiplier
-    // dynamics multiplier first two terms
     d.d_lbd_f.noalias() = -d.Q_y.transpose() - d.Q_yx * d.prim_step[__x] - d.Q_yy * d.prim_step[__y];
     // update hard constraint multipliers
     if (d.ncstr > 0 && d.rank_status_ != rank_status::unconstrained) {
@@ -48,6 +43,39 @@ void finalize_newton_step(ns_node_data *cur) {
         }
     }
     d.dual_step[__dyn].noalias() = nsp.lu_dyn_.transpose().solve(d.d_lbd_f);
+}
+void finalize_newton_step(ns_node_data *cur, bool finalize_dual) {
+    auto &d = *cur;
+    auto &nsp = *d.nsp_;
+    d.prim_step[__u].noalias() = d.d_u.k + d.d_u.K * d.prim_step[__x];
+    ineq_soft_solve::finalize_newton_step(cur);
+    // multiplier
+    // dynamics multiplier first two terms
+    if (finalize_dual)
+        finalize_dual_newton_step(cur);
+}
+void fwd_linear_rollout_correction(ns_node_data *cur, ns_node_data *next) {
+    // get_data(nodes_.front()).prim_step[__x].setZero();
+    auto &d = *cur;
+    d.prim_corr[__y].noalias() = d.d_y.k + d.d_y.K * d.prim_corr[__x];
+    if (next != nullptr) [[likely]] {
+        copy_y_to_x(d.prim_corr[__y], next->prim_corr[__x], d.prob_, next->prob_);
+    }
+}
+void finalize_newton_step_correction(ns_node_data *cur) {
+    auto &d = *cur;
+    auto &nsp = *d.nsp_;
+    d.prim_corr[__u].noalias() = d.d_u.k + d.d_u.K * d.prim_corr[__x];
+    // correction for the primal step
+    for (auto f : primal_fields) {
+        d.prim_step[f] += d.prim_corr[f];
+    }
+    ineq_soft_solve::finalize_newton_step(cur);
+    /// correct bar{u}_0 (first order term)
+    nsp.u_0_p_k += nsp.z_u_k;
+    /// update Q_y with correction
+    d.Q_y += d.Q_y_cache; 
+    finalize_dual_newton_step(cur);
 }
 } // namespace ns_riccati
 } // namespace moto

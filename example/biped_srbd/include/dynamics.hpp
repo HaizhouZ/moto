@@ -3,12 +3,11 @@
 
 #include <moto/core/expr.hpp>
 #include <moto/ocp/cost.hpp>
-#include <moto/ocp/dynamics.hpp>
-#include <moto/solver/ipm_constr.hpp>
+#include <moto/solver/ipm/ipm_constr.hpp>
 
 namespace biped_srbd {
 using namespace moto;
-struct srbd_dynamics : public dynamics {
+struct srbd_dynamics {
     sym r, r_n;                     // position
     sym v, v_n;                     // velocity
     sym r_l, r_l_n;                 // left foot position

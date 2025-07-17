@@ -113,8 +113,8 @@ inline void copy_x_to_y(vector_ref from_x, vector_ref to_y,
 }
 
 /**
- * @brief Get the permutation matrix that maps y to x, i.e., X = P * Y
- * @example for derivative conversion: dfdy = dfdx * P
+ * @brief Get the permutation matrix that maps y to x, i.e., X = P * Y.
+ * for example: derivative conversion: dfdy = dfdx * P
  * @param prob_y problem of which the y field (order of syms) is used
  * @param prob_x problem of which the x field (order of syms) is used
  * @return Eigen::PermutationMatrix<-1, -1>& the permutation matrix that maps y to x

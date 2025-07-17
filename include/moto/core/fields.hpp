@@ -45,6 +45,9 @@ constexpr auto concat_fields(const std::array<field_t, sizes> &...arrays) {
     return result;
 }
 
+constexpr auto soft_ineq_constr_fields = concat_fields(ineq_constr_fields, soft_constr_fields);
+constexpr auto constr_fields = concat_fields(hard_constr_fields, ineq_constr_fields, soft_constr_fields);
+
 namespace field {
 constexpr size_t num_sym = __p + 1;                   // number of symbolic fields
 constexpr size_t num_prim = std::size(primal_fields); // number of primal fields

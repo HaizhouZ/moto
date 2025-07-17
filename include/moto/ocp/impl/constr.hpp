@@ -1,22 +1,23 @@
 #ifndef MOTO_CONSTR_IMPL_HPP
 #define MOTO_CONSTR_IMPL_HPP
 
+#include <moto/core/workspace_data.hpp>
 #include <moto/ocp/impl/func.hpp>
+#include <moto/solver/linesearch_config.hpp>
 #include <moto/utils/optional_boolean.hpp>
 
 namespace moto {
 namespace impl {
 struct constr;
 /**
- * @brief constraint data
+ * @brief constraint approximation map
  * derived from sp_approx_map with multipler and vjp (for cost) mapping in addition
  */
 struct constr_approx_map : public sp_approx_map {
-    /// @todo: add this to raw
-    // vector_ref slack_;
-    double *merit_;
-    vector_ref multiplier_;
-    std::vector<row_vector_ref> vjp_;
+    solver::linesearch_config *ls_cfg = nullptr; ///< line search configuration, can be nullptr
+    double *merit_;                              ///< pointer to the merit value
+    vector_ref multiplier_;                      ///< multiplier vector reference
+    std::vector<row_vector_ref> vjp_;            ///< multiplier-jacobian product references (cost jacobian)
     /**
      * @brief construct a new constr data object by moving from another sparse approximation map
      * @param multiplier reference to the multiplier vector
@@ -33,7 +34,10 @@ struct constr_approx_map : public sp_approx_map {
     /// @brief short-cut for nested moving construct
     constr_approx_map(sp_approx_map_ptr_t &&rhs) : constr_approx_map(std::move(dynamic_cast<constr_approx_map &>(*rhs))) {}
 };
-
+/**
+ * @brief independent constraint approximation data
+ * @note this is used to store the value and jacobian of the constraint
+ */
 struct constr_approx_data {
     vector v_data_;                ///< value data for the independent constraint
     std::vector<matrix> jac_data_; ///< jacobian data for the independent constraint
@@ -58,6 +62,9 @@ class constr : public func {
     void finalize_impl() override;
 
   public:
+    void setup_setting(sp_arg_map &data, workspace_data *settings) override {
+        data.as<constr_approx_map>().ls_cfg = &settings->get<solver::linesearch_config>();
+    }
     /**
      * @brief type hint for the constraint
      *
@@ -82,8 +89,8 @@ class constr : public func {
     /**
      * @brief constraint data
      *
-     * @tparam approx_map_t mapping type, default is constr_approx_map
-     * @tparam data_t data type, default is constr_approx_data
+     * @tparam approx_map_t mapping type, default is @ref constr_approx_map
+     * @tparam data_t data type, default is @ref constr_approx_data
      */
     template <typename approx_map_t = constr_approx_map,
               typename data_t = constr_approx_data>
@@ -98,7 +105,7 @@ class constr : public func {
     /**
      * @brief make an approximation data for the constraint
      *
-     * @tparam data_type type of the data, default is constr_data<>
+     * @tparam data_type type of the data, @b MUST be instantiation of @ref constr_data, default is constr_data<>
      * @param primal primal data
      * @param raw raw approximation data
      * @param shared shared data
@@ -109,15 +116,23 @@ class constr : public func {
     auto make_approx(sym_data &primal, approx_storage &raw, shared_data &shared) {
         using map_t = typename data_type::mtype;
         using data_t = typename data_type::dtype;
-        constr_approx_data d(*this);
-        auto base_map = constr_approx_map(raw, sp_approx_map(primal, d.v_data_, to_matrix_ref_list(d.jac_data_), shared, *this));
+        using map_base = constr_approx_map;
+        using data_base = constr_approx_data;
+        data_base d(*this);
+        map_base base_map(raw, sp_approx_map(primal, d.v_data_, to_matrix_ref_list(d.jac_data_), shared, *this));
         base_map.setup_hessian(raw);
-        return new data_type(map_t(std::move(base_map)), data_t(std::move(d)));
+        if constexpr (std::is_constructible_v<map_t, approx_storage &, constr_approx_map &&>) {
+            // if map_t can be constructed from approx_storage and sp_approx_map
+            map_t derived_map(raw, std::move(base_map));
+            return new data_type(map_t(std::move(derived_map)), data_t(std::move(d)));
+        } else {
+            return new data_type(map_t(std::move(base_map)), data_t(std::move(d)));
+        }
     }
     /**
      * @brief wrapped data maker for constr
-     * @details if field approx is in @ref approx_storage::stored_constr_fields, it will return constr_approx_map
-     * otherwise it will call @ref make_approx to generate @ref constr_data (with independent storage)
+     * @details if field_ is in @ref approx_storage::stored_constr_fields, it will return constr_approx_map
+     * otherwise it will call @ref make_approx to generate @ref constr::constr_data (with independent storage)
      * @param primal primal data
      * @param raw approximation data
      * @param shared shared data

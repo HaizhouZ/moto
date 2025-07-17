@@ -20,6 +20,11 @@ approx_storage::approx_storage(const ocp_ptr_t &prob) : prob_(prob) {
         dual_[i].resize(prob_->dim_[i]);
         dual_[i].setZero();
     }
+    // complementarity
+    for (auto f : ineq_constr_fields) {
+        comp_[f].resize(prob_->dim_[f]);
+        comp_[f].setZero();
+    }
     // cost val
     cost_ = 0;
     // cost hessian(store only half)
