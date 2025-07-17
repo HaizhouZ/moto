@@ -14,7 +14,7 @@ int main() {
     prob->add(dyn.active_r);
     prob->add(dyn.active_l_cur);
     prob->add(dyn.active_r_cur);
-    prob->add(dyn.friction_cone());
+    // prob->add(dyn.friction_cone());
     prob->add(dyn.stance_foot_constr());
     // prob->add(dyn.foot_loc_constr());
     prob->add(dyn.running_cost());
@@ -88,7 +88,7 @@ int main() {
     //     std::cout << data->value(dyn.active_r) << ',';
     // });
     // std::cout << "\n";
-    solver.settings.mu_method = ipm_impl::mehrotra_predictor_corrector; // default method
+    // solver.settings.mu_method = ipm_impl::mehrotra_predictor_corrector; // default method
     solver.update(10);
     size_t step = 0;
     // graph.apply_all_unary_forward([&](node_data *data) {

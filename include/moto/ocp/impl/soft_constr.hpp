@@ -11,7 +11,6 @@ namespace impl {
  */
 struct soft_constr_approx_map : public constr_approx_map {
     std::vector<vector_ref> prim_step_;         // to be set
-    std::vector<vector_ref> prim_corr_;         // to be set
     using constr_approx_map::constr_approx_map; ///< inherit constr_approx_map constructor
     soft_constr_approx_map(constr_approx_map &&rhs) : constr_approx_map(std::move(rhs)) {}
 };

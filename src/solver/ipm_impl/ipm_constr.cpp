@@ -60,13 +60,13 @@ void ipm_constr::line_search_step(ipm::sp_data_map &data, workspace_data *cfg) {
         // if we are in the affine step mode, we need to update the ipm worker data
         ipm_worker->n_ipm_cstr += dim_;
         ipm_worker->prev_normalized_comp += d.multiplier_.dot(d.slack_);
+        ipm_worker->after_normalized_comp += (d.multiplier_ + cfg->get<solver::linesearch_config>().alpha_dual * d.d_multipler_)
+                                                 .dot(d.slack_ + cfg->get<solver::linesearch_config>().alpha_primal * d.d_slack_);
+    } else {
+        d.slack_.array() += cfg->get<solver::linesearch_config>().alpha_primal * d.d_slack_.array();
+        d.multiplier_.array() += cfg->get<solver::linesearch_config>().alpha_dual * d.d_multipler_.array();
+        d.slack_ = d.slack_.array().max(1e-8);
     }
-    d.slack_.array() += cfg->get<solver::linesearch_config>().alpha_primal * d.d_slack_.array();
-    d.multiplier_.array() += cfg->get<solver::linesearch_config>().alpha_dual * d.d_multipler_.array();
-    d.slack_ = d.slack_.array().max(1e-8);
-    if (ipm_worker && d.ipm_cfg->ipm_compute_affine_step())
-        // if we are in the affine step mode, we need to update the ipm worker data
-        ipm_worker->after_normalized_comp += d.multiplier_.dot(d.slack_);
 }
 void ipm_constr::value_impl(sp_approx_map &data) {
     soft_constr::value_impl(data);

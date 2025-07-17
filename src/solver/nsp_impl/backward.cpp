@@ -83,22 +83,15 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
 void riccati_recursion_correction(ns_node_data *cur, ns_node_data *prev) {
     auto &d = *cur;
     auto &nsp = *d.nsp_;
-    /// compute new bar{u}_0, @b ASSUME Q_u/Q_y has only the correction
-    nsp.u_0_p_k.noalias() = d.Q_u.transpose() - nsp.F_u.transpose() * d.Q_y.transpose();
     // compute z_u correction
-    if (d.rank_status_ == rank_status::unconstrained) {
-        nsp.z_u_k.noalias() = nsp.u_0_p_k;
-    } else {
-        // constr rank > 0
-        nsp.z_u_k.noalias() = nsp.u_0_p_k;
-    }
+    nsp.z_u_k.noalias() = d.Q_u.transpose() - nsp.F_u.transpose() * d.Q_y.transpose();
     // compute Q_x correcton
     d.Q_x.noalias() = -d.Q_y * nsp.F_0_K + nsp.z_u_k.transpose() * d.d_u.K;
     if (prev != nullptr) [[likely]] {
         auto &d_pre = *prev;
         auto &perm = permutation_from_y_to_x(prev->prob_, cur->prob_);
         d.Q_x *= perm;
-        d_pre.Q_y_corr.noalias() = d.Q_x;
+        d_pre.Q_y += d.Q_x;
     }
 }
 } // namespace ns_riccati

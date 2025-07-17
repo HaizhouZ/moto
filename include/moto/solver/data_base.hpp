@@ -24,14 +24,15 @@ struct data_base : public node_data {
     matrix &Q_yy;
     array_type<vector, primal_fields> prim_step; ///< primal (newton) step
     array_type<vector, primal_fields> prim_corr; ///< correction for the primal step
-    row_vector Q_y_corr; ///< correction for the Q_y
+    row_vector Q_y_cache; ///< cache before correction for the Q_y
     /// @brief create solver data
     /// @param prob ocp to initialize nx, nu and the Q-derivative refs
     data_base(const ocp_ptr_t &prob);
 };
 /**
  * @brief prepare the primal correction for the data_base
- * @details will set the Q_x, Q_u, Q_y and prim_corr[__x] to zero
+ * @details will set the Q_x, Q_u, Q_y and prim_corr[__x] to zero and copy Q_y to Q_y_cache because 
+ * it is @b assumed Q_y will be used in newton step finalization
  * @param data 
  */
 void prepare_correction(data_base *data);

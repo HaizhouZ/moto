@@ -71,7 +71,10 @@ void finalize_newton_step_correction(ns_node_data *cur) {
         d.prim_step[f] += d.prim_corr[f];
     }
     ineq_soft_solve::finalize_newton_step(cur);
-    d.Q_y += d.Q_y_corr; // update Q_y with correction
+    /// correct bar{u}_0 (first order term)
+    nsp.u_0_p_k += nsp.z_u_k;
+    /// update Q_y with correction
+    d.Q_y += d.Q_y_cache; 
     finalize_dual_newton_step(cur);
 }
 } // namespace ns_riccati

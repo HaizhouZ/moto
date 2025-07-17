@@ -14,8 +14,6 @@ void ns_sqp::forward() {
 }
 void ns_sqp::update(size_t n_iter) {
     fmt::print("Initialization for SQP...\n");
-    settings.adaptive_mu_allowed = true; // enable adaptive mu
-
     graph_.apply_all_unary_parallel([this](solver::data_base *cur) {
         // setup solver settings
         cur->for_each_constr([this](auto &c, auto &d) { c.setup_setting(d, &settings); });
