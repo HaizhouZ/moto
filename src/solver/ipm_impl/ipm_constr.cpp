@@ -50,16 +50,23 @@ void ipm_constr::update_line_search_cfg(ipm::soft_constr_data &data, solver::lin
 }
 void ipm_constr::line_search_step(ipm::soft_constr_data &data, solver::line_search_cfg *cfg) {
     auto &d = dynamic_cast<ipm_data &>(data);
+    auto ipm_cfg = dynamic_cast<ipm_settings *>(cfg); // temporary config
+    if (d.ipm_cfg->comp_affine_step() && ipm_cfg->adaptive_mu) {
+        ipm_cfg->n_ipm_cstr++;
+        ipm_cfg->prev_normalized_comp += d.multiplier_.dot(d.slack_);
+    }
     d.slack_.array() += cfg->alpha_primal * d.d_slack_.array();
     d.multiplier_.array() += cfg->alpha_dual * d.d_multipler_.array();
     d.slack_ = d.slack_.array().max(1e-8);
+    if (d.ipm_cfg->comp_affine_step() && ipm_cfg->adaptive_mu)
+        ipm_cfg->after_normalized_comp += d.multiplier_.dot(d.slack_);
 }
 void ipm_constr::value_impl(sp_approx_map &data) {
     soft_constr::value_impl(data);
     auto &d = dynamic_cast<ipm_data &>(data);
     d.g_ = d.v_;
     d.v_ = d.g_ + d.slack_; // r_g = g_ + slack
-    if (d.ipm_cfg->mu_method == mehrotra_predictor_corrector || d.ipm_cfg->mu_method == mehrotra_probing)
+    if (d.ipm_cfg->comp_affine_step())
         d.r_s_.array() = static_cast<soft_constr_data &>(data).multiplier_.cwiseProduct(d.slack_).array();
     else
         d.r_s_.array() = static_cast<soft_constr_data &>(data).multiplier_.cwiseProduct(d.slack_).array() - d.ipm_cfg->mu;
@@ -71,7 +78,7 @@ void ipm_constr::jacobian_impl(sp_approx_map &data) {
     d.diag_scaling.array() = static_cast<soft_constr_data &>(data).multiplier_.array() / d.slack_.array();
     // set scaled residual
     d.scaled_res_ = d.diag_scaling.cwiseProduct(d.g_);
-    if (d.ipm_cfg->mu_method > mehrotra_predictor_corrector)
+    if (!d.ipm_cfg->comp_affine_step())
         d.scaled_res_.array() += d.ipm_cfg->mu / d.slack_.array();
     // modification of jacobian
     // fmt::print("--------------------\n");

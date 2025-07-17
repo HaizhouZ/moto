@@ -56,6 +56,23 @@ struct node_data {
     scalar_t inf_prim_res() const; // constraint violation residual
 
     void update_approximation(bool eval_only = false);
+
+    template <std::array fields, typename Callback>
+        requires std::is_invocable_r_v<void, Callback, impl::func &, sp_approx_map&> &&
+                 std::is_same_v<std::tuple_element_t<0, decltype(fields)>, field_t>
+    void for_each(Callback &&f) {
+        for (const auto &field : fields) {
+            for (const auto &e : prob_->expr_[field]) {
+                auto& func = dynamic_cast<impl::func &>(*e);
+                f(func, data(func));
+            }
+        }
+    }
+
+    template <typename Callback>
+    void for_each_constr(Callback &&f) {
+        for_each<constr_fields>(std::forward<Callback>(f));
+    }
 };
 } // namespace moto
 

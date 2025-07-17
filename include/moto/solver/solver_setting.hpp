@@ -27,6 +27,7 @@ struct alignas(std::hardware_destructive_interference_size) line_search_cfg {
     } primal, dual;
     scalar_t alpha_primal = 1.0; ///< primal step size
     scalar_t alpha_dual = 1.0;   ///< dual step size
+    virtual ~line_search_cfg() = default; ///< virtual destructor to ensure polymorphism
 };
 
 struct solver_settings : public line_search_cfg {
