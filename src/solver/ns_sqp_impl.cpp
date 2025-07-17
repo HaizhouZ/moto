@@ -49,13 +49,13 @@ void ns_sqp::update(size_t n_iter) {
             }
             settings.alpha_primal = settings.primal.alpha_max;
             settings.alpha_dual = settings.dual.alpha_max;
-            // copy the settings to each worker
-            for (size_t i = 0; i < n_worker; ++i) {
-                setting_per_thread[i].primal = settings.primal;
-                setting_per_thread[i].dual = settings.dual;
-                setting_per_thread[i].alpha_primal = settings.alpha_primal;
-                setting_per_thread[i].alpha_dual = settings.alpha_dual;
-            }
+            // // copy the settings to each worker
+            // for (size_t i = 0; i < n_worker; ++i) {
+            //     setting_per_thread[i].primal = settings.primal;
+            //     setting_per_thread[i].dual = settings.dual;
+            //     setting_per_thread[i].alpha_primal = settings.alpha_primal;
+            //     setting_per_thread[i].alpha_dual = settings.alpha_dual;
+            // }
         };
         // timed_block_labeled("all",
         graph_.apply_all_unary_parallel(ns_riccati::ns_factorization);

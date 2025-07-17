@@ -14,7 +14,7 @@ int main() {
     prob->add(dyn.active_r);
     prob->add(dyn.active_l_cur);
     prob->add(dyn.active_r_cur);
-    // prob->add(dyn.friction_cone());
+    prob->add(dyn.friction_cone());
     prob->add(dyn.stance_foot_constr());
     // prob->add(dyn.foot_loc_constr());
     prob->add(dyn.running_cost());

@@ -42,7 +42,6 @@ void ns_factorization(ns_node_data *cur) {
     }
     d.Q_xx.noalias() += -(d.Q_yx.transpose() * nsp.F_0_K + nsp.F_0_K.transpose() * d.Q_yx);
     // nullspace computation
-    d.rank_status_ = rank_status::unconstrained;
     if (d.ncstr) {
         if (d.ns) {
             nsp.s_u.noalias() = -nsp.s_y * nsp.F_u;
@@ -94,7 +93,7 @@ void ns_factorization(ns_node_data *cur) {
             // fmt::print("nyK :\n {}\n", nsp.u_y_K);
             // fmt::print("F_u: \n{}\n", nsp.F_u.transpose());
             // fmt::print("F_0_K: \n{}\n", nsp.F_0_K.transpose());
-            if (d.rank_status_ = rank_status::fully_constrained) {
+            if (d.rank_status_ == rank_status::fully_constrained) {
                 d.d_u.K = -nsp.u_y_K;
             }
         }
