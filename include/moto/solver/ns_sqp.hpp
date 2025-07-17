@@ -25,6 +25,7 @@ struct ns_sqp {
         scalar_t objective = 0.;    // objective value
         scalar_t inf_prim_res = 0.; // primal residual (constraint violation)
         scalar_t inf_dual_res = 0.; // dual residual (stationary condition)
+        scalar_t inf_comp_res = 0.; // (inequality) complementarity residual
     };
 
     ns_sqp();

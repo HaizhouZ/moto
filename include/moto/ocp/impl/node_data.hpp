@@ -54,6 +54,7 @@ struct node_data {
     scalar_t cost() const { return dense_->cost_; }
 
     scalar_t inf_prim_res() const; // constraint violation residual
+    scalar_t inf_comp_res() const; // complementarity residual
 
     void update_approximation(bool eval_only = false);
 

@@ -1,8 +1,8 @@
 #ifndef MOTO_CONSTR_IMPL_HPP
 #define MOTO_CONSTR_IMPL_HPP
 
-#include <moto/ocp/impl/func.hpp>
 #include <moto/core/workspace_data.hpp>
+#include <moto/ocp/impl/func.hpp>
 #include <moto/solver/linesearch_config.hpp>
 #include <moto/utils/optional_boolean.hpp>
 
@@ -15,9 +15,9 @@ struct constr;
  */
 struct constr_approx_map : public sp_approx_map {
     solver::linesearch_config *ls_cfg = nullptr; ///< line search configuration, can be nullptr
-    double *merit_;                            ///< pointer to the merit value
-    vector_ref multiplier_;                    ///< multiplier vector reference
-    std::vector<row_vector_ref> vjp_;          ///< multiplier-jacobian product references (cost jacobian)
+    double *merit_;                              ///< pointer to the merit value
+    vector_ref multiplier_;                      ///< multiplier vector reference
+    std::vector<row_vector_ref> vjp_;            ///< multiplier-jacobian product references (cost jacobian)
     /**
      * @brief construct a new constr data object by moving from another sparse approximation map
      * @param multiplier reference to the multiplier vector
@@ -116,10 +116,18 @@ class constr : public func {
     auto make_approx(sym_data &primal, approx_storage &raw, shared_data &shared) {
         using map_t = typename data_type::mtype;
         using data_t = typename data_type::dtype;
-        constr_approx_data d(*this);
-        auto base_map = constr_approx_map(raw, sp_approx_map(primal, d.v_data_, to_matrix_ref_list(d.jac_data_), shared, *this));
+        using map_base = constr_approx_map;
+        using data_base = constr_approx_data;
+        data_base d(*this);
+        map_base base_map(raw, sp_approx_map(primal, d.v_data_, to_matrix_ref_list(d.jac_data_), shared, *this));
         base_map.setup_hessian(raw);
-        return new data_type(map_t(std::move(base_map)), data_t(std::move(d)));
+        if constexpr (std::is_constructible_v<map_t, approx_storage &, constr_approx_map &&>) {
+            // if map_t can be constructed from approx_storage and sp_approx_map
+            map_t derived_map(raw, std::move(base_map));
+            return new data_type(map_t(std::move(derived_map)), data_t(std::move(d)));
+        } else {
+            return new data_type(map_t(std::move(base_map)), data_t(std::move(d)));
+        }
     }
     /**
      * @brief wrapped data maker for constr

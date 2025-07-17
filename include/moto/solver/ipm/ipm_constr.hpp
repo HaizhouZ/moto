@@ -6,17 +6,22 @@
 
 namespace moto {
 namespace ipm_impl {
+struct ineq_constr_approx_map : public impl::soft_constr_approx_map {
+    using base = impl::soft_constr_approx_map;
+    vector_ref comp_;
+    ineq_constr_approx_map(approx_storage &raw, constr_approx_map &&d)
+        : base(std::move(d)), comp_(problem()->extract(raw.comp_[func_.field_], func_)) {}
+};
 
 struct ipm_approx_data : public impl::constr_approx_data {
     ipm_config *ipm_cfg = nullptr; ///< pointer to the IPM settings
-
-    vector g_;           ///< ipm primal value
-    vector r_s_;         ///< ipm residuals g + t
-    vector slack_;       ///< slack variables for the constraints
-    vector diag_scaling; ///< Nesterov-Todd scaling T^{-1} N
-    vector scaled_res_;  ///< residuals after NT scaling (Nr_g - r_s) T^{-1} = T{-1} N r_g + T^{-1} mu
-    vector d_slack_;     ///< newton step for slack variables
-    vector d_multipler_; ///< newton step for multipliers
+    vector g_;                     ///< ipm primal value
+    vector r_s_;                   ///< ipm residuals g + t
+    vector slack_;                 ///< slack variables for the constraints
+    vector diag_scaling;           ///< Nesterov-Todd scaling T^{-1} N
+    vector scaled_res_;            ///< residuals after NT scaling (Nr_g - r_s) T^{-1} = T{-1} N r_g + T^{-1} mu
+    vector d_slack_;               ///< newton step for slack variables
+    vector d_multipler_;           ///< newton step for multipliers
     ipm_approx_data(constr_approx_data &&rhs)
         : impl::constr_approx_data(std::move(rhs)) {
         slack_.resize(f_->dim_);
@@ -33,7 +38,7 @@ class ipm_constr final : public impl::soft_constr {
     /// + update the IPM-modified cost jacobian and hessian
     void jacobian_impl(sp_approx_map &data) override final;
     /// data type for the IPM constraint
-    using data_type = constr_data<base::data_type::mtype, ipm_approx_data>;
+    using data_type = constr_data<ineq_constr_approx_map, ipm_approx_data>;
 
   public:
     using base::base;

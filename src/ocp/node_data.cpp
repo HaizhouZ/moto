@@ -53,6 +53,16 @@ scalar_t node_data::inf_prim_res() const {
     return res;
 }
 
+scalar_t node_data::inf_comp_res() const {
+    scalar_t res = 0.;
+    for (const auto &comp : dense_->comp_) {
+        if (comp.size() == 0)
+            continue; // skip empty fields
+        res = std::max(comp.cwiseAbs().maxCoeff(), res);
+    }
+    return res;
+}
+
 namespace impl {
 void data_mgr::create_data_batch(const ocp_ptr_t &prob, size_t N) {
     data_.try_emplace(prob->uid_);

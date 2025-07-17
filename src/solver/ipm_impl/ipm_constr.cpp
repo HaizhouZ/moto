@@ -35,26 +35,29 @@ void ipm_constr::correct_jacobian(sp_data_map &data) {
     auto &d = data.as<ipm_data>();
     d.scaled_res_.array() = d.ipm_cfg->mu / d.slack_.array();
     if (d.ipm_cfg->ipm_enable_corrector()) // add the dual correction term
-        d.scaled_res_.array() += d.d_multipler_.array() * d.d_slack_.array();
+        d.scaled_res_.array() -= d.d_multipler_.array() * d.d_slack_.array() / d.slack_.array();
     propagate_jacobian(d);
 }
 void ipm_constr::update_linesearch_config(ipm::sp_data_map &data, workspace_data *cfg) {
     constexpr scalar_t tau = 0.995; // scaling factor
     scalar_t alpha_max = 1.0;       // default max step size
     auto &d = data.as<ipm_data>();
+    auto &ls_cfg = cfg->get<solver::linesearch_config>();
     // compute alpha_max
     for (size_t idx : range(dim_)) {
         if (d.d_slack_(idx) < 0) {
             alpha_max = (-tau) * d.slack_(idx) / d.d_slack_(idx);
-            cfg->get<solver::linesearch_config>().primal.clip(alpha_max);
-            cfg->get<solver::linesearch_config>().primal.alpha_max = alpha_max;
+            ls_cfg.primal.clip(alpha_max);
+            ls_cfg.primal.alpha_max = alpha_max;
         }
         if (d.d_multipler_(idx) < 0) {
             alpha_max = (-tau) * d.multiplier_(idx) / d.d_multipler_(idx);
-            cfg->get<solver::linesearch_config>().dual.clip(alpha_max);
-            cfg->get<solver::linesearch_config>().dual.alpha_max = alpha_max;
+            ls_cfg.dual.clip(alpha_max);
+            ls_cfg.dual.alpha_max = alpha_max;
         }
     }
+    assert(ls_cfg.primal.alpha_max > 1e-3);
+    assert(ls_cfg.dual.alpha_max > 1e-3);
 }
 void ipm_constr::line_search_step(ipm::sp_data_map &data, workspace_data *cfg) {
     auto &d = data.as<ipm_data>();
@@ -67,6 +70,8 @@ void ipm_constr::line_search_step(ipm::sp_data_map &data, workspace_data *cfg) {
         ipm_worker->prev_aff_comp += d.multiplier_.dot(d.slack_);
         ipm_worker->post_aff_comp += (d.multiplier_ + cfg->get<solver::linesearch_config>().alpha_dual * d.d_multipler_)
                                          .dot(d.slack_ + cfg->get<solver::linesearch_config>().alpha_primal * d.d_slack_);
+        assert((d.multiplier_ + cfg->get<solver::linesearch_config>().alpha_dual * d.d_multipler_)
+                                         .dot(d.slack_ + cfg->get<solver::linesearch_config>().alpha_primal * d.d_slack_) > 0);
     } else {
         assert(!d.ipm_cfg->ipm_compute_affine_step &&
                "flag must set false for ipm full step computation in line search");
@@ -81,6 +86,7 @@ void ipm_constr::value_impl(sp_approx_map &data) {
     d.g_ = d.v_;
     d.v_ = d.g_ + d.slack_; // r_g = g_ + slack
     d.r_s_.array() = data.as<sp_data_map>().multiplier_.cwiseProduct(d.slack_).array() - d.ipm_cfg->mu;
+    d.comp_.array() = d.multiplier_.array() * d.slack_.array();
 }
 void ipm_constr::jacobian_impl(sp_approx_map &data) {
     soft_constr::jacobian_impl(data);

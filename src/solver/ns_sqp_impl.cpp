@@ -29,7 +29,7 @@ void ns_sqp::update(size_t n_iter) {
     graph_.apply_all_unary_parallel(ns_riccati::update_approx);
 
     // print statistics header
-    constexpr std::string_view terms[] = {"objective", "inf_prim_res", "inf_dual_res", "alpha_primal", "alpha_dual", "ipm_mu"};
+    constexpr std::string_view terms[] = {"objective", "inf_prim_res", "inf_dual_res", "inf_comp_res", "alpha_primal", "alpha_dual", "ipm_mu"};
     size_t total_length = 4 + std::size(terms) * (stat_col_width + 4) + 1;
     fmt::print("{:-<{}}\n", "", total_length);
     fmt::print("no. |");
@@ -108,8 +108,9 @@ void ns_sqp::update(size_t n_iter) {
         kkt_info info;
         for (auto &n : graph_.get_unordered_flattened_nodes()) {
             info.objective += n->cost();
-            info.inf_prim_res = std::max(n->inf_prim_res(), info.inf_prim_res);
+            info.inf_prim_res = std::max(info.inf_prim_res, n->inf_prim_res());
             info.inf_dual_res = std::max(info.inf_dual_res, n->dense_->jac_[__u].cwiseAbs().maxCoeff());
+            info.inf_comp_res = std::max(info.inf_comp_res, n->inf_comp_res());
         }
         graph_.apply_all_binary_forward<false, true>([&info](node_data *cur, node_data *next) {
             if (next != nullptr) [[likely]] {
@@ -122,7 +123,7 @@ void ns_sqp::update(size_t n_iter) {
                 info.inf_dual_res = std::max(info.inf_dual_res, cur->dense_->jac_[__y].cwiseAbs().maxCoeff());
         });
         // print statistics
-        scalar_t stats[] = {info.objective, info.inf_prim_res, info.inf_dual_res,
+        scalar_t stats[] = {info.objective, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res,
                             settings.alpha_primal, settings.alpha_dual, settings.mu};
         fmt::print("{:<3} |", i_iter);
         for (const auto &stat : stats) {

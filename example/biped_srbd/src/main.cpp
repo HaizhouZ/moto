@@ -36,8 +36,8 @@ int main() {
     init_node->value(dyn.active_l_cur).setOnes();
     init_node->value(dyn.active_r_cur).setOnes();
     init_node->value(dyn.r_d) << 0., 0., 0.; // desired position of the com
-    init_node->value(dyn.f_l) << 0, 0, 0.0;  // initial force (regularized)
-    init_node->value(dyn.f_r) << 0, 0, 0.0;  // initial force (regularized)
+    init_node->value(dyn.f_l) << 0, 0, 0.1;  // initial force (regularized)
+    init_node->value(dyn.f_r) << 0, 0, 0.1;  // initial force (regularized)
 
     // set gait
     int n = -10;
@@ -88,7 +88,7 @@ int main() {
     //     std::cout << data->value(dyn.active_r) << ',';
     // });
     // std::cout << "\n";
-    solver.settings.mu_method = ipm_impl::mehrotra_probing; // default method
+    solver.settings.mu_method = ipm_impl::mehrotra_predictor_corrector; // default method
     solver.update(10);
     size_t step = 0;
     // graph.apply_all_unary_forward([&](node_data *data) {
