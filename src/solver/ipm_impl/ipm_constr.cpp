@@ -4,7 +4,7 @@ namespace moto {
 namespace ipm_impl {
 void ipm_constr::initialize(ipm::soft_constr_data &data) {
     soft_constr::value_impl(data);
-    auto &d = dynamic_cast<ipm_data &>(data);
+    auto &d = data.as<ipm_data>();
     d.g_ = d.v_;
     d.slack_ = (-d.g_).cwiseMax(1e-2); // clip
     d.v_ = d.g_ + d.slack_;            // r_g = g_ + slack
@@ -13,7 +13,7 @@ void ipm_constr::initialize(ipm::soft_constr_data &data) {
     d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.ipm_cfg->mu;
 }
 void ipm_constr::post_rollout(ipm::soft_constr_data &data) {
-    auto &d = dynamic_cast<ipm_data &>(data);
+    auto &d = data.as<ipm_data>();
     size_t arg_idx = 0;
     // update slack newton step
     d.d_slack_ = -d.v_; // -r_g
@@ -30,40 +30,40 @@ void ipm_constr::post_rollout(ipm::soft_constr_data &data) {
     d.d_multipler_.array() = -d.multiplier_.array() + d.ipm_cfg->mu / d.slack_.array() - d.diag_scaling.array() * d.d_slack_.array();
     /// @todo iterative refinement for better accuracy?
 }
-void ipm_constr::update_line_search_cfg(ipm::soft_constr_data &data, solver::line_search_cfg *cfg) {
+void ipm_constr::update_line_search_cfg(ipm::soft_constr_data &data, workspace_data *cfg) {
     constexpr scalar_t tau = 0.995; // scaling factor
     scalar_t alpha_max = 1.0;       // default max step size
-    auto &d = dynamic_cast<ipm_data &>(data);
+    auto &d = data.as<ipm_data>();
     // compute alpha_max
     for (size_t idx : range(dim_)) {
         if (d.d_slack_(idx) < 0) {
             alpha_max = (-tau) * d.slack_(idx) / d.d_slack_(idx);
-            cfg->primal.clip(alpha_max);
-            cfg->primal.alpha_max = alpha_max;
+            cfg->get<solver::line_search_cfg>().primal.clip(alpha_max);
+            cfg->get<solver::line_search_cfg>().primal.alpha_max = alpha_max;
         }
         if (d.d_multipler_(idx) < 0) {
             alpha_max = (-tau) * d.multiplier_(idx) / d.d_multipler_(idx);
-            cfg->dual.clip(alpha_max);
-            cfg->dual.alpha_max = alpha_max;
+            cfg->get<solver::line_search_cfg>().dual.clip(alpha_max);
+            cfg->get<solver::line_search_cfg>().dual.alpha_max = alpha_max;
         }
     }
 }
-void ipm_constr::line_search_step(ipm::soft_constr_data &data, solver::line_search_cfg *cfg) {
-    auto &d = dynamic_cast<ipm_data &>(data);
-    auto ipm_cfg = dynamic_cast<ipm_settings *>(cfg); // temporary config
-    if (d.ipm_cfg->comp_affine_step() && ipm_cfg->adaptive_mu) {
-        ipm_cfg->n_ipm_cstr++;
+void ipm_constr::line_search_step(ipm::soft_constr_data &data, workspace_data *cfg) {
+    auto &d = data.as<ipm_data>();
+    auto ipm_cfg = &cfg->get<ipm_settings::worker_type>(); // temporary config
+    if (d.ipm_cfg->comp_affine_step()) {
+        ipm_cfg->n_ipm_cstr += dim_;
         ipm_cfg->prev_normalized_comp += d.multiplier_.dot(d.slack_);
     }
-    d.slack_.array() += cfg->alpha_primal * d.d_slack_.array();
-    d.multiplier_.array() += cfg->alpha_dual * d.d_multipler_.array();
+    d.slack_.array() += cfg->get<solver::line_search_cfg>().alpha_primal * d.d_slack_.array();
+    d.multiplier_.array() += cfg->get<solver::line_search_cfg>().alpha_dual * d.d_multipler_.array();
     d.slack_ = d.slack_.array().max(1e-8);
-    if (d.ipm_cfg->comp_affine_step() && ipm_cfg->adaptive_mu)
+    if (d.ipm_cfg->comp_affine_step())
         ipm_cfg->after_normalized_comp += d.multiplier_.dot(d.slack_);
 }
 void ipm_constr::value_impl(sp_approx_map &data) {
     soft_constr::value_impl(data);
-    auto &d = dynamic_cast<ipm_data &>(data);
+    auto &d = data.as<ipm_data>();
     d.g_ = d.v_;
     d.v_ = d.g_ + d.slack_; // r_g = g_ + slack
     if (d.ipm_cfg->comp_affine_step())
@@ -73,7 +73,7 @@ void ipm_constr::value_impl(sp_approx_map &data) {
 }
 void ipm_constr::jacobian_impl(sp_approx_map &data) {
     soft_constr::jacobian_impl(data);
-    auto &d = dynamic_cast<ipm_data &>(data);
+    auto &d = data.as<ipm_data>();
     // setup T^{-1} N
     d.diag_scaling.array() = static_cast<soft_constr_data &>(data).multiplier_.array() / d.slack_.array();
     // set scaled residual

@@ -2,6 +2,7 @@
 #define __approx__
 
 #include <future>
+#include <moto/core/workspace_data.hpp>
 #include <moto/ocp/impl/func_data.hpp>
 
 namespace moto {
@@ -87,6 +88,8 @@ class func : public expr {
      * @return true if field is not __pre_comp or __usr_func and field value is greater than __dyn
      */
     bool is_approx() const { return (field_ != __pre_comp && field_ != __usr_func) && field_ > __dyn; }
+
+    virtual void setup_setting(sp_arg_map &data, workspace_data *settings) {}
     /**
      * @brief setup the sparse func data
      * @details will setup the mapping from the dense approx_storage to sp_approx_map

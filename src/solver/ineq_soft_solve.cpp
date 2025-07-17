@@ -29,12 +29,12 @@ void post_rollout(solver::data_base *cur) {
         sf.post_rollout(sd);
     });
 }
-void line_search_step(solver::data_base *cur, solver::line_search_cfg* config) {
+void line_search_step(solver::data_base *cur, workspace_data *config) {
     for_funcs(cur, [cur, cfg = config](soft_constr &sf, soft_constr_data &sd) {
         sf.line_search_step(sd, cfg);
     });
 }
-void calculate_line_search_bounds(solver::data_base *cur, solver::line_search_cfg* config) {
+void calculate_line_search_bounds(solver::data_base *cur, workspace_data *config) {
     for_funcs(cur, [cur, cfg = config](soft_constr &sf, soft_constr_data &sd) {
         sf.update_line_search_cfg(sd, cfg);
     });

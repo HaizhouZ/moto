@@ -37,19 +37,18 @@ class ipm_constr final : public impl::soft_constr {
 
   public:
     using base::base;
-    void setup_solver_setting(sp_approx_map &data, solver::solver_settings *settings) override {
-        base::setup_solver_setting(data, settings);
-        auto &d = dynamic_cast<ipm_approx_data &>(data);
-        d.ipm_cfg = dynamic_cast<ipm_settings *>(settings);
+    void setup_setting(sp_arg_map &data,  workspace_data *settings) override {
+        base::setup_setting(data, settings);
+        data.as<ipm_approx_data>().ipm_cfg = &settings->get<ipm_settings>();
     }
     /// @brief initialize the IPM constraint data
     void initialize(soft_constr_data &data) override final;
     /// @brief post rollout operation for the IPM constraint to compute the newton step
     void post_rollout(soft_constr_data &data) override final;
     /// @brief line search step for the IPM constraint
-    void line_search_step(soft_constr_data &data, solver::line_search_cfg *cfg) override final;
+    void line_search_step(soft_constr_data &data, workspace_data *cfg) override final;
     /// @brief update the line search configuration (if necessary)
-    void update_line_search_cfg(soft_constr_data &data, solver::line_search_cfg *cfg) override final;
+    void update_line_search_cfg(soft_constr_data &data, workspace_data *cfg) override final;
 
     using ipm_data = data_type;
 

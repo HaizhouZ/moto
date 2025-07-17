@@ -34,9 +34,9 @@ class soft_constr : public impl::soft_constr_base {
     /// post rollout operation for the soft constraint to compute the newton step
     virtual void post_rollout(soft_constr_data &data) = 0;
     /// line search step for the soft constraint
-    virtual void line_search_step(soft_constr_data &data, solver::line_search_cfg* cfg) = 0;
+    virtual void line_search_step(soft_constr_data &data, workspace_data *cfg) = 0;
     /// update the line search configuration (if necessary)
-    virtual void update_line_search_cfg(soft_constr_data &data, solver::line_search_cfg *cfg) {}
+    virtual void update_line_search_cfg(soft_constr_data &data, workspace_data *cfg) {}
     /***
      * @brief make approximation data for the soft constraint, will use default @ref data_type
      */

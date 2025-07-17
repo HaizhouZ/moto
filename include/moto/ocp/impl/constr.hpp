@@ -2,7 +2,8 @@
 #define MOTO_CONSTR_IMPL_HPP
 
 #include <moto/ocp/impl/func.hpp>
-#include <moto/solver/solver_setting.hpp>
+#include <moto/core/workspace_data.hpp>
+#include <moto/solver/linesearch_config.hpp>
 #include <moto/utils/optional_boolean.hpp>
 
 namespace moto {
@@ -61,8 +62,8 @@ class constr : public func {
     void finalize_impl() override;
 
   public:
-    virtual void setup_solver_setting(sp_approx_map &data, solver::solver_settings *settings) {
-        dynamic_cast<constr_approx_map&>(data).ls_cfg = static_cast<solver::line_search_cfg*>(settings);
+    void setup_setting(sp_arg_map &data, workspace_data *settings) override {
+        data.as<constr_approx_map>().ls_cfg = &settings->get<solver::line_search_cfg>();
     }
     /**
      * @brief type hint for the constraint
