@@ -71,7 +71,7 @@ void finalize_newton_step_correction(ns_node_data *cur) {
     /// correct bar{u}_0 (first order term)
     nsp.u_0_p_k += nsp.z_u_k;
     /// update Q_y with correction
-    d.Q_y += d.Q_y_cache; 
+    d.Q_y += *d.Q_y_corr; 
     finalize_dual_newton_step(cur);
 }
 } // namespace ns_riccati

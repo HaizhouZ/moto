@@ -24,7 +24,7 @@ struct data_base : public node_data {
     matrix &Q_yy;
     array_type<vector, primal_fields> prim_step; ///< primal (newton) step
     array_type<vector, primal_fields> prim_corr; ///< correction for the primal step
-    row_vector Q_y_cache; ///< cache before correction for the Q_y
+    row_vector *Q_y_corr;                        ///< correction for the Q_y
     /// @brief create solver data
     /// @param prob ocp to initialize nx, nu and the Q-derivative refs
     data_base(const ocp_ptr_t &prob);

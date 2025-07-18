@@ -119,9 +119,8 @@ void ipm_constr::propagate_jacobian(ipm_data &d) {
     size_t j_idx = 0;
     for (auto &j : d.jac_data_) {
         if (j.size() != 0) {
-            d.vjp_[j_idx].noalias() += d.scaled_res_.transpose() * j;
-            // fmt::print("vjp: {:.3}\n", d.vjp_[j_idx]);
-            if (d.vjp_[j_idx].hasNaN()) {
+            d.jac_modification_[j_idx].noalias() += d.scaled_res_.transpose() * j;
+            if (d.jac_modification_[j_idx].hasNaN()) {
                 fmt::print("--------------------\n");
                 fmt::print("constraint name: {}\n", d.func_.name_);
                 for (auto &arg : d.func_.in_args()) {

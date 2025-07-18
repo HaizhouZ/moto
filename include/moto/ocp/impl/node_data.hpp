@@ -79,6 +79,7 @@ struct node_data {
 
     /// @brief add modification to the jacobian
     void merge_jacobian_modification();
+    void swap_jacobian_modification();
 
     template <typename Callback>
     void for_each_constr(Callback &&f) {

@@ -43,7 +43,7 @@ class soft_constr : public soft_constr_base {
     virtual void initialize(data_map_t &data) = 0;
     /// post rollout operation for the soft constraint to compute the newton step
     virtual void finalize_newton_step(data_map_t &data) = 0;
-    /// first order correction of the cost jacobian. vjp must be reset to zero before calling this
+    /// first order correction of the cost jacobian. jac_modification must be reset to zero before calling this
     virtual void correct_jacobian(data_map_t &data) {};
     /// line search step for the soft constraint
     virtual void line_search_step(data_map_t &data, workspace_data *worker_cfg) = 0;

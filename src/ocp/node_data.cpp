@@ -25,28 +25,21 @@ node_data::node_data(const ocp_ptr_t &prob)
         sparse_[field].push_back(_f.make_approx_map(*sym_, *dense_, *shared_));
     });
 }
-void node_data::clear_merit_jac() {
-    // set cost jacobian to zero
-    for (auto field : primal_fields) {
-        dense_->jac_[field].setZero();
-        dense_->jac_modification_[field].setZero();
-    }
-}
-void node_data::clear_merit_hessian() {
-    // set hessian to zero
-    for (auto &hess_l_0 : dense_->hessian_) {
-        for (auto &hess_l_1 : hess_l_0) {
-            hess_l_1.setZero();
-        }
-    }
-}
 void node_data::update_approximation(bool eval_only) {
     /// @todo: always eval residual?
     // call to precompute
     dense_->cost_ = 0.;
     dense_->merit_ = 0.;
-    clear_merit_jac();
-    clear_merit_hessian();
+    // set merit jacobian to zero
+    for (auto field : primal_fields) {
+        dense_->jac_[field].setZero();
+        dense_->jac_modification_[field].setZero();
+    }
+    for (auto &hess_l_0 : dense_->hessian_) {
+        for (auto &hess_l_1 : hess_l_0) {
+            hess_l_1.setZero();
+        }
+    }
     for (const auto &expr : prob_->expr_[__pre_comp]) {
         auto &f = static_cast<impl::func &>(*expr);
         f.call((*shared_)[f]);
@@ -75,6 +68,12 @@ void node_data::update_approximation(bool eval_only) {
 void node_data::merge_jacobian_modification() {
     for (const auto &field : primal_fields) {
         dense_->jac_[field] += dense_->jac_modification_[field];
+    }
+}
+
+void node_data::swap_jacobian_modification() {
+    for (const auto &field : primal_fields) {
+        dense_->jac_[field].swap(dense_->jac_modification_[field]);
     }
 }
 

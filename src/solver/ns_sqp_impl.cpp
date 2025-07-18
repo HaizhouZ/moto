@@ -93,13 +93,13 @@ void ns_sqp::update(size_t n_iter) {
             // adaptive mu update
             settings.adaptive_mu_update(main_worker);
             // use the new mu to update the rhs jacobian
-            graph_.apply_all_unary_parallel(solver::ineq_soft::first_order_correction);
+            graph_.apply_all_unary_parallel(solver::ineq_soft::first_order_correction_start);
             // solve the problem again with updated mu
             graph_.apply_all_binary_backward<true>(ns_riccati::riccati_recursion_correction);
             graph_.apply_all_unary_parallel(ns_riccati::compute_primal_sensitivity_correction);
             graph_.apply_all_binary_forward<false, true>(ns_riccati::fwd_linear_rollout_correction);
-            graph_.apply_all_unary_parallel(ns_riccati::finalize_newton_step_correction);
             graph_.apply_all_unary_parallel([](auto *d) {
+                solver::ineq_soft::first_order_correction_end(d);
                 ns_riccati::finalize_newton_step_correction(d);
                 solver::ineq_soft::finalize_newton_step(d);
             });

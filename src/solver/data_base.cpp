@@ -16,7 +16,7 @@ data_base::data_base(const ocp_ptr_t &prob)
     prim_corr[__x].setZero();
     prim_corr[__u].resize(nu);
     prim_corr[__y].resize(nx);
-    Q_y_cache.resize(Q_y.size());
+    Q_y_corr = nullptr;
 }
 } // namespace solver
 } // namespace moto
