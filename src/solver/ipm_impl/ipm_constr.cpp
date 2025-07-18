@@ -26,16 +26,19 @@ void ipm_constr::finalize_newton_step(ipm::sp_data_map &data) {
         arg_idx++;
     }
     // update dual newton step
-    if (d.ipm_cfg->ipm_compute_affine_step)
+    if (d.ipm_cfg->ipm_computing_affine_step())
         d.d_multipler_.array() = -d.multiplier_.array() - d.diag_scaling.array() * d.d_slack_.array();
     else
         d.d_multipler_.array() = -d.multiplier_.array() + d.ipm_cfg->mu / d.slack_.array() - d.diag_scaling.array() * d.d_slack_.array();
 }
 void ipm_constr::correct_jacobian(sp_data_map &data) {
     auto &d = data.as<ipm_data>();
-    d.scaled_res_.array() = d.ipm_cfg->mu / d.slack_.array();
-    if (d.ipm_cfg->ipm_enable_corrector()) // add the dual correction term
-        d.scaled_res_.array() -= d.d_multipler_.array() * d.d_slack_.array() / d.slack_.array();
+    if (d.ipm_cfg->ipm_accept_corrector()) { // add the dual correction term
+        d.scaled_res_.array() = d.ipm_cfg->mu - d.d_multipler_.array() * d.d_slack_.array();
+    } else {
+        d.scaled_res_.array() = d.ipm_cfg->mu;
+    }
+    d.scaled_res_.array() /= d.slack_.array();
     propagate_jacobian(d);
 }
 void ipm_constr::update_linesearch_config(ipm::sp_data_map &data, workspace_data *cfg) {
@@ -61,23 +64,29 @@ void ipm_constr::update_linesearch_config(ipm::sp_data_map &data, workspace_data
 }
 void ipm_constr::line_search_step(ipm::sp_data_map &data, workspace_data *cfg) {
     auto &d = data.as<ipm_data>();
-    auto ipm_worker = cfg->try_get<ipm_config::worker_type>();
+    auto *ipm_worker = cfg->try_get<ipm_config::worker_type>();
+    auto &ls_cfg = cfg->get<solver::linesearch_config>();
     if (ipm_worker && d.ipm_cfg->ipm_enable_affine_step()) {
-        assert(d.ipm_cfg->ipm_compute_affine_step &&
-               "flag must set true for ipm affine step computation in line search");
+        assert(d.ipm_cfg->ipm_computing_affine_step() &&
+               "ipm affine step computation not started but affine step is requested");
         // if we are in the affine step mode, we need to update the ipm worker data
         ipm_worker->n_ipm_cstr += dim_;
         ipm_worker->prev_aff_comp += d.multiplier_.dot(d.slack_);
-        ipm_worker->post_aff_comp += (d.multiplier_ + cfg->get<solver::linesearch_config>().alpha_dual * d.d_multipler_)
-                                         .dot(d.slack_ + cfg->get<solver::linesearch_config>().alpha_primal * d.d_slack_);
-        assert((d.multiplier_ + cfg->get<solver::linesearch_config>().alpha_dual * d.d_multipler_)
-                                         .dot(d.slack_ + cfg->get<solver::linesearch_config>().alpha_primal * d.d_slack_) > 0);
+        ipm_worker->post_aff_comp += (d.multiplier_ + ls_cfg.alpha_dual * d.d_multipler_)
+                                         .dot(d.slack_ + ls_cfg.alpha_primal * d.d_slack_);
+        assert(d.multiplier_.dot(d.slack_) > 0 &&
+               "the complementarity must be positive before the line search step");
+        assert((d.multiplier_ + ls_cfg.alpha_dual * d.d_multipler_)
+                   .dot(d.slack_ + ls_cfg.alpha_primal * d.d_slack_) > 0);
     } else {
-        assert(!d.ipm_cfg->ipm_compute_affine_step &&
-               "flag must set false for ipm full step computation in line search");
-        d.slack_.array() += cfg->get<solver::linesearch_config>().alpha_primal * d.d_slack_.array();
-        d.multiplier_.array() += cfg->get<solver::linesearch_config>().alpha_dual * d.d_multipler_.array();
-        d.slack_ = d.slack_.array().max(1e-8);
+        assert(!d.ipm_cfg->ipm_computing_affine_step() &&
+               "ipm affine step computation not ended");
+        d.slack_.array() += ls_cfg.alpha_primal * d.d_slack_.array();
+        d.multiplier_.array() += ls_cfg.alpha_dual * d.d_multipler_.array();
+        if (d.ipm_cfg->ipm_enable_corrector()) {
+            d.slack_ = d.slack_.array().max(1e-20);
+            d.multiplier_ = d.multiplier_.array().max(1e-20);
+        }
     }
 }
 void ipm_constr::value_impl(sp_approx_map &data) {
@@ -85,14 +94,14 @@ void ipm_constr::value_impl(sp_approx_map &data) {
     auto &d = data.as<ipm_data>();
     d.g_ = d.v_;
     d.v_ = d.g_ + d.slack_; // r_g = g_ + slack
-    d.r_s_.array() = data.as<sp_data_map>().multiplier_.cwiseProduct(d.slack_).array() - d.ipm_cfg->mu;
+    d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.ipm_cfg->mu;
     d.comp_.array() = d.multiplier_.array() * d.slack_.array();
 }
 void ipm_constr::jacobian_impl(sp_approx_map &data) {
     soft_constr::jacobian_impl(data);
     auto &d = data.as<ipm_data>();
     // setup T^{-1} N
-    d.diag_scaling.array() = data.as<sp_data_map>().multiplier_.array() / d.slack_.array();
+    d.diag_scaling.array() = d.multiplier_.array() / d.slack_.array();
     // set scaled residual
     d.scaled_res_ = d.diag_scaling.cwiseProduct(d.g_);
     if (!d.ipm_cfg->ipm_enable_affine_step())

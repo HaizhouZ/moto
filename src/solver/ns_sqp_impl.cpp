@@ -65,7 +65,7 @@ void ns_sqp::update(size_t n_iter) {
         graph_.apply_all_binary_forward<false, true>(ns_riccati::fwd_linear_rollout);
 
         if (settings.ipm_enable_affine_step()) { // compute the affine step, no need to finalize dual step
-            settings.ipm_compute_affine_step = true;
+            settings.ipm_start_predictor_computation();
             graph_.apply_all_unary_parallel([](auto *d) { ns_riccati::finalize_newton_step(d, false); });
         } else // directly finalize the dual step
             graph_.apply_all_unary_parallel([](auto *d) { ns_riccati::finalize_newton_step(d, true); });
@@ -79,7 +79,7 @@ void ns_sqp::update(size_t n_iter) {
             graph_.apply_all_unary_parallel([&setting_per_thread](size_t tid, auto *d) {
                 ineq_soft_solve::line_search_step(d, &setting_per_thread[tid]);
             });
-            settings.ipm_compute_affine_step = false; // ipm affine step computation is done
+            settings.ipm_end_predictor_computation(); // ipm affine step computation is done
             // collect worker ipm data
             auto &main_worker = setting_per_thread[0];
             for (size_t i = 1; i < n_worker; ++i) {
