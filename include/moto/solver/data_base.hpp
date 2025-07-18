@@ -29,13 +29,6 @@ struct data_base : public node_data {
     /// @param prob ocp to initialize nx, nu and the Q-derivative refs
     data_base(const ocp_ptr_t &prob);
 };
-/**
- * @brief prepare the primal correction for the data_base
- * @details will set the Q_x, Q_u, Q_y and prim_corr[__x] to zero and copy Q_y to Q_y_cache because 
- * it is @b assumed Q_y will be used in newton step finalization
- * @param data 
- */
-void prepare_correction(data_base *data);
 } // namespace solver
 } // namespace moto
 

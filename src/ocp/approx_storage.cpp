@@ -35,6 +35,8 @@ approx_storage::approx_storage(const ocp_ptr_t &prob) : prob_(prob) {
         }
         jac_[i].resize(prob_->dim_[i]);
         jac_[i].setZero();
+        jac_modification_[i].resize(prob_->dim_[i]);
+        jac_modification_[i].setZero();
     }
 }
 } // namespace moto

@@ -25,12 +25,28 @@ node_data::node_data(const ocp_ptr_t &prob)
         sparse_[field].push_back(_f.make_approx_map(*sym_, *dense_, *shared_));
     });
 }
-
+void node_data::clear_merit_jac() {
+    // set cost jacobian to zero
+    for (auto field : primal_fields) {
+        dense_->jac_[field].setZero();
+        dense_->jac_modification_[field].setZero();
+    }
+}
+void node_data::clear_merit_hessian() {
+    // set hessian to zero
+    for (auto &hess_l_0 : dense_->hessian_) {
+        for (auto &hess_l_1 : hess_l_0) {
+            hess_l_1.setZero();
+        }
+    }
+}
 void node_data::update_approximation(bool eval_only) {
     /// @todo: always eval residual?
     // call to precompute
     dense_->cost_ = 0.;
     dense_->merit_ = 0.;
+    clear_merit_jac();
+    clear_merit_hessian();
     for (const auto &expr : prob_->expr_[__pre_comp]) {
         auto &f = static_cast<impl::func &>(*expr);
         f.call((*shared_)[f]);
@@ -41,26 +57,25 @@ void node_data::update_approximation(bool eval_only) {
                                      !eval_only && _f.order() >= approx_order::first,
                                      !eval_only && _f.order() >= approx_order::second);
               });
-    dense_->merit_ += dense_->cost_;
-}
-scalar_t node_data::inf_prim_res() const {
-    scalar_t res = 0.;
+    inf_prim_res_ = 0.;
     for (const auto &field_data : dense_->approx_) {
         if (field_data.v_.size() == 0)
             continue; // skip empty fields
-        res = std::max(field_data.v_.cwiseAbs().maxCoeff(), res);
+        inf_prim_res_ = std::max(field_data.v_.cwiseAbs().maxCoeff(), inf_prim_res_);
     }
-    return res;
-}
-
-scalar_t node_data::inf_comp_res() const {
-    scalar_t res = 0.;
+    inf_comp_res_ = 0.;
     for (const auto &comp : dense_->comp_) {
         if (comp.size() == 0)
             continue; // skip empty fields
-        res = std::max(comp.cwiseAbs().maxCoeff(), res);
+        inf_comp_res_ = std::max(comp.cwiseAbs().maxCoeff(), inf_comp_res_);
     }
-    return res;
+    dense_->merit_ += dense_->cost_;
+}
+
+void node_data::merge_jacobian_modification() {
+    for (const auto &field : primal_fields) {
+        dense_->jac_[field] += dense_->jac_modification_[field];
+    }
 }
 
 namespace impl {

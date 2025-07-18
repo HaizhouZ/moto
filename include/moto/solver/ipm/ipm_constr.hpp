@@ -1,17 +1,11 @@
 #ifndef MOTO_SOLVER_IPM_CONSTR_HPP
 #define MOTO_SOLVER_IPM_CONSTR_HPP
 
-#include <moto/ocp/impl/soft_constr.hpp>
+#include <moto/ocp/impl/ineq_constr.hpp>
 #include <moto/solver/ipm/ipm_config.hpp>
 
 namespace moto {
 namespace ipm_impl {
-struct ineq_constr_approx_map : public impl::soft_constr_approx_map {
-    using base = impl::soft_constr_approx_map;
-    vector_ref comp_;
-    ineq_constr_approx_map(approx_storage &raw, constr_approx_map &&d)
-        : base(std::move(d)), comp_(problem()->extract(raw.comp_[func_.field_], func_)) {}
-};
 
 struct ipm_approx_data : public impl::constr_approx_data {
     ipm_config *ipm_cfg = nullptr; ///< pointer to the IPM settings
@@ -30,15 +24,15 @@ struct ipm_approx_data : public impl::constr_approx_data {
     }
 };
 
-class ipm_constr final : public impl::soft_constr {
+class ipm_constr final : public impl::ineq_constr {
   private:
-    using base = impl::soft_constr;
+    using base = impl::ineq_constr;
     /// + update the IPM slack and residuals
     void value_impl(sp_approx_map &data) override final;
     /// + update the IPM-modified cost jacobian and hessian
     void jacobian_impl(sp_approx_map &data) override final;
     /// data type for the IPM constraint
-    using data_type = constr_data<ineq_constr_approx_map, ipm_approx_data>;
+    using data_type = constr_data<base::data_type::map_t, ipm_approx_data>;
 
   public:
     using base::base;
@@ -47,15 +41,15 @@ class ipm_constr final : public impl::soft_constr {
         data.as<ipm_approx_data>().ipm_cfg = &settings->get<ipm_config>();
     }
     /// @brief initialize the IPM constraint data
-    void initialize(sp_data_map &data) override final;
+    void initialize(data_map_t &data) override final;
     /// @brief post rollout operation for the IPM constraint to compute the newton step
-    void finalize_newton_step(sp_data_map &data) override final;
+    void finalize_newton_step(data_map_t &data) override final;
     /// @brief will compute the cost jacobian correction depending on the IPM settings
-    void correct_jacobian(sp_data_map &data) override final;
+    void correct_jacobian(data_map_t &data) override final;
     /// @brief line search step for the IPM constraint
-    void line_search_step(sp_data_map &data, workspace_data *cfg) override final;
+    void line_search_step(data_map_t &data, workspace_data *cfg) override final;
     /// @brief update the line search configuration (if necessary)
-    void update_linesearch_config(sp_data_map &data, workspace_data *cfg) override final;
+    void update_linesearch_config(data_map_t &data, workspace_data *cfg) override final;
 
     using ipm_data = data_type;
 

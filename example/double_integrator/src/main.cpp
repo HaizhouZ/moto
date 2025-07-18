@@ -51,10 +51,10 @@ int main() {
     // sqp.update();
     sqp.graph_.apply_all_unary_forward([&dyn](auto *node) {
         // std::cout << "delX  " << data.rollout_->prim_[__x].transpose() << '\n';
-        // std::cout << magic_enum::enum_name(data.rank_status_) << '\n';
+        // std::cout << field::name(data.rank_status_) << '\n';
         // std::cout << "state " << node->sym_->value_[__x].transpose() << '\n';
         // std::cout << "input " << node->sym_->value_[__u].transpose() << '\n';
-        std::cout << "inf_prim_res: " << node->inf_prim_res() << '\n';
+        std::cout << "inf_prim_res: " << node->inf_prim_res_ << '\n';
         // std::cout << "nexts " << data.sym_->value_[__y].transpose() << '\n';
         // std::cout << "rescs " << node->data(dyn.vel_zero_constr).v_.transpose() << '\n';
         // std::cout << "dual  " << static_cast<constr_approx_map &>(node->data(dyn.vel_zero_constr)).multiplier_.transpose() << '\n';

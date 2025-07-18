@@ -1,5 +1,5 @@
+#include <moto/solver/linesearch_config.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
-#include <moto/solver/ineq_soft_solve.hpp>
 
 namespace moto {
 namespace ns_riccati {
@@ -12,7 +12,6 @@ void line_search_step(ns_node_data *cur, workspace_data *_cfg) {
     for (auto f : hard_constr_fields) {
         cur->dense_->dual_[f].noalias() += cfg.alpha_dual * d.dual_step[f];
     }
-    ineq_soft_solve::line_search_step(cur, _cfg);
 }
 
 } // namespace ns_riccati

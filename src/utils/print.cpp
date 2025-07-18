@@ -8,7 +8,7 @@ void print_problem(const ocp_ptr_t &prob) {
     for (size_t i = 0; i < field::num; i++) {
         if (prob->expr_[i].size() > 0) {
             fmt::print("field : {}, \ttotal dim {}\n",
-                       magic_enum::enum_name(static_cast<field_t>(i)),
+                       field::name(static_cast<field_t>(i)),
                        prob->dim_[i]);
             for (const auto &expr : prob->expr_[i]) {
                 fmt::print(" - {} dim: {}\n", expr->name_, expr->dim_);

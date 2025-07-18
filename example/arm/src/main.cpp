@@ -43,7 +43,7 @@ int main() {
 
     sqp.graph_.apply_all_unary_forward([&dyn](auto *node) {
         // std::cout << "delX  " << node->rollout_->prim_[__x].transpose() << '\n';
-        // std::cout << magic_enum::enum_name(node->rank_status_) << '\n';
+        // std::cout << field::name(node->rank_status_) << '\n';
         std::cout << "state " << node->sym_->value_[__x].transpose() << '\n';
         std::cout << "input " << node->sym_->value_[__u].transpose() << '\n';
         std::cout << "nexts " << node->sym_->value_[__y].transpose() << '\n';

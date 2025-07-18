@@ -13,17 +13,23 @@ constr_approx_map::constr_approx_map(vector_ref multiplier,
       multiplier_(multiplier) {
     auto f = &func_;
     const auto &in_args = f->in_args();
-    for (size_t i = 0; i < in_args_.size(); i++) {
-        if (in_args[i]->field_ < field::num_prim)
-            vjp_.push_back(raw.jac_[in_args[i]->field_].segment(
-                raw.prob_->get_expr_start(in_args[i]), in_args[i]->dim_));
-        else {
-            static row_vector empty;
-            vjp_.push_back(empty); // no jacobian for this field
-        }
+    if (f->order() >= approx_order::first) {
+        map_merit_jac_from_raw(raw.jac_, vjp_);
     }
-    if (f->order() >= approx_order::second) {
+    if (f->order() >= approx_order::second) { // for hessian from vjp autodiff codegen
         in_args_.push_back(multiplier_);
+    }
+}
+void constr_approx_map::map_merit_jac_from_raw(decltype(approx_storage::jac_) &raw, std::vector<row_vector_ref> &jac) {
+    auto &in_args = func_.in_args();
+    jac.clear();
+    for (size_t i : range(in_args_.size())) {
+        if (in_args[i]->field_ < field::num_prim) {
+            jac.push_back(raw[in_args[i]->field_].segment(problem()->get_expr_start(in_args[i]), in_args[i]->dim_));
+        } else { // useless
+            static row_vector empty;
+            jac.push_back(empty);
+        }
     }
 }
 constr_approx_data::constr_approx_data(func &f) : f_(&f) {
@@ -78,7 +84,7 @@ void constr::finalize_impl() {
             for (auto &arg : in_args_) {
                 if (arg->field_ == __x) {
                     fmt::print("substitution in constr {} of type {}: inarg {} with {}\n",
-                               name_, magic_enum::enum_name(field_), arg->name_, arg->name_ + "_nxt");
+                               name_, field::name(field_), arg->name_, arg->name_ + "_nxt");
                     substitute(arg, expr_lookup::get<sym>(arg->uid_ + 1));
                 }
             }

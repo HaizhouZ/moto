@@ -7,10 +7,10 @@ namespace impl {
 sp_approx_map_ptr_t func::make_approx_map(sym_data &primal, approx_storage &raw, shared_data &shared) {
     if (field_ - __dyn >= field::num_func)
         throw std::runtime_error(fmt::format("make_approx_map cannot be called for func {} type {}",
-                                             name_, magic_enum::enum_name(field_)));
+                                             name_, field::name(field_)));
     if (in_args_.empty())
         throw std::runtime_error(fmt::format("in args unset for func {} in field {}",
-                                             name_, magic_enum::enum_name(field_)));
+                                             name_, field::name(field_)));
     return std::make_unique<sp_approx_map>(primal, raw, shared, *this);
 }
 void func::load_external(const std::string &path) {

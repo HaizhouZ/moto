@@ -130,7 +130,7 @@ struct sp_approx_map : public sp_arg_map {
     sp_approx_map(sym_data &primal, vector_ref v, std::vector<matrix_ref> &&jac, shared_data &shared, impl::func &f);
     /// @brief setup hessian from raw approx storage
     void setup_hessian(approx_storage &raw);
-
+    /// @brief get the jacobian reference
     auto jac(const sym &in) const {
         return jac_[sym_uid_idx_.at(in->uid_)];
     }

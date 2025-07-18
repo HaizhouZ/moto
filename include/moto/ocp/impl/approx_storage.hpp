@@ -25,10 +25,12 @@ struct approx_storage {
     shifted_array<vector, field::num_constr, __dyn> dual_;
     /// complementarity of each inequality fields
     array_type<vector, ineq_constr_fields> comp_;
-    scalar_t merit_;
-    scalar_t cost_;
+    scalar_t merit_; ///< cost + sum of all constraints multipler-residual products
+    scalar_t cost_; ///< cost value
     /// cost jacobian
     array<row_vector, field::num_prim> jac_;
+    /// modification of the merit jacobian, indexed by field
+    array<row_vector, field::num_prim> jac_modification_;
     /// cost hessian h[a][b] is h_ab. Note only the upper block-triangular part is stored
     array<array<matrix, field::num_prim>, field::num_prim> hessian_;
 };

@@ -136,7 +136,7 @@ class func : public expr {
         : func(name, approx_order::none, 0, field) {
         if (is_approx()) {
             throw std::runtime_error(fmt::format("func {} field type {} not qualified as non-approx",
-                                                 name_, magic_enum::enum_name(field)));
+                                                 name_, field::name(field)));
         }
         // make a default make_data
         make_data = [this](sym_data &primal, shared_data &shared) {

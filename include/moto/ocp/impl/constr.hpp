@@ -33,6 +33,9 @@ struct constr_approx_map : public sp_approx_map {
     constr_approx_map(approx_storage &raw, sp_approx_map &&d);
     /// @brief short-cut for nested moving construct
     constr_approx_map(sp_approx_map_ptr_t &&rhs) : constr_approx_map(std::move(dynamic_cast<constr_approx_map &>(*rhs))) {}
+
+  protected:
+    void map_merit_jac_from_raw(decltype(approx_storage::jac_) &raw, std::vector<row_vector_ref> &jac);
 };
 /**
  * @brief independent constraint approximation data
@@ -52,6 +55,25 @@ class constr : public func {
   private:
     struct constr_data_base {}; ///< base class for constr data as constraint
 
+  public:
+    /**
+     * @brief constraint data
+     *
+     * @tparam approx_map_t mapping type, default is @ref constr_approx_map
+     * @tparam data_t data type, default is @ref constr_approx_data
+     */
+    template <typename approx_map_t = constr_approx_map,
+              typename approx_data_t = constr_approx_data>
+        requires std::is_base_of_v<constr_approx_map, approx_map_t> &&
+                     std::is_base_of_v<constr_approx_data, approx_data_t>
+    struct constr_data final : private constr_data_base, public composed_data<approx_map_t, approx_data_t> {
+        using base = composed_data<approx_map_t, approx_data_t>; ///< base type
+        /// inherit base constructor
+        using base::base;
+        using map_t = approx_map_t;   ///< map type
+        using data_t = approx_data_t; ///< data type
+    };
+
   protected:
     /// @brief evaluate the value of the constraint for merit
     void value_impl(sp_approx_map &data) override;
@@ -60,6 +82,8 @@ class constr : public func {
     /// @brief finalize the constraint, will be called upon added to a problem
     /// @note will set the field (if unset) based on the field hint and substitute __x to __y for pure-state constraints
     void finalize_impl() override;
+
+    using data_type = constr_data<>; ///< data type for the constraint
 
   public:
     void setup_setting(sp_arg_map &data, workspace_data *settings) override {
@@ -86,47 +110,34 @@ class constr : public func {
            size_t dim = dim_tbd, field_t field = __undefined)
         : func(name, order, dim, field) {
     }
-    /**
-     * @brief constraint data
-     *
-     * @tparam approx_map_t mapping type, default is @ref constr_approx_map
-     * @tparam data_t data type, default is @ref constr_approx_data
-     */
-    template <typename approx_map_t = constr_approx_map,
-              typename data_t = constr_approx_data>
-        requires std::is_base_of_v<constr_approx_map, approx_map_t> && std::is_base_of_v<constr_approx_data, data_t>
-    struct constr_data final : private constr_data_base, public composed_data<approx_map_t, data_t> {
-        using base = composed_data<approx_map_t, data_t>; ///< base type
-        /// inherit base constructor
-        using base::base;
-        using mtype = approx_map_t; ///< map type
-        using dtype = data_t;       ///< data type
-    };
+
     /**
      * @brief make an approximation data for the constraint
      *
-     * @tparam data_type type of the data, @b MUST be instantiation of @ref constr_data, default is constr_data<>
+     * @tparam _data_type of the data, @b MUST be instantiation of @ref constr_data, default is constr_data<>
+     * 1. _data_type::map_t must constructible from (optional @ref approx_storage and) @ref map_t
+     * 2. _data_type::data_t must constructible from @ref data_t
      * @param primal primal data
      * @param raw raw approximation data
      * @param shared shared data
      * @return data_type* pointer to the approximation data
      */
-    template <typename data_type = constr_data<>>
-        requires std::is_base_of_v<constr_data_base, data_type>
+    template <typename _data_type = data_type>
+        requires std::is_base_of_v<constr_data_base, _data_type>
     auto make_approx(sym_data &primal, approx_storage &raw, shared_data &shared) {
-        using map_t = typename data_type::mtype;
-        using data_t = typename data_type::dtype;
-        using map_base = constr_approx_map;
-        using data_base = constr_approx_data;
+        using map_base = data_type::map_t;
+        using data_base = data_type::data_t;
+        using map_t = typename _data_type::map_t;
+        using data_t = typename _data_type::data_t;
         data_base d(*this);
         map_base base_map(raw, sp_approx_map(primal, d.v_data_, to_matrix_ref_list(d.jac_data_), shared, *this));
         base_map.setup_hessian(raw);
-        if constexpr (std::is_constructible_v<map_t, approx_storage &, constr_approx_map &&>) {
+        if constexpr (std::is_constructible_v<map_t, approx_storage &, map_base &&>) {
             // if map_t can be constructed from approx_storage and sp_approx_map
             map_t derived_map(raw, std::move(base_map));
-            return new data_type(map_t(std::move(derived_map)), data_t(std::move(d)));
+            return new _data_type(map_t(std::move(derived_map)), data_t(std::move(d)));
         } else {
-            return new data_type(map_t(std::move(base_map)), data_t(std::move(d)));
+            return new _data_type(map_t(std::move(base_map)), data_t(std::move(d)));
         }
     }
     /**
