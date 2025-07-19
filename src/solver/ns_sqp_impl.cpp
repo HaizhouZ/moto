@@ -10,13 +10,13 @@
 
 namespace moto {
 void ns_sqp::forward() {
-    timed_block(graph_.apply_all_unary_parallel(ns_riccati::update_approx));
+    timed_block(graph_.apply_all_unary_parallel(solver::ns_riccati::update_approx));
 }
 void ns_sqp::update(size_t n_iter) {
     fmt::print("Initialization for SQP...\n");
     graph_.apply_all_unary_parallel([this](solver::data_base *cur) {
         // setup solver settings
-        cur->for_each_constr([this](auto &c, auto &d) { c.setup_setting(d, &settings); });
+        cur->for_each_constr([this](auto &c, auto &d) { c.setup_workspace_data(d, &settings); });
         cur->update_approximation(true);
         // initialize the data
         solver::ineq_soft::initialize(cur);
@@ -26,7 +26,7 @@ void ns_sqp::update(size_t n_iter) {
         cost_all += n->dense_->cost_;
     });
     fmt::print("initial cost_total: {}\n", cost_all.load());
-    graph_.apply_all_unary_parallel(ns_riccati::update_approx);
+    graph_.apply_all_unary_parallel(solver::ns_riccati::update_approx);
 
     // print statistics header
     constexpr std::string_view terms[] = {"objective", "inf_prim_res", "inf_dual_res", "inf_comp_res", "alpha_primal", "alpha_dual", "ipm_mu"};
@@ -59,10 +59,10 @@ void ns_sqp::update(size_t n_iter) {
             }
         };
         // timed_block_labeled("all",
-        graph_.apply_all_unary_parallel(ns_riccati::ns_factorization);
-        graph_.apply_all_binary_backward<true>(ns_riccati::riccati_recursion);
-        graph_.apply_all_unary_parallel(ns_riccati::compute_primal_sensitivity);
-        graph_.apply_all_binary_forward<false, true>(ns_riccati::fwd_linear_rollout);
+        graph_.apply_all_unary_parallel(solver::ns_riccati::ns_factorization);
+        graph_.apply_all_binary_backward<true>(solver::ns_riccati::riccati_recursion);
+        graph_.apply_all_unary_parallel(solver::ns_riccati::compute_primal_sensitivity);
+        graph_.apply_all_binary_forward<false, true>(solver::ns_riccati::fwd_linear_rollout);
 
         bool finalize_dual = true;
         if (settings.ipm_enable_affine_step()) { // compute the affine step, no need to finalize dual step
@@ -70,7 +70,7 @@ void ns_sqp::update(size_t n_iter) {
             finalize_dual = false; // do not finalize dual step
         }
         graph_.apply_all_unary_parallel([finalize_dual, &setting_per_thread](size_t tid, auto *d) {
-            ns_riccati::finalize_newton_step(d, finalize_dual);
+            solver::ns_riccati::finalize_newton_step(d, finalize_dual);
             solver::ineq_soft::finalize_newton_step(d);
             // decide line search bounds (e.g., fraction-to-bounds)
             solver::ineq_soft::calculate_line_search_bounds(d, &setting_per_thread[tid]);
@@ -95,23 +95,23 @@ void ns_sqp::update(size_t n_iter) {
             // use the new mu to update the rhs jacobian
             graph_.apply_all_unary_parallel(solver::ineq_soft::first_order_correction_start);
             // solve the problem again with updated mu
-            graph_.apply_all_binary_backward<true>(ns_riccati::riccati_recursion_correction);
-            graph_.apply_all_unary_parallel(ns_riccati::compute_primal_sensitivity_correction);
-            graph_.apply_all_binary_forward<false, true>(ns_riccati::fwd_linear_rollout_correction);
+            graph_.apply_all_binary_backward<true>(solver::ns_riccati::riccati_recursion_correction);
+            graph_.apply_all_unary_parallel(solver::ns_riccati::compute_primal_sensitivity_correction);
+            graph_.apply_all_binary_forward<false, true>(solver::ns_riccati::fwd_linear_rollout_correction);
             graph_.apply_all_unary_parallel([](auto *d) {
                 solver::ineq_soft::first_order_correction_end(d);
-                ns_riccati::finalize_newton_step_correction(d);
+                solver::ns_riccati::finalize_newton_step_correction(d);
                 solver::ineq_soft::finalize_newton_step(d);
             });
         }
         /// @todo: update the line search stepsize?
         // real line search step
         graph_.apply_all_unary_parallel([this](auto *d) {
-            ns_riccati::line_search_step(d, &settings);
+            solver::ns_riccati::line_search_step(d, &settings);
             solver::ineq_soft::line_search_step(d, &settings);
         });
 
-        graph_.apply_all_unary_parallel(ns_riccati::update_approx);
+        graph_.apply_all_unary_parallel(solver::ns_riccati::update_approx);
         // );
         kkt_info info;
         for (auto &n : graph_.get_unordered_flattened_nodes()) {

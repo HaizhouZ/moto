@@ -23,14 +23,14 @@ class cost : public func {
  * @brief wrapper of impl::cost, in fact a pointer
  *
  */
-struct cost : public impl::shared_<impl::cost, cost> {
+struct cost : public impl::shared_handle<impl::cost, cost> {
     /**
      * @brief Construct a new cost object
      *
      * @param name name of the cost
      */
     cost(const std::string &name)
-        : shared_(new expr_type(name)) {
+        : shared_handle(new expr_type(name)) {
     }
     /**
      * @brief Construct a new cost object from casadi expression
@@ -40,16 +40,16 @@ struct cost : public impl::shared_<impl::cost, cost> {
      * @param out output casadi SX expression
      */
     cost(const std::string &name, std::initializer_list<sym> in_args, const cs::SX &out)
-        : shared_(new expr_type(name)) {
+        : shared_handle(new expr_type(name)) {
         assert(out.is_scalar() && "cost output must be a scalar");
         (*this)->set_from_casadi(in_args, out);
     }
     cost() = default;
-    using shared_::operator=;
+    using shared_handle::operator=;
     template <typename derived_impl>
         requires(std::derived_from<derived_impl, impl::cost>)
     /// @brief will get the shared ownership of impl_rval
-    cost(derived_impl *impl_rval) : shared_(impl_rval) {}
+    cost(derived_impl *impl_rval) : shared_handle(impl_rval) {}
     /**
      * @brief make state-only cost, appending suffix "_terminal" to costs
      *

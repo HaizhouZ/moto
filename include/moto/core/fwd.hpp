@@ -1,12 +1,13 @@
 #ifndef __FRLQR_FWD__
 #define __FRLQR_FWD__
 
-#include <cstddef> // For size_t
 #include <Eigen/Core>
-#include <memory>
+#include <cstddef> // For size_t
 #include <fmt/core.h>
 #include <magic_enum/magic_enum.hpp>
+#include <memory>
 #include <ranges>
+#include <new>
 
 #include <moto/utils/eigen_fmt.h>
 
@@ -15,7 +16,7 @@ typedef double scalar_t;
 typedef Eigen::Vector<scalar_t, -1> vector;
 typedef Eigen::RowVector<scalar_t, -1> row_vector;
 typedef const Eigen::Vector<scalar_t, -1> const_vector;
-typedef Eigen::Matrix<scalar_t, -1, -1> matrix_cm; // column major
+typedef Eigen::Matrix<scalar_t, -1, -1> matrix_cm;                                     // column major
 typedef Eigen::Matrix<scalar_t, -1, -1, Eigen::AutoAlign | Eigen::RowMajor> matrix_rm; // row major
 typedef matrix_cm matrix;
 using vector_ref = Eigen::Ref<vector>;
@@ -50,6 +51,8 @@ inline constexpr auto range(size_t n) {
 inline constexpr auto range_n(size_t st, size_t n) {
     return std::views::iota(st, st + n);
 }
-}  // namespace moto
+
+#define MOTO_ALIGN_NO_SHARING alignas(std::hardware_destructive_interference_size)
+} // namespace moto
 
 #endif /*__FWD_*/

@@ -29,7 +29,7 @@ class func : public expr {
     std::vector<sym> in_args_; ///< input arguments
 
     std::unordered_map<size_t, size_t> sym_uid_idx_; /// < map from sym uid to index in in_args_
-    friend struct moto::sp_arg_map;
+    friend struct moto::func_arg_map;
     /**
      * @brief finalize the function
      * @details it will wait until the codegen is done if set_from_casadi is used
@@ -45,11 +45,11 @@ class func : public expr {
 
   protected:
     ///@brief callback to evaluate (the residual) of the function, call to @ref value by default
-    virtual void value_impl([[maybe_unused]] sp_approx_map &data) { value(data); };
+    virtual void value_impl([[maybe_unused]] func_approx_map &data) { value(data); };
     ///@brief callback to evaluate jacobian of the function, call to @ref jacobian by default
-    virtual void jacobian_impl([[maybe_unused]] sp_approx_map &data) { jacobian(data); };
+    virtual void jacobian_impl([[maybe_unused]] func_approx_map &data) { jacobian(data); };
     ///@brief callback to evaluate hessian of the function, call to @ref hessian by default
-    virtual void hessian_impl([[maybe_unused]] sp_approx_map &data) { hessian(data); };
+    virtual void hessian_impl([[maybe_unused]] func_approx_map &data) { hessian(data); };
 
   public:
     void add_argument(const sym &in) {
@@ -83,30 +83,29 @@ class func : public expr {
     /// @brief order of approximation
     inline approx_order order() { return order_; }
     /**
-     * @brief check if the function is an approximation
-     * @note funcs in __undefined will be considered as (possibly) approximation
-     * @return true if field is not __pre_comp or __usr_func and field value is greater than __dyn
+     * @brief set up workspace data for the function
+     * @details user can override this to setup the workspace data (usually by pointer) for the function data
+     * @param data func_arg_map to be setup
+     * @param ws_data workspace_data pointer to the settings, can be nullptr if not needed
      */
-    bool is_approx() const { return (field_ != __pre_comp && field_ != __usr_func) && field_ > __dyn; }
-
-    virtual void setup_setting(sp_arg_map &data, workspace_data *settings) {}
+    virtual void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) {}
     /**
      * @brief setup the sparse func data
-     * @details will setup the mapping from the dense approx_storage to sp_approx_map
-     * @return sp_approx_map_ptr_t
+     * @details will setup the mapping from the dense dense_approx_data to func_approx_map
+     * @return func_approx_map_ptr_t
      */
-    virtual sp_approx_map_ptr_t make_approx_map(sym_data &primal,
-                                                approx_storage &raw,
-                                                shared_data &shared);
+    virtual func_approx_map_ptr_t create_approx_map(sym_data &primal,
+                                                    dense_approx_data &raw,
+                                                    shared_data &shared);
     /**
      * @brief evaluate the func
-     * @param data sp_approx_map to be evaluated
+     * @param data func_approx_map to be evaluated
      * @param eval_val evaluate value if true
      * @param eval_jac evaluate jacobian if true
      * @param eval_hess evaluate hessian if true
      */
-    void evaluate_approx(sp_approx_map &data,
-                         bool eval_val, bool eval_jac = false, bool eval_hess = false) {
+    void compute_approx(func_approx_map &data,
+                        bool eval_val, bool eval_jac = false, bool eval_hess = false) {
         if (eval_val)
             value_impl(data);
         if (eval_jac)
@@ -115,9 +114,9 @@ class func : public expr {
             hessian_impl(data);
     }
     template <typename T>
-    void evaluate_approx(T &data,
-                         bool eval_val, bool eval_jac = false, bool eval_hess = false) {
-        evaluate_approx(dynamic_cast<sp_approx_map &>(data), eval_val, eval_jac, eval_hess);
+    void compute_approx(T &data,
+                        bool eval_val, bool eval_jac = false, bool eval_hess = false) {
+        compute_approx(dynamic_cast<func_approx_map &>(data), eval_val, eval_jac, eval_hess);
     }
     /**
      * @brief load the external approximation functions
@@ -125,24 +124,6 @@ class func : public expr {
      * @param path folder of the external functions, default is "gen"
      */
     virtual void load_external(const std::string &path = "gen");
-
-    /**
-     * @brief constructor for non-approximation functions
-     *
-     * @param name name of the function
-     * @param field field, must explicitly belong to the non-approximation fields
-     */
-    func(const std::string &name, field_t field = __undefined)
-        : func(name, approx_order::none, 0, field) {
-        if (is_approx()) {
-            throw std::runtime_error(fmt::format("func {} field type {} not qualified as non-approx",
-                                                 name_, field::name(field)));
-        }
-        // make a default make_data
-        make_data = [this](sym_data &primal, shared_data &shared) {
-            return std::make_unique<sp_arg_map>(primal, shared, *this);
-        };
-    }
     /**
      * @brief constructor for approximation functions
      * @note the order must be specified, otherwise it will be considered as non-approximation
@@ -152,20 +133,16 @@ class func : public expr {
      * @param field field type, default is __undefined (to be finalized later, @ref finalize_impl)
      */
     func(const std::string &name, approx_order order, size_t dim = dim_tbd, field_t field = __undefined)
-        : impl::expr(name, dim, field), order_(order) {
+        : expr(name, dim, field), order_(order) {
     }
 
   public:
     /// @brief callback to evaluate the value of the approximation
-    std::function<void(sp_approx_map &)> value;
+    std::function<void(func_approx_map &)> value;
     /// @brief callback to evaluate the jacobian of the approximation
-    std::function<void(sp_approx_map &)> jacobian;
+    std::function<void(func_approx_map &)> jacobian;
     /// @brief callback to evaluate the hessian of the approximation
-    std::function<void(sp_approx_map &)> hessian;
-    /// @brief callback to call a non-approximation function
-    std::function<void(sp_arg_map &)> call;
-    /// @brief callback to make data（for non-approx) @note will not be called in @ref make_approx_map
-    std::function<sp_arg_map_ptr_t(sym_data &, shared_data &)> make_data;
+    std::function<void(func_approx_map &)> hessian;
 };
 } // namespace impl
 /**

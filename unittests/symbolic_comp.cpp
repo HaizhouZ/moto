@@ -1,10 +1,10 @@
 #define CATCH_CONFIG_MAIN
-#include <moto/core/expr.hpp>
-#include <moto/ocp/constr.hpp>
-#include <moto/utils/codegen.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <iostream>
+#include <moto/core/expr.hpp>
+#include <moto/ocp/constr.hpp>
+#include <moto/utils/codegen.hpp>
 
 using namespace moto;
 
@@ -18,7 +18,7 @@ TEST_CASE("symbolicComp") {
                          codegen_opts{
                              .sx_inputs = {a, b},
                              .compile = true,
-                            //  .gen_eval=false,
+                             //  .gen_eval=false,
                              .gen_jacobian = true,
                              .gen_hessian = true,
                              .check_jac_ad = true,

@@ -6,38 +6,38 @@
 namespace moto {
 namespace impl {
 /**
- * @brief soft constraint data, contains:
- * 1. additional primal step data for splitting post-rollout operation
- * 2. jacobian modification data for the soft constraint
- *
- */
-struct soft_constr_approx_map : public constr_approx_map {
-    std::vector<vector_ref> prim_step_;         // to be set
-    std::vector<row_vector_ref> jac_modification_; ///< merit jacobian modification
-    using constr_approx_map::constr_approx_map; ///< inherit constr_approx_map constructor
-    soft_constr_approx_map(approx_storage &raw, constr_approx_map &&rhs) : constr_approx_map(std::move(rhs)) {
-        map_merit_jac_from_raw(raw.jac_modification_, jac_modification_);
-    }
-};
-
-/**
  * @brief soft constraint interface class
- * @warning jacobian modification should be added to @ soft_constr_approx_map::jac_modification_
+ * @warning jacobian modification should be added to @ approx_map::jac_modification_
  */
-class soft_constr : public soft_constr_base {
+class soft_constr : public constr {
   private:
-    using base = soft_constr_base;
+    using base = constr;
+
+  public:
+    /**
+     * @brief soft constraint data, contains:
+     * 1. additional primal step data for splitting post-rollout operation
+     * 2. jacobian modification data for the soft constraint
+     *
+     */
+    struct approx_map : public base::approx_map {
+        std::vector<vector_ref> prim_step_;            // to be set
+        std::vector<row_vector_ref> jac_modification_; ///< merit jacobian modification
+        approx_map(dense_approx_data &raw, base::approx_map &&rhs) : base::approx_map(std::move(rhs)) {
+            map_merit_jac_from_raw(raw.jac_modification_, jac_modification_);
+        }
+    };
 
   protected:
-    /// @brief basic data_type for the soft constraint. derived class can use this or make their own alias of @ref constr::constr_data
-    using data_type = constr_data<soft_constr_approx_map, base::data_type::data_t>;
+  	bool skip_field_check = false; ///< skip field check in finalize_impl
     /// @brief check if the field is in the soft constraint fields
     void finalize_impl() override;
 
   public:
-    using base::base;
-    /// public type alias for @ref soft_constr_approx_map to ensure common interface of all soft constraints
-    using data_map_t = data_type::map_t;
+    using base::base;                                 ///< inherit constructors
+    soft_constr(base &&rhs) : base(std::move(rhs)) {} ///< move constructor from base class
+    /// public type alias for @ref approx_map to ensure common interface of all soft constraints
+    using data_map_t = approx_map;
 
     /// initialize the soft constraint data
     virtual void initialize(data_map_t &data) = 0;
@@ -52,8 +52,8 @@ class soft_constr : public soft_constr_base {
     /***
      * @brief make approximation data for the soft constraint, will use default @ref data_type
      */
-    sp_approx_map_ptr_t make_approx_map(sym_data &primal, approx_storage &raw, shared_data &shared) override {
-        return sp_approx_map_ptr_t(make_approx<data_type>(primal, raw, shared));
+    func_approx_map_ptr_t create_approx_map(sym_data &primal, dense_approx_data &raw, shared_data &shared) override {
+        return func_approx_map_ptr_t(make_approx<soft_constr>(primal, raw, shared));
     }
 };
 } // namespace impl

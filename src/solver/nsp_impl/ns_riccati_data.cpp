@@ -2,6 +2,7 @@
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
 
 namespace moto {
+namespace solver {
 namespace ns_riccati {
 ns_node_data::ns_node_data(const ocp_ptr_t &prob)
     : solver::data_base(prob),
@@ -39,4 +40,5 @@ ns_node_data::~ns_node_data() {
     delete nsp_;
 }
 } // namespace ns_riccati
+} // namespace solver
 } // namespace moto

@@ -1,9 +1,9 @@
-#include <moto/solver/ns_riccati/nullspace_data.hpp>
-#include <moto/solver/ns_sqp.hpp>
-#include <moto/utils/print.hpp>
 #include <double_integrator/cost.hpp>
 #include <double_integrator/dynamics.hpp>
 #include <iostream>
+#include <moto/solver/ns_riccati/nullspace_data.hpp>
+#include <moto/solver/ns_sqp.hpp>
+#include <moto/utils/print.hpp>
 
 using namespace moto;
 
@@ -22,8 +22,8 @@ int main() {
 
     ns_sqp sqp;
 
-    auto& init_node = sqp.graph_.add(ns_sqp::node_type(prob));
-    auto& end_node = sqp.graph_.add(ns_sqp::node_type(prob_terminal));
+    auto &init_node = sqp.graph_.add(ns_sqp::node_type(prob));
+    auto &end_node = sqp.graph_.add(ns_sqp::node_type(prob_terminal));
 
     sqp.graph_.add_edge(init_node, end_node, 10);
 

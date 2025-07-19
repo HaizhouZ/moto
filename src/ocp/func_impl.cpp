@@ -4,25 +4,25 @@
 
 namespace moto {
 namespace impl {
-sp_approx_map_ptr_t func::make_approx_map(sym_data &primal, approx_storage &raw, shared_data &shared) {
+func_approx_map_ptr_t func::create_approx_map(sym_data &primal, dense_approx_data &raw, shared_data &shared) {
     if (field_ - __dyn >= field::num_func)
-        throw std::runtime_error(fmt::format("make_approx_map cannot be called for func {} type {}",
+        throw std::runtime_error(fmt::format("create_approx_map cannot be called for func {} type {}",
                                              name_, field::name(field_)));
     if (in_args_.empty())
         throw std::runtime_error(fmt::format("in args unset for func {} in field {}",
                                              name_, field::name(field_)));
-    return std::make_unique<sp_approx_map>(primal, raw, shared, *this);
+    return std::make_unique<func_approx_map>(primal, raw, shared, *this);
 }
 void func::load_external(const std::string &path) {
     auto funcs = load_approx(name_, true, order() >= approx_order::first, order() >= approx_order::second);
-    value = [eval = funcs[0]](sp_approx_map &d) {
+    value = [eval = funcs[0]](func_approx_map &d) {
         eval.invoke(d.in_arg_data(), d.v_);
     };
-    jacobian = [jac = funcs[1]](sp_approx_map &d) {
+    jacobian = [jac = funcs[1]](func_approx_map &d) {
         jac.invoke(d.in_arg_data(), d.jac_);
     };
 
-    hessian = [hess = funcs[2]](sp_approx_map &d) {
+    hessian = [hess = funcs[2]](func_approx_map &d) {
         hess.invoke(d.in_arg_data(), d.hess_);
     };
 }

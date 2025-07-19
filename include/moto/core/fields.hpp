@@ -31,7 +31,7 @@ constexpr auto ineq_constr_fields = std::array{__ineq_x, __ineq_xu};
 constexpr auto soft_constr_fields = std::array{__eq_x_soft, __eq_xu_soft};
 
 template <size_t N, typename T>
-inline bool in_field(const std::array<field_t, N> &arr, T val) {
+inline bool in_field(T val, const std::array<field_t, N> &arr) {
     return std::find(arr.begin(), arr.end(), field_t(val)) != arr.end();
 }
 
@@ -46,7 +46,9 @@ constexpr auto concat_fields(const std::array<field_t, sizes> &...arrays) {
 }
 
 constexpr auto ineq_soft_constr_fields = concat_fields(ineq_constr_fields, soft_constr_fields);
-constexpr auto constr_fields = concat_fields(hard_constr_fields, ineq_constr_fields, soft_constr_fields);
+constexpr auto constr_fields = concat_fields(hard_constr_fields, ineq_soft_constr_fields);
+constexpr auto func_fields = concat_fields(constr_fields, std::array{__cost});
+constexpr auto custom_func_fields = std::array{__pre_comp, __usr_func};
 
 namespace field {
 constexpr auto name(field_t f) { return magic_enum::enum_name<field_t>(f); }

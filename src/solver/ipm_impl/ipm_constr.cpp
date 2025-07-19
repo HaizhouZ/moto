@@ -1,7 +1,7 @@
 #include <moto/solver/ipm/ipm_constr.hpp>
 
 namespace moto {
-namespace ipm_impl {
+namespace solver {
 void ipm_constr::initialize(ipm::data_map_t &data) {
     base::value_impl(data);
     auto &d = data.as<ipm_data>();
@@ -89,14 +89,14 @@ void ipm_constr::line_search_step(ipm::data_map_t &data, workspace_data *cfg) {
         }
     }
 }
-void ipm_constr::value_impl(sp_approx_map &data) {
+void ipm_constr::value_impl(func_approx_map &data) {
     base::value_impl(data);
     auto &d = data.as<ipm_data>();
     d.g_ = d.v_;
     d.v_ = d.g_ + d.slack_; // r_g = g_ + slack
     d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.ipm_cfg->mu;
 }
-void ipm_constr::jacobian_impl(sp_approx_map &data) {
+void ipm_constr::jacobian_impl(func_approx_map &data) {
     base::jacobian_impl(data);
     auto &d = data.as<ipm_data>();
     // setup T^{-1} N
@@ -157,5 +157,5 @@ void ipm_constr::propagate_hessian(ipm_data &d) {
         outer_idx++;
     }
 }
-} // namespace ipm_impl
+} // namespace solver
 } // namespace moto

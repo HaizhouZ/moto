@@ -88,8 +88,8 @@ int main() {
     //     std::cout << data->value(dyn.active_r) << ',';
     // });
     // std::cout << "\n";
-    solver.settings.mu_method = ipm_impl::mehrotra_probing; // default method
-    // solver.settings.mu_method = ipm_impl::mehrotra_predictor_corrector; // default method
+    solver.settings.mu_method = solver::ipm_config::mehrotra_probing; // default method
+    // solver.settings.mu_method = impl::mehrotra_predictor_corrector; // default method
     // solver.settings.ipm_conditional_corrector = true;
     solver.update(10);
     size_t step = 0;

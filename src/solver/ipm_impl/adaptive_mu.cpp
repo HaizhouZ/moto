@@ -1,7 +1,7 @@
 #include <moto/solver/ipm/ipm_config.hpp>
 
 namespace moto {
-namespace ipm_impl {
+namespace solver {
 void ipm_config::adaptive_mu_update(worker &ipm_worker) {
     // compute the normalized complementarity
     // eta = after / before
@@ -12,5 +12,5 @@ void ipm_config::adaptive_mu_update(worker &ipm_worker) {
     assert(mu > 0);
     ipm_reject_corrector = ipm_conditional_corrector && ipm_worker.post_aff_comp > 2 * ipm_worker.prev_aff_comp;
 }
-} // namespace ipm_impl
+} // namespace impl
 } // namespace moto

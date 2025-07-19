@@ -2,14 +2,14 @@
 
 namespace moto {
 namespace impl {
-constr_approx_map::constr_approx_map(approx_storage &raw,
-                                     sp_approx_map &&d)
-    : constr_approx_map(raw.prob_->extract(raw.dual_[d.func_.field_], d.func_), raw, std::move(d)) {
+constr::approx_map::approx_map(dense_approx_data &raw,
+                               func_approx_map &&d)
+    : approx_map(raw.prob_->extract(raw.dual_[d.func_.field_], d.func_), raw, std::move(d)) {
 }
-constr_approx_map::constr_approx_map(vector_ref multiplier,
-                                     approx_storage &raw,
-                                     sp_approx_map &&d)
-    : sp_approx_map(std::move(d)), merit_(&raw.merit_),
+constr::approx_map::approx_map(vector_ref multiplier,
+                               dense_approx_data &raw,
+                               func_approx_map &&d)
+    : func_approx_map(std::move(d)), merit_(&raw.merit_),
       multiplier_(multiplier) {
     auto f = &func_;
     const auto &in_args = f->in_args();
@@ -20,7 +20,7 @@ constr_approx_map::constr_approx_map(vector_ref multiplier,
         in_args_.push_back(multiplier_);
     }
 }
-void constr_approx_map::map_merit_jac_from_raw(decltype(approx_storage::jac_) &raw, std::vector<row_vector_ref> &jac) {
+void constr::approx_map::map_merit_jac_from_raw(decltype(dense_approx_data::jac_) &raw, std::vector<row_vector_ref> &jac) {
     auto &in_args = func_.in_args();
     jac.clear();
     for (size_t i : range(in_args_.size())) {
@@ -32,7 +32,7 @@ void constr_approx_map::map_merit_jac_from_raw(decltype(approx_storage::jac_) &r
         }
     }
 }
-constr_approx_data::constr_approx_data(func &f) : f_(&f) {
+constr::approx_data::approx_data(func &f) : f_(&f) {
     v_data_.resize(f.dim_);
     v_data_.setZero();
     jac_data_.reserve(f.in_args().size());
@@ -97,10 +97,10 @@ void constr::finalize_impl() {
     assert(field_ >= __dyn && field_ - __dyn < field::num_constr);
 }
 
-void constr::value_impl(sp_approx_map &data) {
+void constr::value_impl(func_approx_map &data) {
     value(data);
     // compute contribution to merit function
-    auto &d = static_cast<constr_approx_map &>(data);
+    auto &d = static_cast<approx_map &>(data);
     scalar_t res = d.multiplier_.dot(d.v_);
     // fmt::print("\t{}:\tv:{}\n", name_, d.v_.transpose());
     // #pragma omp critical
@@ -112,11 +112,11 @@ void constr::value_impl(sp_approx_map &data) {
     // }
     // fmt::print("\t{}:\tm:{}\n", name_, d.multiplier_.transpose());
 } // namespace moto
-void constr::jacobian_impl(sp_approx_map &data) {
+void constr::jacobian_impl(func_approx_map &data) {
     // compute jacobian first
     jacobian(data);
     // update multiplier - jacobian product
-    auto &d = static_cast<constr_approx_map &>(data);
+    auto &d = static_cast<approx_map &>(data);
     for (size_t i = 0; i < d.in_arg_data().size(); i++) {
         if (d.vjp_[i].size() != 0) // skip if no jacobian for this input
             // fmt::print("{}\t{}:i\t{:.3}\n", i, name_, d.in_args_[i].transpose());

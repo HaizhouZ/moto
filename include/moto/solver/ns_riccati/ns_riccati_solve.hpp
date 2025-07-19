@@ -4,6 +4,7 @@
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
 
 namespace moto {
+namespace solver {
 namespace ns_riccati {
 /**
  * @brief update the approximation of the node data
@@ -45,7 +46,7 @@ void compute_primal_sensitivity(ns_node_data *cur);
 void compute_primal_sensitivity_correction(ns_node_data *cur);
 /**
  * @brief perform the forward linear rollout for the current node
- * 
+ *
  * @param cur current node data
  * @param next next node data, can be nullptr
  */
@@ -69,15 +70,16 @@ void finalize_newton_step(ns_node_data *cur, bool finalize_dual = true);
  * @details will correct the primal steps before finalizing the dual steps
  * @param cur current node data
  */
-void finalize_newton_step_correction(ns_node_data* cur);
+void finalize_newton_step_correction(ns_node_data *cur);
 /**
  * @brief line search step for the current node
- * 
+ *
  * @param cur current node data
  * @param cfg workspace configuration containing line search parameters
  */
 void line_search_step(ns_node_data *cur, workspace_data *cfg);
 } // namespace ns_riccati
+} // namespace solver
 } // namespace moto
 
 #endif

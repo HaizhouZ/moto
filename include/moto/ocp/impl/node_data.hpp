@@ -16,11 +16,11 @@ struct node_data {
     scalar_t inf_prim_res_ = 0.;
     scalar_t inf_comp_res_ = 0.;
 
-    ocp_ptr_t prob_;             /// < pointer to the problem
-    sym_data_ptr_t sym_;         /// < dense storage of symbolic data
-    approx_storage_ptr_t dense_; /// <dense storage of the func data
-    shared_data_ptr_t shared_;   /// < shared data
-    shifted_array<std::vector<sp_approx_map_ptr_t>, field::num_func, __dyn>
+    ocp_ptr_t prob_;                /// < pointer to the problem
+    sym_data_ptr_t sym_;            /// < dense storage of symbolic data
+    dense_approx_data_ptr_t dense_; /// <dense storage of the func data
+    shared_data_ptr_t shared_handle;      /// < shared data
+    shifted_array<std::vector<func_approx_map_ptr_t>, field::num_func, __dyn>
         sparse_; /// < sparse view per func
 
     node_data(const ocp_ptr_t &prob);
@@ -60,13 +60,13 @@ struct node_data {
 
     /**
      * @brief update the approximation data and compute primal and comp residuals
-     * 
-     * @param eval_only 
+     *
+     * @param eval_only
      */
     void update_approximation(bool eval_only = false);
 
     template <std::array fields, typename Callback>
-        requires std::is_invocable_r_v<void, Callback, impl::func &, sp_approx_map &> &&
+        requires std::is_invocable_r_v<void, Callback, impl::func &, func_approx_map &> &&
                  std::is_same_v<std::tuple_element_t<0, decltype(fields)>, field_t>
     void for_each(Callback &&f) {
         for (const auto &field : fields) {

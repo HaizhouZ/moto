@@ -10,12 +10,12 @@ namespace moto {
 
 struct ns_sqp {
     struct settings_t
-        : public workspace_data_collection<solver::linesearch_config, ipm_impl::ipm_config> {
+        : public workspace_data_collection<solver::linesearch_config, solver::ipm_config> {
     } settings;
 
-    struct node_type : public impl::shooting_node<ns_riccati::ns_node_data> {
+    struct node_type : public impl::shooting_node<solver::ns_riccati::ns_node_data> {
         node_type(const ocp_ptr_t &prob)
-            : impl::shooting_node<ns_riccati::ns_node_data>(prob) {}
+            : impl::shooting_node<solver::ns_riccati::ns_node_data>(prob) {}
         node_type(const node_type &rhs) = default;
         node_type(node_type &&rhs) = default;
     };

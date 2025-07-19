@@ -3,6 +3,7 @@
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
 
 namespace moto {
+namespace solver {
 namespace ns_riccati {
 
 void update_approx(ns_node_data *cur) {
@@ -90,6 +91,6 @@ void ns_factorization(ns_node_data *cur) {
         }
     }
 }
-
 } // namespace ns_riccati
+} // namespace solver
 } // namespace moto

@@ -45,7 +45,7 @@ void first_order_correction_start(data_base *data) {
     data->swap_jacobian_modification(); // move modification to the jacobian for later solving
 }
 void first_order_correction_end(data_base *data) {
-    data->swap_jacobian_modification(); // move 
+    data->swap_jacobian_modification();                     // move
     data->Q_y_corr = &data->dense_->jac_modification_[__y]; // cache the Q_y after correction
 }
 } // namespace ineq_soft

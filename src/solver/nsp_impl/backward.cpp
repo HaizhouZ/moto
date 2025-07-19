@@ -3,6 +3,7 @@
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
 
 namespace moto {
+namespace solver {
 namespace ns_riccati {
 void kkt_diagnosis(ns_node_data *cur) {
     auto &d = *cur;
@@ -95,4 +96,5 @@ void riccati_recursion_correction(ns_node_data *cur, ns_node_data *prev) {
     }
 }
 } // namespace ns_riccati
+} // namespace solver
 } // namespace moto

@@ -1,14 +1,14 @@
-#include <moto/ocp/impl/approx_storage.hpp>
+#include <moto/ocp/impl/dense_approx_data.hpp>
 
 namespace moto {
 
-approx_storage::approx_storage(const ocp_ptr_t &prob) : prob_(prob) {
+dense_approx_data::dense_approx_data(const ocp_ptr_t &prob) : prob_(prob) {
     for (auto i : range_n(__dyn, field::num_constr)) {
         if (prob_->expr_[i].empty()) {
             continue;
         }
         size_t dim = prob_->dim_[i];
-        if (in_field(approx_storage::stored_constr_fields, i)) {
+        if (in_field(i, dense_approx_data::stored_constr_fields)) {
             approx_[i].v_.resize(dim);
             approx_[i].v_.setZero();
             for (auto j : range(field::num_prim)) {

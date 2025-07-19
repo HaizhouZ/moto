@@ -1,5 +1,5 @@
-#include <moto/core/fwd.hpp>
 #include <functional>
+#include <moto/core/fwd.hpp>
 #include <pybind11/eigen.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
@@ -23,7 +23,7 @@
 namespace py = pybind11;
 
 struct external_function {
-    external_function(const external_function& rhs) = default;
+    external_function(const external_function &rhs) = default;
     explicit external_function(const std::string &lib_path, const std::string &func_name) {
         void *handle = LOAD_LIBRARY(lib_path.c_str());
         if (!handle)

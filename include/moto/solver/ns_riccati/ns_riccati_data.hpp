@@ -4,6 +4,7 @@
 #include <moto/solver/data_base.hpp>
 
 namespace moto {
+namespace solver {
 namespace ns_riccati {
 enum rank_status : int { unconstrained = 0,
                          constrained,
@@ -12,7 +13,7 @@ enum rank_status : int { unconstrained = 0,
 // fwd declaration
 struct nullspace_data;
 
-struct ns_node_data : public solver::data_base {
+struct ns_node_data : public data_base {
     // dim
     size_t ns, nc, ncstr;
     size_t nz;
@@ -35,6 +36,7 @@ struct ns_node_data : public solver::data_base {
     ~ns_node_data();
 };
 } // namespace ns_riccati
+} // namespace solver
 } // namespace moto
 
 #endif

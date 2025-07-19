@@ -1,8 +1,8 @@
 #define CATCH_CONFIG_MAIN
-#include <moto/core/external_function.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <iostream>
+#include <moto/core/external_function.hpp>
 
 TEST_CASE("externalFunc") {
     using namespace moto;

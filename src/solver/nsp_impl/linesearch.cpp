@@ -2,6 +2,7 @@
 #include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
 
 namespace moto {
+namespace solver {
 namespace ns_riccati {
 void line_search_step(ns_node_data *cur, workspace_data *_cfg) {
     auto &cfg = _cfg->get<solver::linesearch_config>();
@@ -15,4 +16,5 @@ void line_search_step(ns_node_data *cur, workspace_data *_cfg) {
 }
 
 } // namespace ns_riccati
+} // namespace solver
 } // namespace moto

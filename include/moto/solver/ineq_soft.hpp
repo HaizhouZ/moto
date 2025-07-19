@@ -30,17 +30,17 @@ void line_search_step(data_base *data, workspace_data *config);
 void calculate_line_search_bounds(data_base *data, workspace_data *config);
 /**
  * @brief prepare for the first-order primal correction and call to correct_jacobian on each soft constraint
- * @details it will set prim_corr[__x] to zero and swap merit jacobian and its modifcation (as a pre-correction cache), 
+ * @details it will set prim_corr[__x] to zero and swap merit jacobian and its modifcation (as a pre-correction cache),
  * i.e., later solving will use the jacobian modification
  * it is @b assumed Q_y will be used in newton step finalization
- * @param data 
+ * @param data
  */
 void first_order_correction_start(data_base *data);
 /**
  * @brief finalize the first-order primal correction and cache Q_y after correction
  * @details it will swap back merit jacobian and its modification and set Q_y_corr to the Q_y correction
  * it is @b assumed Q_y will be used in newton step finalization
- * @param data 
+ * @param data
  */
 void first_order_correction_end(data_base *data);
 } // namespace ineq_soft
