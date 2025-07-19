@@ -30,6 +30,12 @@ struct MOTO_ALIGN_NO_SHARING linesearch_config {
     void ls_config_reset() {
         *this = linesearch_config();
     }
+    void copy_from(const linesearch_config &other) {
+        primal = other.primal;
+        dual = other.dual;
+        alpha_primal = other.alpha_primal;
+        alpha_dual = other.alpha_dual;
+    }
 };
 
 } // namespace solver

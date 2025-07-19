@@ -10,7 +10,7 @@ void ipm_constr::initialize(ipm::data_map_t &data) {
     d.v_ = d.g_ + d.slack_;            // r_g = g_ + slack
     d.multiplier_.array() = d.ipm_cfg->mu / d.slack_.array();
     d.multiplier_ = d.multiplier_.cwiseMin(1e3); // clip
-    d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.ipm_cfg->mu;
+    d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array();
 }
 void ipm_constr::finalize_newton_step(ipm::data_map_t &data) {
     auto &d = data.as<ipm_data>();
@@ -59,34 +59,38 @@ void ipm_constr::update_linesearch_config(ipm::data_map_t &data, workspace_data 
             ls_cfg.dual.alpha_max = alpha_max;
         }
     }
-    assert(ls_cfg.primal.alpha_max > 1e-3);
-    assert(ls_cfg.dual.alpha_max > 1e-3);
+    // ls_cfg.primal.alpha_max = std::max(ls_cfg.primal.alpha_max, 1e-10);
+    // ls_cfg.dual.alpha_max = std::max(ls_cfg.dual.alpha_max, 1e-10);
+    assert(ls_cfg.primal.alpha_max > 1e-10);
+    assert(ls_cfg.dual.alpha_max > 1e-10);
+}
+void ipm_constr::finalize_predictor_step(ipm::data_map_t &data, workspace_data *cfg) {
+    auto &d = data.as<ipm_data>();
+    auto &ipm_worker = cfg->get<ipm_config::worker_type>();
+    auto &ls_cfg = cfg->get<solver::linesearch_config>();
+    assert(d.ipm_cfg->ipm_computing_affine_step() &&
+           "ipm affine step computation not started but affine step is requested");
+    // if we are in the affine step mode, we need to update the ipm worker data
+    ipm_worker.n_ipm_cstr += dim_;
+    ipm_worker.prev_aff_comp += d.multiplier_.dot(d.slack_);
+    // finalize the affine step
+    d.d_multipler_.array() *= ls_cfg.alpha_dual;
+    d.d_slack_.array() *= ls_cfg.alpha_primal;
+    ipm_worker.post_aff_comp += (d.multiplier_ + d.d_multipler_).dot(d.slack_ + d.d_slack_);
+    assert(d.multiplier_.dot(d.slack_) > 0 &&
+           "the complementarity must be positive before the line search step");
+    assert((d.multiplier_ + d.d_multipler_).dot(d.slack_ + d.d_slack_) > 0);
 }
 void ipm_constr::line_search_step(ipm::data_map_t &data, workspace_data *cfg) {
     auto &d = data.as<ipm_data>();
     auto *ipm_worker = cfg->try_get<ipm_config::worker_type>();
     auto &ls_cfg = cfg->get<solver::linesearch_config>();
-    if (ipm_worker && d.ipm_cfg->ipm_enable_affine_step()) {
-        assert(d.ipm_cfg->ipm_computing_affine_step() &&
-               "ipm affine step computation not started but affine step is requested");
-        // if we are in the affine step mode, we need to update the ipm worker data
-        ipm_worker->n_ipm_cstr += dim_;
-        ipm_worker->prev_aff_comp += d.multiplier_.dot(d.slack_);
-        ipm_worker->post_aff_comp += (d.multiplier_ + ls_cfg.alpha_dual * d.d_multipler_)
-                                         .dot(d.slack_ + ls_cfg.alpha_primal * d.d_slack_);
-        assert(d.multiplier_.dot(d.slack_) > 0 &&
-               "the complementarity must be positive before the line search step");
-        assert((d.multiplier_ + ls_cfg.alpha_dual * d.d_multipler_)
-                   .dot(d.slack_ + ls_cfg.alpha_primal * d.d_slack_) > 0);
-    } else {
-        assert(!d.ipm_cfg->ipm_computing_affine_step() &&
-               "ipm affine step computation not ended");
-        d.slack_.array() += ls_cfg.alpha_primal * d.d_slack_.array();
-        d.multiplier_.array() += ls_cfg.alpha_dual * d.d_multipler_.array();
-        if (d.ipm_cfg->ipm_enable_corrector()) {
-            d.slack_ = d.slack_.array().max(1e-20);
-            d.multiplier_ = d.multiplier_.array().max(1e-20);
-        }
+    assert(!d.ipm_cfg->ipm_computing_affine_step() && "ipm affine step computation not ended");
+    d.slack_.array() += ls_cfg.alpha_primal * d.d_slack_.array();
+    d.multiplier_.array() += ls_cfg.alpha_dual * d.d_multipler_.array();
+    if (d.ipm_cfg->ipm_accept_corrector()) {
+        d.slack_ = d.slack_.array().max(1e-20);
+        d.multiplier_ = d.multiplier_.array().max(1e-20);
     }
 }
 void ipm_constr::value_impl(func_approx_map &data) {
@@ -94,7 +98,7 @@ void ipm_constr::value_impl(func_approx_map &data) {
     auto &d = data.as<ipm_data>();
     d.g_ = d.v_;
     d.v_ = d.g_ + d.slack_; // r_g = g_ + slack
-    d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array() - d.ipm_cfg->mu;
+    d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array();
 }
 void ipm_constr::jacobian_impl(func_approx_map &data) {
     base::jacobian_impl(data);

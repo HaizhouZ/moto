@@ -6,7 +6,7 @@
 #define ENABLE_TIMED_BLOCK
 #include <moto/utils/timed_block.hpp>
 
-#define stat_col_width 12
+#define stat_col_width 15
 
 namespace moto {
 void ns_sqp::forward() {
@@ -44,18 +44,15 @@ void ns_sqp::update(size_t n_iter) {
         size_t n_worker = get_num_threads();
         settings_t::worker setting_per_thread[n_worker];
         auto finalize_bound_and_set_to_max = [&]() {
-            for (size_t i = 0; i < n_worker; ++i) {
+            for (size_t i : range(n_worker)) {
                 settings.primal.merge_from(setting_per_thread[i].primal);
                 settings.dual.merge_from(setting_per_thread[i].dual);
             }
             settings.alpha_primal = settings.primal.alpha_max;
             settings.alpha_dual = settings.dual.alpha_max;
             // copy the settings to each worker
-            for (size_t i = 0; i < n_worker; ++i) {
-                setting_per_thread[i].primal = settings.primal;
-                setting_per_thread[i].dual = settings.dual;
-                setting_per_thread[i].alpha_primal = settings.alpha_primal;
-                setting_per_thread[i].alpha_dual = settings.alpha_dual;
+            for (size_t i : range(n_worker)) {
+                setting_per_thread[i].copy_from(settings);
             }
         };
         // timed_block_labeled("all",
@@ -79,16 +76,13 @@ void ns_sqp::update(size_t n_iter) {
         if (settings.ipm_enable_affine_step()) {
             // line search with max bounds
             graph_.apply_all_unary_parallel([&setting_per_thread](size_t tid, auto *d) {
-                solver::ineq_soft::line_search_step(d, &setting_per_thread[tid]);
+                solver::ineq_soft::finalize_predictor_step(d, &setting_per_thread[tid]);
             });
             settings.ipm_end_predictor_computation(); // ipm affine step computation is done
             // collect worker ipm data
-            auto &main_worker = setting_per_thread[0];
-            for (size_t i = 1; i < n_worker; ++i) {
-                auto &cfg = setting_per_thread[i];
-                main_worker.prev_aff_comp += cfg.prev_aff_comp;
-                main_worker.post_aff_comp += cfg.post_aff_comp;
-                main_worker.n_ipm_cstr += cfg.n_ipm_cstr;
+            solver::ipm_config::worker &main_worker = setting_per_thread[0];
+            for (size_t i : range(n_worker)) {
+                main_worker += setting_per_thread[i];
             }
             // adaptive mu update
             settings.adaptive_mu_update(main_worker);
@@ -103,6 +97,15 @@ void ns_sqp::update(size_t n_iter) {
                 solver::ns_riccati::finalize_newton_step_correction(d);
                 solver::ineq_soft::finalize_newton_step(d);
             });
+            // recompute line search bounds with the corrected newton step
+            settings.ls_config_reset();
+            for (size_t i : range(n_worker)) {
+                setting_per_thread[i].ls_config_reset();
+            }
+            graph_.apply_all_unary_parallel([&setting_per_thread](size_t tid, auto *d) {
+                solver::ineq_soft::calculate_line_search_bounds(d, &setting_per_thread[tid]);
+            });
+            finalize_bound_and_set_to_max();
         }
         /// @todo: update the line search stepsize?
         // real line search step

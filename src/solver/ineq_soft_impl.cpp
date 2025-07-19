@@ -20,6 +20,11 @@ void finalize_newton_step(data_base *cur) {
         sf.finalize_newton_step(sd);
     });
 }
+void finalize_predictor_step(data_base *data, workspace_data *config) {
+    for_each(data, [cfg = config](soft_constr &sf, soft_constr_data_t &sd) {
+        sf.finalize_predictor_step(sd, cfg);
+    });
+}
 void line_search_step(data_base *cur, workspace_data *config) {
     for_each(cur, [cfg = config](soft_constr &sf, soft_constr_data_t &sd) {
         sf.line_search_step(sd, cfg);

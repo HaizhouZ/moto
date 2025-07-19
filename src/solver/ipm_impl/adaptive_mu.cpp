@@ -10,7 +10,7 @@ void ipm_config::adaptive_mu_update(worker &ipm_worker) {
     sig = sig * sig * sig;                 // cubic
     mu = sig * ipm_worker.prev_aff_comp / ipm_worker.n_ipm_cstr;
     assert(mu > 0);
-    ipm_reject_corrector = ipm_conditional_corrector && ipm_worker.post_aff_comp > 2 * ipm_worker.prev_aff_comp;
+    ipm_reject_corrector = ipm_conditional_corrector && ipm_worker.post_aff_comp > 1 * ipm_worker.prev_aff_comp;
 }
 } // namespace impl
 } // namespace moto

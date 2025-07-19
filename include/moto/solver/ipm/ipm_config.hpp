@@ -25,6 +25,14 @@ class ipm_config {
         size_t n_ipm_cstr = 0;
         scalar_t prev_aff_comp = 0.; ///< previous complementarity without the affine step
         scalar_t post_aff_comp = 0.; ///< complementarity after adding the affine step
+        worker &operator+=(const worker &rhs) {
+            if (&rhs != this) {
+                n_ipm_cstr += rhs.n_ipm_cstr;
+                prev_aff_comp += rhs.prev_aff_comp;
+                post_aff_comp += rhs.post_aff_comp;
+            }
+            return *this;
+        }
     };
     using worker_type = worker;
     bool ipm_enable_affine_step() {

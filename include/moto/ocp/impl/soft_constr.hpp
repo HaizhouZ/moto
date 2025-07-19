@@ -43,11 +43,19 @@ class soft_constr : public constr {
     virtual void initialize(data_map_t &data) = 0;
     /// post rollout operation for the soft constraint to compute the newton step
     virtual void finalize_newton_step(data_map_t &data) = 0;
+	/// @brief finalize the predictor step, should be called after the rollout
+	/// @param data data map
+	/// @param worker_cfg workspace data pointer to the config to be finalized
+	virtual void finalize_predictor_step(data_map_t &data, workspace_data *worker_cfg) {};
     /// first order correction of the cost jacobian. jac_modification must be reset to zero before calling this
     virtual void correct_jacobian(data_map_t &data) {};
-    /// line search step for the soft constraint
+    /// @brief line search step for the soft constraint
+	/// @param data data map
+	/// @param worker_cfg workspace data pointer to the config to be used
     virtual void line_search_step(data_map_t &data, workspace_data *worker_cfg) = 0;
-    /// update the line search configuration (if necessary)
+    /// @brief update the line search configuration (if necessary)
+	/// @param data data map
+	/// @param worker_cfg workspace data pointer to the config to be updated
     virtual void update_linesearch_config(data_map_t &data, workspace_data *worker_cfg) {}
     /***
      * @brief make approximation data for the soft constraint, will use default @ref data_type

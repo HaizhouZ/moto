@@ -25,8 +25,32 @@ auto for_each(Callback &&callback) {
     };
 }
 void initialize(data_base *data);
+/**
+ * @brief finalize the newton step for the soft constraints
+ * @details it will call finalize_newton_step on each soft constraint
+ * @param data data base
+ */
 void finalize_newton_step(data_base *data);
+/**
+ * @brief finalize the predictor step, should be called after the rollout (@ref finalize_newton_step)
+ * @details it will call finalize_predictor_step on each soft constraint
+ * @param data data base
+ * @param config workspace data pointer to the config to be updated
+ */
+void finalize_predictor_step(data_base *data, workspace_data *config);
+/**
+ * @brief line search step for the soft constraints
+ * @details it will call line_search_step on each soft constraint
+ * @param data data base
+ * @param config workspace data pointer (should contain linesearch config) to the config to be used
+ */
 void line_search_step(data_base *data, workspace_data *config);
+/**
+ * @brief calculate the line search bounds for the soft constraints
+ * @details it will call update_linesearch_config on each soft constraint
+ * @param data data base
+ * @param config workspace data pointer to the config to be updated
+ */
 void calculate_line_search_bounds(data_base *data, workspace_data *config);
 /**
  * @brief prepare for the first-order primal correction and call to correct_jacobian on each soft constraint

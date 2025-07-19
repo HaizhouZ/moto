@@ -46,6 +46,8 @@ class ipm_constr final : public impl::ineq_constr {
     void initialize(data_map_t &data) override final;
     /// @brief post rollout operation for the IPM constraint to compute the newton step
     void finalize_newton_step(data_map_t &data) override final;
+    /// @brief finalize the predictor step, should be called after the rollout
+    void finalize_predictor_step(data_map_t &data, workspace_data *cfg) override final;
     /// @brief will compute the cost jacobian correction depending on the IPM settings
     void correct_jacobian(data_map_t &data) override final;
     /// @brief line search step for the IPM constraint

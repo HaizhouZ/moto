@@ -28,16 +28,16 @@ int main() {
     auto &init_node = graph.set_head(graph.add(ns_sqp::node_type(prob)));
     auto &end_node = graph.set_tail(graph.add(ns_sqp::node_type(terminal_prob)));
 
-    graph.add_edge(init_node, end_node, 10); // 100 steps
+    graph.add_edge(init_node, end_node, 100); // 100 steps
 
     init_node->value(dyn.r) << 0, 0, 0.5;     // initial position of the com
     init_node->value(dyn.r_l) << 0, 0.1, 0.;  // initial position of the left foot
     init_node->value(dyn.r_r) << 0, -0.1, 0.; // initial position of the right foot
     init_node->value(dyn.active_l_cur).setOnes();
     init_node->value(dyn.active_r_cur).setOnes();
-    init_node->value(dyn.r_d) << 0., 0., 0.; // desired position of the com
-    init_node->value(dyn.f_l) << 0, 0, 0.1;  // initial force (regularized)
-    init_node->value(dyn.f_r) << 0, 0, 0.1;  // initial force (regularized)
+    init_node->value(dyn.r_d) << 1., 0., 0.5; // desired position of the com
+    init_node->value(dyn.f_l) << 0, 0, 1.0;  // initial force (regularized)
+    init_node->value(dyn.f_r) << 0, 0, 1.0;  // initial force (regularized)
 
     // set gait
     int n = -10;
@@ -58,16 +58,16 @@ int main() {
             } else
                 phase = -1;
         }
-        // if (phase == -1) {
-        data->value(dyn.active_l) << 1;
-        data->value(dyn.active_r) << 1;
-        // } else if (phase == 0) {
-        //     data->value(dyn.active_l) << 0;
-        //     data->value(dyn.active_r) << 1;
-        // } else if (phase == 1) {
-        //     data->value(dyn.active_l) << 1;
-        //     data->value(dyn.active_r) << 0;
-        // }
+        if (phase == -1) {
+            data->value(dyn.active_l) << 1;
+            data->value(dyn.active_r) << 1;
+        } else if (phase == 0) {
+            data->value(dyn.active_l) << 0;
+            data->value(dyn.active_r) << 1;
+        } else if (phase == 1) {
+            data->value(dyn.active_l) << 1;
+            data->value(dyn.active_r) << 0;
+        }
         n++;
     });
     // propogate parameters
@@ -88,8 +88,8 @@ int main() {
     //     std::cout << data->value(dyn.active_r) << ',';
     // });
     // std::cout << "\n";
-    solver.settings.mu_method = solver::ipm_config::mehrotra_probing; // default method
-    // solver.settings.mu_method = impl::mehrotra_predictor_corrector; // default method
+    // solver.settings.mu_method = solver::ipm_config::mehrotra_probing; // default method
+    solver.settings.mu_method = solver::ipm_config::mehrotra_predictor_corrector; // default method
     // solver.settings.ipm_conditional_corrector = true;
     solver.update(10);
     size_t step = 0;
