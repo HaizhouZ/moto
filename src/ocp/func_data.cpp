@@ -2,22 +2,22 @@
 #include <moto/ocp/impl/func_data.hpp>
 
 namespace moto {
-sp_arg_map::sp_arg_map(sym_data &primal, shared_data &shared, impl::func &f)
-    : func_(f), shared_(shared), sym_uid_idx_(f.sym_uid_idx_) {
+func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, impl::func &f)
+    : func_(f), shared_handle(shared), sym_uid_idx_(f.sym_uid_idx_) {
     auto &in_args = f.in_args();
     in_args_.reserve(in_args.size());
     for (auto &arg : in_args) {
         in_args_.push_back(primal[arg]);
     }
 }
-sp_arg_map::sp_arg_map(std::vector<vector_ref> &&primal, shared_data &shared, impl::func &f)
-    : in_args_(std::move(primal)), func_(f), shared_(shared), sym_uid_idx_(f.sym_uid_idx_) {
+func_arg_map::func_arg_map(std::vector<vector_ref> &&primal, shared_data &shared, impl::func &f)
+    : in_args_(std::move(primal)), func_(f), shared_handle(shared), sym_uid_idx_(f.sym_uid_idx_) {
 }
-sp_approx_map::sp_approx_map(sym_data &primal,
-                             approx_storage &raw,
-                             shared_data &shared,
-                             impl::func &f)
-    : sp_arg_map(primal, shared, f),
+func_approx_map::func_approx_map(sym_data &primal,
+                                 dense_approx_data &raw,
+                                 shared_data &shared,
+                                 impl::func &f)
+    : func_arg_map(primal, shared, f),
       v_(f.field_ == __cost
              ? vector_ref(mapped_vector(&raw.cost_, 1))
              : raw.approx_[f.field_].v_.segment(raw.prob_->get_expr_start(f), f.dim_)) {
@@ -52,14 +52,14 @@ sp_approx_map::sp_approx_map(sym_data &primal,
     }
     setup_hessian(raw);
 }
-sp_approx_map::sp_approx_map(sym_data &primal,
-                             vector_ref v,
-                             std::vector<matrix_ref> &&jac,
-                             shared_data &shared,
-                             impl::func &f)
-    : v_(v), jac_(jac), sp_arg_map(primal, shared, f) {
+func_approx_map::func_approx_map(sym_data &primal,
+                                 vector_ref v,
+                                 std::vector<matrix_ref> &&jac,
+                                 shared_data &shared,
+                                 impl::func &f)
+    : v_(v), jac_(jac), func_arg_map(primal, shared, f) {
 }
-void sp_approx_map::setup_hessian(approx_storage &raw) {
+void func_approx_map::setup_hessian(dense_approx_data &raw) {
     auto &f = func_;
     auto &in_args = f.in_args();
     if (f.order() >= approx_order::second || f.field_ - __dyn < field::num_constr) {
@@ -72,7 +72,7 @@ void sp_approx_map::setup_hessian(approx_storage &raw) {
                     field_1 = in_args[i]->field_;
                     field_2 = in_args[j]->field_;
                     if (field_2 < field::num_prim) {
-                        /// @note order matches approx_storage
+                        /// @note order matches dense_approx_data
                         /// h[i][j] = h[j][i] if i, j in the same field or field(i) < field(j)
                         /// otherwise only keep h[i][j] (empty)
                         if (field_1 >= field_2) {
@@ -89,15 +89,6 @@ void sp_approx_map::setup_hessian(approx_storage &raw) {
                 }
             }
         }
-    }
-}
-shared_data::shared_data(const ocp_ptr_t &prob, sym_data &primal) : prob_(prob) {
-    data_.reserve(prob->expr_[__pre_comp].size() + prob->expr_[__usr_func].size());
-    for (const auto &expr : prob->expr_[__pre_comp]) {
-        add(expr->uid_, static_cast<impl::func *>(expr.get())->make_data(primal, *this));
-    }
-    for (const auto &expr : prob->expr_[__usr_func]) {
-        add(expr->uid_, static_cast<impl::func *>(expr.get())->make_data(primal, *this));
     }
 }
 } // namespace moto

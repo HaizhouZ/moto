@@ -1,8 +1,8 @@
 #include <arm/costs.hpp>
 #include <arm/dynamics.hpp>
+#include <iostream>
 #include <moto/solver/ns_sqp.hpp>
 #include <moto/utils/print.hpp>
-#include <iostream>
 
 int main() {
     using namespace moto;
@@ -19,8 +19,8 @@ int main() {
 
     ns_sqp sqp;
 
-    auto& init_node = sqp.graph_.add(ns_sqp::node_type(prob));
-    auto& end_node = sqp.graph_.add(ns_sqp::node_type(prob_terminal));
+    auto &init_node = sqp.graph_.add(ns_sqp::node_type(prob));
+    auto &end_node = sqp.graph_.add(ns_sqp::node_type(prob_terminal));
 
     sqp.graph_.add_edge(init_node, end_node, 8);
 
@@ -43,7 +43,7 @@ int main() {
 
     sqp.graph_.apply_all_unary_forward([&dyn](auto *node) {
         // std::cout << "delX  " << node->rollout_->prim_[__x].transpose() << '\n';
-        // std::cout << magic_enum::enum_name(node->rank_status_) << '\n';
+        // std::cout << field::name(node->rank_status_) << '\n';
         std::cout << "state " << node->sym_->value_[__x].transpose() << '\n';
         std::cout << "input " << node->sym_->value_[__u].transpose() << '\n';
         std::cout << "nexts " << node->sym_->value_[__y].transpose() << '\n';

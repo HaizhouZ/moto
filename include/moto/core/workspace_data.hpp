@@ -1,8 +1,8 @@
 #ifndef MOTO_CORE_WORKSPACE_DATA_HPP
 #define MOTO_CORE_WORKSPACE_DATA_HPP
 
-#include <moto/core/fwd.hpp>
 #include <concepts>
+#include <moto/core/fwd.hpp>
 
 namespace moto {
 /**
@@ -50,7 +50,6 @@ concept has_worker_type = requires {
 template <typename... Ts>
 class workspace_data_collection : public workspace_data, public Ts... {
   private:
-
     template <has_worker_type T>
     using get_worker_type = typename T::worker_type;
 

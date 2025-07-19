@@ -88,7 +88,9 @@ int main() {
     //     std::cout << data->value(dyn.active_r) << ',';
     // });
     // std::cout << "\n";
-    solver.settings.mu_method = ipm_impl::mehrotra_predictor_corrector; // default method
+    solver.settings.mu_method = solver::ipm_config::mehrotra_probing; // default method
+    // solver.settings.mu_method = impl::mehrotra_predictor_corrector; // default method
+    // solver.settings.ipm_conditional_corrector = true;
     solver.update(10);
     size_t step = 0;
     // graph.apply_all_unary_forward([&](node_data *data) {
@@ -115,6 +117,5 @@ int main() {
     //     std::cout << "f_l: " << data->value(dyn.f_l).transpose() << '\n';
     //     std::cout << "f_r: " << data->value(dyn.f_r).transpose() << '\n';
     // });
-
     return 0;
 }

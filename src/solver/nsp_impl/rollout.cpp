@@ -1,8 +1,8 @@
-#include <moto/solver/ineq_soft_solve.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
 
 namespace moto {
+namespace solver {
 namespace ns_riccati {
 void fwd_linear_rollout(ns_node_data *cur, ns_node_data *next) {
     // get_data(nodes_.front()).prim_step[__x].setZero();
@@ -48,7 +48,6 @@ void finalize_newton_step(ns_node_data *cur, bool finalize_dual) {
     auto &d = *cur;
     auto &nsp = *d.nsp_;
     d.prim_step[__u].noalias() = d.d_u.k + d.d_u.K * d.prim_step[__x];
-    ineq_soft_solve::finalize_newton_step(cur);
     // multiplier
     // dynamics multiplier first two terms
     if (finalize_dual)
@@ -70,12 +69,12 @@ void finalize_newton_step_correction(ns_node_data *cur) {
     for (auto f : primal_fields) {
         d.prim_step[f] += d.prim_corr[f];
     }
-    ineq_soft_solve::finalize_newton_step(cur);
     /// correct bar{u}_0 (first order term)
     nsp.u_0_p_k += nsp.z_u_k;
     /// update Q_y with correction
-    d.Q_y += d.Q_y_cache; 
+    d.Q_y += *d.Q_y_corr;
     finalize_dual_newton_step(cur);
 }
 } // namespace ns_riccati
+} // namespace solver
 } // namespace moto

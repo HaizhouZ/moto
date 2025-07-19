@@ -2,6 +2,7 @@
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
 
 namespace moto {
+namespace solver {
 namespace ns_riccati {
 void compute_primal_sensitivity(ns_node_data *cur) {
     auto &d = *cur;
@@ -42,4 +43,5 @@ void compute_primal_sensitivity_correction(ns_node_data *cur) {
     d.d_y.k.noalias() = -nsp.F_u * d.d_u.k;
 }
 } // namespace ns_riccati
+} // namespace solver
 } // namespace moto

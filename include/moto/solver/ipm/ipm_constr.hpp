@@ -1,81 +1,77 @@
 #ifndef MOTO_SOLVER_IPM_CONSTR_HPP
 #define MOTO_SOLVER_IPM_CONSTR_HPP
 
-#include <moto/ocp/impl/soft_constr.hpp>
+#include <moto/ocp/impl/ineq_constr.hpp>
 #include <moto/solver/ipm/ipm_config.hpp>
 
 namespace moto {
-namespace ipm_impl {
-struct ineq_constr_approx_map : public impl::soft_constr_approx_map {
-    using base = impl::soft_constr_approx_map;
-    vector_ref comp_;
-    ineq_constr_approx_map(approx_storage &raw, constr_approx_map &&d)
-        : base(std::move(d)), comp_(problem()->extract(raw.comp_[func_.field_], func_)) {}
-};
+namespace solver {
 
-struct ipm_approx_data : public impl::constr_approx_data {
-    ipm_config *ipm_cfg = nullptr; ///< pointer to the IPM settings
-    vector g_;                     ///< ipm primal value
-    vector r_s_;                   ///< ipm residuals g + t
-    vector slack_;                 ///< slack variables for the constraints
-    vector diag_scaling;           ///< Nesterov-Todd scaling T^{-1} N
-    vector scaled_res_;            ///< residuals after NT scaling (Nr_g - r_s) T^{-1} = T{-1} N r_g + T^{-1} mu
-    vector d_slack_;               ///< newton step for slack variables
-    vector d_multipler_;           ///< newton step for multipliers
-    ipm_approx_data(constr_approx_data &&rhs)
-        : impl::constr_approx_data(std::move(rhs)) {
-        slack_.resize(f_->dim_);
-        diag_scaling.resize(f_->dim_);
-        scaled_res_.resize(f_->dim_);
-    }
-};
-
-class ipm_constr final : public impl::soft_constr {
+class ipm_constr final : public impl::ineq_constr {
   private:
-    using base = impl::soft_constr;
+    using base = impl::ineq_constr;
+
+  public:
+    struct approx_data : public base::approx_data {
+        ipm_config *ipm_cfg = nullptr; ///< pointer to the IPM settings
+        vector g_;                     ///< ipm primal value
+        vector r_s_;                   ///< ipm residuals g + t
+        vector slack_;                 ///< slack variables for the constraints
+        vector diag_scaling;           ///< Nesterov-Todd scaling T^{-1} N
+        vector scaled_res_;            ///< residuals after NT scaling (Nr_g - r_s) T^{-1} = T{-1} N r_g + T^{-1} mu
+        vector d_slack_;               ///< newton step for slack variables
+        vector d_multipler_;           ///< newton step for multipliers
+        template <typename approx_data_t>
+        approx_data(approx_data_t &&rhs)
+            : approx_data_t(std::move(rhs)) {
+            slack_.resize(f_->dim_);
+            diag_scaling.resize(f_->dim_);
+            scaled_res_.resize(f_->dim_);
+        }
+    };
+
+  private:
     /// + update the IPM slack and residuals
-    void value_impl(sp_approx_map &data) override final;
+    void value_impl(func_approx_map &data) override final;
     /// + update the IPM-modified cost jacobian and hessian
-    void jacobian_impl(sp_approx_map &data) override final;
-    /// data type for the IPM constraint
-    using data_type = constr_data<ineq_constr_approx_map, ipm_approx_data>;
+    void jacobian_impl(func_approx_map &data) override final;
 
   public:
     using base::base;
-    void setup_setting(sp_arg_map &data, workspace_data *settings) override {
-        base::setup_setting(data, settings);
-        data.as<ipm_approx_data>().ipm_cfg = &settings->get<ipm_config>();
+    void setup_workspace_data(func_arg_map &data, workspace_data *settings) override {
+        base::setup_workspace_data(data, settings);
+        data.as<approx_data>().ipm_cfg = &settings->get<ipm_config>();
     }
     /// @brief initialize the IPM constraint data
-    void initialize(sp_data_map &data) override final;
+    void initialize(data_map_t &data) override final;
     /// @brief post rollout operation for the IPM constraint to compute the newton step
-    void finalize_newton_step(sp_data_map &data) override final;
+    void finalize_newton_step(data_map_t &data) override final;
     /// @brief will compute the cost jacobian correction depending on the IPM settings
-    void correct_jacobian(sp_data_map &data) override final;
+    void correct_jacobian(data_map_t &data) override final;
     /// @brief line search step for the IPM constraint
-    void line_search_step(sp_data_map &data, workspace_data *cfg) override final;
+    void line_search_step(data_map_t &data, workspace_data *cfg) override final;
     /// @brief update the line search configuration (if necessary)
-    void update_linesearch_config(sp_data_map &data, workspace_data *cfg) override final;
+    void update_linesearch_config(data_map_t &data, workspace_data *cfg) override final;
 
-    using ipm_data = data_type;
+    using ipm_data = data_type<ipm_constr>;
 
     /**
      * @brief make the sparse approximation data for the IPM
      * @param primal sym data including states inputs etc
      * @param raw dense raw data of approximation
      * @param shared shared data
-     * @return sp_approx_map_ptr_t
+     * @return func_approx_map_ptr_t
      */
-    sp_approx_map_ptr_t make_approx_map(sym_data &primal, approx_storage &raw, shared_data &shared) override {
-        return sp_approx_map_ptr_t(make_approx<data_type>(primal, raw, shared));
+    func_approx_map_ptr_t create_approx_map(sym_data &primal, dense_approx_data &raw, shared_data &shared) override {
+        return func_approx_map_ptr_t(make_approx<ipm_constr>(primal, raw, shared));
     }
 
   private:
     void propagate_jacobian(ipm_data &d);
     void propagate_hessian(ipm_data &d);
 };
-} // namespace ipm_impl
-using ipm = ipm_impl::ipm_constr;
+} // namespace solver
+using ipm = solver::ipm_constr;
 
 } // namespace moto
 

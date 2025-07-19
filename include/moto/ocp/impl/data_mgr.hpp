@@ -19,12 +19,12 @@ class data_mgr {
         std::mutex mtx_;
         data_pool() = default;
     };
-    using make_data_func = std::function<node_data *(const ocp_ptr_t &)>;
+    using data_constructor = std::function<node_data *(const ocp_ptr_t &)>;
     node_data_ptr_t get_data(const ocp_ptr_t &prob);
 
     data_mgr() = default;
     data_mgr(data_mgr &) = delete;
-    data_mgr(make_data_func maker) : maker_(maker) {}
+    data_mgr(data_constructor maker) : maker_(maker) {}
 
   public:
     /**
@@ -42,7 +42,7 @@ class data_mgr {
             std::is_constructible<data_type, const ocp_ptr_t &>::value,
             "data_type must have a constructor that accepts [const ocp_ptr_t&]");
 
-        make_data_func maker = [](const ocp_ptr_t &prob) {
+        data_constructor maker = [](const ocp_ptr_t &prob) {
             return new data_type(prob);
         };
 
@@ -80,7 +80,7 @@ class data_mgr {
     void release(node_data *data);
 
   private:
-    make_data_func maker_;
+    data_constructor maker_;
     /// mapping [uid of problem, data pool]
     std::unordered_map<size_t, data_pool> data_;
 };

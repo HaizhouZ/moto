@@ -13,14 +13,19 @@ def_unique_ptr(node_data);
  * @note to use your own data class with data_mgr, inherit this class and implement constructor C(ocp_ptr_t)
  */
 struct node_data {
-    ocp_ptr_t prob_;             /// < pointer to the problem
-    sym_data_ptr_t sym_;         /// < dense storage of symbolic data
-    approx_storage_ptr_t dense_; /// <dense storage of the func data
-    shared_data_ptr_t shared_;   /// < shared data
-    shifted_array<std::vector<sp_approx_map_ptr_t>, field::num_func, __dyn>
+    scalar_t inf_prim_res_ = 0.;
+    scalar_t inf_comp_res_ = 0.;
+
+    ocp_ptr_t prob_;                /// < pointer to the problem
+    sym_data_ptr_t sym_;            /// < dense storage of symbolic data
+    dense_approx_data_ptr_t dense_; /// <dense storage of the func data
+    shared_data_ptr_t shared_handle;      /// < shared data
+    shifted_array<std::vector<func_approx_map_ptr_t>, field::num_func, __dyn>
         sparse_; /// < sparse view per func
+
     node_data(const ocp_ptr_t &prob);
     virtual ~node_data() = default;
+
     // get value of the whole field
     auto &value(field_t f) const {
         if (f >= field::num_sym && f - __dyn <= field::num_constr)
@@ -53,27 +58,36 @@ struct node_data {
 
     scalar_t cost() const { return dense_->cost_; }
 
-    scalar_t inf_prim_res() const; // constraint violation residual
-    scalar_t inf_comp_res() const; // complementarity residual
-
+    /**
+     * @brief update the approximation data and compute primal and comp residuals
+     *
+     * @param eval_only
+     */
     void update_approximation(bool eval_only = false);
 
     template <std::array fields, typename Callback>
-        requires std::is_invocable_r_v<void, Callback, impl::func &, sp_approx_map&> &&
+        requires std::is_invocable_r_v<void, Callback, impl::func &, func_approx_map &> &&
                  std::is_same_v<std::tuple_element_t<0, decltype(fields)>, field_t>
     void for_each(Callback &&f) {
         for (const auto &field : fields) {
             for (const auto &e : prob_->expr_[field]) {
-                auto& func = dynamic_cast<impl::func &>(*e);
+                auto &func = dynamic_cast<impl::func &>(*e);
                 f(func, data(func));
             }
         }
     }
 
+    /// @brief add modification to the jacobian
+    void merge_jacobian_modification();
+    void swap_jacobian_modification();
+
     template <typename Callback>
     void for_each_constr(Callback &&f) {
         for_each<constr_fields>(std::forward<Callback>(f));
     }
+
+    void clear_merit_jac();
+    void clear_merit_hessian();
 };
 } // namespace moto
 

@@ -2,12 +2,11 @@
 #define MOTO_SOLVER_SOLVER_SETTING_HPP
 
 #include <moto/core/fwd.hpp>
-#include <new>
 
 namespace moto {
 namespace solver {
 
-struct alignas(std::hardware_destructive_interference_size) linesearch_config {
+struct MOTO_ALIGN_NO_SHARING linesearch_config {
     // bound
     struct bounds {
         scalar_t alpha_max = 1.0; ///< max step size

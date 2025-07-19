@@ -3,19 +3,10 @@
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
 
 namespace moto {
+namespace solver {
 namespace ns_riccati {
 
 void update_approx(ns_node_data *cur) {
-    // collect constraint residuals and jacobians
-    auto &d = *cur;
-    d.Q_x.setZero();
-    d.Q_u.setZero();
-    d.Q_y.setZero();
-    d.Q_xx.setZero();
-    d.Q_ux.setZero();
-    d.Q_uu.setZero();
-    d.Q_yx.setZero();
-    d.Q_yy.setZero();
     // update everything
     cur->update_approximation();
 }
@@ -32,6 +23,7 @@ void ns_factorization(ns_node_data *cur) {
     nsp.F_0_k = nsp.lu_dyn_.solve(_approx[__dyn].v_);
     nsp.F_0_K = nsp.lu_dyn_.solve(F[__x]);
     // partial value derivative
+    cur->merge_jacobian_modification();
     d.Q_x.noalias() += -nsp.F_0_k.transpose() * d.Q_yx;
     if (nsp.F_0_K.array().isNaN().any() || d.Q_xx.array().isNaN().any()) {
         std::cerr << "F_0_K:\n"
@@ -99,6 +91,6 @@ void ns_factorization(ns_node_data *cur) {
         }
     }
 }
-
 } // namespace ns_riccati
+} // namespace solver
 } // namespace moto

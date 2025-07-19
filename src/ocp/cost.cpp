@@ -15,7 +15,7 @@ void cost::finalize_impl() {
             case __u:
                 throw std::runtime_error(fmt::format(
                     "cost {} can only be terminal state-only cost, but has input arguments of type {}",
-                    name_, magic_enum::enum_name(arg->field_)));
+                    name_, field::name(arg->field_)));
             default:
                 // do nothing
                 break;

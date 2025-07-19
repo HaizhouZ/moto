@@ -25,7 +25,7 @@ struct ext_func {
      * @brief Check if the function pointer is empty
      * @return true if the function pointer is null, false otherwise
      */
-    bool empty() {return func_ == nullptr; }
+    bool empty() { return func_ == nullptr; }
     /**
      * @brief Construct a new ext_func object by calling @ref load_from_shared
      * @param lib_path Path to the shared library (e.g., "gen/libmy_approx.so")
