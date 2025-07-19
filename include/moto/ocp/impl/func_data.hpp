@@ -86,8 +86,8 @@ struct func_arg_map {
 
     const auto &problem() const { return shared_handle.prob_; }
 
-    template <typename T>
-    T &as() { return dynamic_cast<T &>(*this); }
+    // template <typename T>
+    // T &as() { return dynamic_cast<T &>(*this); }
 
     template <typename T>
         requires(std::is_base_of_v<func_arg_map, T>)

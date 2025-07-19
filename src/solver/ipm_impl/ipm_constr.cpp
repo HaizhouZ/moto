@@ -45,7 +45,7 @@ void ipm_constr::update_linesearch_config(ipm::data_map_t &data, workspace_data 
     constexpr scalar_t tau = 0.995; // scaling factor
     scalar_t alpha_max = 1.0;       // default max step size
     auto &d = data.as<ipm_data>();
-    auto &ls_cfg = cfg->get<solver::linesearch_config>();
+    auto &ls_cfg = cfg->as<solver::linesearch_config>();
     // compute alpha_max
     for (size_t idx : range(dim_)) {
         if (d.d_slack_(idx) < 0) {
@@ -66,8 +66,8 @@ void ipm_constr::update_linesearch_config(ipm::data_map_t &data, workspace_data 
 }
 void ipm_constr::finalize_predictor_step(ipm::data_map_t &data, workspace_data *cfg) {
     auto &d = data.as<ipm_data>();
-    auto &ipm_worker = cfg->get<ipm_config::worker_type>();
-    auto &ls_cfg = cfg->get<solver::linesearch_config>();
+    auto &ipm_worker = cfg->as<ipm_config::worker_type>();
+    auto &ls_cfg = cfg->as<solver::linesearch_config>();
     assert(d.ipm_cfg->ipm_computing_affine_step() &&
            "ipm affine step computation not started but affine step is requested");
     // if we are in the affine step mode, we need to update the ipm worker data
@@ -83,8 +83,7 @@ void ipm_constr::finalize_predictor_step(ipm::data_map_t &data, workspace_data *
 }
 void ipm_constr::line_search_step(ipm::data_map_t &data, workspace_data *cfg) {
     auto &d = data.as<ipm_data>();
-    auto *ipm_worker = cfg->try_get<ipm_config::worker_type>();
-    auto &ls_cfg = cfg->get<solver::linesearch_config>();
+    auto &ls_cfg = cfg->as<solver::linesearch_config>();
     assert(!d.ipm_cfg->ipm_computing_affine_step() && "ipm affine step computation not ended");
     d.slack_.array() += ls_cfg.alpha_primal * d.d_slack_.array();
     d.multiplier_.array() += ls_cfg.alpha_dual * d.d_multipler_.array();

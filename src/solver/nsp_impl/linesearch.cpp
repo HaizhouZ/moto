@@ -5,7 +5,7 @@ namespace moto {
 namespace solver {
 namespace ns_riccati {
 void line_search_step(ns_node_data *cur, workspace_data *_cfg) {
-    auto &cfg = _cfg->get<solver::linesearch_config>();
+    auto &cfg = _cfg->as<solver::linesearch_config>();
     auto &d = *cur;
     for (auto f : primal_fields) {
         cur->sym_->value_[f].noalias() += cfg.alpha_primal * d.prim_step[f];

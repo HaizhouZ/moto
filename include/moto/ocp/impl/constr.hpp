@@ -84,7 +84,7 @@ class constr : public func {
 
   public:
     void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) override {
-        data.as<approx_map>().ls_cfg = &ws_data->get<solver::linesearch_config>();
+        data.as<approx_map>().ls_cfg = &ws_data->as<solver::linesearch_config>();
     }
     /**
      * @brief type hint for the constraint

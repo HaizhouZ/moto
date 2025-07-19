@@ -38,9 +38,11 @@ class ipm_constr final : public impl::ineq_constr {
 
   public:
     using base::base;
+    using ipm_data = data_type<ipm_constr>;
+
     void setup_workspace_data(func_arg_map &data, workspace_data *settings) override {
         base::setup_workspace_data(data, settings);
-        data.as<approx_data>().ipm_cfg = &settings->get<ipm_config>();
+        data.as<ipm_data>().ipm_cfg = &settings->as<ipm_config>();
     }
     /// @brief initialize the IPM constraint data
     void initialize(data_map_t &data) override final;
@@ -55,7 +57,6 @@ class ipm_constr final : public impl::ineq_constr {
     /// @brief update the line search configuration (if necessary)
     void update_linesearch_config(data_map_t &data, workspace_data *cfg) override final;
 
-    using ipm_data = data_type<ipm_constr>;
 
     /**
      * @brief make the sparse approximation data for the IPM

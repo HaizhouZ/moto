@@ -15,28 +15,12 @@ struct workspace_data {
      * @return lvalue ref to the data
      */
     template <typename T>
-    T &get() {
+    T &as() {
         try {
             return dynamic_cast<T &>(*this);
         } catch (const std::bad_cast &e) {
             throw std::runtime_error(fmt::format("Invalid cast from workspace_data to {}", typeid(T).name()));
         }
-    }
-    /**
-     * @brief Try to get the data type from the workspace
-     * @return T* pointer to the data, nullptr if the cast fails
-     */
-    template <typename T>
-    T *try_get() {
-        T *ptr;
-        try {
-            ptr = dynamic_cast<T *>(this);
-        } catch (const std::bad_cast &) {
-            ptr = nullptr;
-        } catch (...) {
-            throw std::runtime_error(fmt::format("Unknown error in cast from workspace_data to {}", typeid(T).name()));
-        }
-        return ptr;
     }
 
     virtual ~workspace_data() = default;
@@ -54,8 +38,6 @@ class workspace_data_collection : public workspace_data, public Ts... {
     using get_worker_type = typename T::worker_type;
 
   public:
-    using workspace_data::get;
-    using workspace_data::try_get;
 
     struct worker : public workspace_data, public get_worker_type<Ts>... {
     };
@@ -65,12 +47,6 @@ class workspace_data_collection : public workspace_data, public Ts... {
     workspace_data_collection() = default;
 
     workspace_data_collection(Ts &&...args) : Ts(std::forward<Ts>(args))... {
-    }
-
-    template <typename T>
-        requires(std::disjunction_v<std::derived_from<T, Ts>...>)
-    T &as() {
-        return static_cast<T &>(*this);
     }
 };
 } // namespace moto
