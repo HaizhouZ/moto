@@ -17,6 +17,11 @@ class cost : public func {
     } hint_;
     cost(const std::string &name, approx_order order = approx_order::second)
         : func(name, order, 1, __cost) {}
+
+    cost(const std::string &name, std::initializer_list<sym> in_args, const cs::SX &out, approx_order order = approx_order::second)
+        : func(name, in_args, out, order, __cost) {
+        assert(out.is_scalar() && "cost output must be a scalar");
+    }
 };
 } // namespace impl
 /**
@@ -40,9 +45,7 @@ struct cost : public impl::shared_handle<impl::cost, cost> {
      * @param out output casadi SX expression
      */
     cost(const std::string &name, std::initializer_list<sym> in_args, const cs::SX &out)
-        : shared_handle(new expr_type(name)) {
-        assert(out.is_scalar() && "cost output must be a scalar");
-        (*this)->set_from_casadi(in_args, out);
+        : shared_handle(new expr_type(name, in_args, out)) {
     }
     cost() = default;
     using shared_handle::operator=;

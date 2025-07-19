@@ -117,6 +117,5 @@ int main() {
     //     std::cout << "f_l: " << data->value(dyn.f_l).transpose() << '\n';
     //     std::cout << "f_r: " << data->value(dyn.f_r).transpose() << '\n';
     // });
-
     return 0;
 }

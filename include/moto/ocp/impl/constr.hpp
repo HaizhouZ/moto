@@ -95,18 +95,7 @@ class constr : public func {
         bool is_soft = false;       ///< true if soft constraint, false if hard constraint, default is false
     } field_hint_;                  ///< type hint for the constraint
 
-    /**
-     * @brief construct a new constraint
-     *
-     * @param name  name of the constraint
-     * @param order approximation order, default is first order
-     * @param dim   dimension of the constraint, default is 0 (to be determined)
-     * @param field field type, default is __undefined
-     */
-    constr(const std::string &name, approx_order order = approx_order::first,
-           size_t dim = dim_tbd, field_t field = __undefined)
-        : func(name, order, dim, field) {
-    }
+    using func::func; ///< inherit constructors from func
 
     /**
      * @brief make an approximation data for the constraint

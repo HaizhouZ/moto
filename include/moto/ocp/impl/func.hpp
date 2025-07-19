@@ -132,8 +132,24 @@ class func : public expr {
      * @param dim dimension of the function, default is 0
      * @param field field type, default is __undefined (to be finalized later, @ref finalize_impl)
      */
-    func(const std::string &name, approx_order order, size_t dim = dim_tbd, field_t field = __undefined)
+    func(const std::string &name, approx_order order = approx_order::first, size_t dim = dim_tbd, field_t field = __undefined)
         : expr(name, dim, field), order_(order) {
+    }
+
+    /**
+     * @brief Construct a new constr object from casadi SX expression
+     *
+     * @param name  name of the constraint
+     * @param in_args  input arguments
+     * @param out output casadi SX expression
+     * @param order approximation order
+     * @param field field type, default to __undefined
+     */
+    func(const std::string &name, std::initializer_list<sym> in_args, const cs::SX &out,
+         approx_order order = approx_order::first, field_t field = __undefined)
+        : func(name, order, out.size1(), field) {
+        assert(out.size2() == 1 && "constr output cols must be 1");
+        set_from_casadi(in_args, out);
     }
 
   public:

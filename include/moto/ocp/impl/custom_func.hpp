@@ -36,6 +36,8 @@ class custom_func : public func {
             return create_arg_map(primal, shared);
         };
     }
+
+    using func::func;
     /**
      * @brief create the argument mapping for the custom function
      * 

@@ -31,10 +31,9 @@ struct constr : public impl::shared_handle<impl::constr, constr> {
      */
     constr(const std::string &name, std::initializer_list<sym> in_args, const cs::SX &out,
            approx_order order = approx_order::first, field_t field = __undefined)
-        : shared_handle(new expr_type(name, order, out.size1(), field)) {
-        assert(out.size2() == 1 && "constr output must be a column vector");
-        (*this)->set_from_casadi(in_args, out);
+        : shared_handle(new expr_type(name, in_args, out, order, field)) {
     }
+
     template <typename derived_impl>
         requires(std::derived_from<derived_impl, expr_type>)
     /// @brief will get the shared ownership of impl_rval
