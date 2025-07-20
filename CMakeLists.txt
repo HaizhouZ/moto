@@ -13,6 +13,10 @@ add_project_dependency(fmt REQUIRED)
 add_project_dependency(OpenMP REQUIRED)
 add_project_dependency(CASADI REQUIRED)
 add_project_dependency(pybind11 REQUIRED)
+add_project_dependency(re2 REQUIRED)
+add_project_dependency(pybind11 REQUIRED)
+add_project_dependency(nlohmann_json REQUIRED)
+add_project_dependency(OpenSSL REQUIRED)
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
 
@@ -46,6 +50,9 @@ list(APPEND MOTO_DEP_LIBS
     fmt::fmt
     OpenMP::OpenMP_CXX
     pybind11::embed
+    re2::re2
+    nlohmann_json::nlohmann_json
+    OpenSSL::Crypto
 )
 
 include(cmake/subObjectHelpers.cmake)

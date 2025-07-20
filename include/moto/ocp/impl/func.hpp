@@ -186,6 +186,11 @@ class func_codegen {
      * @note this will enable the code generation delegation to the helper
      */
     static void enable();
+	/**
+	 * @brief make codegen task for the function
+	 * 
+	 */
+	static std::future<void> make_codegen_task(impl::func *f);
 };
 } // namespace moto
 

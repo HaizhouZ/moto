@@ -1,6 +1,6 @@
 #include <moto/core/external_function.hpp>
 #include <moto/ocp/impl/func.hpp>
-#include <moto/utils/codegen_bind.hpp>
+#include <moto/utils/codegen.hpp>
 
 namespace moto {
 namespace impl {
@@ -42,18 +42,32 @@ void func::set_from_casadi(std::initializer_list<sym> in_args, const cs::SX &out
 void func::finalize_impl() {
     if (!gen_.out_.is_empty()) {
         if (!gen_delegated_) {
-            gen_.res_ = utils::generate_n_compile(name_, in_args_, {gen_.out_},
-                                                  order_ >= approx_order::zero,
-                                                  order_ >= approx_order::first,
-                                                  order_ >= approx_order::second,
-                                                  field_ == __cost); // generate code
-            gen_.res_.wait();                                        // wait until codegen is done
+            gen_.res_ = func_codegen::make_codegen_task(this);
+            gen_.res_.wait(); // wait until codegen is done
             load_external();
         } else
             func_codegen::add(this);
     }
 }
 } // namespace impl
+std::future<void> func_codegen::make_codegen_task(impl::func *f) {
+    utils::cs_codegen::task t;
+    t.func_name = f->name_;
+    t.sx_inputs = f->in_args_;
+    t.sx_output = f->gen_.out_;
+    t.gen_eval = f->order_ >= approx_order::zero;
+    t.gen_jacobian = f->order_ >= approx_order::first;
+    t.gen_hessian = f->order_ >= approx_order::second;
+    t.append_value = f->field_ == __cost;
+    t.append_jac = f->field_ == __cost;
+    t.verbose = true;
+    t.force_recompile = true;
+    auto workers = utils::cs_codegen::generate_and_compile(std::move(t));
+    return std::async(std::launch::async, [w = std::move(workers)]() mutable {
+        w.wait_until_finished();
+    });
+}
+
 void func_codegen::enable() {
     impl::func::gen_delegated_ = true; // enable codegen delegation
 }
@@ -65,17 +79,11 @@ void func_codegen::wait_until_all_compiled(size_t njobs) {
         cnt++;
         if (cnt == njobs || it_f + 1 == funcs_.end()) {
             for (auto f : jobs) {
-                f->gen_.res_ = utils::generate_n_compile(f->name_, f->in_args_, {f->gen_.out_},
-                                                         f->order_ >= approx_order::zero,
-                                                         f->order_ >= approx_order::first,
-                                                         f->order_ >= approx_order::second,
-                                                         f->field_ == __cost);
+                f->gen_.res_ = make_codegen_task(f); // make codegen task for each function
             }
             for (auto f : jobs) {
-                if (f->gen_.res_.valid()) {
-                    f->gen_.res_.wait(); // wait until codegen is done
-                    f->load_external();
-                }
+                f->gen_.res_.wait(); // wait until codegen is done
+                f->load_external();
             }
             cnt = 0; // reset counter
             jobs.clear();

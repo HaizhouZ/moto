@@ -5,7 +5,7 @@
 #include <moto/utils/print.hpp>
 
 int main() {
-    // moto::func_codegen::enable();
+    moto::func_codegen::enable();
     biped_srbd::srbd_dynamics dyn;
     std::cout << "Hello, Biped SRBD!" << std::endl;
     auto prob = moto::ocp::make();
@@ -20,7 +20,7 @@ int main() {
     prob->add(dyn.running_cost());
     auto terminal_prob = prob->copy();
     terminal_prob->add(dyn.terminal_cost());
-    // moto::func_codegen::wait_until_all_compiled(8);
+    moto::func_codegen::wait_until_all_compiled(8);
     using namespace moto;
     utils::print_problem(prob);
     ns_sqp solver;
