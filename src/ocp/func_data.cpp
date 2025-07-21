@@ -3,7 +3,7 @@
 
 namespace moto {
 func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, impl::func &f)
-    : func_(f), shared_handle(shared), sym_uid_idx_(f.sym_uid_idx_) {
+    : func_(f), shared_(shared), sym_uid_idx_(f.sym_uid_idx_) {
     auto &in_args = f.in_args();
     in_args_.reserve(in_args.size());
     for (auto &arg : in_args) {
@@ -11,7 +11,7 @@ func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, impl::func &f)
     }
 }
 func_arg_map::func_arg_map(std::vector<vector_ref> &&primal, shared_data &shared, impl::func &f)
-    : in_args_(std::move(primal)), func_(f), shared_handle(shared), sym_uid_idx_(f.sym_uid_idx_) {
+    : in_args_(std::move(primal)), func_(f), shared_(shared), sym_uid_idx_(f.sym_uid_idx_) {
 }
 func_approx_map::func_approx_map(sym_data &primal,
                                  dense_approx_data &raw,

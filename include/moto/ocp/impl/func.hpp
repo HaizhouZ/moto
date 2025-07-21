@@ -14,7 +14,6 @@ namespace impl {
  */
 class func : public expr {
   private:
-    inline static bool gen_delegated_ = false; ///< true if the codegen is delegated to @ref moto::func_codegen
     /**
      * @brief codegen info
      */
@@ -165,16 +164,13 @@ class func : public expr {
  * @brief Code generation helper for functions
  *
  */
-class func_codegen {
-  private:
-    inline static std::vector<impl::func *> funcs_{}; ///< list of functions to be compiled
-  public:
+struct func_codegen {
     /**
      * @brief add a function to the list of functions to be compiled
      * @note this will be called by the func class
      * @param f function to be added
      */
-    static void add(impl::func *f) { funcs_.push_back(f); }
+    static void add(impl::func *f);
     /**
      * @brief wait until all functions are compiled
      * @note this will block until all functions are compiled

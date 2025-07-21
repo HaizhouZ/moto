@@ -6,8 +6,10 @@ namespace utils {
 // Namespace aliases
 namespace fs = std::filesystem;
 using json = nlohmann::json;
-
-namespace cs_codegen_impl {
+namespace cs_codegen {
+namespace impl {
+worker_list workers_{};
+std::mutex mutex_{};
 // Generates a list of (row, col) pairs from CasADi's CCS sparsity format
 std::vector<std::pair<int, int>> ccs_index_to_ij(const cs::Sparsity &sp) {
     std::vector<std::pair<int, int>> ij_pairs;
@@ -270,14 +272,14 @@ void run(
     }
 }
 
-}; // namespace cs_codegen_impl
+}; // namespace impl
 
-void cs_codegen::task::finalize(worker_list &workers_) {
+void task::finalize(worker_list &workers_) {
     std::string full_func_name = prefix.empty() ? func_name : prefix + "_" + func_name;
 
     if (gen_eval)
         workers_.add(std::async(std::launch::deferred,
-                                &cs_codegen_impl::run,
+                                &impl::run,
                                 full_func_name,
                                 sx_inputs,
                                 std::vector{sx_output},
@@ -346,7 +348,7 @@ void cs_codegen::task::finalize(worker_list &workers_) {
                 f_ad = cs::Function(func_name + "_ad", sx_inputs_cs, jac_ad);
             }
             workers_.add(std::async(std::launch::deferred,
-                                    &cs_codegen_impl::run,
+                                    &impl::run,
                                     full_func_name + "_jac",
                                     sx_inputs,
                                     std::move(jacs),
@@ -406,7 +408,7 @@ void cs_codegen::task::finalize(worker_list &workers_) {
             hess_flat.insert(hess_flat.end(), sublist.begin(), sublist.end());
         }
         workers_.add(std::async(std::launch::deferred,
-                                &cs_codegen_impl::run,
+                                &impl::run,
                                 full_func_name + "_hess",
                                 sx_inputs,
                                 std::move(hess_flat),
@@ -420,22 +422,23 @@ void cs_codegen::task::finalize(worker_list &workers_) {
     }
 }
 // Public entry point to start code generation
-cs_codegen::worker_list cs_codegen::generate_and_compile(cs_codegen::task &&_task) {
+worker_list generate_and_compile(task &&_task) {
     worker_list workers_tmp;
     _task.finalize(workers_tmp);
-    std::lock_guard<std::mutex> lock(mutex_);
-    workers_.add(workers_tmp);
+    std::lock_guard<std::mutex> lock(impl::mutex_);
+    impl::workers_.add(workers_tmp);
     // Launch the implementation in a new thread
     return workers_tmp;
 }
 
 // Waits for all compilation threads to finish
-void cs_codegen::wait_until_generated() {
-    std::lock_guard<std::mutex> lock(mutex_);
+void wait_until_generated() {
+    std::lock_guard<std::mutex> lock(impl::mutex_);
     std::cout << "Waiting for code generation tasks to complete..." << std::endl;
-    workers_.wait_until_finished();
-    workers_.workers.clear();
+    impl::workers_.wait_until_finished();
+    impl::workers_.workers.clear();
     std::cout << "All code generation completed." << std::endl;
 }
+} // namespace cs_codegen
 } // namespace utils
 } // namespace moto

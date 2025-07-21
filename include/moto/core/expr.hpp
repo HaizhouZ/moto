@@ -45,7 +45,7 @@ namespace impl {
  */
 class expr {
   private:
-    inline static size_t max_uid = 0; /// < uid used to index global expressions
+    static size_t max_uid; /// < uid used to index global expressions
     bool finalized = false;
 
   protected:
@@ -106,14 +106,15 @@ class expr {
  *
  */
 class expr_lookup {
-  protected:
+  public:
     /// all expressions, indexed by uid, nullptr if not finalized (only placeholder)
     using expr_handle = impl::expr::handle;               /// < type of expr handle
     using expr_handle_ptr = std::shared_ptr<expr_handle>; /// < type of expr handle
-    inline static std::vector<expr_handle_ptr> all_;
+    static std::vector<expr_handle_ptr> all_;
     /// all expressions, indexed by name
-    inline static std::unordered_map<std::string, expr_handle_ptr> by_name_{};
+    static std::unordered_map<std::string, expr_handle_ptr> by_name_;
     friend class impl::expr;
+    expr_lookup() = delete; // no instance of expr_lookup
 
   public:
     /// @brief get an expression by name
@@ -144,7 +145,7 @@ namespace impl {
  */
 template <typename derived, typename derived_shared = void>
     requires std::derived_from<derived, expr>
-class shared_handle : public std::shared_ptr<derived>, public expr::handle, private expr_lookup {
+class shared_handle : public std::shared_ptr<derived>, public expr::handle {
   private:
     /// @brief will copy the derived_shared to expr_lookup::all_[uid], so that the derived_shared class can be accessed by uid
     /// @note this is to enable derived_shared with state, for example, sym with cs::SX::sym

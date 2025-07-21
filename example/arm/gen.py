@@ -3,6 +3,12 @@ import pinocchio.casadi as cpin
 import casadi as cs
 import moto
 
+a = moto.sym('a', 1)
+
+print(a)
+
+exit(0)
+
 import moto.codegen
 
 # Load the robot model

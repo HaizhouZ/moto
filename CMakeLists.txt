@@ -14,7 +14,6 @@ add_project_dependency(OpenMP REQUIRED)
 add_project_dependency(CASADI REQUIRED)
 add_project_dependency(pybind11 REQUIRED)
 add_project_dependency(re2 REQUIRED)
-add_project_dependency(pybind11 REQUIRED)
 add_project_dependency(nlohmann_json REQUIRED)
 add_project_dependency(OpenSSL REQUIRED)
 
@@ -49,7 +48,6 @@ list(APPEND MOTO_DEP_LIBS
     magic_enum::magic_enum
     fmt::fmt
     OpenMP::OpenMP_CXX
-    pybind11::embed
     re2::re2
     nlohmann_json::nlohmann_json
     OpenSSL::Crypto

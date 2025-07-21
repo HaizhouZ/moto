@@ -1,10 +1,15 @@
 
 
-find_package(pybind11 REQUIRED)
-
 # set(CMAKE_PREFIX_PATH $ENV{CONDA_PREFIX} ${CMAKE_PREFIX_PATH})
 
-# @ref from raisim cmakelists
+if (CMAKE_VERSION VERSION_LESS 3.18)
+  set(DEV_MODULE Development)
+else()
+  set(DEV_MODULE Development.Module)
+endif()
+
+find_package(Python 3.8 COMPONENTS Interpreter ${DEV_MODULE} REQUIRED)
+
 execute_process(
         COMMAND "${PYTHON_EXECUTABLE}" -c "if True:
             import sysconfig
@@ -13,7 +18,16 @@ execute_process(
         OUTPUT_STRIP_TRAILING_WHITESPACE)
 message("-- python site is ${PYTHON_SITE}")
 
-find_package(pybind11 REQUIRED)
+execute_process(
+  COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
+  OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE nanobind_ROOT)
+  
+if(POLICY CMP0074)
+  cmake_policy(SET CMP0074 OLD)
+endif()
+
+find_package(nanobind CONFIG REQUIRED HINTS "${nanobind_ROOT}")
+
 
 set(PYTHON_MODULE_NAME ${PROJECT_NAME}_pywrap)
 set(BINDING_FILES "")
@@ -28,8 +42,9 @@ foreach(SUBDIR ${BINDING_SUBDIRS})
   endif()
 endforeach()
 
-pybind11_add_module(${PYTHON_MODULE_NAME} ${BINDING_FILES} setup_bindings.cpp)
+nanobind_add_module(${PYTHON_MODULE_NAME} NB_STATIC ${BINDING_FILES} setup_bindings.cpp)
 target_link_libraries(${PYTHON_MODULE_NAME} PRIVATE ${PROJECT_NAME})
+target_include_directories(${PYTHON_MODULE_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 install(TARGETS ${PYTHON_MODULE_NAME}
         LIBRARY DESTINATION ${PYTHON_SITE}/${PROJECT_NAME})
@@ -41,5 +56,13 @@ foreach(dir IN LISTS BINDING_SUBDIRS)
                 DESTINATION ${PYTHON_SITE}/${PROJECT_NAME}/${DIR_NAME})
 endforeach()
 
-install(FILES __init__.py common.py
+install(FILES __init__.py
         DESTINATION ${PYTHON_SITE}/${PROJECT_NAME})
+
+nanobind_add_stub(
+  ${PYTHON_MODULE_NAME}_stub
+  MODULE ${PYTHON_MODULE_NAME}
+  OUTPUT ${PYTHON_SITE}/${PROJECT_NAME}/${PYTHON_MODULE_NAME}.pyi
+  PYTHON_PATH ${PYTHON_SITE}/${PROJECT_NAME}
+  DEPENDS ${PYTHON_MODULE_NAME}
+)

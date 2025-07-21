@@ -3,6 +3,8 @@
 #include <moto/utils/codegen.hpp>
 
 namespace moto {
+static bool impl_func_gen_delegated_ = false; ///< true if the codegen is delegated to @ref moto::func_codegen
+
 namespace impl {
 func_approx_map_ptr_t func::create_approx_map(sym_data &primal, dense_approx_data &raw, shared_data &shared) {
     if (field_ - __dyn >= field::num_func)
@@ -41,7 +43,7 @@ void func::set_from_casadi(std::initializer_list<sym> in_args, const cs::SX &out
 }
 void func::finalize_impl() {
     if (!gen_.out_.is_empty()) {
-        if (!gen_delegated_) {
+        if (!impl_func_gen_delegated_) {
             gen_.res_ = func_codegen::make_codegen_task(this);
             gen_.res_.wait(); // wait until codegen is done
             load_external();
@@ -67,13 +69,17 @@ std::future<void> func_codegen::make_codegen_task(impl::func *f) {
         w.wait_until_finished();
     });
 }
+static std::vector<impl::func *> code_gen_funcs_{}; ///< list of functions to be compiled
+
+void func_codegen::add(impl::func *f) { code_gen_funcs_.push_back(f); }
 
 void func_codegen::enable() {
-    impl::func::gen_delegated_ = true; // enable codegen delegation
+    impl_func_gen_delegated_ = true; // enable codegen delegation
 }
 void func_codegen::wait_until_all_compiled(size_t njobs) {
     std::vector<impl::func *> jobs;
     size_t cnt = 0;
+    auto &funcs_ = code_gen_funcs_;
     for (auto it_f = funcs_.begin(); it_f != funcs_.end(); ++it_f) {
         jobs.push_back(*it_f);
         cnt++;

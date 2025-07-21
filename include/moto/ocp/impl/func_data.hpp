@@ -19,6 +19,7 @@ class shared_data {
 
   public:
     shared_data(const ocp_ptr_t &prob, sym_data &primal);
+    shared_data(shared_data&&) noexcept = default;
 
     ocp_ptr_t prob_;
     /// @brief add data by uid of the func (owner of the data)
@@ -70,7 +71,7 @@ struct func_arg_map {
 
     virtual ~func_arg_map() = default;
     impl::func &func_;          ///< pointer to the func
-    shared_data &shared_handle; ///< ref to shared data
+    shared_data &shared_; ///< ref to shared data
     /**
      * @brief get the input argument values
      * @note this is a wrapper of in_args_ to access the values
@@ -84,7 +85,7 @@ struct func_arg_map {
 
     const auto &in_arg_data() const { return in_args_; }
 
-    const auto &problem() const { return shared_handle.prob_; }
+    const auto &problem() const { return shared_.prob_; }
 
     // template <typename T>
     // T &as() { return dynamic_cast<T &>(*this); }

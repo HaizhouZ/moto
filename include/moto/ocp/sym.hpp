@@ -5,7 +5,6 @@
 #include <moto/core/expr.hpp>
 
 namespace moto {
-
 namespace cs = casadi;
 
 /**

@@ -16,6 +16,7 @@ namespace moto {
 template <typename T, size_t N, size_t st>
 struct shifted_array : public std::array<T, N> {
     using base_type = std::array<T, N>;
+    using shift_size = std::integral_constant<size_t, st>;
     auto &operator[](size_t i) {
         assert(i >= st && i < st + N);
         return base_type::operator[](i - st);

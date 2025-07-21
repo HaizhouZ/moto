@@ -77,8 +77,8 @@ struct constr : public impl::shared_handle<impl::constr, constr> {
         (*this)->field_hint_.is_eq = false;
         return *this;
     }
-    constr &as_eq(std::string_view type_name, bool soft = false);
-    constr &as_ineq(std::string_view type_name);
+    constr &as_eq(std::string_view type_name, bool soft = false) { return *this; }
+    constr &as_ineq(std::string_view type_name) { return *this; }
     constr() = default;
     using shared_handle::operator=;
 };

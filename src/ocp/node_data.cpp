@@ -20,9 +20,9 @@ inline void for_each_func(const ocp_ptr_t &prob, Callback &&callback) {
 }
 
 node_data::node_data(const ocp_ptr_t &prob)
-    : prob_(prob), sym_(new sym_data(prob)), dense_(new dense_approx_data(prob)), shared_handle(new shared_data(prob, *sym_)) {
+    : prob_(prob), sym_(new sym_data(prob)), dense_(new dense_approx_data(prob)), shared_(new shared_data(prob, *sym_)) {
     for_each_func(prob, [&]([[maybe_unused]] size_t idx, impl::func &_f) {
-        sparse_[_f.field_].push_back(_f.create_approx_map(*sym_, *dense_, *shared_handle));
+        sparse_[_f.field_].push_back(_f.create_approx_map(*sym_, *dense_, *shared_));
     });
 }
 void node_data::update_approximation(bool eval_only) {
@@ -42,7 +42,7 @@ void node_data::update_approximation(bool eval_only) {
     }
     for (const auto &expr : prob_->expr_[__pre_comp]) {
         auto &f = static_cast<impl::custom_func &>(*expr);
-        f.custom_call((*shared_handle)[f]);
+        f.custom_call((*shared_)[f]);
     }
     for_each_func(prob_,
                   [this, eval_only](size_t idx, impl::func &_f) {

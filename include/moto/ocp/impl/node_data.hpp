@@ -19,7 +19,7 @@ struct node_data {
     ocp_ptr_t prob_;                /// < pointer to the problem
     sym_data_ptr_t sym_;            /// < dense storage of symbolic data
     dense_approx_data_ptr_t dense_; /// <dense storage of the func data
-    shared_data_ptr_t shared_handle;      /// < shared data
+    shared_data_ptr_t shared_;      /// < shared data
     shifted_array<std::vector<func_approx_map_ptr_t>, field::num_func, __dyn>
         sparse_; /// < sparse view per func
 
