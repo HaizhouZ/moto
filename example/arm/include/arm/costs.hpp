@@ -6,21 +6,31 @@
 
 namespace moto {
 struct armCosts {
-    struct ee_cost : public impl::cost {
+    struct ee_cost : public cost {
         vector d_r;
-        inline static sym r_des{"r_des", 3, __p};
-        inline static sym W_kin{"W_kin", 1, __p};
-        ee_cost(sym q) : impl::cost("kin_cost") {
-            d_r.resize(3);
-            d_r.setConstant(100);
+        // ee_cost(cost &&rhs) : cost(std::move(rhs)) {};
+        using cost::cost;
+        inline static auto r_des = sym::create("r_des", 3, __p);
+        inline static auto W_kin = sym::create("W_kin", 1, __p);
+        static ee_cost *create(sym *q) {
+            auto c = cost::create("kin_cost")->cast<ee_cost>();
+            c->d_r.resize(3);
+            c->d_r.setConstant(100);
 
-            add_arguments({q, r_des, W_kin});
-            load_external();
+            c->add_arguments({q, r_des, W_kin});
+            c->load_external();
+            return c;
         }
     };
-    struct state_cost : public impl::cost {
+    struct state_cost : public cost {
         vector d_q, d_v;
-        state_cost(sym q, sym v) : impl::cost("dI_state_cost") {
+        static auto *create(sym *q, sym *v) {
+            auto c = cost::create("dI_state_cost")->cast<state_cost>();
+            c->setup(q, v);
+            return c;
+        }
+        state_cost(expr &&rhs) : cost(std::move(rhs)) {};
+        void setup(sym *q, sym *v) {
             d_q.resize(7);
             d_q.setConstant(10);
             d_v.resize(7);
@@ -41,9 +51,15 @@ struct armCosts {
             };
         }
     };
-    struct input_cost : public impl::cost {
+    struct input_cost : public cost {
         vector d_a;
-        input_cost(sym a) : impl::cost("dI_input_cost") {
+        static auto create(sym *a) {
+            auto c = cost::create("dI_input_cost")->cast<input_cost>();
+            c->setup(a);
+            return c;
+        }
+        input_cost(expr &&rhs) : cost(std::move(rhs)) {}
+        void setup(sym *a) {
             d_a.resize(7);
             d_a.setConstant(1e-2);
             add_arguments({a});
@@ -58,11 +74,12 @@ struct armCosts {
             };
         }
     };
-    static expr_list running(sym q, sym v, sym a) {
-        return {new state_cost(q, v), new input_cost(a), new ee_cost(q)};
+    static expr_list running(sym *q, sym *v, sym *a) {
+        expr_list b({input_cost::create(a), input_cost::create(a), input_cost::create(a)});
+        return {state_cost::create(q, v), ee_cost::create(q)};
     }
-    static expr_list terminal(sym q, sym v) {
-        return {cost(new state_cost(q, v)).as_terminal(), cost(new ee_cost(q)).as_terminal()};
+    static expr_list terminal(sym *q, sym *v) {
+        return {state_cost::create(q, v)->as_terminal(), ee_cost::create(q)->as_terminal()};
     }
 };
 

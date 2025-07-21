@@ -6,8 +6,8 @@ namespace solver {
 namespace ns_riccati {
 ns_node_data::ns_node_data(const ocp_ptr_t &prob)
     : solver::data_base(prob),
-      ns(dense_->prob_->dim_[__eq_x]),
-      nc(dense_->prob_->dim_[__eq_xu]), ncstr(ns + nc), d_u(nu, nx),
+      ns(dense_->prob_->dim(__eq_x)),
+      nc(dense_->prob_->dim(__eq_xu)), ncstr(ns + nc), d_u(nu, nx),
       d_y(nx, nx), d_lbd_f(nx), d_lbd_s_c_pre_solve(nu), d_lbd_s_c(ncstr) {
     if (nu < ncstr) {
         nz = 0;

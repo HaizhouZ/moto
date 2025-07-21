@@ -5,8 +5,7 @@
 namespace moto {
 static bool impl_func_gen_delegated_ = false; ///< true if the codegen is delegated to @ref moto::func_codegen
 
-namespace impl {
-func_approx_map_ptr_t func::create_approx_map(sym_data &primal, dense_approx_data &raw, shared_data &shared) {
+func_approx_map_ptr_t func::create_approx_map(sym_data &primal, dense_approx_data &raw, shared_data &shared) const {
     if (field_ - __dyn >= field::num_func)
         throw std::runtime_error(fmt::format("create_approx_map cannot be called for func {} type {}",
                                              name_, field::name(field_)));
@@ -28,16 +27,16 @@ void func::load_external(const std::string &path) {
         hess.invoke(d.in_arg_data(), d.hess_);
     };
 }
-void func::substitute(const sym &arg, const sym &rhs) {
+void func::substitute(const sym *arg, const sym *rhs) {
     if (!gen_.out_.is_empty()) {
-        gen_.out_ = cs::SX::substitute(gen_.out_, arg, rhs);
+        gen_.out_ = cs::SX::substitute(gen_.out_, *arg, *rhs);
     }
-    auto nh = sym_uid_idx_.extract(arg->uid_);
-    nh.key() = rhs->uid_;
-    sym_uid_idx_.insert(std::move(nh));         // update the uid index
-    in_args_[sym_uid_idx_.at(rhs->uid_)] = rhs; // update the in_args_ to point to the new sym
+    auto nh = sym_uid_idx_.extract(arg->uid());
+    nh.key() = rhs->uid();
+    sym_uid_idx_.insert(std::move(nh));                                // update the uid index
+    in_args_.at(sym_uid_idx_.at(rhs->uid())) = const_cast<sym *>(rhs); // update the in_args_ to point to the new sym
 }
-void func::set_from_casadi(std::initializer_list<sym> in_args, const cs::SX &out) {
+void func::set_from_casadi(sym_init_list in_args, const cs::SX &out) {
     add_arguments(in_args);
     gen_.out_ = out;
 }
@@ -51,8 +50,7 @@ void func::finalize_impl() {
             func_codegen::add(this);
     }
 }
-} // namespace impl
-std::future<void> func_codegen::make_codegen_task(impl::func *f) {
+std::future<void> func_codegen::make_codegen_task(func *f) {
     utils::cs_codegen::task t;
     t.func_name = f->name_;
     t.sx_inputs = f->in_args_;
@@ -69,15 +67,15 @@ std::future<void> func_codegen::make_codegen_task(impl::func *f) {
         w.wait_until_finished();
     });
 }
-static std::vector<impl::func *> code_gen_funcs_{}; ///< list of functions to be compiled
+static std::vector<func *> code_gen_funcs_{}; ///< list of functions to be compiled
 
-void func_codegen::add(impl::func *f) { code_gen_funcs_.push_back(f); }
+void func_codegen::add(func *f) { code_gen_funcs_.push_back(f); }
 
 void func_codegen::enable() {
     impl_func_gen_delegated_ = true; // enable codegen delegation
 }
 void func_codegen::wait_until_all_compiled(size_t njobs) {
-    std::vector<impl::func *> jobs;
+    std::vector<func *> jobs;
     size_t cnt = 0;
     auto &funcs_ = code_gen_funcs_;
     for (auto it_f = funcs_.begin(); it_f != funcs_.end(); ++it_f) {

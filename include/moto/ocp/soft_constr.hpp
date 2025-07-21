@@ -1,10 +1,9 @@
 #ifndef MOTO_OCP_SOFT_CONSTR_HPP
 #define MOTO_OCP_SOFT_CONSTR_HPP
 
-#include <moto/ocp/impl/constr.hpp>
+#include <moto/ocp/constr.hpp>
 
 namespace moto {
-namespace impl {
 /**
  * @brief soft constraint interface class
  * @warning jacobian modification should be added to @ approx_map::jac_modification_
@@ -40,31 +39,30 @@ class soft_constr : public constr {
     using data_map_t = approx_map;
 
     /// initialize the soft constraint data
-    virtual void initialize(data_map_t &data) = 0;
+    virtual void initialize(data_map_t &data) const = 0;
     /// post rollout operation for the soft constraint to compute the newton step
-    virtual void finalize_newton_step(data_map_t &data) = 0;
+    virtual void finalize_newton_step(data_map_t &data) const = 0;
 	/// @brief finalize the predictor step, should be called after the rollout
 	/// @param data data map
 	/// @param worker_cfg workspace data pointer to the config to be finalized
-	virtual void finalize_predictor_step(data_map_t &data, workspace_data *worker_cfg) {};
+	virtual void finalize_predictor_step(data_map_t &data, workspace_data *worker_cfg) const {};
     /// first order correction of the cost jacobian. jac_modification must be reset to zero before calling this
-    virtual void correct_jacobian(data_map_t &data) {};
+    virtual void correct_jacobian(data_map_t &data) const {};
     /// @brief line search step for the soft constraint
 	/// @param data data map
 	/// @param worker_cfg workspace data pointer to the config to be used
-    virtual void line_search_step(data_map_t &data, workspace_data *worker_cfg) = 0;
+    virtual void line_search_step(data_map_t &data, workspace_data *worker_cfg) const = 0;
     /// @brief update the line search configuration (if necessary)
 	/// @param data data map
 	/// @param worker_cfg workspace data pointer to the config to be updated
-    virtual void update_linesearch_config(data_map_t &data, workspace_data *worker_cfg) {}
+    virtual void update_linesearch_config(data_map_t &data, workspace_data *worker_cfg) const {}
     /***
      * @brief make approximation data for the soft constraint, will use default @ref data_type
      */
-    func_approx_map_ptr_t create_approx_map(sym_data &primal, dense_approx_data &raw, shared_data &shared) override {
+    func_approx_map_ptr_t create_approx_map(sym_data &primal, dense_approx_data &raw, shared_data &shared) const override {
         return func_approx_map_ptr_t(make_approx<soft_constr>(primal, raw, shared));
     }
 };
-} // namespace impl
 } // namespace moto
 
 #endif // MOTO_OCP_SOFT_CONSTR_HPP

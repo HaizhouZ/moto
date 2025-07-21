@@ -3,7 +3,7 @@
 namespace moto {
 namespace solver {
 data_base::data_base(const ocp_ptr_t &prob)
-    : node_data(prob), nx(prob->dim_[__x]), nu(prob->dim_[__u]),
+    : node_data(prob), nx(prob->dim(__x)), nu(prob->dim(__u)),
       Q_x(dense_->jac_[__x]), Q_u(dense_->jac_[__u]),
       Q_y(dense_->jac_[__y]), Q_xx(dense_->hessian_[__x][__x]),
       Q_ux(dense_->hessian_[__u][__x]), Q_uu(dense_->hessian_[__u][__u]),

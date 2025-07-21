@@ -15,17 +15,15 @@ namespace moto {
  */
 class ocp {
   protected:
-    inline static size_t max_uid = 0;
-    ocp() : uid_(max_uid++) {}
+    ocp() = default; // default constructor
     ocp(const ocp &rhs)
-        : uid_(max_uid++), expr_(rhs.expr_), d_idx_(rhs.d_idx_),
+        : expr_(rhs.expr_), d_idx_(rhs.d_idx_),
           pos_by_uid_(rhs.pos_by_uid_), dim_(rhs.dim_) {}
-    bool add_impl(const expr_ptr_t &expr);
+    bool add_impl(expr *);
 
-  public:
-    const size_t uid_ = 0;
+    uid_t<ocp> uid_;
     /// collection of all expressions in the problem
-    std::array<std::vector<expr_ptr_t>, field::num> expr_;
+    std::array<expr_list, field::num> expr_;
     /// data index of expr in serialized vector, by uid
     std::unordered_map<size_t, std::pair<size_t, size_t>> d_idx_;
     /// position of expr in expr_ e.g., no. xxx, by uid
@@ -33,60 +31,55 @@ class ocp {
     /// dimension of each field
     std::array<size_t, field::num> dim_{};
 
-    static auto make() { return std::shared_ptr<ocp>(new ocp()); }
-    auto copy() { return std::shared_ptr<ocp>(new ocp(*this)); }
+  public:
+    CONST_ATTR_GETTER(uid);                                                  ///< getter for uid
+    const auto &exprs(size_t f) const { return expr_.at(f); }                ///< getter for expr_
+    const auto &pos(const expr *e) const { return pos_by_uid_.at(e->uid()); } ///< getter for pos_by_uid_
+    size_t dim(size_t f) const { return dim_.at(f); }                        ///< getter for dim_
 
-    scalar_t *get_data_ptr(scalar_t *data, impl::expr &expr) const {
+    static auto create() { return std::shared_ptr<ocp>(new ocp()); }
+    auto clone() { return std::shared_ptr<ocp>(new ocp(*this)); }
+
+    scalar_t *get_data_ptr(scalar_t *data, expr *expr) const {
         return data + get_expr_start(expr);
     }
-    scalar_t *get_data_ptr(scalar_t *data, impl::expr &expr, size_t offset) const {
+    scalar_t *get_data_ptr(scalar_t *data, expr *expr, size_t offset) const {
         return data + get_expr_start(expr) * offset;
     }
-    vector_ref extract(vector_ref data, const impl::expr &expr) const {
-        return data.segment(get_expr_start(expr), expr.dim_);
+    vector_ref extract(vector_ref data, const expr *expr) const {
+        return data.segment(get_expr_start(expr), expr->dim());
     }
     /**
      * @brief add expr to problem formulation
      * @note will copy the shared pointer
      * @param expr expression to be added
      */
-    void add(const expr_ptr_t &expr);
-    /**
-     * @brief add expr to problem formulation
-     * @note will move the shared pointer
-     * @param expr expression to be added
-     */
-    void add(expr_ptr_t &&expr);
+    void add(expr *expr);
 
-    template <typename derived>
-        requires std::is_base_of_v<impl::expr, derived>
-    void add(const std::vector<std::shared_ptr<derived>> &exprs) {
-        for (const auto &expr_ : exprs) {
+    template <typename derived = expr>
+        requires std::is_base_of_v<expr, derived>
+    void add(const std::initializer_list<derived *> &exprs) {
+        for (auto &expr_ : exprs) {
             add(expr_);
         }
     }
 
     template <typename derived>
-        requires std::is_base_of_v<impl::expr, derived>
-    void add(std::vector<std::shared_ptr<derived>> &&exprs) {
+        requires std::is_base_of_v<expr, derived>
+    void add(const std::vector<derived *> &exprs) {
         for (auto &expr_ : exprs) {
-            add(std::move(expr_));
+            add(expr_);
         }
     }
 
     /**
      * @brief get start index of expr in its field
      */
-    template <typename derived>
-        requires std::is_base_of_v<impl::expr, derived>
-    inline size_t get_expr_start(const std::shared_ptr<derived> &expr) const {
-        return get_expr_start(*expr);
-    }
-    size_t get_expr_start(const impl::expr &expr) const {
+    size_t get_expr_start(const expr *expr) const {
         try {
-            return d_idx_.at(expr.uid_).first;
+            return d_idx_.at(expr->uid()).first;
         } catch (const std::exception &e) {
-            throw std::runtime_error(fmt::format("expr {} uid {} cannot be found", expr.name_, expr.dim_));
+            throw std::runtime_error(fmt::format("expr {} uid {} cannot be found", expr->name(), expr->dim()));
         }
     }
 };
@@ -98,8 +91,8 @@ def_ptr(ocp);
  */
 inline void copy_y_to_x(vector_ref from_y, vector_ref to_x,
                         const ocp_ptr_t &prob_y, const ocp_ptr_t &prob_x) {
-    for (auto &y : prob_y->expr_[__y]) {
-        prob_x->extract(to_x, expr_lookup::get(y->uid_ - 1).val()) = prob_y->extract(from_y, *y);
+    for (auto &y : prob_y->exprs(__y)) {
+        prob_x->extract(to_x, expr_lookup::get(y->uid() - 1)) = prob_y->extract(from_y, y);
     }
 }
 /**
@@ -107,8 +100,8 @@ inline void copy_y_to_x(vector_ref from_y, vector_ref to_x,
  */
 inline void copy_x_to_y(vector_ref from_x, vector_ref to_y,
                         const ocp_ptr_t &prob_x, const ocp_ptr_t &prob_y) {
-    for (auto &x : prob_x->expr_[__x]) {
-        prob_y->extract(to_y, expr_lookup::get(x->uid_ + 1).val()) = prob_x->extract(from_x, *x);
+    for (auto &x : prob_x->exprs(__x)) {
+        prob_y->extract(to_y, expr_lookup::get(x->uid() + 1)) = prob_x->extract(from_x, x);
     }
 }
 

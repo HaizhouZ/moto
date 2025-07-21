@@ -79,8 +79,8 @@ void register_submodule_functional(nb::module_ &m) {
 
     export_expr_shared_wrapper<sym>(m, "sym")
         .def(nb::init<const std::string &, size_t, moto::field_t>(), nb::arg("name"), nb::arg("dim") = dim_tbd, nb::arg("field") = moto::field_t::__undefined)
-        .def("__str__", [](const sym &s) { return s->name_; })
-        .def("__repr__", [](const sym &s) { return fmt::format("sym(name='{}', field={}, dim={})", s->name_, field::name(s->field_), s->dim_); })
+        .def("__str__", [](const sym &s) { return s.name(); })
+        .def("__repr__", [](const sym &s) { return fmt::format("sym(name='{}', field={}, dim={})", s.name(), field::name(s->field()), s->dim()); })
         .def_static("inputs", &sym::inputs, nb::arg("name"), nb::arg("dim") = 1)
         .def_static("params", &sym::params, nb::arg("name"), nb::arg("dim") = 1)
         .def_static("states", &sym::states, nb::arg("name"), nb::arg("dim") = 1);

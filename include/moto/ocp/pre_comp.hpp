@@ -8,9 +8,9 @@ namespace moto {
 /**
  * @brief pre-compute function pointer wrapper
  */
-struct pre_compute : public impl::shared_handle<impl::custom_func, pre_compute> {
-    pre_compute(const std::string &name)
-        : shared_handle(new expr_type(name, __pre_comp)) {
+struct pre_compute : public custom_func_derived<pre_compute> {
+    static auto *create(const std::string &name) {
+        return base::create(name, approx_order::none, 0, __pre_comp);
     }
 };
 } // namespace moto

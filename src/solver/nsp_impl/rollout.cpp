@@ -24,8 +24,8 @@ void finalize_dual_newton_step(ns_node_data *cur) {
         // fmt::print("u_0_p_K: \n{}\n", nsp.u_0_p_K.transpose());
         // fmt::print("d.prim_step[__x]: \n{}\n", d.prim_step[__x].transpose());
         // fmt::print("d.prim_step[__u]: \n{}\n", d.prim_step[__u].transpose());
-        // for(auto &arg:cur->ocp_->expr_[__y]){
-        //     fmt::print("{}({}) ", arg->name_, arg->dim_);
+        // for(auto &arg:cur->ocp_->exprs(__y)){
+        //     fmt::print("{}({}) ", arg->name(), arg->dim());
         // }
         // fmt::print("\nd.Q_y: \n{}\n", d.Q_y.transpose());
         // fmt::print("d.Q_yy: \n{}\n", d.Q_yy.transpose());

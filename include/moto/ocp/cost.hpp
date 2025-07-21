@@ -1,75 +1,36 @@
 #include <moto/ocp/impl/func.hpp>
 
 namespace moto {
-struct cost; // forward declaration
-namespace impl {
 /**
  * @brief simple cost implementation
  *
  */
-class cost : public func {
+class cost : public func_derived<cost> {
   protected:
     void finalize_impl() override;
+    using base::base;
 
   public:
     struct finalize_hint {
         bool substitute_x_to_y = false; ///< whether to substitute x to y
     } hint_;
-    cost(const std::string &name, approx_order order = approx_order::second)
-        : func(name, order, 1, __cost) {}
+    static cost *create(const std::string &name, approx_order order = approx_order::second) {
+        return base::create(name, order, 1, __cost);
+    }
 
-    cost(const std::string &name, std::initializer_list<sym> in_args, const cs::SX &out, approx_order order = approx_order::second)
-        : func(name, in_args, out, order, __cost) {
+    static cost *create(const std::string &name, sym_init_list in_args, const cs::SX &out, approx_order order = approx_order::second) {
         assert(out.is_scalar() && "cost output must be a scalar");
+        return base::create(name, in_args, out, order, __cost);
+    }
+    cost *as_terminal() {
+        update_name(name_ + "_terminal");
+        return this;
+    }
+    template <typename derived>
+    requires std::is_base_of_v<cost, derived>
+    derived* cast() {
+        return base::moving_cast<derived, cost>(this);
     }
 };
-} // namespace impl
-/**
- * @brief wrapper of impl::cost, in fact a pointer
- *
- */
-struct cost : public impl::shared_handle<impl::cost, cost> {
-    /**
-     * @brief Construct a new cost object
-     *
-     * @param name name of the cost
-     */
-    cost(const std::string &name)
-        : shared_handle(new expr_type(name)) {
-    }
-    /**
-     * @brief Construct a new cost object from casadi expression
-     *
-     * @param name name of the cost
-     * @param in_args input arguments
-     * @param out output casadi SX expression
-     */
-    cost(const std::string &name, std::initializer_list<sym> in_args, const cs::SX &out)
-        : shared_handle(new expr_type(name, in_args, out)) {
-    }
-    cost() = default;
-    using shared_handle::operator=;
-    template <typename derived_impl>
-        requires(std::derived_from<derived_impl, impl::cost>)
-    /// @brief will get the shared ownership of impl_rval
-    cost(derived_impl *impl_rval) : shared_handle(impl_rval) {}
-    /**
-     * @brief make state-only cost, appending suffix "_terminal" to costs
-     *
-     * @tparam derived_impl derived from impl::cost
-     * @return the pointer
-     */
-    template <typename derived_impl = impl::cost>
-        requires(std::derived_from<derived_impl, impl::cost>)
-    cost &as_terminal() {
-        if constexpr (!std::is_same_v<derived_impl, impl::cost>) {
-            if (dynamic_cast<derived_impl *>(this->get()) == nullptr) {
-                // not the same type, cast
-                this->reset(new derived_impl(std::move(**this)));
-            }
-        }
-        *const_cast<std::string *>(&(*this)->name_) += "_terminal";
-        return *this;
-    }
-};
-}; // namespace moto
+def_raw_ptr(cost);
+} // namespace moto

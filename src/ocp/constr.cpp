@@ -1,22 +1,21 @@
-#include <moto/ocp/impl/constr.hpp>
+#include <moto/ocp/constr.hpp>
 
 namespace moto {
-namespace impl {
 constr::approx_map::approx_map(dense_approx_data &raw,
                                func_approx_map &&d)
-    : approx_map(raw.prob_->extract(raw.dual_[d.func_.field_], d.func_), raw, std::move(d)) {
+    : approx_map(raw.prob_->extract(raw.dual_[d.func_.field()], &d.func_), raw, std::move(d)) {
 }
 constr::approx_map::approx_map(vector_ref multiplier,
                                dense_approx_data &raw,
                                func_approx_map &&d)
     : func_approx_map(std::move(d)), merit_(&raw.merit_),
       multiplier_(multiplier) {
-    auto f = &func_;
-    const auto &in_args = f->in_args();
-    if (f->order() >= approx_order::first) {
+    auto &f = func_;
+    const auto &in_args = f.in_args();
+    if (f.order() >= approx_order::first) {
         map_merit_jac_from_raw(raw.jac_, vjp_);
     }
-    if (f->order() >= approx_order::second) { // for hessian from vjp autodiff codegen
+    if (f.order() >= approx_order::second) { // for hessian from vjp autodiff codegen
         in_args_.push_back(multiplier_);
     }
 }
@@ -24,21 +23,21 @@ void constr::approx_map::map_merit_jac_from_raw(decltype(dense_approx_data::jac_
     auto &in_args = func_.in_args();
     jac.clear();
     for (size_t i : range(in_args_.size())) {
-        if (in_args[i]->field_ < field::num_prim) {
-            jac.push_back(raw[in_args[i]->field_].segment(problem()->get_expr_start(in_args[i]), in_args[i]->dim_));
+        if (in_args[i]->field() < field::num_prim) {
+            jac.push_back(raw[in_args[i]->field()].segment(problem()->get_expr_start(in_args[i]), in_args[i]->dim()));
         } else { // useless
             static row_vector empty;
             jac.push_back(empty);
         }
     }
 }
-constr::approx_data::approx_data(func &f) : f_(&f) {
-    v_data_.resize(f.dim_);
+constr::approx_data::approx_data(const func &f) : f_(f) {
+    v_data_.resize(f.dim());
     v_data_.setZero();
     jac_data_.reserve(f.in_args().size());
     for (auto &arg : f.in_args()) {
-        if (arg->field_ < field::num_prim) {
-            jac_data_.emplace_back(f.dim_, arg->dim_);
+        if (arg->field() < field::num_prim) {
+            jac_data_.emplace_back(f.dim(), arg->dim());
             jac_data_.back().setZero();
         } else { // useless
             static matrix empty;
@@ -50,8 +49,8 @@ void constr::finalize_impl() {
     if (field_ == __undefined) {
         bool has_[3] = {false, false, false}; // x, u, y
         for (const auto &arg : in_args_) {
-            if (arg->field_ <= __y)
-                has_[arg->field_] = true;
+            if (arg->field() <= __y)
+                has_[arg->field()] = true;
         }
         // make this long enough so that people will not easily remove the const :D
         auto &field = const_cast<field_t &>(field_);
@@ -82,10 +81,10 @@ void constr::finalize_impl() {
         // do in_arg substitute
         try {
             for (auto &arg : in_args_) {
-                if (arg->field_ == __x) {
+                if (arg->field() == __x) {
                     fmt::print("substitution in constr {} of type {}: inarg {} with {}\n",
-                               name_, field::name(field_), arg->name_, arg->name_ + "_nxt");
-                    substitute(arg, expr_lookup::get<sym>(arg->uid_ + 1));
+                               name_, field::name(field_), arg->name(), arg->name() + "_nxt");
+                    substitute(arg, expr_lookup::get<sym>(arg->uid() + 1));
                 }
             }
         } catch (const std::exception &ex) {
@@ -93,11 +92,11 @@ void constr::finalize_impl() {
             throw;
         }
     }
-    impl::func::finalize_impl();
+    func::finalize_impl();
     assert(field_ >= __dyn && field_ - __dyn < field::num_constr);
 }
 
-void constr::value_impl(func_approx_map &data) {
+void constr::value_impl(func_approx_map &data) const {
     value(data);
     // compute contribution to merit function
     auto &d = static_cast<approx_map &>(data);
@@ -112,7 +111,7 @@ void constr::value_impl(func_approx_map &data) {
     // }
     // fmt::print("\t{}:\tm:{}\n", name_, d.multiplier_.transpose());
 } // namespace moto
-void constr::jacobian_impl(func_approx_map &data) {
+void constr::jacobian_impl(func_approx_map &data) const {
     // compute jacobian first
     jacobian(data);
     // update multiplier - jacobian product
@@ -124,5 +123,4 @@ void constr::jacobian_impl(func_approx_map &data) {
         // fmt::print("{}\t{}:jac\n{:.3}\n", i, name_, d.jac_[i]);
     }
 }
-} // namespace impl
 } // namespace moto

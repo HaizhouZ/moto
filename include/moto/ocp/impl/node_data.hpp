@@ -33,28 +33,14 @@ struct node_data {
         else
             return sym_->value_[f];
     }
-    // get value of the sym variable
-    auto value(const sym &sym) const { return (*sym_)[sym]; }
+    auto value(const sym *sym) const { return (*sym_)[sym]; }
     /**
      * @brief get the sparse func data by pointer
      *
      * @param f
      * @return auto&
      */
-    auto &data(const impl::func &f) const {
-        return *sparse_[f.field_][prob_->pos_by_uid_[f.uid_]];
-    }
-    /**
-     * @brief get the sparse func data by pointer
-     *
-     * @param f
-     * @return auto&
-     */
-    template <typename derived>
-        requires std::is_base_of_v<impl::func, derived>
-    auto &data(const std::shared_ptr<derived> &f) const {
-        return data(*f);
-    }
+    auto &data(const func *f) const { return *sparse_[f->field()][prob_->pos(f)]; }
 
     scalar_t cost() const { return dense_->cost_; }
 
@@ -66,13 +52,15 @@ struct node_data {
     void update_approximation(bool eval_only = false);
 
     template <std::array fields, typename Callback>
-        requires std::is_invocable_r_v<void, Callback, impl::func &, func_approx_map &> &&
+        requires std::is_invocable_r_v<void, Callback, const func &, func_approx_map &> &&
                  std::is_same_v<std::tuple_element_t<0, decltype(fields)>, field_t>
-    void for_each(Callback &&f) {
+    void for_each(Callback &&callback) {
         for (const auto &field : fields) {
-            for (const auto &e : prob_->expr_[field]) {
-                auto &func = dynamic_cast<impl::func &>(*e);
-                f(func, data(func));
+            size_t idx = 0;
+            auto &d = sparse_[field];
+            for (const auto &e : prob_->exprs(field)) {
+                auto &f = static_cast<const func &>(*e);
+                callback(f, *d[idx]);
             }
         }
     }

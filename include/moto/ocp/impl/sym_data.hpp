@@ -19,28 +19,24 @@ struct sym_data {
      */
     sym_data(const ocp_ptr_t &prob) : prob_(prob) {
         for (size_t i = 0; i < field::num_sym; i++) {
-            value_[i].resize(prob_->dim_[i]);
+            value_[i].resize(prob_->dim(i));
             value_[i].setZero();
         }
-        for (const auto &v : prob_->expr_[__usr_var]) {
-            usr_value_[v->uid_] = vector(prob_->dim_[__usr_var]);
-            usr_value_[v->uid_].setZero();
+        for (const auto &v : prob_->exprs(__usr_var)) {
+            usr_value_[v->uid()] = vector(prob_->dim(__usr_var));
+            usr_value_[v->uid()].setZero();
         }
     }
     /// get the symbolic variable value of the sym
-    vector_ref get(impl::expr *sym) {
-        if (sym->field_ == __usr_var)
-            return usr_value_.at(sym->uid_);
+    vector_ref get(const sym *sym) {
+        if (sym->field() == __usr_var)
+            return usr_value_.at(sym->uid());
         else
-            return prob_->extract(value_.at(sym->field_), *sym);
+            return prob_->extract(value_.at(sym->field()), sym);
     }
-    auto operator[](impl::expr *sym) {
+
+    auto operator[](const sym *sym) {
         return get(sym);
-    }
-    template <typename derived>
-        requires(std::derived_from<derived, impl::expr>)
-    auto operator[](const std::shared_ptr<derived> &sym) {
-        return get(sym.get());
     }
 
     /// pointer to the problem, used to get dimensions of symbolic variables

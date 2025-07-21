@@ -29,6 +29,7 @@ using mapped_const_vector = Eigen::Map<const_vector>;
 using mapped_matrix = Eigen::Map<matrix>;
 
 #define def_ptr(name) typedef std::shared_ptr<name> name##_ptr_t
+#define def_raw_ptr(name) typedef name* name##_ptr_t
 #define def_ptr_named(name, type_name) typedef std::shared_ptr<type_name> name##_ptr_t
 #define def_ptr_in_namespace(name, name_sp) typedef std::shared_ptr<name_sp::name> name##_ptr_t
 #define def_unique_ptr(name) typedef std::unique_ptr<name> name##_ptr_t

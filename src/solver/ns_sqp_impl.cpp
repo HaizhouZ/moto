@@ -1,4 +1,4 @@
-#include <moto/ocp/impl/soft_constr.hpp>
+#include <moto/ocp/soft_constr.hpp>
 #include <moto/solver/ineq_soft.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
 #include <moto/solver/ns_sqp.hpp>

@@ -6,12 +6,12 @@
 
 int main() {
     using namespace moto;
-    auto prob = ocp::make();
+    auto prob = ocp::create();
     armDynamics dyn;
     prob->add(dyn.dyn_pos);
     prob->add(dyn.dyn_vel);
     prob->add(armCosts::running(dyn.q, dyn.v, dyn.tau));
-    auto prob_terminal = prob->copy();
+    auto prob_terminal = prob->clone();
     prob_terminal->add(armCosts::terminal(dyn.q_next, dyn.v_next));
     utils::print_problem(prob);
     utils::print_problem(prob_terminal);

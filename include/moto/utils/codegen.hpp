@@ -50,13 +50,14 @@ struct worker_list {
 
 struct task {
     std::string func_name;
-    std::vector<moto::sym> sx_inputs;
+    using in_arg_list_t = sym_list;
+    in_arg_list_t sx_inputs;
     cs::SX sx_output;
     bool gen_eval = true;
     bool gen_jacobian = false;
     bool gen_hessian = false;
-    std::vector<std::pair<moto::sym, cs::SX>> ext_jac;
-    std::vector<std::tuple<moto::sym, moto::sym, cs::SX>> ext_hess;
+    std::vector<std::pair<moto::sym*, cs::SX>> ext_jac;
+    std::vector<std::tuple<moto::sym*, moto::sym*, cs::SX>> ext_hess;
     std::string output_dir = "gen";
     bool force_recompile = false;
     bool check_jac_ad = false; // check if jacobian is correct by comparing with ad

@@ -1,4 +1,4 @@
-#include <moto/ocp/impl/soft_constr.hpp>
+#include <moto/ocp/soft_constr.hpp>
 #include <moto/solver/ineq_soft.hpp>
 
 namespace moto {
@@ -8,8 +8,8 @@ void initialize(data_base *cur) {
     for_each(cur, [cur](auto &sf, auto &sd) {
         sd.prim_step_.clear();
         for (const auto &arg : sf.in_args()) {
-            if (arg->field_ < field::num_prim) {
-                sd.prim_step_.push_back(cur->prob_->extract(cur->prim_step[arg->field_], *arg));
+            if (arg->field() < field::num_prim) {
+                sd.prim_step_.push_back(cur->prob_->extract(cur->prim_step[arg->field()], arg));
             }
         }
         sf.initialize(sd);
@@ -21,17 +21,17 @@ void finalize_newton_step(data_base *cur) {
     });
 }
 void finalize_predictor_step(data_base *data, workspace_data *config) {
-    for_each(data, [cfg = config](soft_constr &sf, soft_constr_data_t &sd) {
+    for_each(data, [cfg = config](const soft_constr &sf, soft_constr_data_t &sd) {
         sf.finalize_predictor_step(sd, cfg);
     });
 }
 void line_search_step(data_base *cur, workspace_data *config) {
-    for_each(cur, [cfg = config](soft_constr &sf, soft_constr_data_t &sd) {
+    for_each(cur, [cfg = config](const soft_constr &sf, soft_constr_data_t &sd) {
         sf.line_search_step(sd, cfg);
     });
 }
 void calculate_line_search_bounds(data_base *cur, workspace_data *config) {
-    for_each(cur, [cfg = config](soft_constr &sf, soft_constr_data_t &sd) {
+    for_each(cur, [cfg = config](const soft_constr &sf, soft_constr_data_t &sd) {
         sf.update_linesearch_config(sd, cfg);
     });
 }
@@ -43,7 +43,7 @@ void first_order_correction_start(data_base *data) {
     for (auto field : primal_fields) {
         data->dense_->jac_modification_[field].setZero();
     }
-    for_each(data, [](soft_constr &sf, soft_constr_data_t &sd) {
+    for_each(data, [](const soft_constr &sf, soft_constr_data_t &sd) {
         sf.correct_jacobian(sd);
     });
     // data->merge_jacobian_modification();
