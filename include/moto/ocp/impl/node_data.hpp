@@ -2,11 +2,14 @@
 #define __MOTO_NODE_DATA_HPP__
 
 #include <moto/ocp/impl/func.hpp>
+#include <moto/ocp/problem.hpp>
 
 namespace moto {
 struct node_data;
 def_unique_ptr(node_data);
-
+namespace impl {
+class data_mgr;
+} // namespace impl
 /**
  * @brief node data class
  * stores the shooting node data including symbolics, raw approximation and its sparse mapping
@@ -16,6 +19,7 @@ struct node_data {
     scalar_t inf_prim_res_ = 0.;
     scalar_t inf_comp_res_ = 0.;
 
+  protected:
     ocp_ptr_t prob_;                /// < pointer to the problem
     sym_data_ptr_t sym_;            /// < dense storage of symbolic data
     dense_approx_data_ptr_t dense_; /// <dense storage of the func data
@@ -23,8 +27,17 @@ struct node_data {
     shifted_array<std::vector<func_approx_map_ptr_t>, field::num_func, __dyn>
         sparse_; /// < sparse view per func
 
+    friend class impl::data_mgr; ///< data manager can access private members
+  public:
     node_data(const ocp_ptr_t &prob);
+    node_data(const node_data &rhs) = delete;
+    node_data(node_data &&rhs) noexcept = default;
     virtual ~node_data() = default;
+
+    auto &sym_val() const { return *sym_; }   ///< getter for sym_
+    auto &dense() const { return *dense_; }   ///< getter for dense_
+    auto &shared() const { return *shared_; } ///< getter for shared_
+    auto &problem() const { return *prob_; }  ///< getter for prob_
 
     // get value of the whole field
     auto &value(field_t f) const {
@@ -33,14 +46,14 @@ struct node_data {
         else
             return sym_->value_[f];
     }
-    auto value(const sym *sym) const { return (*sym_)[sym]; }
+    auto value(const sym &s) const { return (*sym_)[s]; }
     /**
      * @brief get the sparse func data by pointer
      *
      * @param f
      * @return auto&
      */
-    auto &data(const func *f) const { return *sparse_[f->field()][prob_->pos(f)]; }
+    auto &data(const func &f) const { return *sparse_[f.field()][prob_->pos(f)]; }
 
     scalar_t cost() const { return dense_->cost_; }
 
@@ -64,11 +77,7 @@ struct node_data {
             }
         }
     }
-
-    /// @brief add modification to the jacobian
-    void merge_jacobian_modification();
-    void swap_jacobian_modification();
-
+    
     template <typename Callback>
     void for_each_constr(Callback &&f) {
         for_each<constr_fields>(std::forward<Callback>(f));

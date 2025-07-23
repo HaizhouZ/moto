@@ -44,17 +44,17 @@ int main() {
     sqp.graph_.apply_all_unary_forward([&dyn](auto *node) {
         // std::cout << "delX  " << node->rollout_->prim_[__x].transpose() << '\n';
         // std::cout << field::name(node->rank_status_) << '\n';
-        std::cout << "state " << node->sym_->value_[__x].transpose() << '\n';
-        std::cout << "input " << node->sym_->value_[__u].transpose() << '\n';
-        std::cout << "nexts " << node->sym_->value_[__y].transpose() << '\n';
-        std::cout << "param " << node->sym_->value_[__p].transpose() << '\n';
+        std::cout << "state " << node->value(__x).transpose() << '\n';
+        std::cout << "input " << node->value(__u).transpose() << '\n';
+        std::cout << "nexts " << node->value(__y).transpose() << '\n';
+        std::cout << "param " << node->value(__p).transpose() << '\n';
         // std::cout << "rescs " << node->data(dyn.vel_zero_constr).v_.transpose() << '\n';
         // std::cout << "dual  " << static_cast<constr_approx_map &>(node->data(dyn.vel_zero_constr)).multiplier_.transpose() << '\n';
         // std::cout << "sy    " << node->nsp_->s_y << '\n';
         // std::cout << "su    " << node->nsp_->s_u << '\n';
         // std::cout << "resdy " << node->dense_->approx_[__dyn].v_.transpose() << '\n';
         // std::cout << "jacdy \n" << node->dense_->approx_[__dyn].jac_[__y] << '\n';
-        std::cout << "dual  " << node->dense_->dual_[__dyn].transpose() << '\n';
+        std::cout << "dual  " << node->dense().dual_[__dyn].transpose() << '\n';
         //     std::cout << "Qx    " << node->Q_x << '\n';
         //     std::cout << "Qu    " << node->Q_u << '\n';
         //     std::cout << "Qy    " << node->Q_y << '\n';

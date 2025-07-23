@@ -29,3 +29,4 @@ endfunction()
 
 # add_moto_test(external_function)
 # add_moto_test(symbolic_comp)
+add_moto_test(expr_ownership)

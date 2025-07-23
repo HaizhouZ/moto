@@ -19,10 +19,7 @@ class ineq_constr : public soft_constr {
      */
     struct approx_map : public base::approx_map {
         vector_ref comp_;
-        template <typename approx_map_t>
-        approx_map(dense_approx_data &raw, approx_map_t &&d)
-            : base::approx_map(raw, std::move(d)),
-              comp_(problem()->extract(raw.comp_[func_.field()], &func_)) {}
+        approx_map(dense_approx_data &raw, map_base &&d);
     };
 
   protected:

@@ -12,12 +12,16 @@ struct ns_sqp {
     struct settings_t
         : public workspace_data_collection<solver::linesearch_config, solver::ipm_config> {
     } settings;
-
-    struct node_type : public impl::shooting_node<solver::ns_riccati::ns_node_data> {
-        node_type(const ocp_ptr_t &prob)
-            : impl::shooting_node<solver::ns_riccati::ns_node_data>(prob) {}
-        node_type(const node_type &rhs) = default;
-        node_type(node_type &&rhs) = default;
+    // using node_base = ;
+    using ns_node_data = solver::ns_riccati::ns_node_data;
+    struct data : public composed_data<node_data, ns_node_data> {
+        using base = composed_data<node_data, ns_node_data>;
+        data(const ocp_ptr_t &prob)
+            : base(node_data(prob), ns_node_data(node_data::sym_.get(), node_data::dense_.get())) {}
+        data(data &&rhs) = default;
+        static void update_approx(data *d) {
+            d->update_approximation();
+        }
     };
     void update(size_t n_iter);
     void forward();
@@ -29,7 +33,7 @@ struct ns_sqp {
     };
 
     ns_sqp();
-
+    using node_type = impl::shooting_node<data>;
     directed_graph<node_type> graph_;
 };
 

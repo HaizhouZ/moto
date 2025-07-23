@@ -133,8 +133,8 @@ cs::Function filter_func_near_zero(
     double tol = 1e-8,
     int ntrials = 50) {
     cs::SXVector sx_inputs;
-    for (const auto &i : inputs)
-        sx_inputs.push_back(*i);
+    for (const sym &i : inputs)
+        sx_inputs.push_back(i);
     cs::SXVector sx_expr;
     for (const auto &e : expr)
         sx_expr.push_back(e);
@@ -297,9 +297,9 @@ void task::finalize(worker_list &workers_) {
     // excluded = [e.name for e in exclude]
     std::set<size_t> excluded;
     // # exclude inputs in field p
-    for (const auto &s : sx_inputs)
-        if (s->field() == __p)
-            excluded.insert(s->uid());
+    for (const sym &s : sx_inputs)
+        if (s.field() == __p)
+            excluded.insert(s.uid());
     std::map<size_t, cs::SX> external_jac;
     for (auto &[in_arg, jac] : ext_jac)
         external_jac[in_arg->uid()] = std::move(jac);
@@ -330,13 +330,13 @@ void task::finalize(worker_list &workers_) {
     std::vector<cs::SX> jacs;
     // generate jacobian
     if (gen_jacobian or vjp_for_hess) {
-        for (auto &s : sx_inputs) {
-            if (!excluded.contains(s->uid())) {
-                if (!external_jac.empty() and external_jac.contains(s->uid())) {
-                    jacs.push_back(external_jac[s->uid()]);
+        for (sym &s : sx_inputs) {
+            if (!excluded.contains(s.uid())) {
+                if (!external_jac.empty() and external_jac.contains(s.uid())) {
+                    jacs.push_back(external_jac[s.uid()]);
                     continue;
                 }
-                jacs.push_back(cs::SX::jacobian(sx_output, *s));
+                jacs.push_back(cs::SX::jacobian(sx_output, s));
             } else
                 jacs.push_back(cs::SX());
         }
@@ -345,9 +345,9 @@ void task::finalize(worker_list &workers_) {
             if (check_jac_ad) {
                 std::vector<cs::SX> sx_inputs_cs;
                 std::vector<cs::SX> jac_ad;
-                for (auto &e : sx_inputs) {
-                    sx_inputs_cs.push_back(*e);
-                    jac_ad.push_back(cs::SX::jacobian(sx_output, *e));
+                for (sym &e : sx_inputs) {
+                    sx_inputs_cs.push_back(e);
+                    jac_ad.push_back(cs::SX::jacobian(sx_output, e));
                 }
                 f_ad = cs::Function(func_name + "_ad", sx_inputs_cs, jac_ad);
             }
@@ -372,34 +372,34 @@ void task::finalize(worker_list &workers_) {
         hess.resize(sx_inputs.size());
         // use AD of vjp to compute hessian
 
-        auto lbd = sym::create(func_name + "_lbd", sx_output.rows(), __usr_var);
+        auto lbd = sym(func_name + "_lbd", sx_output.rows(), __usr_var);
         size_t idx_i = 0;
-        for (auto &i : sx_inputs) {
+        for (sym &i : sx_inputs) {
             hess[idx_i].resize(sx_inputs.size());
             cs::SX vjp_;
-            bool i_excluded = excluded.contains(i->uid());
+            bool i_excluded = excluded.contains(i.uid());
             if (!i_excluded)
-                vjp_ = cs::SX::jtimes(sx_output, *i, *lbd, true);
+                vjp_ = cs::SX::jtimes(sx_output, i, lbd, true);
             size_t idx_j = 0;
-            for (auto &j : sx_inputs) {
-                if (i_excluded or excluded.contains(j->uid()) or i->field() < j->field()) {
+            for (sym &j : sx_inputs) {
+                if (i_excluded or excluded.contains(j.uid()) or i.field() < j.field()) {
                     continue;
                 }
-                if (external_hess.contains({i->uid(), j->uid()})) {
-                    hess[idx_i][idx_j] = external_hess[{i->uid(), j->uid()}];
+                if (external_hess.contains({i.uid(), j.uid()})) {
+                    hess[idx_i][idx_j] = external_hess[{i.uid(), j.uid()}];
                     idx_j++;
                     continue;
-                } else if (external_hess.contains({j->uid(), i->uid()})) {
-                    hess[idx_i][idx_j] = external_hess[{j->uid(), i->uid()}].T();
+                } else if (external_hess.contains({j.uid(), i.uid()})) {
+                    hess[idx_i][idx_j] = external_hess[{j.uid(), i.uid()}].T();
                     idx_j++;
                     continue;
                 }
                 // for i,j in same field, just copy
-                if (i->field() == j->field() and idx_i > idx_j) {
+                if (i.field() == j.field() and idx_i > idx_j) {
                     hess[idx_i][idx_j] = hess[idx_j][idx_i].T();
                     continue;
                 }
-                hess[idx_i][idx_j] = cs::SX::jacobian(vjp_, *j);
+                hess[idx_i][idx_j] = cs::SX::jacobian(vjp_, j);
             }
             hess_inputs.reserve(sx_inputs.size() + 1);
             hess_inputs = sx_inputs;

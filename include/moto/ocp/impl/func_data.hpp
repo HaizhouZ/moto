@@ -16,29 +16,25 @@ class shared_data {
     std::unordered_map<size_t, func_arg_map_ptr_t> data_; ///< [uid (of data owner), data]
 
   public:
-    shared_data(const ocp_ptr_t &prob, sym_data &primal);
-    shared_data(shared_data&&) noexcept = default;
+    shared_data(const ocp *prob, sym_data *primal);
+    shared_data(shared_data &&) = default;
 
-    ocp_ptr_t prob_;
+    const ocp *prob_;
     /// @brief add data by uid of the func (owner of the data)
     void add(size_t uid, func_arg_map_ptr_t &&data) { data_.try_emplace(uid, std::move(data)); }
     /// @brief add data by func shared pointer (owner of the data)
     template <typename derived>
         requires std::is_base_of_v<func, derived>
-    void add(const std::shared_ptr<derived> &expr, func_arg_map_ptr_t &&data) {
-        assert(expr->field() == __pre_comp || expr->field() == __usr_func);
-        add(expr->uid, std::move(data));
+    void add(const derived &ex, func_arg_map_ptr_t &&data) {
+        assert(ex.field() == __pre_comp || ex.field() == __usr_func);
+        add(ex.uid, std::move(data));
     }
     /// @brief get the data by uid
     auto &get(size_t uid) { return *data_.at(uid); }
-    /// @brief get the data by func shared pointer (owner of the data) by uid
-    template <typename derived>
-        requires std::is_base_of_v<func, derived>
-    auto &operator[](const std::shared_ptr<derived> &expr) { return get(expr.uid()); }
     /// @brief get the data of the func (by uid)
     template <typename derived>
         requires std::is_base_of_v<func, derived>
-    auto &operator[](const derived &expr) { return get(expr.uid()); }
+    auto &operator[](const derived &ex) { return get(ex.uid()); }
 };
 def_unique_ptr(shared_data);
 /////////////////////////////////////////////////////////////////////
@@ -68,22 +64,22 @@ struct func_arg_map {
     func_arg_map(std::vector<vector_ref> &&primal, shared_data &shared, const func &f);
 
     virtual ~func_arg_map() = default;
-    const func &func_;          ///< pointer to the func
+    const func &func_;    ///< pointer to the func
     shared_data &shared_; ///< ref to shared data
     /**
      * @brief get the input argument values
      * @note this is a wrapper of in_args_ to access the values
      * @return vector_ref of input arguments
      */
-    auto operator[](const sym *in) {
-        return in_args_[sym_uid_idx_.at(in->uid())];
+    auto operator[](const sym &in) {
+        return in_args_[sym_uid_idx_.at(in.uid())];
     }
     /// @brief get the input argument values by index
     auto operator[](size_t i) const { return in_args_.at(i); }
 
     const auto &in_arg_data() const { return in_args_; }
 
-    const auto &problem() const { return shared_.prob_; }
+    auto problem() const { return shared_.prob_; }
 
     // template <typename T>
     // T &as() { return dynamic_cast<T &>(*this); }
@@ -134,8 +130,8 @@ struct func_approx_map : public func_arg_map {
     /// @brief setup hessian from raw approx storage
     void setup_hessian(dense_approx_data &raw);
     /// @brief get the jacobian reference
-    auto jac(const sym *in) const {
-        return jac_[sym_uid_idx_.at(in->uid())];
+    auto jac(const sym &in) const {
+        return jac_[sym_uid_idx_.at(in.uid())];
     }
 };
 

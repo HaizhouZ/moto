@@ -1,9 +1,10 @@
 #include <moto/ocp/constr.hpp>
+#include <moto/ocp/problem.hpp>
 
 namespace moto {
 constr::approx_map::approx_map(dense_approx_data &raw,
                                func_approx_map &&d)
-    : approx_map(raw.prob_->extract(raw.dual_[d.func_.field()], &d.func_), raw, std::move(d)) {
+    : approx_map(raw.prob_->extract(raw.dual_[d.func_.field()], d.func_), raw, std::move(d)) {
 }
 constr::approx_map::approx_map(vector_ref multiplier,
                                dense_approx_data &raw,
@@ -46,45 +47,45 @@ constr::approx_data::approx_data(const func &f) : f_(f) {
     }
 }
 void constr::finalize_impl() {
-    if (field_ == __undefined) {
+    if (field() == __undefined) {
         bool has_[3] = {false, false, false}; // x, u, y
         for (const auto &arg : in_args_) {
             if (arg->field() <= __y)
                 has_[arg->field()] = true;
         }
         // make this long enough so that people will not easily remove the const :D
-        auto &field = const_cast<field_t &>(field_);
+        auto &_field = field();
         if (field_hint_.is_eq == utils::optional_bool::Unset) {
-            throw std::runtime_error(fmt::format("constr {} eq/ineq hint unset, please set it using as_eq() or as_ineq()", name_));
+            throw std::runtime_error(fmt::format("constr {} eq/ineq hint unset, please set it using as_eq() or as_ineq()", name()));
         }
         if (field_hint_.is_eq) {
             if (has_[__u] && !has_[__y])
-                field = field_hint_.is_soft ? __eq_xu_soft : __eq_xu;
+                _field = field_hint_.is_soft ? __eq_xu_soft : __eq_xu;
             else if (has_[__x] && has_[__y] && !field_hint_.is_soft) // we dont assume x can be converted to y
-                field = __dyn;
+                _field = __dyn;
             else if (!has_[__u] && (has_[__x] ^ has_[__y]))
-                field = field_hint_.is_soft ? __eq_x_soft : __eq_x;
+                _field = field_hint_.is_soft ? __eq_x_soft : __eq_x;
             else
-                throw std::runtime_error(fmt::format("unsupported eq constr \"{}\" type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set field or hints?",
-                                                     name_, has_[__x], has_[__u], has_[__y], field_hint_.is_soft));
+                throw std::runtime_error(fmt::format("unsupported eq constr \"{}\" type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set _field or hints?",
+                                                     name(), has_[__x], has_[__u], has_[__y], field_hint_.is_soft));
         } else {
             if (has_[__u] && !has_[__y] && !field_hint_.is_soft)
-                field = __ineq_xu;
+                _field = __ineq_xu;
             else if (!has_[__u] && (has_[__x] ^ has_[__y]) && !field_hint_.is_soft)
-                field = __ineq_x;
+                _field = __ineq_x;
             else
-                throw std::runtime_error(fmt::format("unsupported ineq constr \"{}\" type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set field or hints?",
-                                                     name_, has_[__x], has_[__u], has_[__y], field_hint_.is_soft));
+                throw std::runtime_error(fmt::format("unsupported ineq constr \"{}\" type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set _field or hints?",
+                                                     name(), has_[__x], has_[__u], has_[__y], field_hint_.is_soft));
         }
     }
-    if (field_ == __eq_x || field_ == __ineq_x || field_ == __eq_x_soft) {
+    if (in_field(field(), std::array{__eq_x, __ineq_x, __eq_x_soft})) {
         // do in_arg substitute
         try {
-            for (auto &arg : in_args_) {
-                if (arg->field() == __x) {
+            for (sym &arg : in_args_) {
+                if (arg.field() == __x) {
                     fmt::print("substitution in constr {} of type {}: inarg {} with {}\n",
-                               name_, field::name(field_), arg->name(), arg->name() + "_nxt");
-                    substitute(arg, expr_lookup::get<sym>(arg->uid() + 1));
+                               name(), field::name(field()), arg.name(), arg.name() + "_nxt");
+                    substitute(arg, arg.next());
                 }
             }
         } catch (const std::exception &ex) {
@@ -93,34 +94,34 @@ void constr::finalize_impl() {
         }
     }
     func::finalize_impl();
-    assert(field_ >= __dyn && field_ - __dyn < field::num_constr);
+    assert(field() >= __dyn && field() - __dyn < field::num_constr);
 }
 
 void constr::value_impl(func_approx_map &data) const {
-    value(data);
+    value_(data);
     // compute contribution to merit function
     auto &d = static_cast<approx_map &>(data);
     scalar_t res = d.multiplier_.dot(d.v_);
-    // fmt::print("\t{}:\tv:{}\n", name_, d.v_.transpose());
+    // fmt::print("\t{}:\tv:{}\n", name(), d.v_.transpose());
     // #pragma omp critical
     // {
     // fmt::print("pre {}\n", *d.merit_);
     *d.merit_ += res;
-    //     fmt::print("\t{}:\tv:{}\n", name_, d.multiplier_.dot(d.v_));
+    //     fmt::print("\t{}:\tv:{}\n", name(), d.multiplier_.dot(d.v_));
     //     fmt::print("after {}\n", *d.merit_);
     // }
-    // fmt::print("\t{}:\tm:{}\n", name_, d.multiplier_.transpose());
+    // fmt::print("\t{}:\tm:{}\n", name(), d.multiplier_.transpose());
 } // namespace moto
 void constr::jacobian_impl(func_approx_map &data) const {
     // compute jacobian first
-    jacobian(data);
+    jacobian_(data);
     // update multiplier - jacobian product
     auto &d = static_cast<approx_map &>(data);
     for (size_t i = 0; i < d.in_arg_data().size(); i++) {
         if (d.vjp_[i].size() != 0) // skip if no jacobian for this input
-            // fmt::print("{}\t{}:i\t{:.3}\n", i, name_, d.in_args_[i].transpose());
+            // fmt::print("{}\t{}:i\t{:.3}\n", i, name(), d.in_args_[i].transpose());
             d.vjp_[i].noalias() += d.multiplier_.transpose() * d.jac_[i];
-        // fmt::print("{}\t{}:jac\n{:.3}\n", i, name_, d.jac_[i]);
+        // fmt::print("{}\t{}:jac\n{:.3}\n", i, name(), d.jac_[i]);
     }
 }
 } // namespace moto

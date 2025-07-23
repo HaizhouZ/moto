@@ -4,18 +4,18 @@
 namespace moto {
 namespace solver {
 namespace ns_riccati {
-ns_node_data::ns_node_data(const ocp_ptr_t &prob)
-    : solver::data_base(prob),
-      ns(dense_->prob_->dim(__eq_x)),
-      nc(dense_->prob_->dim(__eq_xu)), ncstr(ns + nc), d_u(nu, nx),
-      d_y(nx, nx), d_lbd_f(nx), d_lbd_s_c_pre_solve(nu), d_lbd_s_c(ncstr) {
+ns_node_data::ns_node_data(sym_data *s, dense_approx_data *dense)
+    : solver::data_base(s, dense),
+      ns(dense->approx_[__eq_x].v_.size()),
+      nc(dense->approx_[__eq_xu].v_.size()), ncstr(ns + nc), d_u(nu, nx),
+      d_y(nx, nx), d_lbd_f(nx), d_lbd_s_c_pre_solve(nu), d_lbd_s_c(ncstr),
+      nsp_(new nullspace_data(dense->approx_[__eq_x].jac_[__y])) {
     if (nu < ncstr) {
         nz = 0;
         // throw std::runtime_error("system over-constrained, i.e., nu < ncstr");
     } else {
         nz = nu - ncstr;
     }
-    nsp_ = new nullspace_data(dense_->approx_[__eq_x].jac_[__y]);
     nsp_->F_0_k.resize(nx);
     nsp_->F_0_K.resize(nx, nx);
     nsp_->F_u.resize(nx, nu);
@@ -37,7 +37,8 @@ ns_node_data::ns_node_data(const ocp_ptr_t &prob)
     dual_step[__eq_xu].resize(nc);
 }
 ns_node_data::~ns_node_data() {
-    delete nsp_;
+    if (nsp_)
+        delete nsp_.get();
 }
 } // namespace ns_riccati
 } // namespace solver

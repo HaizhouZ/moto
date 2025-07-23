@@ -18,6 +18,15 @@ struct optional_bool {
     optional_bool(bool v) : value(v ? True : False) {}
     optional_bool(val_type v = Unset) : value(v) {}
     operator bool() const { return value == True; }
+    bool operator==(const optional_bool &rhs) const {
+        return value == rhs.value;
+    }
+    bool operator==(val_type rhs) const {
+        return value == rhs;
+    }
+    bool operator!=(const optional_bool &rhs) const {
+        return value != rhs.value;
+    }
 };
 } // namespace utils
 } // namespace moto

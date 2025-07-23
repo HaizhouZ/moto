@@ -3,25 +3,23 @@
 
 #include <moto/ocp/constr.hpp>
 
-template <typename T>
-using ref_ = std::add_lvalue_reference_t<T>;
-template <typename T>
-using ptr_ = T*;
-
-
 namespace moto {
 struct armDynamics {
-    sym_ptr_t q, q_next, v, v_next, tau;
-    constr_ptr_t dyn_pos, dyn_vel;
-    armDynamics() : q(sym::state("q", 7)), q_next(q->next()), v(sym::state("v", 7)), v_next(v->next()),
-                    tau(sym::inputs("tau", 7)),
-                    dyn_pos(constr::create("euler", approx_order::first, 7)),
-                    dyn_vel(constr::create("rnea", approx_order::first, 7)) {
+    sym q, v, tau, q_next, v_next;
+    constr dyn_pos, dyn_vel;
+    armDynamics() {
+        std::tie(q, q_next) = sym::states("q", 7);
+        std::tie(v, v_next) = sym::states("v", 7);
+        tau = sym::inputs("tau", 7);
 
-        dyn_pos->add_arguments({q, q_next, v_next});
-        dyn_pos->load_external();
-        dyn_vel->add_arguments({q, v, v_next, tau});
-        dyn_vel->load_external();
+        dyn_pos = constr("euler", approx_order::first, 7);
+        dyn_pos.add_arguments({q, q_next, v_next});
+        dyn_pos.field_hint().is_eq = true;
+        // dyn_pos.load_external();
+        dyn_vel = constr("rnea", approx_order::first, 7);
+        dyn_vel.add_arguments({q, v, v_next, tau});
+        dyn_vel.field_hint().is_eq = true;
+        // dyn_vel.load_external();
     }
 };
 } // namespace moto

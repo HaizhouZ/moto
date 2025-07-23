@@ -1,7 +1,7 @@
-#include <moto/ocp/soft_constr.hpp>
 #include <moto/solver/ineq_soft.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
 #include <moto/solver/ns_sqp.hpp>
+#include <moto/utils/field_conversion.hpp>
 
 #define ENABLE_TIMED_BLOCK
 #include <moto/utils/timed_block.hpp>
@@ -10,11 +10,11 @@
 
 namespace moto {
 void ns_sqp::forward() {
-    timed_block(graph_.apply_all_unary_parallel(solver::ns_riccati::update_approx));
+    graph_.apply_all_unary_parallel(data::update_approx);
 }
 void ns_sqp::update(size_t n_iter) {
     fmt::print("Initialization for SQP...\n");
-    graph_.apply_all_unary_parallel([this](solver::data_base *cur) {
+    graph_.apply_all_unary_parallel([this](data *cur) {
         // setup solver settings
         cur->for_each_constr([this](auto &c, auto &d) { c.setup_workspace_data(d, &settings); });
         cur->update_approximation(true);
@@ -22,11 +22,11 @@ void ns_sqp::update(size_t n_iter) {
         solver::ineq_soft::initialize(cur);
     });
     std::atomic<double> cost_all{0.};
-    graph_.apply_all_unary_parallel([&cost_all](auto *n) {
+    graph_.apply_all_unary_parallel([&cost_all](solver::data_base *n) {
         cost_all += n->dense_->cost_;
     });
     fmt::print("initial cost_total: {}\n", cost_all.load());
-    graph_.apply_all_unary_parallel(solver::ns_riccati::update_approx);
+    graph_.apply_all_unary_parallel(data::update_approx);
 
     // print statistics header
     constexpr std::string_view terms[] = {"objective", "inf_prim_res", "inf_dual_res", "inf_comp_res", "alpha_primal", "alpha_dual", "ipm_mu"};
@@ -102,36 +102,38 @@ void ns_sqp::update(size_t n_iter) {
             for (size_t i : range(n_worker)) {
                 setting_per_thread[i].ls_config_reset();
             }
-            graph_.apply_all_unary_parallel([&setting_per_thread](size_t tid, auto *d) {
+            graph_.apply_all_unary_parallel([&setting_per_thread](size_t tid, data *d) {
                 solver::ineq_soft::calculate_line_search_bounds(d, &setting_per_thread[tid]);
             });
             finalize_bound_and_set_to_max();
         }
         /// @todo: update the line search stepsize?
         // real line search step
-        graph_.apply_all_unary_parallel([this](auto *d) {
+        graph_.apply_all_unary_parallel([this](data *d) {
             solver::ns_riccati::line_search_step(d, &settings);
             solver::ineq_soft::line_search_step(d, &settings);
         });
 
-        graph_.apply_all_unary_parallel(solver::ns_riccati::update_approx);
+        graph_.apply_all_unary_parallel(data::update_approx);
         // );
         kkt_info info;
-        for (auto &n : graph_.get_unordered_flattened_nodes()) {
+        for (node_data *n : graph_.get_unordered_flattened_nodes()) {
             info.objective += n->cost();
             info.inf_prim_res = std::max(info.inf_prim_res, n->inf_prim_res_);
-            info.inf_dual_res = std::max(info.inf_dual_res, n->dense_->jac_[__u].cwiseAbs().maxCoeff());
+            info.inf_dual_res = std::max(info.inf_dual_res, n->dense().jac_[__u].cwiseAbs().maxCoeff());
             info.inf_comp_res = std::max(info.inf_comp_res, n->inf_comp_res_);
         }
         graph_.apply_all_binary_forward<false, true>([&info](node_data *cur, node_data *next) {
             if (next != nullptr) [[likely]] {
                 // cancellation of jacobian from y to x
                 static row_vector tmp;
-                tmp.conservativeResize(next->dense_->jac_[__x].cols());
-                tmp.noalias() = next->dense_->jac_[__x] * permutation_from_y_to_x(cur->prob_, next->prob_) + cur->dense_->jac_[__y];
+                tmp.conservativeResize(next->dense().jac_[__x].cols());
+                tmp.noalias() = next->dense().jac_[__x] *
+                                    utils::permutation_from_y_to_x(&cur->problem(), &next->problem()) +
+                                cur->dense().jac_[__y];
                 info.inf_dual_res = std::max(info.inf_dual_res, tmp.cwiseAbs().maxCoeff());
             } else /// @todo: include initial jac[__x] inf norm if init is optimized
-                info.inf_dual_res = std::max(info.inf_dual_res, cur->dense_->jac_[__y].cwiseAbs().maxCoeff());
+                info.inf_dual_res = std::max(info.inf_dual_res, cur->dense().jac_[__y].cwiseAbs().maxCoeff());
         });
         // print statistics
         scalar_t stats[] = {info.objective, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res,

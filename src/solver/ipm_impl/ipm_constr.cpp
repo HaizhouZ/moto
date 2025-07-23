@@ -47,7 +47,7 @@ void ipm_constr::update_linesearch_config(ipm::data_map_t &data, workspace_data 
     auto &d = data.as<ipm_data>();
     auto &ls_cfg = cfg->as<solver::linesearch_config>();
     // compute alpha_max
-    for (size_t idx : range(dim_)) {
+    for (size_t idx : range(dim())) {
         if (d.d_slack_(idx) < 0) {
             alpha_max = (-tau) * d.slack_(idx) / d.d_slack_(idx);
             ls_cfg.primal.clip(alpha_max);
@@ -71,7 +71,7 @@ void ipm_constr::finalize_predictor_step(ipm::data_map_t &data, workspace_data *
     assert(d.ipm_cfg->ipm_computing_affine_step() &&
            "ipm affine step computation not started but affine step is requested");
     // if we are in the affine step mode, we need to update the ipm worker data
-    ipm_worker.n_ipm_cstr += dim_;
+    ipm_worker.n_ipm_cstr += dim();
     ipm_worker.prev_aff_comp += d.multiplier_.dot(d.slack_);
     // finalize the affine step
     d.d_multipler_.array() *= ls_cfg.alpha_dual;
@@ -126,8 +126,8 @@ void ipm_constr::propagate_jacobian(ipm_data &d) const {
             if (d.jac_modification_[j_idx].hasNaN()) {
                 fmt::print("--------------------\n");
                 fmt::print("constraint name: {}\n", d.func_.name());
-                for (auto &arg : d.func_.in_args()) {
-                    fmt::print("arg: {}: {}\n", arg->name(), d[arg].transpose());
+                for (sym &arg : d.func_.in_args()) {
+                    fmt::print("arg: {}: {}\n", arg.name(), d[arg].transpose());
                 }
                 fmt::print("jac: \n{:.3}\n", j);
                 fmt::print("slack: {:.3}\n", d.slack_.transpose());

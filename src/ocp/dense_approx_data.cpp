@@ -1,8 +1,9 @@
 #include <moto/ocp/impl/dense_approx_data.hpp>
+#include <moto/ocp/problem.hpp>
 
 namespace moto {
 
-dense_approx_data::dense_approx_data(const ocp_ptr_t &prob) : prob_(prob) {
+dense_approx_data::dense_approx_data(ocp *prob) : prob_(prob) {
     for (auto i : range_n(__dyn, field::num_constr)) {
         if (prob_->exprs(i).empty()) {
             continue;

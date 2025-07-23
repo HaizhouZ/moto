@@ -1,6 +1,7 @@
 #include <Eigen/Eigenvalues>
 #include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
+#include <moto/utils/field_conversion.hpp>
 
 namespace moto {
 namespace solver {
@@ -72,7 +73,7 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
     // update value function derivatives of previous node
     if (prev != nullptr) [[likely]] {
         auto &d_pre = *prev;
-        auto &perm = permutation_from_y_to_x(prev->prob_, cur->prob_);
+        auto &perm = utils::permutation_from_y_to_x(prev->dense_->prob_, cur->dense_->prob_);
         d.Q_x *= perm;
         d.Q_xx *= perm;
         d.Q_xx.applyOnTheLeft(perm.transpose());
@@ -90,7 +91,7 @@ void riccati_recursion_correction(ns_node_data *cur, ns_node_data *prev) {
     d.Q_x.noalias() = -d.Q_y * nsp.F_0_K + nsp.z_u_k.transpose() * d.d_u.K;
     if (prev != nullptr) [[likely]] {
         auto &d_pre = *prev;
-        auto &perm = permutation_from_y_to_x(prev->prob_, cur->prob_);
+        auto &perm = utils::permutation_from_y_to_x(prev->dense_->prob_, cur->dense_->prob_);
         d.Q_x *= perm;
         d_pre.Q_y += d.Q_x;
     }

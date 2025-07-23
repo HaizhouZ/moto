@@ -55,7 +55,7 @@ list(APPEND MOTO_DEP_LIBS
 
 include(cmake/subObjectHelpers.cmake)
 
-file(GLOB_RECURSE SRC_FILES src/*.cpp)
+file(GLOB_RECURSE SRC_FILES src/*.cpp)#core/*.cpp  src/ocp/*.cpp src/utils/*.cpp)# src/solver/*.cpp
 add_library(${PROJECT_NAME} SHARED ${SRC_FILES})
 target_add_deps(${PROJECT_NAME})
 
@@ -63,4 +63,4 @@ include(cmake/installHelpers.cmake)
 
 add_subdirectory(example)
 # add_subdirectory(bindings)
-# add_subdirectory(unittests)
+add_subdirectory(unittests)

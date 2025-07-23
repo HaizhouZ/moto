@@ -1,7 +1,13 @@
 #include <moto/ocp/impl/func.hpp>
 #include <moto/ocp/impl/func_data.hpp>
+#include <moto/ocp/problem.hpp>
 
 namespace moto {
+void sym::finalize_impl() {
+    if (field() == __y) {
+        assert(dual_ != nullptr && "dual pointer should not be null when field == __y");
+    }
+}
 func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, const func &f)
     : func_(f), shared_(shared), sym_uid_idx_(f.sym_uid_idx_) {
     auto &in_args = f.in_args();
@@ -20,9 +26,9 @@ func_approx_map::func_approx_map(sym_data &primal,
     : func_arg_map(primal, shared, f),
       v_(f.field() == __cost
              ? vector_ref(mapped_vector(&raw.cost_, 1))
-             : raw.approx_[f.field()].v_.segment(raw.prob_->get_expr_start(&f), f.dim())) {
+             : raw.approx_[f.field()].v_.segment(raw.prob_->get_expr_start(f), f.dim())) {
     auto &in_args = f.in_args();
-    size_t f_st = raw.prob_->get_expr_start(&f);
+    size_t f_st = raw.prob_->get_expr_start(f);
     // for non-cost
     if (f.field() - __dyn < field::num_constr) {
         if (f.order() >= approx_order::first) {

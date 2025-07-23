@@ -22,7 +22,8 @@ class soft_constr : public constr {
     struct approx_map : public base::approx_map {
         std::vector<vector_ref> prim_step_;            // to be set
         std::vector<row_vector_ref> jac_modification_; ///< merit jacobian modification
-        approx_map(dense_approx_data &raw, base::approx_map &&rhs) : base::approx_map(std::move(rhs)) {
+        using map_base = base::approx_map;
+        approx_map(dense_approx_data &raw, map_base &&rhs) : map_base(std::move(rhs)) {
             map_merit_jac_from_raw(raw.jac_modification_, jac_modification_);
         }
     };

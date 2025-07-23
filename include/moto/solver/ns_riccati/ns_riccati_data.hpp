@@ -2,6 +2,7 @@
 #define __NS_RICCATI_DATA__
 
 #include <moto/solver/data_base.hpp>
+#include <moto/utils/movable_ptr.hpp>
 
 namespace moto {
 namespace solver {
@@ -18,7 +19,7 @@ struct ns_node_data : public data_base {
     size_t ns, nc, ncstr;
     size_t nz;
 
-    nullspace_data *nsp_;
+    movable_ptr<nullspace_data> nsp_;
 
     rank_status rank_status_;
     // sensitivity for sqp step
@@ -31,8 +32,10 @@ struct ns_node_data : public data_base {
     vector d_lbd_f, d_lbd_s_c_pre_solve, d_lbd_s_c;
 
     array_type<vector, hard_constr_fields> dual_step; // dual rollout
-
-    ns_node_data(const ocp_ptr_t &prob);
+    
+    ns_node_data(sym_data *, dense_approx_data *);
+    ns_node_data(const ns_node_data &rhs) = delete;
+    ns_node_data(ns_node_data &&rhs) = default;
     ~ns_node_data();
 };
 } // namespace ns_riccati

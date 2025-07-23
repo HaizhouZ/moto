@@ -1,7 +1,22 @@
 #include <moto/ocp/impl/custom_func.hpp>
 #include <moto/ocp/impl/data_mgr.hpp>
 namespace moto {
-
+sym_data::sym_data(ocp *prob) : prob_(prob) {
+    for (size_t i = 0; i < field::num_sym; i++) {
+        value_[i].resize(prob_->dim(i));
+        value_[i].setZero();
+    }
+    for (const auto &v : prob_->exprs(__usr_var)) {
+        usr_value_[v->uid()] = vector(prob_->dim(__usr_var));
+        usr_value_[v->uid()].setZero();
+    }
+}
+vector_ref sym_data::get(const sym &s) {
+    if (s.field() == __usr_var)
+        return usr_value_.at(s.uid());
+    else
+        return prob_->extract(value_.at(s.field()), s);
+}
 /**
  * @brief for loop shortcut for funcs (dyn,cost,constr...)
  *
@@ -20,7 +35,10 @@ inline void for_each_func(const ocp_ptr_t &prob, Callback &&callback) {
 }
 
 node_data::node_data(const ocp_ptr_t &prob)
-    : prob_(prob), sym_(new sym_data(prob)), dense_(new dense_approx_data(prob)), shared_(new shared_data(prob, *sym_)) {
+    : prob_(prob),
+      sym_(new sym_data(prob.get())), 
+      dense_(new dense_approx_data(prob.get())), 
+      shared_(new shared_data(prob.get(), sym_.get())) {
     for_each_func(prob, [&]([[maybe_unused]] size_t idx, const func &_f) {
         sparse_[_f.field()].push_back(_f.create_approx_map(*sym_, *dense_, *shared_));
     });
@@ -42,7 +60,7 @@ void node_data::update_approximation(bool eval_only) {
     }
     for (const auto &expr : prob_->exprs(__pre_comp)) {
         auto &f = static_cast<const custom_func &>(*expr);
-        f.custom_call((*shared_)[f]);
+        f.custom_call()((*shared_)[f]);
     }
     for_each_func(prob_,
                   [this, eval_only](size_t idx, const func &_f) {
@@ -64,19 +82,6 @@ void node_data::update_approximation(bool eval_only) {
     }
     dense_->merit_ += dense_->cost_;
 }
-
-void node_data::merge_jacobian_modification() {
-    for (const auto &field : primal_fields) {
-        dense_->jac_[field] += dense_->jac_modification_[field];
-    }
-}
-
-void node_data::swap_jacobian_modification() {
-    for (const auto &field : primal_fields) {
-        dense_->jac_[field].swap(dense_->jac_modification_[field]);
-    }
-}
-
 namespace impl {
 void data_mgr::create_data_batch(const ocp_ptr_t &prob, size_t N) {
     data_.try_emplace(prob->uid());
@@ -113,7 +118,7 @@ node_data *data_mgr::acquire(const node_data *rhs) {
 }
 
 void data_mgr::release(node_data *data) {
-    auto &pool = data_[data->sym_->prob_->uid()];
+    auto &pool = data_[data->prob_->uid()];
     std::lock_guard _lock(pool.mtx_);
     pool.emplace(data);
 }

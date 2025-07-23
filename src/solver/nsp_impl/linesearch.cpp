@@ -1,5 +1,6 @@
 #include <moto/solver/linesearch_config.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
+#include <moto/ocp/impl/sym_data.hpp>
 
 namespace moto {
 namespace solver {

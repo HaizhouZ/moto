@@ -1,16 +1,18 @@
 #ifndef MOTO_SOLVER_INEQ_SOFT_SOLVE_HPP
 #define MOTO_SOLVER_INEQ_SOFT_SOLVE_HPP
 
+#include <moto/ocp/impl/node_data.hpp>
 #include <moto/ocp/soft_constr.hpp>
 #include <moto/solver/data_base.hpp>
 
 namespace moto {
+class node_data; // forward declaration
 namespace solver {
 namespace ineq_soft {
 using soft_constr = soft_constr;
 using soft_constr_data_t = soft_constr::data_map_t;
 template <typename Callback>
-void for_each(data_base *data, Callback &&callback) {
+void for_each(node_data *data, Callback &&callback) {
     data->for_each<ineq_soft_constr_fields>(
         [&](auto &f, auto &d) {
             auto &sf = static_cast<const soft_constr &>(f);
@@ -18,40 +20,40 @@ void for_each(data_base *data, Callback &&callback) {
             callback(sf, sd);
         });
 }
-template <typename Callback>
+template <typename node_type, typename Callback>
 auto for_each(Callback &&callback) {
-    return [callback = std::forward<Callback>(callback)](data_base *data) {
+    return [callback = std::forward<Callback>(callback)](node_type *data) {
         for_each(data, callback);
     };
 }
-void initialize(data_base *data);
+void initialize(node_data *data);
 /**
  * @brief finalize the newton step for the soft constraints
  * @details it will call finalize_newton_step on each soft constraint
  * @param data data base
  */
-void finalize_newton_step(data_base *data);
+void finalize_newton_step(node_data *data);
 /**
  * @brief finalize the predictor step, should be called after the rollout (@ref finalize_newton_step)
  * @details it will call finalize_predictor_step on each soft constraint
  * @param data data base
  * @param config workspace data pointer to the config to be updated
  */
-void finalize_predictor_step(data_base *data, workspace_data *config);
+void finalize_predictor_step(node_data *data, workspace_data *config);
 /**
  * @brief line search step for the soft constraints
  * @details it will call line_search_step on each soft constraint
  * @param data data base
  * @param config workspace data pointer (should contain linesearch config) to the config to be used
  */
-void line_search_step(data_base *data, workspace_data *config);
+void line_search_step(node_data *data, workspace_data *config);
 /**
  * @brief calculate the line search bounds for the soft constraints
  * @details it will call update_linesearch_config on each soft constraint
  * @param data data base
  * @param config workspace data pointer to the config to be updated
  */
-void calculate_line_search_bounds(data_base *data, workspace_data *config);
+void calculate_line_search_bounds(node_data *data, workspace_data *config);
 /**
  * @brief prepare for the first-order primal correction and call to correct_jacobian on each soft constraint
  * @details it will set prim_corr[__x] to zero and swap merit jacobian and its modifcation (as a pre-correction cache),

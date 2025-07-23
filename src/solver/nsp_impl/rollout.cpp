@@ -1,5 +1,6 @@
 #include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
+#include <moto/utils/field_conversion.hpp>
 
 namespace moto {
 namespace solver {
@@ -9,7 +10,7 @@ void fwd_linear_rollout(ns_node_data *cur, ns_node_data *next) {
     auto &d = *cur;
     d.prim_step[__y].noalias() = d.d_y.k + d.d_y.K * d.prim_step[__x];
     if (next != nullptr) [[likely]] {
-        copy_y_to_x(d.prim_step[__y], next->prim_step[__x], d.prob_, next->prob_);
+        utils::copy_y_to_x(d.prim_step[__y], next->prim_step[__x], cur->dense_->prob_, next->dense_->prob_);
     }
 }
 void finalize_dual_newton_step(ns_node_data *cur) {
@@ -58,7 +59,7 @@ void fwd_linear_rollout_correction(ns_node_data *cur, ns_node_data *next) {
     auto &d = *cur;
     d.prim_corr[__y].noalias() = d.d_y.k + d.d_y.K * d.prim_corr[__x];
     if (next != nullptr) [[likely]] {
-        copy_y_to_x(d.prim_corr[__y], next->prim_corr[__x], d.prob_, next->prob_);
+        utils::copy_y_to_x(d.prim_corr[__y], next->prim_corr[__x], cur->dense_->prob_, next->dense_->prob_);
     }
 }
 void finalize_newton_step_correction(ns_node_data *cur) {

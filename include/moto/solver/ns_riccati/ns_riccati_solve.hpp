@@ -2,16 +2,11 @@
 #define __NS_RICCATI_SOLVER__
 
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
+#include <moto/core/workspace_data.hpp>
 
 namespace moto {
 namespace solver {
 namespace ns_riccati {
-/**
- * @brief update the approximation of the node data
- * @note will start from reset Q-derivatives to zero
- * @param cur current node data
- */
-void update_approx(ns_node_data *cur);
 /**
  * @brief factorization for the nullspace kernel using the hard constraints
  * @details will directly add related parts to the Q-derivatives

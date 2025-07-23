@@ -6,11 +6,6 @@ namespace moto {
 namespace solver {
 namespace ns_riccati {
 
-void update_approx(ns_node_data *cur) {
-    // update everything
-    cur->update_approximation();
-}
-
 void ns_factorization(ns_node_data *cur) {
     // collect constraint residuals and jacobians
     auto &d = *cur;
@@ -26,10 +21,8 @@ void ns_factorization(ns_node_data *cur) {
     cur->merge_jacobian_modification();
     d.Q_x.noalias() += -nsp.F_0_k.transpose() * d.Q_yx;
     if (nsp.F_0_K.array().isNaN().any() || d.Q_xx.array().isNaN().any()) {
-        std::cerr << "F_0_K:\n"
-                  << nsp.F_0_K << "\n";
-        std::cerr << "Q_xx:\n"
-                  << d.Q_xx << "\n";
+        fmt::print("F_0_K:{}\n", nsp.F_0_K);
+        fmt::print("Q_xx:{}\n", d.Q_xx);
         throw std::runtime_error("NaN detected in F_0_K or Q_xx");
     }
     d.Q_xx.noalias() += -(d.Q_yx.transpose() * nsp.F_0_K + nsp.F_0_K.transpose() * d.Q_yx);

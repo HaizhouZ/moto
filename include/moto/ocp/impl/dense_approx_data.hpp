@@ -1,18 +1,19 @@
 #ifndef MOTO_OCP_PROBLEM_DATA_HPP
 #define MOTO_OCP_PROBLEM_DATA_HPP
 
+#include <moto/core/fields.hpp>
 #include <moto/core/array.hpp>
-#include <moto/ocp/problem.hpp>
 
 namespace moto {
+class ocp;
 /**
  * @brief dense raw approximation data
  * deserialized data storage of all function fields
  */
 struct dense_approx_data {
-    dense_approx_data(const ocp_ptr_t &prob);
+    dense_approx_data(ocp *prob);
 
-    ocp_ptr_t prob_;
+    ocp *prob_;
     struct raw_approx {
         vector v_;                           ///< dense value
         array<matrix, field::num_prim> jac_; ///< dense jacobian

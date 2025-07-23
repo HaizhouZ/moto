@@ -8,11 +8,11 @@
 
 namespace moto {
 class constr;
-def_raw_ptr(constr);
+
 /**
  * @brief constraint approximation with multipliers (and slack variables)
  */
-class constr : public func_derived<constr> {
+class constr : public func {
   public:
     /**
      * @brief constraint approximation map
@@ -49,7 +49,7 @@ class constr : public func_derived<constr> {
     struct approx_data {
         vector v_data_;                ///< value data for the independent constraint
         std::vector<matrix> jac_data_; ///< jacobian data for the independent constraint
-        const func &f_;                      ///< reference to the function
+        const func &f_;                ///< reference to the function
         approx_data(const func &f);
     };
     /**
@@ -73,6 +73,13 @@ class constr : public func_derived<constr> {
     template <typename derived = constr>
     using data_type = constr_data_tpl<typename derived::approx_map, typename derived::approx_data>;
 
+  private:
+    /// @brief type hint for the constraint
+    struct field_hint {
+        utils::optional_bool is_eq; ///< true if equality constraint, false if inequality constraint, default is unset
+        bool is_soft = false;       ///< true if soft constraint, false if hard constraint, default is false
+    } field_hint_;                  ///< type hint for the constraint
+
   protected:
     /// @brief evaluate the value of the constraint for merit
     void value_impl(func_approx_map &data) const override;
@@ -81,21 +88,14 @@ class constr : public func_derived<constr> {
     /// @brief finalize the constraint, will be called upon added to a problem
     /// @note will set the field (if unset) based on the field hint and substitute __x to __y for pure-state constraints
     void finalize_impl() override;
-    using base::base;
 
   public:
+    using base = func;
+    using base::base; ///< inherit constructor from func
     void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const override {
         data.as<approx_map>().ls_cfg = &ws_data->as<solver::linesearch_config>();
     }
-    /**
-     * @brief type hint for the constraint
-     *
-     */
-    struct field_hint {
-        utils::optional_bool is_eq; ///< true if equality constraint, false if inequality constraint, default is unset
-        bool is_soft = false;       ///< true if soft constraint, false if hard constraint, default is false
-    } field_hint_;                  ///< type hint for the constraint
-
+    SHARED_ATTR_GETTER(field_hint, constr); ///< getter for field hint
     /**
      * @brief make an approximation data for the constraint
      * @tparam derived derived type of @ref constr, default is constr
@@ -133,7 +133,7 @@ class constr : public func_derived<constr> {
      * @return func_approx_map_ptr_t
      */
     func_approx_map_ptr_t create_approx_map(sym_data &primal, dense_approx_data &raw, shared_data &shared) const override {
-        if (in_field(field_, dense_approx_data::stored_constr_fields))
+        if (in_field(field(), dense_approx_data::stored_constr_fields))
             return func_approx_map_ptr_t(new approx_map(raw, func_approx_map(primal, raw, shared, *this)));
         else
             return func_approx_map_ptr_t(make_approx(primal, raw, shared));
