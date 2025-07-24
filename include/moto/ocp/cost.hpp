@@ -16,6 +16,7 @@ class cost : public func {
         } finalize_hint_;
 
         using func::impl::impl; ///< inherit constructor from func::impl
+        impl(func::impl &&rhs) : func::impl(std::move(rhs)) {}
     };
 
     DEF_PROTECTED_SHARED_GETTER();
@@ -33,7 +34,7 @@ class cost : public func {
     cost(const std::string &name, sym_init_list in_args, const cs::SX &out, approx_order order = approx_order::second)
         : base(name, in_args, out, order, __cost) {
         assert(out.is_scalar() && "cost output must be a scalar");
-        shared_ = std::make_shared<impl>(std::move(*shared_));
+        shared_.reset(new impl(std::move(static_cast<base::impl&>(*shared_))));
     }
     cost &as_terminal() {
         name() += "_terminal";

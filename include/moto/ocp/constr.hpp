@@ -78,7 +78,8 @@ class constr : public func {
             bool is_soft = false;       ///< true if soft constraint, false if hard constraint, default is false
         } field_hint_;                  ///< type hint for the constraint
 
-        using func::impl::impl; ///< inherit constructor from func::impl
+        using func::impl::impl;                                ///< inherit constructors from func::impl
+        impl(func::impl &&rhs) : func::impl(std::move(rhs)) {} ///< move constructor from func::impl
     };
 
   protected:
@@ -90,19 +91,18 @@ class constr : public func {
     /// @note will set the field (if unset) based on the field hint and substitute __x to __y for pure-state constraints
     void finalize_impl() override;
 
-    template <typename derived = constr>
-    using data_type = constr_data_tpl<typename derived::approx_map, typename derived::approx_data>;
-
     DEF_PROTECTED_SHARED_GETTER();
 
   public:
+    template <typename derived = constr>
+    using data_type = constr_data_tpl<typename derived::approx_map, typename derived::approx_data>;
     using base = func;
     constr() = default; ///< default constructor
 
     constr(const std::string &name, approx_order order = approx_order::first,
            size_t dim = dim_tbd, field_t field = __undefined)
         : base(name, order, dim, field) {
-        shared_.reset(new impl(std::move(static_cast<base::impl&>(*shared_))));
+        shared_.reset(new impl(std::move(static_cast<base::impl &>(*shared_))));
     } ///< constructor with name, order, dimension and field
 
     constr(const std::string &name,
@@ -110,7 +110,7 @@ class constr : public func {
            const cs::SX &out,
            approx_order order = approx_order::first, field_t field = __undefined)
         : base(name, in_args, out, order, field) {
-        shared_.reset(new impl(std::move(static_cast<base::impl&>(*shared_))));
+        shared_.reset(new impl(std::move(static_cast<base::impl &>(*shared_))));
     } ///< constructor with name, input arguments, output expression, order and field
 
     void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const override {
@@ -165,39 +165,29 @@ class constr : public func {
      * @param soft if true, set as soft equality constraint
      * @return constr& *this
      */
-    // template <typename derived_impl = expr_type>
-    //     requires(std::derived_from<derived_impl, expr_type>)
-    // constr &as_eq(bool soft = false) {
-    //     if (soft == true) {
-    //         if (!std::derived_from<derived_impl, impl::soft_constr>) {
-    //             throw std::runtime_error("as_eq(true) requires derived_impl to be soft_impl::expr_type");
-    //         }
-    //     }
-    //     if constexpr (!std::is_same_v<derived_impl, expr_type>) {
-    //         if (dynamic_cast<derived_impl *>(this->get()) == nullptr) { // check if the type is the same
-    //             this->reset(new derived_impl(std::move(**this)));
-    //         }
-    //     }
-    //     // setup hints
-    //     if (soft)
-    //         (*this)->field_hint_.is_soft = true;
-    //     (*this)->field_hint_.is_eq = true;
-    //     return *this;
-    // }
-    // /**
-    //  * @brief set the constraint as inequality constraint
-    //  *
-    //  * @return constr& *this
-    //  */
-    // template <typename derived_impl>
-    //     requires(std::derived_from<derived_impl, impl::ineq_constr>)
-    // constr &as_ineq() {
-    //     if (dynamic_cast<derived_impl *>(this->get()) == nullptr) { // check if the type is the same
-    //         this->reset(new derived_impl(std::move(**this)));
-    //     }
-    //     (*this)->field_hint_.is_eq = false;
-    //     return *this;
-    // }
+    template <typename derived = constr>
+        requires(std::derived_from<derived, constr>)
+    auto as_eq(bool soft = false) {
+        field_hint().is_eq = true;
+        field_hint().is_soft = soft;
+        if constexpr (!std::is_same_v<derived, constr>) {
+            auto tmp = cast<derived, constr>();
+            return tmp;
+        } else
+            return *this;
+    }
+    /**
+     * @brief set the constraint as inequality constraint
+     *
+     * @return constr& *this
+     */
+    template <typename derived>
+        requires(std::derived_from<derived, constr>)
+    auto as_ineq() {
+        shared().field_hint_.is_eq = false;
+        auto tmp = cast<derived, constr>();
+        return tmp;
+    }
 };
 } // namespace moto
 

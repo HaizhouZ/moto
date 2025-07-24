@@ -40,7 +40,8 @@ node_data::node_data(const ocp_ptr_t &prob)
       dense_(new dense_approx_data(prob.get())), 
       shared_(new shared_data(prob.get(), sym_.get())) {
     for_each_func(prob, [&]([[maybe_unused]] size_t idx, const func &_f) {
-        sparse_[_f.field()].push_back(_f.create_approx_map(*sym_, *dense_, *shared_));
+        auto p = _f.create_approx_map(*sym_, *dense_, *shared_);
+        sparse_[_f.field()].push_back(std::move(p));
     });
 }
 void node_data::update_approximation(bool eval_only) {

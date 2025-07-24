@@ -14,10 +14,9 @@ struct ns_sqp {
     } settings;
     // using node_base = ;
     using ns_node_data = solver::ns_riccati::ns_node_data;
-    struct data : public composed_data<node_data, ns_node_data> {
-        using base = composed_data<node_data, ns_node_data>;
+    struct data : public node_data, ns_node_data {
         data(const ocp_ptr_t &prob)
-            : base(node_data(prob), ns_node_data(node_data::sym_.get(), node_data::dense_.get())) {}
+            : node_data(prob), ns_node_data(&sym_val(), &dense()) {}
         data(data &&rhs) = default;
         static void update_approx(data *d) {
             d->update_approximation();

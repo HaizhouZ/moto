@@ -21,6 +21,8 @@ class func : public expr {
         struct gen_info {
             cs::SX out_;
             std::future<void> res_;
+            gen_info() = default; ///< default constructor
+            gen_info(gen_info &&) = default;
             gen_info &operator=(const gen_info &rhs) {
                 out_ = rhs.out_;
                 return *this;
@@ -39,10 +41,10 @@ class func : public expr {
         /// @brief callback to evaluate the hessian of the approximation
         std::function<void(func_approx_map &)> hessian_;
 
-        impl() = default; ///< default constructor
-        impl(expr::impl &&rhs)
+        impl() = default;           ///< default constructor
+        impl(impl &&rhs) = default; ///< move constructor
+        explicit impl(expr::impl &&rhs)
             : expr::impl(std::move(rhs)), order_(approx_order::first) {}
-        impl(impl &&rhs) = default;                 ///< move constructor
         impl &operator=(const impl &rhs) = default; ///< copy assignment operator
         /**
          * @brief substitute the input argument with another symbol
@@ -87,7 +89,7 @@ class func : public expr {
     }
 
     void add_arguments(sym_init_list args) {
-        for (auto in : args) {
+        for (auto &in : args) {
             add_argument(in);
         }
     }
@@ -164,7 +166,7 @@ class func : public expr {
     func(const std::string &name, approx_order order = approx_order::first,
          size_t dim = dim_tbd, field_t field = __undefined)
         : expr(name, dim, field) {
-        shared_ = std::make_shared<impl>(std::move(*shared_));
+        shared_.reset(new impl(std::move(*shared_)));
         shared().order_ = order;
     }
 

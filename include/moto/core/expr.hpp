@@ -121,7 +121,7 @@ class expr {
         dep_->emplace_back(std::forward<T>(e));
     }
 
-    operator bool() const { return uid() < uid_max; }
+    explicit operator bool() const { return uid() < uid_max; }
 
     expr() = default; // default constructor for derived classes
     /**

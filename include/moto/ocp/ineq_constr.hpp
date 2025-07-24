@@ -31,6 +31,7 @@ class ineq_constr : public soft_constr {
 
   public:
     using base::base;
+    // ineq_constr(constr &&rhs) : base(std::move(rhs)) { field_hint().is_eq = false; }
     /***
      * @brief make approximation data for the inequality constraint, will use default @ref data_type
      */

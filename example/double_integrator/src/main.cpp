@@ -10,10 +10,10 @@ using namespace moto;
 int main() {
     doubleIntegratorDyn dyn;
     doubleIntegratorCosts costs;
-    auto prob = ocp::make();
+    auto prob = ocp::create();
     prob->add(dyn);
     prob->add(costs.running(dyn.r, dyn.v, dyn.a));
-    auto prob_terminal = prob->copy();
+    auto prob_terminal = prob->clone();
     prob_terminal->add(costs.terminal(dyn.r_next, dyn.v_next));
 
     utils::print_problem(prob);

@@ -37,8 +37,9 @@ class soft_constr : public constr {
     void finalize_impl() override;
 
   public:
-    using base::base;                                 ///< inherit constructors
-    soft_constr(base &&rhs) : base(std::move(rhs)) {} ///< move constructor from base class
+    using base::base; ///< inherit constructors
+
+    // soft_constr(base &&rhs) : base(std::move(rhs)) { field_hint().is_soft = true; } ///< move constructor from constr
     /***
      * @brief make approximation data for the soft constraint, will use default @ref data_type
      */

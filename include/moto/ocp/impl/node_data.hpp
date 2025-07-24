@@ -70,9 +70,10 @@ struct node_data {
     void for_each(Callback &&callback) {
         for (const auto &field : fields) {
             size_t idx = 0;
-            auto &d = sparse_[field];
+            auto &s = this->sparse_[field];
             for (const func &f : prob_->exprs(field)) {
-                callback(f, *d[idx]);
+                callback(f, *s[idx]);
+                idx++;
             }
         }
     }
