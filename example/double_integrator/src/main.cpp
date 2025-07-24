@@ -17,6 +17,7 @@ int main() {
     prob_terminal->add(costs.terminal(dyn.r_next, dyn.v_next));
 
     utils::print_problem(prob);
+    utils::print_problem(prob_terminal);
 
     fmt::print("good!\n");
 

@@ -58,7 +58,7 @@ class func : public expr {
 
     virtual void load_external_impl(const std::string &path = "gen");
 
-    DEF_PROTECTED_SHARED_GETTER();
+    DEF_IMPL_GETTER();
 
     /**
      * @brief finalize the function
@@ -66,20 +66,20 @@ class func : public expr {
      */
     virtual void finalize_impl();
     ///@brief callback to evaluate (the residual) of the function, call to value_ by default
-    virtual void value_impl([[maybe_unused]] func_approx_map &data) const { shared().value_(data); };
+    virtual void value_impl([[maybe_unused]] func_approx_map &data) const { get_impl().value_(data); };
     ///@brief callback to evaluate jacobian of the function, call to jacobian_ by default
-    virtual void jacobian_impl([[maybe_unused]] func_approx_map &data) const { shared().jacobian_(data); };
+    virtual void jacobian_impl([[maybe_unused]] func_approx_map &data) const { get_impl().jacobian_(data); };
     ///@brief callback to evaluate hessian of the function, call to hessian_ by default
-    virtual void hessian_impl([[maybe_unused]] func_approx_map &data) const { shared().hessian_(data); };
+    virtual void hessian_impl([[maybe_unused]] func_approx_map &data) const { get_impl().hessian_(data); };
 
   public:
     template <typename T>
         requires std::is_same_v<sym, std::remove_cvref_t<T>>
     void add_argument(T &&in) {
-        auto &_in_args = shared().in_args_;
+        auto &_in_args = get_impl().in_args_;
         _in_args.emplace_back(std::forward<T>(in));
         add_dep(_in_args.back());
-        shared().sym_uid_idx_[_in_args.back().uid()] = shared().sym_uid_idx_.size();
+        get_impl().sym_uid_idx_[_in_args.back().uid()] = get_impl().sym_uid_idx_.size();
     }
 
     void add_arguments(const sym_list &args) {
@@ -102,13 +102,13 @@ class func : public expr {
     void set_from_casadi(sym_init_list in_args, const cs::SX &out);
 
     /// @brief get input argument values
-    SHARED_ATTR_GETTER(in_args, func);
+    IMPL_ATTR_GETTER(in_args, func);
     /// @brief get input argument by index
-    const auto &in_args(size_t i) const { return shared().in_args_[i]; }
+    const auto &in_args(size_t i) const { return get_impl().in_args_[i]; }
     /// @brief get approximation order
-    SHARED_ATTR_GETTER(order, func);
+    IMPL_ATTR_GETTER(order, func);
 
-    SHARED_ATTR_GETTER(sym_uid_idx, func); ///< getter for sym_uid_idx
+    IMPL_ATTR_GETTER(sym_uid_idx, func); ///< getter for sym_uid_idx
     /// @brief order of approximation
     /**
      * @brief set up workspace data for the function
@@ -166,8 +166,8 @@ class func : public expr {
     func(const std::string &name, approx_order order = approx_order::first,
          size_t dim = dim_tbd, field_t field = __undefined)
         : expr(name, dim, field) {
-        shared_.reset(new impl(std::move(*shared_)));
-        shared().order_ = order;
+        impl_.reset(new impl(std::move(*impl_)));
+        get_impl().order_ = order;
     }
 
     /**
@@ -190,9 +190,9 @@ class func : public expr {
 
     func() = default;
 
-    SHARED_ATTR_GETTER(value, func);
-    SHARED_ATTR_GETTER(jacobian, func);
-    SHARED_ATTR_GETTER(hessian, func);
+    IMPL_ATTR_GETTER(value, func);
+    IMPL_ATTR_GETTER(jacobian, func);
+    IMPL_ATTR_GETTER(hessian, func);
 };
 /**
  * @brief Code generation helper for functions

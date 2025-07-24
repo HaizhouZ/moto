@@ -85,7 +85,7 @@ void register_submodule_node_data(nb::module_ &m) {
         .def_prop_ro("prob", [](node_data &self) -> auto & { return *self.prob_; })
         .def_prop_ro("sym", [](node_data &self) -> auto & { return *self.sym_; })
         .def_prop_ro("dense", [](node_data &self) -> auto & { return *self.dense_; })
-        .def_prop_ro("shared", [](node_data &self) -> auto & { return *self.shared_; })
+        .def_prop_ro("shared", [](node_data &self) -> auto & { return *self.impl_; })
         .def("value", nb::overload_cast<field_t>(&node_data::value, nb::const_), nb::arg("field"),
              "Get value of the whole field")
         .def("value", nb::overload_cast<const sym &>(&node_data::value, nb::const_), nb::arg("sym"),

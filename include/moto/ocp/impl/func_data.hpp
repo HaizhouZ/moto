@@ -65,7 +65,7 @@ struct func_arg_map {
 
     virtual ~func_arg_map() = default;
     const func &func_;    ///< pointer to the func
-    shared_data &shared_; ///< ref to shared data
+    shared_data &impl_; ///< ref to shared data
     /**
      * @brief get the input argument values
      * @note this is a wrapper of in_args_ to access the values
@@ -79,7 +79,7 @@ struct func_arg_map {
 
     const auto &in_arg_data() const { return in_args_; }
 
-    auto problem() const { return shared_.prob_; }
+    auto problem() const { return impl_.prob_; }
 
     // template <typename T>
     // T &as() { return dynamic_cast<T &>(*this); }

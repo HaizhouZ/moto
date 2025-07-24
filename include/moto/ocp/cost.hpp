@@ -19,22 +19,22 @@ class cost : public func {
         impl(func::impl &&rhs) : func::impl(std::move(rhs)) {}
     };
 
-    DEF_PROTECTED_SHARED_GETTER();
+    DEF_IMPL_GETTER();
 
   public:
     using base = func; ///< inherit constructor from func
 
-    SHARED_ATTR_GETTER(finalize_hint, cost); ///< getter for finalize_hint
+    IMPL_ATTR_GETTER(finalize_hint, cost); ///< getter for finalize_hint
 
     cost(const std::string &name, approx_order order = approx_order::second)
         : base(name, order, 1, __cost) {
-        shared_ = std::make_shared<impl>(std::move(*shared_));
+        impl_ = std::make_shared<impl>(std::move(*impl_));
     }
 
     cost(const std::string &name, sym_init_list in_args, const cs::SX &out, approx_order order = approx_order::second)
         : base(name, in_args, out, order, __cost) {
         assert(out.is_scalar() && "cost output must be a scalar");
-        shared_.reset(new impl(std::move(static_cast<base::impl&>(*shared_))));
+        impl_.reset(new impl(std::move(static_cast<base::impl&>(*impl_))));
     }
     cost &as_terminal() {
         name() += "_terminal";

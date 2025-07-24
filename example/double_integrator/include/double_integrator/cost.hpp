@@ -10,46 +10,54 @@ namespace moto {
  *
  */
 struct doubleIntegratorCosts {
-    struct state_cost : public cost {
-        vector d_r, d_v;
-        state_cost(sym r, sym v) : cost("dI_state_cost") {
-            d_r.resize(3);
-            d_r.setConstant(10);
-            d_v.resize(3);
-            d_v.setConstant(0.1);
-
-            add_arguments({r, v});
-            value() = [&](func_approx_map &data) {
-                data.v_.noalias() += 0.5 * d_r.transpose() * data[0].cwiseAbs2();
-                data.v_.noalias() += 0.5 * d_v.transpose() * data[1].cwiseAbs2();
-            };
-            jacobian() = [this](func_approx_map &data) { // make sure use +=
-                data.jac_[0].noalias() += data[0].transpose() * d_r.asDiagonal();
-                data.jac_[1].noalias() += data[1].transpose() * d_v.asDiagonal();
-            };
-            hessian() = [this](func_approx_map &data) {
-                data.hess_[0][0].diagonal() += d_r;
-                data.hess_[1][1].diagonal() += d_v;
-            };
-        }
-    };
-    struct input_cost : public cost {
-        vector d_a;
-        input_cost(sym a) : cost("dI_input_cost") {
-            d_a.resize(3);
-            d_a.setConstant(1e-3);
-            add_arguments({a});
-            value() = [&](func_approx_map &data) {
-                data.v_.noalias() += 0.5 * d_a.transpose() * data[0].cwiseAbs2();
-            };
-            jacobian() = [this](func_approx_map &data) { // make sure use +=
-                data.jac_[0].noalias() += data[0].transpose() * d_a.asDiagonal();
-            };
-            hessian() = [this](func_approx_map &data) {
-                data.hess_[0][0].diagonal() += d_a;
-            };
-        }
-    };
+    auto state_cost(sym r, sym v) {
+        struct impl : public cost::impl {
+            vector d_r = vector::Constant(3, 10);
+            vector d_v = vector::Constant(3, 0.1); ///< derivatives of the cost wrt r and v
+            using cost::impl::impl;                ///< inherit constructor from cost::impl
+            impl(sym r, sym v, cost::impl &&rhs) : cost::impl(std::move(rhs)) {
+                value_ = [=](func_approx_map &data) {
+                    data.v_.noalias() += 0.5 * d_r.transpose() * data[r].cwiseAbs2();
+                    data.v_.noalias() += 0.5 * d_v.transpose() * data[v].cwiseAbs2();
+                };
+                jacobian_ = [=](func_approx_map &data) { // make sure use +=
+                    data.jac_[0].noalias() += data[0].transpose() * d_r.asDiagonal();
+                    data.jac_[1].noalias() += data[1].transpose() * d_v.asDiagonal();
+                };
+                hessian_ = [=](func_approx_map &data) {
+                    data.hess_[0][0].diagonal() += d_r;
+                    data.hess_[1][1].diagonal() += d_v;
+                };
+            } ///< move constructor
+            ~impl() = default; ///< destructor
+        };
+        cost c("dI_state_cost");
+        c.add_arguments({r, v});
+        c.set_impl(new impl(r, v, std::move(c.get_impl())));
+        return c;
+    }
+    auto input_cost(sym a) {
+        struct impl : public cost::impl {
+            vector d_a = vector::Constant(3, 1e-3);
+            using cost::impl::impl;
+            impl(sym a, cost::impl &&rhs) : cost::impl(std::move(rhs)) {
+                value_ = [=](func_approx_map &data) {
+                    data.v_.noalias() += 0.5 * d_a.transpose() * data[a].cwiseAbs2();
+                };
+                jacobian_ = [=](func_approx_map &data) {
+                    data.jac_[0].noalias() += data[0].transpose() * d_a.asDiagonal();
+                };
+                hessian_ = [=](func_approx_map &data) {
+                    data.hess_[0][0].diagonal() += d_a;
+                };
+            }
+            ~impl() = default;
+        };
+        cost c("dI_input_cost");
+        c.add_arguments({a});
+        c.set_impl(new impl(a, std::move(c.get_impl())));
+        return c;
+    }
     expr_list running(sym r, sym v, sym a) {
         return {state_cost(r, v), input_cost(a)};
     }

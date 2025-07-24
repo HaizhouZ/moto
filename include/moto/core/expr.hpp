@@ -44,15 +44,15 @@ constexpr size_t dim_tbd = 0;
     auto &mem_name() { return mem_name##_; } \
     const auto &mem_name() const { return mem_name##_; }
 
-#define SHARED_ATTR_GETTER(mem_name, derived)                              \
-  public:                                                                  \
-    auto &mem_name() { return static_cast<impl &>(*shared_).mem_name##_; } \
-    const auto &mem_name() const { return static_cast<const impl &>(*shared_).mem_name##_; }
+#define IMPL_ATTR_GETTER(mem_name, derived)                              \
+  public:                                                                \
+    auto &mem_name() { return static_cast<impl &>(*impl_).mem_name##_; } \
+    const auto &mem_name() const { return static_cast<const impl &>(*impl_).mem_name##_; }
 
-#define DEF_PROTECTED_SHARED_GETTER()         \
-  protected:                                  \
-    auto &shared() const {                    \
-        return static_cast<impl &>(*shared_); \
+#define DEF_IMPL_GETTER()                   \
+  public:                                   \
+    auto &get_impl() const {                \
+        return static_cast<impl &>(*impl_); \
     } ///< get the shared pointer as impl
 
 #define INIT_UID_(type) size_t type::max_uid = 0;
@@ -90,15 +90,15 @@ class expr {
     };
     virtual void finalize_impl() {}
 
-    std::shared_ptr<expr::impl> shared_; ///< shared pointer to the expression, used for shared attributes
+    std::shared_ptr<expr::impl> impl_; ///< shared pointer to the expression, used for shared attributes
 
-    SHARED_ATTR_GETTER(name, expr);      ///< getter for name
-    SHARED_ATTR_GETTER(dim, expr);       ///< getter for dim
-    SHARED_ATTR_GETTER(uid, expr);       ///< getter for uid
-    SHARED_ATTR_GETTER(field, expr);     ///< getter for field
-    SHARED_ATTR_GETTER(finalized, expr); ///< getter for finalized
+    IMPL_ATTR_GETTER(name, expr);      ///< getter for name
+    IMPL_ATTR_GETTER(dim, expr);       ///< getter for dim
+    IMPL_ATTR_GETTER(uid, expr);       ///< getter for uid
+    IMPL_ATTR_GETTER(field, expr);     ///< getter for field
+    IMPL_ATTR_GETTER(finalized, expr); ///< getter for finalized
 
-    DEF_PROTECTED_SHARED_GETTER();
+    DEF_IMPL_GETTER();
 
   private:
     std::shared_ptr<expr_list> dep_; // cannot be in impl (avoid reference cycle)
@@ -132,16 +132,20 @@ class expr {
      * @param field
      */
     expr(const std::string &name, size_t dim, field_t field) {
-        shared_ = std::make_shared<impl>();
-        shared_->name_ = name;
-        shared_->dim_ = dim;
-        shared_->field_ = field;
-        shared_->uid_ = impl::max_uid++;
+        impl_ = std::make_shared<impl>();
+        impl_->name_ = name;
+        impl_->dim_ = dim;
+        impl_->field_ = field;
+        impl_->uid_ = impl::max_uid++;
     }
 
+    void set_impl(impl *impl) {
+        impl_.reset(impl);
+    } ///< set the implementation of the expression
+
     // expr(std::shared_ptr<impl> &&shared)
-    //     : shared_(std::move(shared)) {
-    //     assert(shared_ && "shared pointer cannot be null");
+    //     : impl_(std::move(shared)) {
+    //     assert(impl_ && "shared pointer cannot be null");
     // }
     /**
      * @brief make a const vector from a pointer
@@ -169,8 +173,8 @@ class expr {
         requires std::is_base_of_v<expr, derived>
     derived clone() const {
         derived tmp;
-        tmp.shared_.reset(new derived::impl());                                                    // create a new impl
-        static_cast<derived::impl &>(*tmp.shared_) = static_cast<const derived::impl &>(*shared_); // copy the shared impl
+        tmp.impl_.reset(new derived::impl());                                                  // create a new impl
+        static_cast<derived::impl &>(*tmp.impl_) = static_cast<const derived::impl &>(*impl_); // copy the shared impl
         if (dep_) {
             tmp.dep_.reset(new expr_list()); // create a new list
             *tmp.dep_ = *dep_;               // copy the dependencies
@@ -183,7 +187,7 @@ class expr {
     derived cast() {
         derived tmp;
 
-        tmp.shared_.reset(new derived::impl(static_cast<base::impl&&>(std::move(*shared_)))); // create a new impl
+        tmp.impl_.reset(new derived::impl(static_cast<base::impl &&>(std::move(*impl_)))); // create a new impl
 
         tmp.dep_ = std::move(dep_); // move the dependencies
         return tmp;

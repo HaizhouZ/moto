@@ -25,7 +25,7 @@ class sym : public expr, public cs::SX {
     };
 
     void finalize_impl() override;
-    DEF_PROTECTED_SHARED_GETTER();
+    DEF_IMPL_GETTER();
 
   public:
     using expr::dim;
@@ -41,16 +41,16 @@ class sym : public expr, public cs::SX {
      */
     sym(const std::string &name, size_t dim, field_t type) : expr(name, dim, type) {
         assert(size_t(type) <= field::num_sym || type == __usr_var);
-        shared_.reset(new impl(std::move(*shared_)));
-        static_cast<cs::SX &>(*this) = shared();
+        impl_.reset(new impl(std::move(*impl_)));
+        static_cast<cs::SX &>(*this) = get_impl();
     }
     /// @brief Construct a new sym object from an existing expr
     /// @note it is assumed that the expr pointing to a @ref sym::impl
     template <typename T>
         requires std::is_same_v<expr, std::remove_cvref_t<T>>
     sym(T &&rhs) : expr(std::forward<T>(rhs)) {
-        shared_.reset(new impl(std::move(*shared_)));
-        static_cast<cs::SX &>(*this) = shared();
+        impl_.reset(new impl(std::move(*impl_)));
+        static_cast<cs::SX &>(*this) = get_impl();
     } ///< move constructor from expr
 
     /// @brief make a symbolic input
@@ -66,7 +66,7 @@ class sym : public expr, public cs::SX {
         auto temp = sym(name, dim, __x);
         auto next = sym(name + "_nxt", dim, __y);
         temp.dual_ = next; // set the dual pointer
-        next.shared().dual_ = std::static_pointer_cast<impl>(temp.shared_);
+        next.get_impl().dual_ = std::static_pointer_cast<impl>(temp.impl_);
         return std::make_pair(temp, next);
     }
     static auto state(const std::string &name, size_t dim) {
@@ -80,7 +80,7 @@ class sym : public expr, public cs::SX {
     sym prev() const { /// restrictive implementation, only for __y state
         assert(field() == __y && "dual() can only be used with __y state to get its dual in __x");
         sym tmp;
-        tmp.shared_ = std::move(shared().dual_.lock()); // create a new impl
+        tmp.impl_ = std::move(get_impl().dual_.lock()); // create a new impl
         return tmp;                                     // get the shared pointer of the dual
     }
 };

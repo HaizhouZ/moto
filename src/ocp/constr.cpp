@@ -85,7 +85,7 @@ void constr::finalize_impl() {
                 if (arg.field() == __x) {
                     fmt::print("substitution in constr {} of type {}: inarg {} with {}\n",
                                name(), field::name(field()), arg.name(), arg.name() + "_nxt");
-                    shared().substitute(arg, arg.next());
+                    get_impl().substitute(arg, arg.next());
                 }
             }
         } catch (const std::exception &ex) {

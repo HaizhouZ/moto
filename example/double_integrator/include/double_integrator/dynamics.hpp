@@ -15,52 +15,50 @@ class doubleIntegratorDyn : public expr_list {
     // position, velocity, acceleration, position, velocity
     sym r, v, a, r_next, v_next;
     constr dyn_pos, dyn_vel, vel_zero_constr;
-    struct pos : public constr {
-        pos() : constr("doubleIntegratorDynamics_pos", approx_order::first, 3, __dyn) {
-            value() = [](func_approx_map &data) {
-                data.v_ = -data[0] + data[1] - 0.01 * data[2];
-            };
-            jacobian() = [](func_approx_map &data) {
-                data.jac_[0].diagonal().setConstant(-1);
-                data.jac_[1].setIdentity();
-                data.jac_[2].diagonal().setConstant(-0.01);
-            };
-        }
-    };
-    struct vel : public constr {
-        vel() : constr("doubleIntegratorDynamics_vel", approx_order::first, 3, __dyn) {
-            value() = [](func_approx_map &data) {
-                data.v_ = -data[0] + data[1] - 0.01 * data[2];
-            };
-            jacobian() = [](func_approx_map &data) {
-                data.jac_[0].diagonal().setConstant(-1);
-                data.jac_[1].setIdentity();
-                data.jac_[2].diagonal().setConstant(-0.01);
-            };
-        }
-    };
-    struct zero_vel : public constr {
-        zero_vel() : constr("doubleIntegratorDynamics_zero_vel", approx_order::first, 3, __eq_x) {
-            value() = [](func_approx_map &data) {
-                data.v_ = data[0];
-            };
-            jacobian() = [](func_approx_map &data) {
-                data.jac_[0].setIdentity();
-            };
-        }
-    };
-    doubleIntegratorDyn()
-        : dyn_pos(pos()), dyn_vel(vel()), vel_zero_constr(zero_vel()) {
+    auto pos() {
+        auto d = constr("doubleIntegratorDynamics_pos", approx_order::first, 3, __dyn);
+        d.value() = [*this](func_approx_map &data) {
+            data.v_ = -data[r] + data[r_next] - 0.01 * data[v_next];
+        };
+        d.jacobian() = [*this](func_approx_map &data) {
+            data.jac(r).diagonal().setConstant(-1);
+            data.jac(r_next).setIdentity();
+            data.jac(v_next).diagonal().setConstant(-0.01);
+        };
+        d.add_arguments({r, r_next, v_next});
+        return d;
+    }
+    auto vel() {
+        auto d = constr("doubleIntegratorDynamics_vel", approx_order::first, 3, __dyn);
+        d.value() = [this](func_approx_map &data) {
+            data.v_ = -data[v] + data[v_next] - 0.01 * data[a];
+        };
+        d.jacobian() = [this](func_approx_map &data) {
+            data.jac(v).diagonal().setConstant(-1);
+            data.jac(v_next).setIdentity();
+            data.jac(a).diagonal().setConstant(-0.01);
+        };
+        d.add_arguments({v, v_next, a});
+        return d;
+    }
+    auto zero_vel() {
+        auto d = constr("doubleIntegratorDynamics_zero_vel", approx_order::first, 3, __eq_x);
+        d.value() = [this](func_approx_map &data) {
+            data.v_ = data[v];
+        };
+        d.jacobian() = [this](func_approx_map &data) {
+            data.jac(v).setIdentity();
+        };
+        d.add_arguments({v});
+        return d;
+    }
+    doubleIntegratorDyn() {
         std::tie(r, r_next) = sym::states("pos", 3);
         std::tie(v, v_next) = sym::states("vel", 3);
         a = sym::inputs("acc", 3);
-        dyn_pos.add_arguments({r, r_next, v_next});
-        dyn_vel.add_arguments({v, v_next, a});
-        vel_zero_constr.add_arguments({v});
-        // constr trial("trial", 3, __eq_x);
-        // trial->add_argument(r);
-        // trial->value = [=](auto &d) { d.v_ = d(r); };
-        // trial->jacobian = [](func_approx_map &d) { d.jac_[0].setIdentity(); };
+        dyn_pos = pos();
+        dyn_vel = vel();
+        vel_zero_constr = zero_vel();
         assign({dyn_pos, dyn_vel});
     }
 };

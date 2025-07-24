@@ -35,8 +35,8 @@ class custom_func : public func {
         return std::make_unique<func_arg_map>(primal, shared, *this);
     }
 
-    SHARED_ATTR_GETTER(create_custom_data, custom_func);
-    SHARED_ATTR_GETTER(custom_call, custom_func);
+    IMPL_ATTR_GETTER(create_custom_data, custom_func);
+    IMPL_ATTR_GETTER(custom_call, custom_func);
 };
 
 } // namespace moto

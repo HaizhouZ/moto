@@ -9,7 +9,7 @@ void cost::finalize_impl() {
             case __x:
                 fmt::print("substitution in cost {}: inarg {} with {}\n",
                            name(), arg.name(), arg.name() + "_nxt");
-                shared().substitute(arg, arg.next());
+                get_impl().substitute(arg, arg.next());
                 break;
             case __u:
                 throw std::runtime_error(fmt::format(

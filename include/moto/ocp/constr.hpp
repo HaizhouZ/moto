@@ -91,7 +91,7 @@ class constr : public func {
     /// @note will set the field (if unset) based on the field hint and substitute __x to __y for pure-state constraints
     void finalize_impl() override;
 
-    DEF_PROTECTED_SHARED_GETTER();
+    DEF_IMPL_GETTER();
 
   public:
     template <typename derived = constr>
@@ -102,7 +102,7 @@ class constr : public func {
     constr(const std::string &name, approx_order order = approx_order::first,
            size_t dim = dim_tbd, field_t field = __undefined)
         : base(name, order, dim, field) {
-        shared_.reset(new impl(std::move(static_cast<base::impl &>(*shared_))));
+        impl_.reset(new impl(std::move(static_cast<base::impl &>(*impl_))));
     } ///< constructor with name, order, dimension and field
 
     constr(const std::string &name,
@@ -110,13 +110,13 @@ class constr : public func {
            const cs::SX &out,
            approx_order order = approx_order::first, field_t field = __undefined)
         : base(name, in_args, out, order, field) {
-        shared_.reset(new impl(std::move(static_cast<base::impl &>(*shared_))));
+        impl_.reset(new impl(std::move(static_cast<base::impl &>(*impl_))));
     } ///< constructor with name, input arguments, output expression, order and field
 
     void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const override {
         data.as<approx_map>().ls_cfg = &ws_data->as<solver::linesearch_config>();
     }
-    SHARED_ATTR_GETTER(field_hint, constr); ///< getter for field hint
+    IMPL_ATTR_GETTER(field_hint, constr); ///< getter for field hint
     /**
      * @brief make an approximation data for the constraint
      * @tparam derived derived type of @ref constr, default is constr
@@ -184,7 +184,7 @@ class constr : public func {
     template <typename derived>
         requires(std::derived_from<derived, constr>)
     auto as_ineq() {
-        shared().field_hint_.is_eq = false;
+        get_impl().field_hint_.is_eq = false;
         auto tmp = cast<derived, constr>();
         return tmp;
     }

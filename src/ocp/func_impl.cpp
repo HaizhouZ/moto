@@ -38,20 +38,20 @@ void func::impl::substitute(const sym &arg, const sym &rhs) {
 }
 void func::set_from_casadi(std::initializer_list<sym> in_args, const cs::SX &out) {
     add_arguments(in_args);
-    shared().gen_.out_ = out;
+    get_impl().gen_.out_ = out;
 }
 void func::finalize_impl() {
-    if (!shared().gen_.out_.is_empty()) {
+    if (!get_impl().gen_.out_.is_empty()) {
         if (!impl_func_gen_delegated_) {
-            shared().gen_.res_ = func_codegen::make_codegen_task(this);
-            shared().gen_.res_.wait(); // wait until codegen is done
+            get_impl().gen_.res_ = func_codegen::make_codegen_task(this);
+            get_impl().gen_.res_.wait(); // wait until codegen is done
             load_external_impl();
         } else
             func_codegen::add(this);
     }
 }
 std::future<void> func_codegen::make_codegen_task(func *_f) {
-    auto f = &_f->shared();
+    auto f = &_f->get_impl();
     utils::cs_codegen::task t;
     t.func_name = f->name_;
     t.sx_inputs = f->in_args_;
@@ -86,10 +86,10 @@ void func_codegen::wait_until_all_compiled(size_t njobs) {
         cnt++;
         if (cnt == njobs || it_f + 1 == funcs_.end()) {
             for (auto f : jobs) {
-                f->shared().gen_.res_ = make_codegen_task(f); // make codegen task for each function
+                f->get_impl().gen_.res_ = make_codegen_task(f); // make codegen task for each function
             }
             for (auto f : jobs) {
-                f->shared().gen_.res_.wait(); // wait until codegen is done
+                f->get_impl().gen_.res_.wait(); // wait until codegen is done
                 f->load_external();
             }
             cnt = 0; // reset counter

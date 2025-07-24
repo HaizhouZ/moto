@@ -23,7 +23,7 @@ struct node_data {
     ocp_ptr_t prob_;                /// < pointer to the problem
     sym_data_ptr_t sym_;            /// < dense storage of symbolic data
     dense_approx_data_ptr_t dense_; /// <dense storage of the func data
-    shared_data_ptr_t shared_;      /// < shared data
+    shared_data_ptr_t impl_;      /// < shared data
     shifted_array<std::vector<func_approx_map_ptr_t>, field::num_func, __dyn>
         sparse_; /// < sparse view per func
 
@@ -36,7 +36,7 @@ struct node_data {
 
     auto &sym_val() const { return *sym_; }   ///< getter for sym_
     auto &dense() const { return *dense_; }   ///< getter for dense_
-    auto &shared() const { return *shared_; } ///< getter for shared_
+    auto &get_impl() const { return *impl_; } ///< getter for impl_
     auto &problem() const { return *prob_; }  ///< getter for prob_
 
     // get value of the whole field

@@ -4,7 +4,7 @@ INIT_UID_(expr::impl);
 bool expr::finalize() {
     if (!finalized()) {
         finalize_impl();
-        shared_->finalized_ = (field() != __undefined);
+        impl_->finalized_ = (field() != __undefined);
     }
     return finalized();
 }
