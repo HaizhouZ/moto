@@ -56,8 +56,8 @@ struct task {
     bool gen_eval = true;
     bool gen_jacobian = false;
     bool gen_hessian = false;
-    std::vector<std::pair<expr_ref, cs::SX>> ext_jac;
-    std::vector<std::tuple<expr_ref, expr_ref, cs::SX>> ext_hess;
+    std::vector<std::pair<shared_expr, cs::SX>> ext_jac;
+    std::vector<std::tuple<shared_expr, shared_expr, cs::SX>> ext_hess;
     std::string output_dir = "gen";
     bool force_recompile = false;
     bool check_jac_ad = false; // check if jacobian is correct by comparing with ad

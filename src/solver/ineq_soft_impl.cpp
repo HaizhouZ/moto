@@ -8,8 +8,8 @@ void initialize(node_data *cur) {
     for_each(cur, [cur](auto &sf, auto &sd) {
         sd.prim_step_.clear();
         for (const auto &arg : sf.in_args()) {
-            if (arg->field() < field::num_prim) {
-                sd.prim_step_.push_back(cur->problem().extract(dynamic_cast<solver::data_base*>(cur)->prim_step[arg->field()], arg));
+            if (arg.field() < field::num_prim) {
+                sd.prim_step_.push_back(cur->problem().extract(dynamic_cast<solver::data_base*>(cur)->prim_step[arg.field()], arg));
             }
         }
         sf.initialize(sd);

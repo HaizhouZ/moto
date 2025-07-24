@@ -29,17 +29,19 @@ class ipm_constr final : public ineq_constr {
             scaled_res_.resize(f_.dim());
         }
     };
-
-  private:
-    /// + update the IPM slack and residuals
-    void value_impl(func_approx_map &data) const override final;
-    /// + update the IPM-modified cost jacobian and hessian
-    void jacobian_impl(func_approx_map &data) const override final;
-
-  public:
     using base::base;
     using ipm_data = data_type<ipm_constr>;
 
+  private:
+    /// update the IPM slack and residuals
+    void value_impl(func_approx_map &data) const override final;
+    /// update the IPM-modified cost jacobian and hessian
+    void jacobian_impl(func_approx_map &data) const override final;
+
+    void propagate_jacobian(ipm_data &d) const;
+    void propagate_hessian(ipm_data &d) const;
+
+  public:
     void setup_workspace_data(func_arg_map &data, workspace_data *settings) const override {
         base::setup_workspace_data(data, settings);
         data.as<ipm_data>().ipm_cfg = &settings->as<ipm_config>();
@@ -57,7 +59,6 @@ class ipm_constr final : public ineq_constr {
     /// @brief update the line search configuration (if necessary)
     void update_linesearch_config(data_map_t &data, workspace_data *cfg) const override final;
 
-
     /**
      * @brief make the sparse approximation data for the IPM
      * @param primal sym data including states inputs etc
@@ -68,10 +69,6 @@ class ipm_constr final : public ineq_constr {
     func_approx_map_ptr_t create_approx_map(sym_data &primal, dense_approx_data &raw, shared_data &shared) const override {
         return func_approx_map_ptr_t(make_approx<ipm_constr>(primal, raw, shared));
     }
-
-  private:
-    void propagate_jacobian(ipm_data &d) const;
-    void propagate_hessian(ipm_data &d) const;
 };
 } // namespace solver
 using ipm = solver::ipm_constr;

@@ -7,54 +7,77 @@
 
 namespace moto {
 class func_codegen;
-using sym_init_list = std::initializer_list<expr_ref>; ///< initializer list of symbolic expressions
+using sym_init_list = std::initializer_list<sym>; ///< initializer list of symbolic expressions
 /**
  * @brief approximation class for generic functions
  * @todo: change to differentiable for precompute
  */
 class func : public expr {
-  private:
-    /**
-     * @brief codegen info
-     */
-    struct gen_info {
-        cs::SX out_;
-        std::future<void> res_;
-    } gen_; /// < code generation info
-    friend class moto::func_codegen;
+  public:
+    struct impl : public expr::impl {
+        /**
+         * @brief codegen info
+         */
+        struct gen_info {
+            cs::SX out_;
+            std::future<void> res_;
+            gen_info &operator=(const gen_info &rhs) {
+                out_ = rhs.out_;
+                return *this;
+            }
+        } gen_; /// < code generation info
 
-  protected:
-    approx_order order_; ///< order of approximation, default is first order
-    sym_list in_args_;   ///< input arguments
+        approx_order order_; ///< order of approximation, default is first order
+        sym_list in_args_;   ///< input arguments
 
-    std::unordered_map<size_t, size_t> sym_uid_idx_; /// < map from sym uid to index in in_args_
-    friend struct moto::func_arg_map;
+        std::unordered_map<size_t, size_t> sym_uid_idx_; /// < map from sym uid to index in in_args_
+
+        /// @brief callback to evaluate the value of the approximation
+        std::function<void(func_approx_map &)> value_;
+        /// @brief callback to evaluate the jacobian of the approximation
+        std::function<void(func_approx_map &)> jacobian_;
+        /// @brief callback to evaluate the hessian of the approximation
+        std::function<void(func_approx_map &)> hessian_;
+
+        impl() = default; ///< default constructor
+        impl(expr::impl &&rhs)
+            : expr::impl(std::move(rhs)), order_(approx_order::first) {}
+        impl(impl &&rhs) = default;                 ///< move constructor
+        impl &operator=(const impl &rhs) = default; ///< copy assignment operator
+        /**
+         * @brief substitute the input argument with another symbol
+         *
+         * @param arg symbol to be substituted
+         * @param rhs symbol to substitute with
+         */
+        void substitute(const sym &arg, const sym &rhs);
+    };
+    friend class func_codegen; ///< allow func_codegen to access private members
+
+    virtual void load_external_impl(const std::string &path = "gen");
+
+    DEF_PROTECTED_SHARED_GETTER();
+
     /**
      * @brief finalize the function
      * @details it will wait until the codegen is done if set_from_casadi is used
      */
     virtual void finalize_impl();
-    /**
-     * @brief substitute the input argument with another symbol
-     *
-     * @param arg symbol to be substituted
-     * @param rhs symbol to substitute with
-     */
-    void substitute(sym &arg, sym &rhs);
-
-  protected:
     ///@brief callback to evaluate (the residual) of the function, call to value_ by default
-    virtual void value_impl([[maybe_unused]] func_approx_map &data) const { value_(data); };
+    virtual void value_impl([[maybe_unused]] func_approx_map &data) const { shared().value_(data); };
     ///@brief callback to evaluate jacobian of the function, call to jacobian_ by default
-    virtual void jacobian_impl([[maybe_unused]] func_approx_map &data) const { jacobian_(data); };
+    virtual void jacobian_impl([[maybe_unused]] func_approx_map &data) const { shared().jacobian_(data); };
     ///@brief callback to evaluate hessian of the function, call to hessian_ by default
-    virtual void hessian_impl([[maybe_unused]] func_approx_map &data) const { hessian_(data); };
+    virtual void hessian_impl([[maybe_unused]] func_approx_map &data) const { shared().hessian_(data); };
 
   public:
-    void add_argument(expr_ref in) {
-        add_dep(in->as<sym>());
-        sym_uid_idx_[in->uid()] = sym_uid_idx_.size();
-        in_args_.emplace_back(std::move(in));
+    template <typename T>
+        requires std::is_same_v<sym, std::remove_cvref_t<T>>
+    void add_argument(T &&in) {
+        auto &_in_args = shared().in_args_;
+        _in_args.emplace_back(std::forward<T>(in));
+        add_dep(_in_args.back());
+        shared().sym_uid_idx_[_in_args.back().uid()] = shared().sym_uid_idx_.size();
     }
 
     void add_arguments(const sym_list &args) {
@@ -79,9 +102,11 @@ class func : public expr {
     /// @brief get input argument values
     SHARED_ATTR_GETTER(in_args, func);
     /// @brief get input argument by index
-    const auto &in_args(size_t i) const { return in_args_[i]; }
+    const auto &in_args(size_t i) const { return shared().in_args_[i]; }
     /// @brief get approximation order
     SHARED_ATTR_GETTER(order, func);
+
+    SHARED_ATTR_GETTER(sym_uid_idx, func); ///< getter for sym_uid_idx
     /// @brief order of approximation
     /**
      * @brief set up workspace data for the function
@@ -124,7 +149,9 @@ class func : public expr {
      * @note will find the functions with suffix _jac, _hess
      * @param path folder of the external functions, default is "gen"
      */
-    virtual void load_external(const std::string &path = "gen");
+    void load_external(const std::string &path = "gen") {
+        load_external_impl(path);
+    }
 
     /**
      * @brief constructor for approximation functions
@@ -136,7 +163,10 @@ class func : public expr {
      */
     func(const std::string &name, approx_order order = approx_order::first,
          size_t dim = dim_tbd, field_t field = __undefined)
-        : expr(name, dim, field), order_(order) {}
+        : expr(name, dim, field) {
+        shared_ = std::make_shared<impl>(std::move(*shared_));
+        shared().order_ = order;
+    }
 
     /**
      * @brief Construct a new constr object from casadi SX expression
@@ -161,14 +191,6 @@ class func : public expr {
     SHARED_ATTR_GETTER(value, func);
     SHARED_ATTR_GETTER(jacobian, func);
     SHARED_ATTR_GETTER(hessian, func);
-
-  protected:
-    /// @brief callback to evaluate the value of the approximation
-    std::function<void(func_approx_map &)> value_;
-    /// @brief callback to evaluate the jacobian of the approximation
-    std::function<void(func_approx_map &)> jacobian_;
-    /// @brief callback to evaluate the hessian of the approximation
-    std::function<void(func_approx_map &)> hessian_;
 };
 /**
  * @brief Code generation helper for functions
@@ -197,6 +219,9 @@ struct func_codegen {
      *
      */
     static std::future<void> make_codegen_task(func *f);
+
+  private:
+    static std::vector<func *> code_gen_funcs_;
 };
 
 } // namespace moto

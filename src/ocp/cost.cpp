@@ -3,13 +3,13 @@
 
 namespace moto {
 void cost::finalize_impl() {
-    if (hint_.substitute_x_to_y) {
-        for (sym &arg : in_args_) {
+    if (finalize_hint().substitute_x_to_y) {
+        for (sym &arg : in_args()) {
             switch (arg.field()) {
             case __x:
                 fmt::print("substitution in cost {}: inarg {} with {}\n",
                            name(), arg.name(), arg.name() + "_nxt");
-                substitute(arg, arg.next());
+                shared().substitute(arg, arg.next());
                 break;
             case __u:
                 throw std::runtime_error(fmt::format(

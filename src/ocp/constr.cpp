@@ -24,8 +24,8 @@ void constr::approx_map::map_merit_jac_from_raw(decltype(dense_approx_data::jac_
     auto &in_args = func_.in_args();
     jac.clear();
     for (size_t i : range(in_args_.size())) {
-        if (in_args[i]->field() < field::num_prim) {
-            jac.push_back(raw[in_args[i]->field()].segment(problem()->get_expr_start(in_args[i]), in_args[i]->dim()));
+        if (in_args[i].field() < field::num_prim) {
+            jac.push_back(raw[in_args[i].field()].segment(problem()->get_expr_start(in_args[i]), in_args[i].dim()));
         } else { // useless
             static row_vector empty;
             jac.push_back(empty);
@@ -37,8 +37,8 @@ constr::approx_data::approx_data(const func &f) : f_(f) {
     v_data_.setZero();
     jac_data_.reserve(f.in_args().size());
     for (auto &arg : f.in_args()) {
-        if (arg->field() < field::num_prim) {
-            jac_data_.emplace_back(f.dim(), arg->dim());
+        if (arg.field() < field::num_prim) {
+            jac_data_.emplace_back(f.dim(), arg.dim());
             jac_data_.back().setZero();
         } else { // useless
             static matrix empty;
@@ -49,43 +49,43 @@ constr::approx_data::approx_data(const func &f) : f_(f) {
 void constr::finalize_impl() {
     if (field() == __undefined) {
         bool has_[3] = {false, false, false}; // x, u, y
-        for (const auto &arg : in_args_) {
-            if (arg->field() <= __y)
-                has_[arg->field()] = true;
+        for (const auto &arg : in_args()) {
+            if (arg.field() <= __y)
+                has_[arg.field()] = true;
         }
         // make this long enough so that people will not easily remove the const :D
         auto &_field = field();
-        if (field_hint_.is_eq == utils::optional_bool::Unset) {
+        if (field_hint().is_eq == utils::optional_bool::Unset) {
             throw std::runtime_error(fmt::format("constr {} eq/ineq hint unset, please set it using as_eq() or as_ineq()", name()));
         }
-        if (field_hint_.is_eq) {
+        if (field_hint().is_eq) {
             if (has_[__u] && !has_[__y])
-                _field = field_hint_.is_soft ? __eq_xu_soft : __eq_xu;
-            else if (has_[__x] && has_[__y] && !field_hint_.is_soft) // we dont assume x can be converted to y
+                _field = field_hint().is_soft ? __eq_xu_soft : __eq_xu;
+            else if (has_[__x] && has_[__y] && !field_hint().is_soft) // we dont assume x can be converted to y
                 _field = __dyn;
             else if (!has_[__u] && (has_[__x] ^ has_[__y]))
-                _field = field_hint_.is_soft ? __eq_x_soft : __eq_x;
+                _field = field_hint().is_soft ? __eq_x_soft : __eq_x;
             else
                 throw std::runtime_error(fmt::format("unsupported eq constr \"{}\" type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set _field or hints?",
-                                                     name(), has_[__x], has_[__u], has_[__y], field_hint_.is_soft));
+                                                     name(), has_[__x], has_[__u], has_[__y], field_hint().is_soft));
         } else {
-            if (has_[__u] && !has_[__y] && !field_hint_.is_soft)
+            if (has_[__u] && !has_[__y] && !field_hint().is_soft)
                 _field = __ineq_xu;
-            else if (!has_[__u] && (has_[__x] ^ has_[__y]) && !field_hint_.is_soft)
+            else if (!has_[__u] && (has_[__x] ^ has_[__y]) && !field_hint().is_soft)
                 _field = __ineq_x;
             else
                 throw std::runtime_error(fmt::format("unsupported ineq constr \"{}\" type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set _field or hints?",
-                                                     name(), has_[__x], has_[__u], has_[__y], field_hint_.is_soft));
+                                                     name(), has_[__x], has_[__u], has_[__y], field_hint().is_soft));
         }
     }
     if (in_field(field(), std::array{__eq_x, __ineq_x, __eq_x_soft})) {
         // do in_arg substitute
         try {
-            for (sym &arg : in_args_) {
+            for (sym &arg : in_args()) {
                 if (arg.field() == __x) {
                     fmt::print("substitution in constr {} of type {}: inarg {} with {}\n",
                                name(), field::name(field()), arg.name(), arg.name() + "_nxt");
-                    substitute(arg, arg.next());
+                    shared().substitute(arg, arg.next());
                 }
             }
         } catch (const std::exception &ex) {
@@ -98,7 +98,7 @@ void constr::finalize_impl() {
 }
 
 void constr::value_impl(func_approx_map &data) const {
-    value_(data);
+    value()(data);
     // compute contribution to merit function
     auto &d = static_cast<approx_map &>(data);
     scalar_t res = d.multiplier_.dot(d.v_);
@@ -114,7 +114,7 @@ void constr::value_impl(func_approx_map &data) const {
 } // namespace moto
 void constr::jacobian_impl(func_approx_map &data) const {
     // compute jacobian first
-    jacobian_(data);
+    jacobian()(data);
     // update multiplier - jacobian product
     auto &d = static_cast<approx_map &>(data);
     for (size_t i = 0; i < d.in_arg_data().size(); i++) {

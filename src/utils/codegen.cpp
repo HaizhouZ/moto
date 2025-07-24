@@ -194,8 +194,8 @@ void run(
     // Step 1: Create CasADi function and filter near-zero elements
     cs::Function casadi_func = filter_func_near_zero(func_name, sx_inputs, sx_outputs);
     std::vector<cs::SX> sx_inputs_cs; //(sx_inputs.begin(), sx_inputs.end());
-    for (auto &s : sx_inputs) {
-        sx_inputs_cs.emplace_back(*s);
+    for (cs::SX &s : sx_inputs) {
+        sx_inputs_cs.emplace_back(s);
     }
     auto filtered_outputs = casadi_func(sx_inputs_cs);
 
@@ -259,7 +259,7 @@ void run(
     json j;
     j["name"] = func_name;
     for (const auto &e : sx_inputs) {
-        j["inputs"][e->name()] = {e->dim(), static_cast<int>(e->field())};
+        j["inputs"][e.name()] = {e.dim(), static_cast<int>(e.field())};
     }
     for (const auto &e : sx_outputs) {
         j["outputs"].push_back({e.rows(), e.columns()});

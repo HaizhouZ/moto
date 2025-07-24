@@ -6,9 +6,9 @@ sym_data::sym_data(ocp *prob) : prob_(prob) {
         value_[i].resize(prob_->dim(i));
         value_[i].setZero();
     }
-    for (const auto &v : prob_->exprs(__usr_var)) {
-        usr_value_[v->uid()] = vector(prob_->dim(__usr_var));
-        usr_value_[v->uid()].setZero();
+    for (const sym &v : prob_->exprs(__usr_var)) {
+        usr_value_[v.uid()] = vector(prob_->dim(__usr_var));
+        usr_value_[v.uid()].setZero();
     }
 }
 vector_ref sym_data::get(const sym &s) {
@@ -28,8 +28,8 @@ inline void for_each_func(const ocp_ptr_t &prob, Callback &&callback) {
     // loop with two variables due to the difference between idx and field no.
     for (size_t field : func_fields) {
         size_t idx = 0;
-        for (const auto &expr : prob->exprs(field)) {
-            callback(idx++, static_cast<const func &>(*expr));
+        for (const func &f : prob->exprs(field)) {
+            callback(idx++, f);
         }
     }
 }
@@ -58,8 +58,7 @@ void node_data::update_approximation(bool eval_only) {
             hess_l_1.setZero();
         }
     }
-    for (const auto &expr : prob_->exprs(__pre_comp)) {
-        auto &f = static_cast<const custom_func &>(*expr);
+    for (const custom_func &f : prob_->exprs(__pre_comp)) {
         f.custom_call()((*shared_)[f]);
     }
     for_each_func(prob_,

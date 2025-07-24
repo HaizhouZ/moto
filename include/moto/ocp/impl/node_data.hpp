@@ -71,13 +71,12 @@ struct node_data {
         for (const auto &field : fields) {
             size_t idx = 0;
             auto &d = sparse_[field];
-            for (const auto &e : prob_->exprs(field)) {
-                auto &f = static_cast<const func &>(*e);
+            for (const func &f : prob_->exprs(field)) {
                 callback(f, *d[idx]);
             }
         }
     }
-    
+
     template <typename Callback>
     void for_each_constr(Callback &&f) {
         for_each<constr_fields>(std::forward<Callback>(f));

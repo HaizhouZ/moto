@@ -15,6 +15,13 @@ class custom_func : public func {
     }
 
   public:
+    struct impl : public func::impl {
+        /// @brief callback to make data（for non-approx) @note will not be called in @ref create_approx_map
+        std::function<func_arg_map_ptr_t(sym_data &, shared_data &)> create_custom_data_;
+        /// @brief callback to call a non-approximation function
+        std::function<void(func_arg_map &)> custom_call_;
+    };
+
     using func::func;
     /**
      * @brief create the argument mapping for the custom function
@@ -30,13 +37,6 @@ class custom_func : public func {
 
     SHARED_ATTR_GETTER(create_custom_data, custom_func);
     SHARED_ATTR_GETTER(custom_call, custom_func);
-
-  protected:
-    friend class shared_data;
-    /// @brief callback to make data（for non-approx) @note will not be called in @ref create_approx_map
-    std::function<func_arg_map_ptr_t(sym_data &, shared_data &)> create_custom_data_;
-    /// @brief callback to call a non-approximation function
-    std::function<void(func_arg_map &)> custom_call_;
 };
 
 } // namespace moto

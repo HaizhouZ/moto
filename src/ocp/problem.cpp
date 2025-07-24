@@ -6,7 +6,7 @@ bool ocp::add_impl(expr &ex) {
     size_t _uid = ex.uid();
     if (d_idx_.find(_uid) == d_idx_.end()) { // skip repeated
         // add dependencies
-        auto &dep = ex.dep();
+        const auto &dep = ex.dep();
         if (!dep.empty()) {
             add(dep);
         }
@@ -22,4 +22,10 @@ bool ocp::add_impl(expr &ex) {
     }
     return false;
 }
+
+
 } // namespace moto
+
+template void moto::ocp::add<const moto::shared_expr &>(const moto::shared_expr &ex);
+template void moto::ocp::add<moto::shared_expr>(moto::shared_expr &&ex);
+template void moto::ocp::add<const moto::shared_expr>(const moto::shared_expr &&ex);

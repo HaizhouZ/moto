@@ -3,7 +3,7 @@
 namespace moto {
 namespace solver {
 void ipm_constr::initialize(ipm::data_map_t &data) const {
-    base::value_impl(data);
+    value_impl(data);
     auto &d = data.as<ipm_data>();
     d.g_ = d.v_;
     d.slack_ = (-d.g_).cwiseMax(1e-2); // clip
@@ -20,7 +20,7 @@ void ipm_constr::finalize_newton_step(ipm::data_map_t &data) const {
     // ensure slack + step >= 1e-8
     // compute linear step
     for (const auto &arg : d.func_.in_args()) {
-        if (arg->field() < field::num_prim) {
+        if (arg.field() < field::num_prim) {
             d.d_slack_.noalias() -= d.jac_data_[arg_idx] * d.prim_step_[arg_idx];
         }
         arg_idx++;
@@ -126,7 +126,7 @@ void ipm_constr::propagate_jacobian(ipm_data &d) const {
             if (d.jac_modification_[j_idx].hasNaN()) {
                 fmt::print("--------------------\n");
                 fmt::print("constraint name: {}\n", d.func_.name());
-                for (sym &arg : d.func_.in_args()) {
+                for (auto &arg : d.func_.in_args()) {
                     fmt::print("arg: {}: {}\n", arg.name(), d[arg].transpose());
                 }
                 fmt::print("jac: \n{:.3}\n", j);

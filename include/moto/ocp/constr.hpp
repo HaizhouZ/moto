@@ -52,6 +52,7 @@ class constr : public func {
         const func &f_;                ///< reference to the function
         approx_data(const func &f);
     };
+
     /**
      * @brief constraint data, a pair of <map, data>
      *
@@ -70,15 +71,15 @@ class constr : public func {
         using data_type = approx_data_t; ///< data type
     };
 
-    template <typename derived = constr>
-    using data_type = constr_data_tpl<typename derived::approx_map, typename derived::approx_data>;
+    struct impl : public func::impl {
+        /// @brief type hint for the constraint
+        struct field_hint {
+            utils::optional_bool is_eq; ///< true if equality constraint, false if inequality constraint, default is unset
+            bool is_soft = false;       ///< true if soft constraint, false if hard constraint, default is false
+        } field_hint_;                  ///< type hint for the constraint
 
-  private:
-    /// @brief type hint for the constraint
-    struct field_hint {
-        utils::optional_bool is_eq; ///< true if equality constraint, false if inequality constraint, default is unset
-        bool is_soft = false;       ///< true if soft constraint, false if hard constraint, default is false
-    } field_hint_;                  ///< type hint for the constraint
+        using func::impl::impl; ///< inherit constructor from func::impl
+    };
 
   protected:
     /// @brief evaluate the value of the constraint for merit
@@ -89,9 +90,29 @@ class constr : public func {
     /// @note will set the field (if unset) based on the field hint and substitute __x to __y for pure-state constraints
     void finalize_impl() override;
 
+    template <typename derived = constr>
+    using data_type = constr_data_tpl<typename derived::approx_map, typename derived::approx_data>;
+
+    DEF_PROTECTED_SHARED_GETTER();
+
   public:
     using base = func;
-    using base::base; ///< inherit constructor from func
+    constr() = default; ///< default constructor
+
+    constr(const std::string &name, approx_order order = approx_order::first,
+           size_t dim = dim_tbd, field_t field = __undefined)
+        : base(name, order, dim, field) {
+        shared_.reset(new impl(std::move(static_cast<base::impl&>(*shared_))));
+    } ///< constructor with name, order, dimension and field
+
+    constr(const std::string &name,
+           sym_init_list in_args,
+           const cs::SX &out,
+           approx_order order = approx_order::first, field_t field = __undefined)
+        : base(name, in_args, out, order, field) {
+        shared_.reset(new impl(std::move(static_cast<base::impl&>(*shared_))));
+    } ///< constructor with name, input arguments, output expression, order and field
+
     void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const override {
         data.as<approx_map>().ls_cfg = &ws_data->as<solver::linesearch_config>();
     }

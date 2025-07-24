@@ -1,6 +1,6 @@
 #include <moto/ocp/problem.hpp>
-#include <moto/utils/field_conversion.hpp>
 #include <moto/ocp/sym.hpp>
+#include <moto/utils/field_conversion.hpp>
 
 namespace moto {
 namespace utils {
@@ -31,13 +31,13 @@ Eigen::PermutationMatrix<-1, -1> &permutation_from_y_to_x(const ocp *prob_y, con
         return it->second; // already exists
     else {
         auto &perm = it->second;
-        size_t col_y = 0;
-        for (expr &y : prob_y->exprs(__y)) {
-            auto &x = static_cast<sym &>(y).prev();
+        for (sym &x : prob_x->exprs(__x)) {
+            auto &y = x.next();
             size_t x0 = prob_x->get_expr_start(x);
             size_t x1 = x0 + x.dim();
+            size_t y0 = prob_y->get_expr_start(y);
             for (size_t i : range(x0, x1)) {
-                perm.indices()[col_y++] = i;
+                perm.indices()[y0++] = i;
             }
         }
         return perm;

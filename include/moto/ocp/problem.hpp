@@ -32,7 +32,8 @@ class ocp {
     std::array<size_t, field::num> dim_{};
 
   public:
-    CONST_ATTR_GETTER(uid);                                                    ///< getter for uid
+    CONST_ATTR_GETTER(uid); ///< getter for uid
+    template <typename T = expr>
     const auto &exprs(size_t f) const { return expr_.at(f); }                  ///< getter for expr_
     const auto &pos(const expr &ex) const { return pos_by_uid_.at(ex.uid()); } ///< getter for pos_by_uid_
     size_t dim(size_t f) const { return dim_.at(f); }                          ///< getter for dim_
@@ -55,32 +56,26 @@ class ocp {
      * @param ex expression to be added
      */
     template <typename T>
-        requires std::is_base_of_v<expr, std::remove_reference_t<T>>
     void add(T &&ex) {
-        expr_ref r(ex);
-        if (add_impl(r))
-            expr_[r->field()].emplace_back(std::move(r));
+        if (add_impl(ex))
+            expr_[static_cast<expr &>(ex).field()].emplace_back(std::forward<T>(ex));
     }
 
-    template <typename derived = expr>
-        requires std::is_base_of_v<expr, derived>
-    void add(std::initializer_list<derived> exprs) {
-        for (expr &ex : exprs) {
+    void add(std::initializer_list<shared_expr> exprs) {
+        for (auto &ex : exprs) {
             add(std::move(ex));
         }
     }
 
-    template <typename derived = expr>
-        requires std::is_base_of_v<expr, derived>
-    void add(const std::vector<derived> &exprs) {
-        for (expr &ex : exprs) {
-            add(std::forward<derived>(ex));
+    void add(const expr_list &exprs) {
+        for (auto &ex : exprs) {
+            add(ex);
         }
     }
 
-    void add(const std::vector<expr_ref> &exprs) {
-        for (expr &ex : exprs) {
-            add(ex);
+    void add(expr_list &&exprs) {
+        for (auto &ex : exprs) {
+            add(std::move(ex));
         }
     }
 
@@ -98,5 +93,9 @@ class ocp {
 
 def_ptr(ocp);
 } // namespace moto
+
+extern template void moto::ocp::add<const moto::shared_expr &>(const moto::shared_expr &ex);
+extern template void moto::ocp::add<const moto::shared_expr>(const moto::shared_expr &&ex);
+extern template void moto::ocp::add<moto::shared_expr>(moto::shared_expr &&ex);
 
 #endif // __MOTO_PROBLEM_HPP__
