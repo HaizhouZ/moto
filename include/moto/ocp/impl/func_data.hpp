@@ -64,16 +64,17 @@ struct func_arg_map {
     func_arg_map(std::vector<vector_ref> &&primal, shared_data &shared, const func &f);
 
     virtual ~func_arg_map() = default;
-    const func &func_;    ///< pointer to the func
+    const func &func_;  ///< pointer to the func
     shared_data &impl_; ///< ref to shared data
     /**
      * @brief get the input argument values
      * @note this is a wrapper of in_args_ to access the values
      * @return vector_ref of input arguments
      */
-    auto operator[](const sym &in) {
+    auto operator[](const sym &in) const {
         return in_args_[sym_uid_idx_.at(in.uid())];
     }
+    auto operator[](sym *in) const { return this->operator[](*in); }
     /// @brief get the input argument values by index
     auto operator[](size_t i) const { return in_args_.at(i); }
 
@@ -133,6 +134,7 @@ struct func_approx_map : public func_arg_map {
     auto jac(const sym &in) const {
         return jac_[sym_uid_idx_.at(in.uid())];
     }
+    auto jac(sym *in) const { return jac(*in); }
 };
 
 def_unique_ptr(func_approx_map);

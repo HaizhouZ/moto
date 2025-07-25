@@ -12,16 +12,38 @@ class sym(cs.SX):
     """
 
     def __init__(self, name: str, dim: int, field: field = field.field_undefined, base: shared_expr = None):
-        self.sym_base = base if base is not None else create_sym(name, dim, field)
-        print("Creating sym with base:", self.sym_base)
-        self.name = name
-        self.dim = dim
-        self.field = field
+        self.sym_base : shared_expr = base if base is not None else create_sym(name, dim, field)
+        self.next: sym = None
+        self.prev: sym = None
         cs.SX.__init__(self, get_sym_sx(self.sym_base))
         print(self)
 
     def __str__(self):
         return f"sym(name=\"{self.name}\", dim={self.dim}, field={self.field})"
+
+    @property
+    def name(self):
+        return self.sym_base.as_expr().name
+    
+    @name.setter
+    def name(self, value):
+        self.sym_base.as_expr().name = value
+
+    @property
+    def dim(self):
+        return self.sym_base.as_expr().dim
+    
+    @dim.setter
+    def dim(self, value):
+        self.sym_base.as_expr().dim = value
+
+    @property
+    def field(self):
+        return self.sym_base.as_expr().field
+    
+    @field.setter
+    def field(self, value):
+        self.sym_base.as_expr().field = value
 
     @staticmethod
     def inputs(name: str, dim: int = 1):
@@ -33,4 +55,15 @@ class sym(cs.SX):
 
     @staticmethod
     def states(name: str, dim: int = 1):
-        return sym(name, dim, field=field.field_x), sym(name + "_nxt", dim, field=field.field_y)
+        x, y = sym(name, dim, field=field.field_x), sym(name + "_nxt", dim, field=field.field_y)
+        x.next = y
+        y.prev = x
+        return x, y
+
+    @property
+    def use_count(self):
+        return self.sym_base.use_count
+    
+    @property
+    def impl_use_count(self):
+        return self.sym_base.impl_use_count

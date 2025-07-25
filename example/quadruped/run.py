@@ -14,4 +14,11 @@ print("------------------------------")
 # print(moto.get_sym_sx(b))
 
 moto.get_all_sx([q, q_next])
-# c = moto.func("c", [q, q_next], 2 * q)
+c = moto.func("c", [q, q_next], 2 * q)
+print(q.use_count, q.impl_use_count)
+print(q.sym_base)
+print(q.next)
+print(q_next.prev)
+
+q_next.name = "q_next111"
+print(q.next.sym_base.as_expr().name)

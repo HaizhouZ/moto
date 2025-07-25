@@ -30,7 +30,7 @@ class shared_object {
     T *operator->() const { return ptr_.get(); }             ///< arrow operator
 
     operator bool() const { return static_cast<bool>(ptr_); } ///< conversion to bool operator
-    size_t use_count() const { return ptr_.use_count(); } ///< get the use count of the pointer
+    size_t use_count() const { return ptr_.use_count(); }     ///< get the use count of the pointer
 };
 
 using shared_expr = shared_object<expr>; ///< type alias for shared expression reference
@@ -61,7 +61,7 @@ constexpr size_t uid_max = std::numeric_limits<size_t>::max();
 /**
  * @brief general expression base class
  */
-class expr {
+class expr : public std::enable_shared_from_this<expr> {
   public:
     struct impl : public std::enable_shared_from_this<impl> {
         static size_t max_uid; /// < uid used to index global expressions
@@ -185,9 +185,9 @@ class expr {
         return tmp;
     }
     /// @brief moving cast
-    /// @tparam derived 
-    /// @tparam base 
-    /// @return 
+    /// @tparam derived
+    /// @tparam base
+    /// @return
     template <typename derived, typename base>
         requires std::is_base_of_v<base, derived>
     derived cast() {
@@ -203,6 +203,9 @@ class expr {
     derived cast() {
         return cast<derived, expr>();
     } ///< cast to derived type
+
+    size_t use_count() const { return weak_from_this().use_count(); }                         ///< get the use count of the expression
+    size_t impl_use_count() const { return impl_ ? impl_->weak_from_this().use_count() : 0; } ///< get the use count of the implementation
 };
 } // namespace moto
 

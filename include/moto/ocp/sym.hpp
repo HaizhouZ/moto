@@ -84,7 +84,9 @@ class sym : public expr, public cs::SX {
     }
 };
 
-using sym_list = std::vector<sym>; ///< list of symbolic expressions
+struct sym_list : public std::vector<sym> {
+    using std::vector<sym>::vector; ///< inherit constructors from std::vector
+}; ///< list of symbolic expressions
 } // namespace moto
 
 #endif // MOTO_OCP_SYM_HPP

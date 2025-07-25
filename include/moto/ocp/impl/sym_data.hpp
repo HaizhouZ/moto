@@ -22,6 +22,7 @@ struct sym_data {
     vector_ref get(const sym &s);
 
     auto operator[](const sym &s) { return get(s); }
+    auto operator[](sym *s) { return get(*s); }
 
     /// pointer to the problem, used to get dimensions of symbolic variables
     ocp *prob_;
