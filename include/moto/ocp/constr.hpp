@@ -106,7 +106,7 @@ class constr : public func {
     } ///< constructor with name, order, dimension and field
 
     constr(const std::string &name,
-           sym_init_list in_args,
+           const sym_list& in_args,
            const cs::SX &out,
            approx_order order = approx_order::first, field_t field = __undefined)
         : base(name, in_args, out, order, field) {
@@ -188,6 +188,8 @@ class constr : public func {
         auto tmp = cast<derived, constr>();
         return tmp;
     }
+
+    shared_expr as_ineq(std::string_view type_name);
 };
 } // namespace moto
 

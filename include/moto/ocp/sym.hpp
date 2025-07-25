@@ -12,18 +12,20 @@ namespace cs = casadi;
  */
 class sym : public expr, public cs::SX {
 
-  protected:
+  public:
     friend class expr; ///< allow expr_lookup to access private members
-    shared_expr dual_; ///< pointer to the dual sym, e.g., next state in OCP;
 
     struct impl : public expr::impl, public cs::SX {
-        std::weak_ptr<impl> dual_; ///< pointer to the dual sym, e.g., next state in OCP;
+        shared_expr dual_; ///< pointer to the dual sym, e.g., next state in OCP;
         impl(expr::impl &&rhs)
             : expr::impl(std::move(rhs)), cs::SX(cs::SX::sym(name_, dim_)) {} ///< move constructor
-        impl(impl &&rhs)
-            : expr::impl(std::move(rhs)), cs::SX(std::move(rhs)), dual_(rhs.dual_) {} ///< move constructor)
+        impl(impl &&rhs) : expr::impl(std::move(rhs)), cs::SX(std::move(rhs)) {
+            dual_ = std::move(rhs.dual_);      // move the dual pointer
+            dual_->impl_ = shared_from_this(); // set the impl pointer of the dual
+        } ///< move constructor
     };
 
+  protected:
     void finalize_impl() override;
     DEF_IMPL_GETTER();
 
@@ -49,8 +51,7 @@ class sym : public expr, public cs::SX {
     template <typename T>
         requires std::is_same_v<expr, std::remove_cvref_t<T>>
     sym(T &&rhs) : expr(std::forward<T>(rhs)) {
-        impl_.reset(new impl(std::move(*impl_)));
-        static_cast<cs::SX &>(*this) = get_impl();
+        assert(dynamic_cast<impl *>(impl_.get()) && "sym must be constructed from an expr with sym::impl");
     } ///< move constructor from expr
 
     /// @brief make a symbolic input
@@ -65,8 +66,8 @@ class sym : public expr, public cs::SX {
     static auto states(const std::string &name, size_t dim) {
         auto temp = sym(name, dim, __x);
         auto next = sym(name + "_nxt", dim, __y);
-        temp.dual_ = next; // set the dual pointer
-        next.get_impl().dual_ = std::static_pointer_cast<impl>(temp.impl_);
+        temp.get_impl().dual_ = next; // set the dual pointer
+        next.get_impl().dual_ = temp;
         return std::make_pair(temp, next);
     }
     static auto state(const std::string &name, size_t dim) {
@@ -75,13 +76,11 @@ class sym : public expr, public cs::SX {
     }
     sym &next() const {
         assert(field() == __x && "next() can only be used with __x state to get its dual in __y");
-        return dual_; // get the shared pointer of the dual
+        return get_impl().dual_; // get the shared pointer of the dual
     }
     sym prev() const { /// restrictive implementation, only for __y state
         assert(field() == __y && "dual() can only be used with __y state to get its dual in __x");
-        sym tmp;
-        tmp.impl_ = std::move(get_impl().dual_.lock()); // create a new impl
-        return tmp;                                     // get the shared pointer of the dual
+        return get_impl().dual_; // get the shared pointer of the dual
     }
 };
 

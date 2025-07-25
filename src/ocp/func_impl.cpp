@@ -36,7 +36,7 @@ void func::impl::substitute(const sym &arg, const sym &rhs) {
     sym_uid_idx_.insert(std::move(nh));            // update the uid index
     in_args_.at(sym_uid_idx_.at(rhs.uid())) = rhs; // update the in_args_ to point to the new sym
 }
-void func::set_from_casadi(std::initializer_list<sym> in_args, const cs::SX &out) {
+void func::set_from_casadi(const sym_list& in_args, const cs::SX &out) {
     add_arguments(in_args);
     get_impl().gen_.out_ = out;
 }

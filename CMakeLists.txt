@@ -61,6 +61,6 @@ target_add_deps(${PROJECT_NAME})
 
 include(cmake/installHelpers.cmake)
 
-add_subdirectory(example)
-# add_subdirectory(bindings)
-add_subdirectory(unittests)
+# add_subdirectory(example)
+add_subdirectory(bindings)
+# add_subdirectory(unittests)

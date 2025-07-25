@@ -30,6 +30,7 @@ class shared_object {
     T *operator->() const { return ptr_.get(); }             ///< arrow operator
 
     operator bool() const { return static_cast<bool>(ptr_); } ///< conversion to bool operator
+    size_t use_count() const { return ptr_.use_count(); } ///< get the use count of the pointer
 };
 
 using shared_expr = shared_object<expr>; ///< type alias for shared expression reference
@@ -62,7 +63,7 @@ constexpr size_t uid_max = std::numeric_limits<size_t>::max();
  */
 class expr {
   public:
-    struct impl {
+    struct impl : public std::enable_shared_from_this<impl> {
         static size_t max_uid; /// < uid used to index global expressions
         bool finalized_ = false;
 
@@ -87,6 +88,7 @@ class expr {
               uid_(rhs.uid_), finalized_(rhs.finalized_) {
             rhs.uid_ = uid_max; // reset the uid of the moved object
         }
+        virtual ~impl() = default; ///< virtual destructor
     };
     virtual void finalize_impl() {}
 
@@ -169,6 +171,7 @@ class expr {
      */
     bool finalize();
 
+    /// @brief clone the expression
     template <typename derived>
         requires std::is_base_of_v<expr, derived>
     derived clone() const {
@@ -181,7 +184,10 @@ class expr {
         }
         return tmp;
     }
-
+    /// @brief moving cast
+    /// @tparam derived 
+    /// @tparam base 
+    /// @return 
     template <typename derived, typename base>
         requires std::is_base_of_v<base, derived>
     derived cast() {

@@ -7,7 +7,7 @@
 
 namespace moto {
 class func_codegen;
-using sym_init_list = std::initializer_list<sym>; ///< initializer list of symbolic expressions
+using sym_list = std::vector<sym>; ///< initializer list of symbolic expressions
 /**
  * @brief approximation class for generic functions
  * @todo: change to differentiable for precompute
@@ -88,18 +88,13 @@ class func : public expr {
         }
     }
 
-    void add_arguments(sym_init_list args) {
-        for (auto &in : args) {
-            add_argument(in);
-        }
-    }
     /**
      * @brief generate the function from casadi expression
      *
      * @param in_args input arguments, must be a list of sym
      * @param out output casadi SX expression
      */
-    void set_from_casadi(sym_init_list in_args, const cs::SX &out);
+    void set_from_casadi(const sym_list& in_args, const cs::SX &out);
 
     /// @brief get input argument values
     IMPL_ATTR_GETTER(in_args, func);
@@ -180,7 +175,7 @@ class func : public expr {
      * @param field field type, default to __undefined
      */
     func(const std::string &name,
-         sym_init_list in_args,
+         const sym_list& in_args,
          const cs::SX &out,
          approx_order order = approx_order::first, field_t field = __undefined)
         : func(name, order, (size_t)out.size1(), field) {

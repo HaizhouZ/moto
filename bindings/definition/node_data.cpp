@@ -1,71 +1,17 @@
-#include <binding_fwd.hpp>
 #include <moto/ocp/impl/node_data.hpp>
-#include <nanobind/stl/array.h>
-
-namespace nanobind {
-namespace detail {
-template <typename Entry, size_t Size, size_t shift>
-struct type_caster<moto::shifted_array<Entry, Size, shift>> {
-    using Array = moto::shifted_array<Entry, Size, shift>;
-    NB_TYPE_CASTER(Array, const_name("moto.shifted_array"))
-    using Caster = make_caster<Entry>;
-
-    bool from_python(handle src, uint8_t flags, cleanup_list *cleanup) noexcept {
-        PyObject *temp;
-
-        /* Will initialize 'temp' (NULL in the case of a failure.) */
-        PyObject **o = seq_get_with_size(src.ptr(), Size, &temp);
-
-        Caster caster;
-        bool success = o != nullptr;
-
-        flags = flags_for_local_caster<Entry>(flags);
-
-        if (success) {
-            for (size_t i = 0; i < Size; ++i) {
-                if (!caster.from_python(o[i], flags, cleanup) ||
-                    !caster.template can_cast<Entry>()) {
-                    success = false;
-                    break;
-                }
-
-                value[i] = caster.operator cast_t<Entry>();
-            }
-
-            Py_XDECREF(temp);
-        }
-
-        return success;
-    }
-
-    template <typename T>
-    static handle from_cpp(T &&src, rv_policy policy, cleanup_list *cleanup) {
-        object ret = steal(PyList_New(Size));
-
-        if (ret.is_valid()) {
-            Py_ssize_t index = 0;
-
-            for (auto &value : src) {
-                handle h = Caster::from_cpp(forward_like_<T>(value), policy, cleanup);
-
-                if (!h.is_valid()) {
-                    ret.reset();
-                    break;
-                }
-
-                NB_LIST_SET_ITEM(ret.ptr(), index++, h.ptr());
-            }
-        }
-
-        return ret.release();
-    }
-};
-
-} // namespace detail
-} // namespace nanobind
+#include <type_cast.hpp>
 
 void register_submodule_node_data(nb::module_ &m) {
     using namespace moto;
+    nb::class_<ocp>(m, "ocp")
+        .def("add", &ocp::add<expr>, nb::arg("ex"), "Add an expression to the OCP problem")
+        .def("add", [](ocp &self, const expr_list &exprs) { self.add(exprs); }, nb::arg("exprs"), "Add a list of expressions to the OCP problem")
+        .def("create", &ocp::create, "Create a new OCP problem")
+        .def("clone", &ocp::clone, "Clone the OCP problem")
+        .def("dim", &ocp::dim, nb::arg("field"), "Get the dimension of the field")
+        .def("exprs", &ocp::exprs<expr>, nb::arg("field"), "Get the expressions in the field")
+        .def_prop_ro("uid", &ocp::uid, "Get the unique identifier of the OCP problem");
+
     nb::class_<sym_data>(m, "sym_data")
         .def_prop_ro("prob", [](sym_data &self) -> ocp & { return *self.prob_; })
         .def("__getitem__", [](sym_data &self, const sym &s) -> auto { return self.operator[](s); });
@@ -79,18 +25,42 @@ void register_submodule_node_data(nb::module_ &m) {
         .def_rw("jac", &dense_approx_data::jac_)
         .def_rw("jac_modification", &dense_approx_data::jac_modification_);
     nb::class_<shared_data>(m, "shared_data")
-        .def_prop_ro("prob", [](shared_data &self) -> ocp & { return *self.prob_; })
-        .def("__getitem__", [](shared_data &self, const std::shared_ptr<impl::func> &ptr) -> auto & { return self[ptr]; });
+        .def_prop_ro("prob", [](node_data &self) -> auto & { return self.problem(); })
+        .def("__getitem__", [](shared_data &self, const func &f) -> auto & { return self[f]; });
     nb::class_<node_data>(m, "node_data")
-        .def_prop_ro("prob", [](node_data &self) -> auto & { return *self.prob_; })
-        .def_prop_ro("sym", [](node_data &self) -> auto & { return *self.sym_; })
-        .def_prop_ro("dense", [](node_data &self) -> auto & { return *self.dense_; })
-        .def_prop_ro("shared", [](node_data &self) -> auto & { return *self.impl_; })
+        .def_prop_ro("prob", [](node_data &self) -> auto & { return self.problem(); })
+        .def_prop_ro("sym", [](node_data &self) -> auto & { return self.sym_val(); })
+        .def_prop_ro("dense", [](node_data &self) -> auto & { return self.dense(); })
+        .def_prop_ro("shared", [](node_data &self) -> auto & { return self.shared(); })
         .def("value", nb::overload_cast<field_t>(&node_data::value, nb::const_), nb::arg("field"),
              "Get value of the whole field")
         .def("value", nb::overload_cast<const sym &>(&node_data::value, nb::const_), nb::arg("sym"),
              "Get value of the sym variable")
-        .def("data", &node_data::data<impl::func>, nb::arg("func"),
+        .def("data", &node_data::data, nb::arg("func"),
              "Get the sparse func data by pointer")
         .def("cost", &node_data::cost, "Get the cost value");
+    nb::class_<func_arg_map>(m, "func_arg_map")
+        .def_prop_ro("prob", [](func_arg_map &self) -> auto & { return *self.problem(); })
+        .def("__getitem__", [](func_arg_map &self, const sym &s) { return self[s]; })
+        .def("__setitem__", [](func_arg_map &self, const sym &s, vector_ref d) { self[s] = d; })
+        .def(nb::init<sym_data &, shared_data &, const func &>(), nb::arg("primal"), nb::arg("shared"), nb::arg("f"),
+             "Constructor for func_arg_map with sym_data and shared_data")
+        .def(nb::init<std::vector<vector_ref> &&, shared_data &, const func &>(), nb::arg("primal"), nb::arg("shared"), nb::arg("f"),
+             "Constructor for func_arg_map with a list of primal data and shared_data");
+    nb::class_<func_approx_map, func_arg_map>(m, "func_approx_map")
+        .def_prop_ro("prob", [](func_approx_map &self) -> auto & { return *self.problem(); })
+        .def("__getitem__", [](func_approx_map &self, const sym &s) { return self[s]; })
+        .def("__setitem__", [](func_approx_map &self, const sym &s, vector_ref d) { self[s] = d; })
+        .def(nb::init<sym_data &, dense_approx_data &, shared_data &, const func &>(), nb::arg("primal"), nb::arg("raw"), nb::arg("shared"), nb::arg("f"),
+             "Constructor for func_approx_map with sym_data, dense_approx_data and shared_data")
+        .def(nb::init<sym_data &, vector_ref, std::vector<matrix_ref> &&, shared_data &, const func &>(),
+             nb::arg("primal"), nb::arg("v"), nb::arg("jac"), nb::arg("shared"), nb::arg("f"),
+             "Constructor for func_approx_map with sym_data, vector_ref to input, list of matrix_ref to jacobian and shared_data")
+        .def("setup_hessian", &func_approx_map::setup_hessian, nb::arg("raw"),
+             "Setup hessian from raw approximation data")
+        .def("jac", &func_approx_map::jac, nb::arg("in"),
+             "Get the jacobian reference for the input symbol")
+        .def_prop_ro("v", [](func_approx_map &self) -> auto { return self.v_; }, "Value vector reference")
+        .def_prop_ro("jac", [](func_approx_map &self) -> auto & { return self.jac_; }, "Jacobian matrix references indexed by input arguments")
+        .def_prop_ro("hess", [](func_approx_map &self) -> auto & { return self.hess_; }, "Hessian matrix references for merit, 2-D indexed by input arguments");
 }

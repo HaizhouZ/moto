@@ -1,65 +1,8 @@
 #include <moto/utils/codegen.hpp>
-#include <binding_fwd.hpp>
+#include <type_cast.hpp>
+#include <nanobind/stl/vector.h>
 
 using namespace moto;
-
-/// @brief A helper struct to extract the PySwigObject from a Python object
-/// This is used to access the underlying C++ object pointer from a Python object
-/// that has been wrapped with SWIG.
-/// The PySwigObject struct is expected to have a 'this' attribute that points to
-/// the C++ object pointer.
-/// The 'desc' attribute is used to store the type description of the object.
-/// @cite https://docs.ros.org/en/noetic/api/eigenpy/html/swig_8hpp_source.html
-struct PySwigObject {
-    PyObject_HEAD void *ptr;
-    const char *desc;
-};
-
-inline PySwigObject *get_PySwigObject(PyObject *pyObj) {
-    if (!PyObject_HasAttrString(pyObj, "this"))
-        return NULL;
-
-    PyObject *this_ptr = PyObject_GetAttrString(pyObj, "this");
-    if (this_ptr == NULL)
-        return nullptr;
-    PySwigObject *swig_obj = reinterpret_cast<PySwigObject *>(this_ptr);
-
-    return swig_obj;
-}
-namespace nanobind {
-namespace detail {
-template <>
-struct type_caster<cs::SX> {
-    NB_TYPE_CASTER(cs::SX, /* type_name_for_error_messages */ const_name("casadi.SX"));
-
-    bool from_python(handle src, uint8_t flags, cleanup_list *cleanup) {
-        // Logic to convert Python object (src) to MyCustomType
-        // e.g., extract an int from src and set self->value
-        value = cs::SX();
-        auto swig_obj = get_PySwigObject(src.ptr());
-        if (swig_obj) {
-            assert(swig_obj != nullptr);
-            auto sx_ptr = reinterpret_cast<cs::SX *>(swig_obj->ptr);
-            value = *sx_ptr;
-        } else
-            nb::raise_type_error("Expected a casadi.SX object, but got: %s", nb::type_name(src).c_str());
-        return true;
-    }
-
-    static handle from_cpp(const cs::SX &src, rv_policy policy, cleanup_list *cleanup) {
-        // Logic to convert MyCustomType (src) to a Python object
-        // e.g., return a Python int from src.value
-        object py_cs_module = nb::module_::import_("casadi");
-        object py_cs_sx = py_cs_module.attr("SX")();
-        auto swig_obj = get_PySwigObject(py_cs_sx.ptr());
-        assert(swig_obj != nullptr);
-        auto sx_ptr = reinterpret_cast<cs::SX *>(swig_obj->ptr);
-        *sx_ptr = src;
-        return py_cs_sx.release();
-    }
-};
-} // namespace detail
-} // namespace nanobind
 
 void register_submodule_codegen(nb::module_ &m) {
     nb::class_<utils::cs_codegen::worker>(m, "codegen_worker")
