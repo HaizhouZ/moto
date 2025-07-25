@@ -7,6 +7,36 @@
 
 #include <definition/sym_type_caster.hpp>
 
+moto::sym_in_list::operator moto::expr_list() const {
+    expr_list tmp;
+    tmp.reserve(this->size());
+    for (auto &ex : *this) {
+        auto type = ex.type();
+        if (nb::isinstance<moto::shared_expr>(ex)) {
+            tmp.push_back(nb::cast<moto::shared_expr &>(ex));
+        } else if (nb::hasattr(ex, "sym_base")) {
+            tmp.push_back(nb::cast<moto::shared_expr &>(ex.attr("sym_base")));
+        } else if (type.is(nb::type<moto::expr>())) {
+            tmp.push_back(nb::cast<moto::expr &>(ex));
+        } else if (type.is(nb::type<moto::func>())) {
+            tmp.push_back(nb::cast<moto::func &>(ex));
+        } else if (type.is(nb::type<moto::cost>())) {
+            tmp.push_back(nb::cast<moto::cost &>(ex));
+        } else if (type.is(nb::type<moto::constr>())) {
+            tmp.push_back(nb::cast<moto::constr &>(ex));
+        } else if (type.is(nb::type<moto::pre_compute>())) {
+            tmp.push_back(nb::cast<moto::pre_compute &>(ex));
+        } else if (type.is(nb::type<moto::usr_func>())) {
+            tmp.push_back(nb::cast<moto::usr_func &>(ex));
+        } else if (type.is(nb::type<moto::custom_func>())) {
+            tmp.push_back(nb::cast<moto::custom_func &>(ex));
+        } else {
+            nb::print("Unknown type in sym_in_list: ", ex);
+        }
+    }
+    return tmp;
+}
+
 void export_order_with_magic(nb::module_ &m, const std::string &python_name) {
     nb::enum_<moto::approx_order> enum_binder(m, python_name.c_str());
 
@@ -67,7 +97,9 @@ void register_submodule_functional(nb::module_ &m) {
         auto& ex = static_cast<moto::sym &>(s); 
         // fmt::print("get_sym_sx called {}\n", s.get_impl().weak_from_this().use_count());
         return cs::SX(ex.get_impl()); }, nb::arg("s"));
-
+    m.def("create_states", [](const std::string &name, size_t dim) {
+        auto [x, y] = moto::sym::states(name, dim);
+        return std::make_pair(shared_expr(std::move(x)), shared_expr(std::move(y))); }, nb::arg("name"), nb::arg("dim") = moto::dim_tbd);
     m.def("print_all_sx", [](sym_in_list &&s) {
         for (sym &ex : *s) {
             std::cout << ex.name() << ": " << ex << '\n';
@@ -91,8 +123,7 @@ void register_submodule_functional(nb::module_ &m) {
              nb::arg("name"), nb::arg("order") = moto::approx_order::first, nb::arg("dim") = 0, nb::arg("field") = moto::field_t::__undefined)
         .def(nb::init<const std::string &, const sym_list &, const cs::SX &, moto::approx_order, field_t>(),
              nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("order") = moto::approx_order::first, nb::arg("field") = moto::field_t::__undefined)
-        .def("__str__", [](const func &f) { return f.name(); })
-        .def("__repr__", [](const func &f) { return fmt::format("func(name='{}', order={}, dim={})", f.name(), magic_enum::enum_name<approx_order>(f.order()), f.dim()); })
+        .def("__str__", [](const func &f) { return fmt::format("func(name='{}', order={}, dim={})", f.name(), magic_enum::enum_name<approx_order>(f.order()), f.dim()); })
         .def("add_argument", &func::add_argument<sym>, nb::arg("in"))
         .def("add_arguments", nb::overload_cast<const sym_list &>(&func::add_arguments), nb::arg("args"))
         .def("create_approx_map", &func::create_approx_map, nb::arg("primal"), nb::arg("raw"), nb::arg("shared"))

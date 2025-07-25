@@ -13,8 +13,8 @@ print("------------------------------")
 # print(moto.get_sym_sx(q.sym_base))
 # print(moto.get_sym_sx(b))
 
-moto.get_all_sx([q, q_next])
-c = moto.func("c", [q, q_next], 2 * q)
+moto.print_all_sx([q, q_next])
+c = moto.constr("f_test", [q, q_next], 2 * q).as_eq()
 print(q.use_count, q.impl_use_count)
 print(q.sym_base)
 print(q.next)
@@ -22,3 +22,7 @@ print(q_next.prev)
 
 q_next.name = "q_next111"
 print(q.next.sym_base.as_expr().name)
+print(c)
+prob = moto.ocp.create()
+prob.add([q, q_next, c])
+# print(prob.exprs(moto.field.field_x))

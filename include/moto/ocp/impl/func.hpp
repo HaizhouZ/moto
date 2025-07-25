@@ -52,24 +52,32 @@ class func : public expr {
          * @param rhs symbol to substitute with
          */
         void substitute(const sym &arg, const sym &rhs);
+
+        /**
+         * @brief finalize the function
+         * @details it will wait until the codegen is done if set_from_casadi is used
+         */
+        virtual void finalize_impl();
+        ///@brief callback to evaluate (the residual) of the function, call to value_ by default
+        virtual void value_impl([[maybe_unused]] func_approx_map &data) const { value_(data); };
+        ///@brief callback to evaluate jacobian of the function, call to jacobian_ by default
+        virtual void jacobian_impl([[maybe_unused]] func_approx_map &data) const { jacobian_(data); };
+        ///@brief callback to evaluate hessian of the function, call to hessian_ by default
+        virtual void hessian_impl([[maybe_unused]] func_approx_map &data) const { hessian_(data); };
+
+        virtual void load_external_impl(const std::string &path = "gen");
+
+        /**
+         * @brief set up workspace data for the function
+         * @details user can override this to setup the workspace data (usually by pointer) for the function data
+         * @param data func_arg_map to be setup
+         * @param ws_data workspace_data pointer to the settings, can be nullptr if not needed
+         */
+        virtual void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const {}
     };
     friend class func_codegen; ///< allow func_codegen to access private members
 
-    virtual void load_external_impl(const std::string &path = "gen");
-
     DEF_IMPL_GETTER();
-
-    /**
-     * @brief finalize the function
-     * @details it will wait until the codegen is done if set_from_casadi is used
-     */
-    virtual void finalize_impl();
-    ///@brief callback to evaluate (the residual) of the function, call to value_ by default
-    virtual void value_impl([[maybe_unused]] func_approx_map &data) const { get_impl().value_(data); };
-    ///@brief callback to evaluate jacobian of the function, call to jacobian_ by default
-    virtual void jacobian_impl([[maybe_unused]] func_approx_map &data) const { get_impl().jacobian_(data); };
-    ///@brief callback to evaluate hessian of the function, call to hessian_ by default
-    virtual void hessian_impl([[maybe_unused]] func_approx_map &data) const { get_impl().hessian_(data); };
 
   public:
     template <typename T>
@@ -103,14 +111,7 @@ class func : public expr {
     IMPL_ATTR_GETTER(order, func);
 
     IMPL_ATTR_GETTER(sym_uid_idx, func); ///< getter for sym_uid_idx
-    /// @brief order of approximation
-    /**
-     * @brief set up workspace data for the function
-     * @details user can override this to setup the workspace data (usually by pointer) for the function data
-     * @param data func_arg_map to be setup
-     * @param ws_data workspace_data pointer to the settings, can be nullptr if not needed
-     */
-    virtual void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const {}
+
     /**
      * @brief setup the sparse func data
      * @details will setup the mapping from the dense dense_approx_data to func_approx_map
@@ -129,11 +130,11 @@ class func : public expr {
     void compute_approx(func_approx_map &data,
                         bool eval_val, bool eval_jac = false, bool eval_hess = false) const {
         if (eval_val)
-            value_impl(data);
+            get_impl().value_impl(data);
         if (eval_jac)
-            jacobian_impl(data);
+            get_impl().jacobian_impl(data);
         if (eval_hess)
-            hessian_impl(data);
+            get_impl().hessian_impl(data);
     }
     template <typename T>
     void compute_approx(T &data,
@@ -146,7 +147,7 @@ class func : public expr {
      * @param path folder of the external functions, default is "gen"
      */
     void load_external(const std::string &path = "gen") {
-        load_external_impl(path);
+        get_impl().load_external_impl(path);
     }
 
     /**
@@ -198,7 +199,7 @@ struct func_codegen {
      * @note this will be called by the func class
      * @param f function to be added
      */
-    static void add(func *f);
+    static void add(func::impl *f);
     /**
      * @brief wait until all functions are compiled
      * @note this will block until all functions are compiled
@@ -214,10 +215,10 @@ struct func_codegen {
      * @brief make codegen task for the function
      *
      */
-    static std::future<void> make_codegen_task(func *f);
+    static std::future<void> make_codegen_task(func::impl *f);
 
   private:
-    static std::vector<func *> code_gen_funcs_;
+    static std::vector<func::impl *> code_gen_funcs_;
 };
 
 } // namespace moto

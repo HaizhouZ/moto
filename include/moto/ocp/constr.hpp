@@ -80,16 +80,19 @@ class constr : public func {
 
         using func::impl::impl;                                ///< inherit constructors from func::impl
         impl(func::impl &&rhs) : func::impl(std::move(rhs)) {} ///< move constructor from func::impl
-    };
 
-  protected:
-    /// @brief evaluate the value of the constraint for merit
-    void value_impl(func_approx_map &data) const override;
-    /// @brief evaluate the jacobian of the constraint and the multiplier-jacobian product (vjp) for merit jacobian
-    void jacobian_impl(func_approx_map &data) const override;
-    /// @brief finalize the constraint, will be called upon added to a problem
-    /// @note will set the field (if unset) based on the field hint and substitute __x to __y for pure-state constraints
-    void finalize_impl() override;
+        /// @brief evaluate the value of the constraint for merit
+        void value_impl(func_approx_map &data) const override;
+        /// @brief evaluate the jacobian of the constraint and the multiplier-jacobian product (vjp) for merit jacobian
+        void jacobian_impl(func_approx_map &data) const override;
+        /// @brief finalize the constraint, will be called upon added to a problem
+        /// @note will set the field (if unset) based on the field hint and substitute __x to __y for pure-state constraints
+        void finalize_impl() override;
+
+        void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const override {
+            data.as<approx_map>().ls_cfg = &ws_data->as<solver::linesearch_config>();
+        }
+    };
 
     DEF_IMPL_GETTER();
 
@@ -106,16 +109,13 @@ class constr : public func {
     } ///< constructor with name, order, dimension and field
 
     constr(const std::string &name,
-           const sym_list& in_args,
+           const sym_list &in_args,
            const cs::SX &out,
            approx_order order = approx_order::first, field_t field = __undefined)
         : base(name, in_args, out, order, field) {
         impl_.reset(new impl(std::move(static_cast<base::impl &>(*impl_))));
     } ///< constructor with name, input arguments, output expression, order and field
 
-    void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const override {
-        data.as<approx_map>().ls_cfg = &ws_data->as<solver::linesearch_config>();
-    }
     IMPL_ATTR_GETTER(field_hint, constr); ///< getter for field hint
     /**
      * @brief make an approximation data for the constraint

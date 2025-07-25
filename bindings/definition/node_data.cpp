@@ -6,8 +6,8 @@ void register_submodule_node_data(nb::module_ &m) {
     using namespace moto;
     nb::class_<ocp>(m, "ocp")
         .def("add", &ocp::add<expr>, nb::arg("ex"), "Add an expression to the OCP problem")
-        .def("add", [](ocp &self, const expr_list &exprs) { self.add(exprs); }, nb::arg("exprs"), "Add a list of expressions to the OCP problem")
-        .def("create", &ocp::create, "Create a new OCP problem")
+        .def("add", [](ocp &self, sym_in_list &&exprs) { self.add(exprs); }, nb::arg("exprs"), "Add a list of expressions to the OCP problem")
+        .def_static("create", &ocp::create, "Create a new OCP problem")
         .def("clone", &ocp::clone, "Clone the OCP problem")
         .def("dim", &ocp::dim, nb::arg("field"), "Get the dimension of the field")
         .def("exprs", &ocp::exprs<expr>, nb::arg("field"), "Get the expressions in the field")

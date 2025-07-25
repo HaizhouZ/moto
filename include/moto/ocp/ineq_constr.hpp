@@ -22,12 +22,16 @@ class ineq_constr : public soft_constr {
         approx_map(dense_approx_data &raw, map_base &&d);
     };
 
-  protected:
-    /// @brief check if the field is in the soft constraint fields
-    void finalize_impl() override;
-    /// @brief evaluate the value of the constraint and compute the complementarity residual
-    /// @param d data
-    void value_impl(func_approx_map &d) const override;
+    struct impl : public base::impl {
+        using base::impl::impl; ///< inherit constructors
+        impl(base::impl &&rhs) : base::impl(std::move(rhs)) {} ///< move constructor from base impl
+
+        /// @brief finalize the inequality constraint, will be called upon added to a problem
+        void finalize_impl() override;
+        /// @brief evaluate the value of the constraint and compute the complementarity residual
+        void value_impl(func_approx_map &data) const override;
+    };
+
 
   public:
     using base::base;

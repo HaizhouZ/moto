@@ -1,4 +1,4 @@
-from moto import shared_expr, create_sym, get_sym_sx
+from moto import shared_expr, create_sym, get_sym_sx, create_states
 from moto import field
 import casadi as cs
 
@@ -11,20 +11,22 @@ class sym(cs.SX):
     symbolic variables with additional functionality specific to the moto framework.
     """
 
-    def __init__(self, name: str, dim: int, field: field = field.field_undefined, base: shared_expr = None):
-        self.sym_base : shared_expr = base if base is not None else create_sym(name, dim, field)
+    def __init__(
+        self, name: str = None, dim: int = None, field: field = field.field_undefined, base: shared_expr = None
+    ):
+        self.sym_base: shared_expr = base if base is not None else create_sym(name, dim, field)
         self.next: sym = None
         self.prev: sym = None
         cs.SX.__init__(self, get_sym_sx(self.sym_base))
         print(self)
 
     def __str__(self):
-        return f"sym(name=\"{self.name}\", dim={self.dim}, field={self.field})"
+        return f'sym(uid={self.uid}, name="{self.name}", dim={self.dim}, field={self.field})'
 
     @property
     def name(self):
         return self.sym_base.as_expr().name
-    
+
     @name.setter
     def name(self, value):
         self.sym_base.as_expr().name = value
@@ -32,7 +34,7 @@ class sym(cs.SX):
     @property
     def dim(self):
         return self.sym_base.as_expr().dim
-    
+
     @dim.setter
     def dim(self, value):
         self.sym_base.as_expr().dim = value
@@ -40,10 +42,14 @@ class sym(cs.SX):
     @property
     def field(self):
         return self.sym_base.as_expr().field
-    
+
     @field.setter
     def field(self, value):
         self.sym_base.as_expr().field = value
+
+    @property
+    def uid(self):
+        return self.sym_base.as_expr().uid
 
     @staticmethod
     def inputs(name: str, dim: int = 1):
@@ -55,7 +61,9 @@ class sym(cs.SX):
 
     @staticmethod
     def states(name: str, dim: int = 1):
-        x, y = sym(name, dim, field=field.field_x), sym(name + "_nxt", dim, field=field.field_y)
+        x, y = create_states(name, dim)
+        x = sym(base=x)
+        y = sym(base=y)
         x.next = y
         y.prev = x
         return x, y
@@ -63,7 +71,7 @@ class sym(cs.SX):
     @property
     def use_count(self):
         return self.sym_base.use_count
-    
+
     @property
     def impl_use_count(self):
         return self.sym_base.impl_use_count

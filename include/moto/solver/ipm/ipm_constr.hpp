@@ -31,33 +31,37 @@ class ipm_constr final : public ineq_constr {
     using base::base;
     using ipm_data = data_type<ipm_constr>;
 
-  private:
-    /// update the IPM slack and residuals
-    void value_impl(func_approx_map &data) const override final;
-    /// update the IPM-modified cost jacobian and hessian
-    void jacobian_impl(func_approx_map &data) const override final;
+    struct impl : public base::impl {
+        using base::impl::impl;                                ///< inherit constructors
+        impl(base::impl &&rhs) : base::impl(std::move(rhs)) {} ///< move constructor from base impl
 
-    void propagate_jacobian(ipm_data &d) const;
-    void propagate_hessian(ipm_data &d) const;
+        /// update the IPM slack and residuals
+        void value_impl(func_approx_map &data) const override final;
+        /// update the IPM-modified cost jacobian and hessian
+        void jacobian_impl(func_approx_map &data) const override final;
+
+        void propagate_jacobian(ipm_data &d) const;
+        void propagate_hessian(ipm_data &d) const;
+
+        void setup_workspace_data(func_arg_map &data, workspace_data *settings) const override {
+            base::impl::setup_workspace_data(data, settings);
+            data.as<ipm_data>().ipm_cfg = &settings->as<ipm_config>();
+        }
+        /// @brief initialize the IPM constraint data
+        void initialize(data_map_t &data) const override final;
+        /// @brief post rollout operation for the IPM constraint to compute the newton step
+        void finalize_newton_step(data_map_t &data) const override final;
+        /// @brief finalize the predictor step, should be called after the rollout
+        void finalize_predictor_step(data_map_t &data, workspace_data *cfg) const override final;
+        /// @brief will compute the cost jacobian correction depending on the IPM settings
+        void correct_jacobian(data_map_t &data) const override final;
+        /// @brief line search step for the IPM constraint
+        void line_search_step(data_map_t &data, workspace_data *cfg) const override final;
+        /// @brief update the line search configuration (if necessary)
+        void update_linesearch_config(data_map_t &data, workspace_data *cfg) const override final;
+    };
 
   public:
-    void setup_workspace_data(func_arg_map &data, workspace_data *settings) const override {
-        base::setup_workspace_data(data, settings);
-        data.as<ipm_data>().ipm_cfg = &settings->as<ipm_config>();
-    }
-    /// @brief initialize the IPM constraint data
-    void initialize(data_map_t &data) const override final;
-    /// @brief post rollout operation for the IPM constraint to compute the newton step
-    void finalize_newton_step(data_map_t &data) const override final;
-    /// @brief finalize the predictor step, should be called after the rollout
-    void finalize_predictor_step(data_map_t &data, workspace_data *cfg) const override final;
-    /// @brief will compute the cost jacobian correction depending on the IPM settings
-    void correct_jacobian(data_map_t &data) const override final;
-    /// @brief line search step for the IPM constraint
-    void line_search_step(data_map_t &data, workspace_data *cfg) const override final;
-    /// @brief update the line search configuration (if necessary)
-    void update_linesearch_config(data_map_t &data, workspace_data *cfg) const override final;
-
     /**
      * @brief make the sparse approximation data for the IPM
      * @param primal sym data including states inputs etc

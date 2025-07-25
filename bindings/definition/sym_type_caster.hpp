@@ -17,7 +17,7 @@ struct type_caster<moto::sym *> {
 #endif
         if (nb::isinstance<moto::shared_expr>(src)) {
             value = &static_cast<moto::sym &>(nb::cast<moto::shared_expr &>(src));
-        } else if (src.attr("sym_base").is_valid()) {
+        } else if (nb::hasattr(src, "sym_base")) {
             value = &static_cast<moto::sym &>(nb::cast<moto::shared_expr &>(src.attr("sym_base")));
         } else {
             return false;
@@ -37,7 +37,7 @@ struct type_caster<moto::sym *> {
 /// @brief Type caster for moto::sym
 template <>
 struct type_caster<moto::sym> {
-    NB_TYPE_CASTER(moto::sym, const_name("moto::sym"));
+    NB_TYPE_CASTER(moto::sym, const_name("moto.sym"));
 
     bool from_python(handle src, uint8_t flags, cleanup_list *cleanup) {
 // Logic to convert Python object (src) to MyCustomType
@@ -48,7 +48,7 @@ struct type_caster<moto::sym> {
 #endif
         if (nb::isinstance<moto::shared_expr>(src)) {
             value = static_cast<moto::sym &>(nb::cast<moto::shared_expr &>(src));
-        } else if (src.attr("sym_base").is_valid()) {
+        } else if (nb::hasattr(src, "sym_base")) {
             value = static_cast<moto::sym &>(nb::cast<moto::shared_expr &>(src.attr("sym_base")));
         } else {
             return false;
@@ -78,12 +78,13 @@ struct sym_in_list : public std::vector<nb::handle> {
         for (auto &ex : *this) {
             if (nb::isinstance<moto::shared_expr>(ex)) {
                 tmp.push_back(static_cast<moto::sym &>(nb::cast<moto::shared_expr &>(ex)));
-            } else if (ex.attr("sym_base").is_valid()) {
+            } else if (nb::hasattr(ex, "sym_base")) {
                 tmp.push_back(static_cast<moto::sym &>(nb::cast<moto::shared_expr &>(ex.attr("sym_base"))));
             }
         }
         return tmp;
     }
+    operator expr_list() const;
 };
 } // namespace moto
 

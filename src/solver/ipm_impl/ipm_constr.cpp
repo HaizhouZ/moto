@@ -2,7 +2,7 @@
 
 namespace moto {
 namespace solver {
-void ipm_constr::initialize(ipm::data_map_t &data) const {
+void ipm_constr::impl::initialize(ipm::data_map_t &data) const {
     value_impl(data);
     auto &d = data.as<ipm_data>();
     d.g_ = d.v_;
@@ -12,7 +12,7 @@ void ipm_constr::initialize(ipm::data_map_t &data) const {
     d.multiplier_ = d.multiplier_.cwiseMin(1e3); // clip
     d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array();
 }
-void ipm_constr::finalize_newton_step(ipm::data_map_t &data) const {
+void ipm_constr::impl::finalize_newton_step(ipm::data_map_t &data) const {
     auto &d = data.as<ipm_data>();
     size_t arg_idx = 0;
     // update slack newton step
@@ -31,7 +31,7 @@ void ipm_constr::finalize_newton_step(ipm::data_map_t &data) const {
     else
         d.d_multipler_.array() = -d.multiplier_.array() + d.ipm_cfg->mu / d.slack_.array() - d.diag_scaling.array() * d.d_slack_.array();
 }
-void ipm_constr::correct_jacobian(data_map_t &data) const {
+void ipm_constr::impl::correct_jacobian(data_map_t &data) const {
     auto &d = data.as<ipm_data>();
     if (d.ipm_cfg->ipm_accept_corrector()) { // add the dual correction term
         d.scaled_res_.array() = d.ipm_cfg->mu - d.d_multipler_.array() * d.d_slack_.array();
@@ -41,13 +41,13 @@ void ipm_constr::correct_jacobian(data_map_t &data) const {
     d.scaled_res_.array() /= d.slack_.array();
     propagate_jacobian(d);
 }
-void ipm_constr::update_linesearch_config(ipm::data_map_t &data, workspace_data *cfg) const {
+void ipm_constr::impl::update_linesearch_config(ipm::data_map_t &data, workspace_data *cfg) const {
     constexpr scalar_t tau = 0.995; // scaling factor
     scalar_t alpha_max = 1.0;       // default max step size
     auto &d = data.as<ipm_data>();
     auto &ls_cfg = cfg->as<solver::linesearch_config>();
     // compute alpha_max
-    for (size_t idx : range(dim())) {
+    for (size_t idx : range(dim_)) {
         if (d.d_slack_(idx) < 0) {
             alpha_max = (-tau) * d.slack_(idx) / d.d_slack_(idx);
             ls_cfg.primal.clip(alpha_max);
@@ -60,18 +60,18 @@ void ipm_constr::update_linesearch_config(ipm::data_map_t &data, workspace_data 
         }
     }
     // ls_cfg.primal.alpha_max = std::max(ls_cfg.primal.alpha_max, 1e-10);
-    // ls_cfg.dual.alpha_max = std::max(ls_cfg.dual.alpha_max, 1e-10);
+    // ls_cfg.dual.alpha_max = std::m ax(ls_cfg.dual.alpha_max, 1e-10);
     assert(ls_cfg.primal.alpha_max > 1e-10);
     assert(ls_cfg.dual.alpha_max > 1e-10);
 }
-void ipm_constr::finalize_predictor_step(ipm::data_map_t &data, workspace_data *cfg) const {
+void ipm_constr::impl::finalize_predictor_step(ipm::data_map_t &data, workspace_data *cfg) const {
     auto &d = data.as<ipm_data>();
     auto &ipm_worker = cfg->as<ipm_config::worker_type>();
     auto &ls_cfg = cfg->as<solver::linesearch_config>();
     assert(d.ipm_cfg->ipm_computing_affine_step() &&
            "ipm affine step computation not started but affine step is requested");
     // if we are in the affine step mode, we need to update the ipm worker data
-    ipm_worker.n_ipm_cstr += dim();
+    ipm_worker.n_ipm_cstr += dim_;
     ipm_worker.prev_aff_comp += d.multiplier_.dot(d.slack_);
     // finalize the affine step
     d.d_multipler_.array() *= ls_cfg.alpha_dual;
@@ -81,7 +81,7 @@ void ipm_constr::finalize_predictor_step(ipm::data_map_t &data, workspace_data *
            "the complementarity must be positive before the line search step");
     assert((d.multiplier_ + d.d_multipler_).dot(d.slack_ + d.d_slack_) > 0);
 }
-void ipm_constr::line_search_step(ipm::data_map_t &data, workspace_data *cfg) const {
+void ipm_constr::impl::line_search_step(ipm::data_map_t &data, workspace_data *cfg) const {
     auto &d = data.as<ipm_data>();
     auto &ls_cfg = cfg->as<solver::linesearch_config>();
     assert(!d.ipm_cfg->ipm_computing_affine_step() && "ipm affine step computation not ended");
@@ -92,15 +92,15 @@ void ipm_constr::line_search_step(ipm::data_map_t &data, workspace_data *cfg) co
         d.multiplier_ = d.multiplier_.array().max(1e-20);
     }
 }
-void ipm_constr::value_impl(func_approx_map &data) const {
-    base::value_impl(data);
+void ipm_constr::impl::value_impl(func_approx_map &data) const {
+    base::impl::value_impl(data);
     auto &d = data.as<ipm_data>();
     d.g_ = d.v_;
     d.v_ = d.g_ + d.slack_; // r_g = g_ + slack
     d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array();
 }
-void ipm_constr::jacobian_impl(func_approx_map &data) const {
-    base::jacobian_impl(data);
+void ipm_constr::impl::jacobian_impl(func_approx_map &data) const {
+    base::impl::jacobian_impl(data);
     auto &d = data.as<ipm_data>();
     // setup T^{-1} N
     d.diag_scaling.array() = d.multiplier_.array() / d.slack_.array();
@@ -118,7 +118,7 @@ void ipm_constr::jacobian_impl(func_approx_map &data) const {
     propagate_jacobian(d);
     propagate_hessian(d);
 }
-void ipm_constr::propagate_jacobian(ipm_data &d) const {
+void ipm_constr::impl::propagate_jacobian(ipm_data &d) const {
     size_t j_idx = 0;
     for (auto &j : d.jac_data_) {
         if (j.size() != 0) {
@@ -141,7 +141,7 @@ void ipm_constr::propagate_jacobian(ipm_data &d) const {
         j_idx++;
     }
 }
-void ipm_constr::propagate_hessian(ipm_data &d) const {
+void ipm_constr::impl::propagate_hessian(ipm_data &d) const {
     // modification of hessian
     size_t outer_idx = 0;
     for (auto &outer : d.hess_) {

@@ -22,7 +22,11 @@ class shared_object {
     template <typename U, typename U_ = std::remove_cvref_t<U>>
         requires std::is_base_of_v<T, U_>
     shared_object(U &&u) {
-        ptr_.reset(new U_(std::forward<U>(u)));
+        if (u.use_count() > 0) {
+            ptr_ = const_cast<U_&>(u).shared_from_this();
+        } else {
+            ptr_.reset(new U_(std::forward<U>(u)));
+        }
     } ///< constructor from a reference
     template <typename U>
         requires std::is_base_of_v<T, std::remove_cvref_t<U>>
@@ -34,7 +38,9 @@ class shared_object {
 };
 
 using shared_expr = shared_object<expr>; ///< type alias for shared expression reference
-using expr_list = std::vector<shared_expr>;
+struct expr_list : public std::vector<shared_expr> {
+    using std::vector<shared_expr>::vector; ///< inherit constructors from std::vector
+};
 
 constexpr size_t dim_tbd = 0;
 
@@ -89,8 +95,8 @@ class expr : public std::enable_shared_from_this<expr> {
             rhs.uid_ = uid_max; // reset the uid of the moved object
         }
         virtual ~impl() = default; ///< virtual destructor
+        virtual void finalize_impl() {}
     };
-    virtual void finalize_impl() {}
 
     std::shared_ptr<expr::impl> impl_; ///< shared pointer to the expression, used for shared attributes
 

@@ -3,9 +3,9 @@
 #include <moto/ocp/problem.hpp>
 
 namespace moto {
-void sym::finalize_impl() {
-    if (field() == __x) {
-        assert(get_impl().dual_ && "dual pointer should not be null when field == __x");
+void sym::impl::finalize_impl() {
+    if (field_ == __x) {
+        assert(dual_ && "dual pointer should not be null when field == __x");
     }
 }
 func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, const func &f)

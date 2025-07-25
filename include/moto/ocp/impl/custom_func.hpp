@@ -6,13 +6,6 @@
 namespace moto {
 
 class custom_func : public func {
-  protected:
-    void finalize_impl() override {
-        if (in_field(field(), moto::func_fields) || field() == __undefined) {
-            throw std::runtime_error(fmt::format("func {} field type {} not qualified as custom function - finalization failed",
-                                                 name(), field::name(field())));
-        }
-    }
 
   public:
     struct impl : public func::impl {
@@ -20,6 +13,18 @@ class custom_func : public func {
         std::function<func_arg_map_ptr_t(sym_data &, shared_data &)> create_custom_data_;
         /// @brief callback to call a non-approximation function
         std::function<void(func_arg_map &)> custom_call_;
+
+        impl() = default;           ///< default constructor
+        impl(impl &&rhs) = default; ///< move constructor
+        explicit impl(func::impl &&rhs)
+            : func::impl(std::move(rhs)) {}
+
+        void finalize_impl() override {
+            if (in_field(field_, moto::func_fields) || field_ == __undefined) {
+                throw std::runtime_error(fmt::format("func {} field type {} not qualified as custom function - finalization failed",
+                                                     name_, field::name(field_)));
+            }
+        }
     };
 
     using func::func;

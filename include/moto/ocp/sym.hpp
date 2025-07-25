@@ -23,10 +23,10 @@ class sym : public expr, public cs::SX {
             dual_ = std::move(rhs.dual_);      // move the dual pointer
             dual_->impl_ = shared_from_this(); // set the impl pointer of the dual
         } ///< move constructor
+        void finalize_impl() override;
     };
 
   protected:
-    void finalize_impl() override;
     DEF_IMPL_GETTER();
 
   public:
