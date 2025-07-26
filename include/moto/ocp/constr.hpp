@@ -93,19 +93,8 @@ class constr : public func_base {
     template <typename derived = constr>
     using data_type = constr_data_tpl<typename derived::approx_map, typename derived::approx_data>;
     using base = func_base;
+    using base::base; ///< inherit base constructor
     constr() = default; ///< default constructor
-
-    constr(const std::string &name, approx_order order = approx_order::first,
-           size_t dim = dim_tbd, field_t field = __undefined)
-        : base(name, order, dim, field) {
-    } ///< constructor with name, order, dimension and field
-
-    constr(const std::string &name,
-           const var_list &in_args,
-           const cs::SX &out,
-           approx_order order = approx_order::first, field_t field = __undefined)
-        : base(name, in_args, out, order, field) {
-    } ///< constructor with name, input arguments, output expression, order and field
 
     PROPERTY(field_hint); ///< getter for field hint
 
@@ -151,20 +140,20 @@ class constr : public func_base {
         else
             return func_approx_map_ptr_t(make_approx(primal, raw, shared));
     }
+    DEF_FUNC_CLONE;
     /**
-     * @brief set the constraint as equality constraint
+     * @brief set the constraint as equality constraint in-place
      *
      * @param soft if true, set as soft equality constraint
      * @return constr& *this
      */
     template <typename derived = constr>
         requires(std::derived_from<derived, constr>)
-    auto as_eq(bool soft = false) {
+    decltype(auto) as_eq(bool soft = false) {
         field_hint().is_eq = true;
         field_hint().is_soft = soft;
         if constexpr (!std::is_same_v<derived, constr>) {
-            auto tmp = cast<derived, constr>();
-            return tmp;
+            return derived(std::move(*this));
         } else
             return *this;
     }
@@ -177,11 +166,10 @@ class constr : public func_base {
         requires(std::derived_from<derived, constr>)
     auto as_ineq() {
         field_hint_.is_eq = false;
-        auto tmp = cast<derived, constr>();
-        return tmp;
+        return derived(std::move(*this));
     }
 
-    shared_expr as_ineq(std::string_view type_name);
+    func as_ineq(std::string_view type_name);
 };
 } // namespace moto
 

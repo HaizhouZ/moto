@@ -7,6 +7,12 @@
 
 namespace moto {
 class func_codegen;
+class func_base;
+struct func : public shared_expr {
+    using base = shared_expr;
+    using base::base;
+    func_base *operator->() const; ///< convert to func_base
+};
 /**
  * @brief approximation class for generic functions
  * @todo: change to differentiable for precompute
@@ -35,6 +41,8 @@ class func_base : public expr {
     friend class func_arg_map;
 
     void substitute(const sym &arg, const sym &rhs);
+    void set_from_casadi(const var_inarg_list &in_args, const cs::SX &out);
+
     virtual void finalize_impl() override;
     virtual void value_impl([[maybe_unused]] func_approx_map &data) const { value(data); }
     virtual void jacobian_impl([[maybe_unused]] func_approx_map &data) const { jacobian(data); }
@@ -45,12 +53,12 @@ class func_base : public expr {
     virtual void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const {}
     func_base() = default;
     func_base(const std::string &name, approx_order order = approx_order::first,
-         size_t dim = dim_tbd, field_t field = __undefined)
+              size_t dim = dim_tbd, field_t field = __undefined)
         : expr(name, dim, field), order_(order) {}
     func_base(const std::string &name,
-         const var_list &in_args,
-         const cs::SX &out,
-         approx_order order = approx_order::first, field_t field = __undefined)
+              const var_inarg_list &in_args,
+              const cs::SX &out,
+              approx_order order = approx_order::first, field_t field = __undefined)
         : func_base(name, order, (size_t)out.size1(), field) {
         assert(out.size2() == 1 && "constr output cols must be 1");
         set_from_casadi(in_args, out);
@@ -66,20 +74,19 @@ class func_base : public expr {
     const auto &in_args(size_t i) const { return in_args_[i]; }
 
     template <typename T>
-        requires std::is_same_v<var, std::remove_cvref_t<T>> || 
+        requires std::is_same_v<var, std::remove_cvref_t<T>> ||
                  std::is_same_v<shared_expr, std::remove_cvref_t<T>>
     void add_argument(T &&in) {
         in_args_.emplace_back(std::forward<T>(in));
         add_dep(in_args_.back());
         sym_uid_idx_[in_args_.back()->uid()] = sym_uid_idx_.size();
     }
-    void add_arguments(const var_list &args) {
-        for (auto &in : args) {
-            add_argument(in);
+    void add_arguments(const var_inarg_list &args) {
+        for (sym &in : args) {
+            add_argument(var(in));
         }
     }
 
-    void set_from_casadi(const var_list &in_args, const cs::SX &out);
     virtual func_approx_map_ptr_t create_approx_map(sym_data &primal,
                                                     dense_approx_data &raw,
                                                     shared_data &shared) const;
@@ -100,14 +107,20 @@ class func_base : public expr {
     void load_external(const std::string &path = "gen") {
         load_external_impl(path);
     }
-    std::function<void(func_approx_map &)> value;///< value callback
-    std::function<void(func_approx_map &)> jacobian;///< jacobian callback
-    std::function<void(func_approx_map &)> hessian;///< hessian callback
+    std::function<void(func_approx_map &)> value;    ///< value callback
+    std::function<void(func_approx_map &)> jacobian; ///< jacobian callback
+    std::function<void(func_approx_map &)> hessian;  ///< hessian callback
+
+#define DEF_FUNC_CLONE           \
+    virtual func clone() const { \
+        return func(*this);      \
+    }
+
+    DEF_FUNC_CLONE;
 };
-struct func : public shared_object<func_base> {
-    using base = shared_object<func_base>;
-    using base::shared_object;
-};
+inline func_base *func::operator->() const {
+    return static_cast<func_base *>(base::operator->());
+} ///< convert to func_base
 /**
  * @brief Code generation helper for functions
  *

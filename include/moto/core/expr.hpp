@@ -25,7 +25,7 @@ class shared_object {
         requires std::is_base_of_v<T, U_>
     shared_object(U &&u) {
         if (u.use_count() > 0) {
-            *this = const_cast<U_ &>(u).get_shared();
+            *this = const_cast<U_ &&>(u).get_shared();
         } else {
             ptr_.reset(new U_(std::forward<U>(u)));
             if (u) {
@@ -36,16 +36,23 @@ class shared_object {
     template <typename U, typename U_ = std::remove_cvref_t<U>>
         requires std::is_base_of_v<T, U_> || std::is_base_of_v<U_, T>
     shared_object(const shared_object<U> &rhs) {
+        bool rhs_empty = !rhs.ptr_;
         ptr_ = std::static_pointer_cast<T>(rhs.ptr_);
-        assert(ptr_ && "Cannot move a null shared_object");
+        assert(ptr_ || rhs_empty && "Cannot move a null shared_object");
     }
     template <typename U, typename U_ = std::remove_cvref_t<U>>
         requires std::is_base_of_v<T, U_> || std::is_base_of_v<U_, T>
-    shared_object(shared_object<U> &&rhs) {
+    shared_object(shared_object<U> &&rhs) noexcept {
+        bool rhs_empty = !rhs.ptr_;
         ptr_ = std::static_pointer_cast<T>(std::move(rhs.ptr_));
-        assert(ptr_ && "Cannot move a null shared_object");
+        assert(ptr_ || rhs_empty && "Cannot move a null shared_object");
     }
     shared_object(ptr_t &&p) : ptr_(std::move(p)) {} ///< constructor from a shared pointer
+    shared_object(const ptr_t &p) : ptr_(p) {} ///< constructor from a shared pointer
+    shared_object(const shared_object &rhs) = default; ///< copy constructor
+    shared_object(shared_object &&rhs) noexcept = default; ///< move constructor
+    shared_object& operator=(const shared_object &rhs) = default;
+    shared_object& operator=(shared_object &&rhs) noexcept = default; ///< move assignment operator
     template <typename U, typename U_ = std::remove_cvref_t<U>>
         requires std::is_base_of_v<T, U_> || std::is_base_of_v<U_, T>
     operator U &() const { return static_cast<U &>(*ptr_); } ///< dereference operator
@@ -60,12 +67,25 @@ class shared_object {
 
     operator bool() const { return static_cast<bool>(ptr_); } ///< conversion to bool operator
     size_t use_count() const { return ptr_.use_count(); }     ///< get the use count of the pointer
+    virtual ~shared_object() {
+        if (ptr_)
+            fmt::print("Shared object {} with uid {} is destroyed\n", ptr_->name(), ptr_->uid());
+    }
 };
 
 using shared_expr = shared_object<expr>; ///< type alias for shared expression reference
 struct expr_list : public std::vector<shared_expr> {
     using std::vector<shared_expr>::vector; ///< inherit constructors from std::vector
 };
+struct expr_inarg_list : public std::vector<std::reference_wrapper<expr>> {
+    using std::vector<std::reference_wrapper<expr>>::vector; ///< inherit constructors from std::vector
+    expr_inarg_list(const expr_list &exprs) { ///< constructor from a vector of shared_expr
+        reserve(exprs.size());
+        for (expr &ex : exprs) {
+            emplace_back(ex);
+        }
+    } ///< constructor from a vector of shared_expr
+}; ///< list of expressions
 
 constexpr size_t dim_tbd = 0;
 
@@ -184,27 +204,6 @@ class expr : public std::enable_shared_from_this<expr> {
     auto make_vec(const scalar_t *ptr) const { return mapped_const_vector(ptr, dim_); }
 
     bool finalize();
-
-    /// @brief clone the expression
-    template <typename derived, typename base = expr>
-        requires std::is_base_of_v<expr, derived>
-    derived clone() const {
-        return derived(static_cast<base &>(*this));
-    }
-    /// @brief moving cast
-    /// @tparam derived
-    /// @tparam base
-    /// @return
-    template <typename derived, typename base>
-        requires std::is_base_of_v<base, derived>
-    derived cast() {
-        return derived(static_cast<base &&>(*this));
-    }
-
-    template <typename derived>
-    derived cast() {
-        return cast<derived, expr>();
-    } ///< cast to derived type
 
     size_t use_count() const { return weak_from_this().use_count(); } ///< get the use count of the expression
 };

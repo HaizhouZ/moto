@@ -13,7 +13,7 @@ struct usr_func : public custom_func {
     usr_func(const std::string &name, approx_order order, size_t dim = dim_tbd) : custom_func(name, order, dim, __usr_func) {
     }
     usr_func(const std::string &name,
-             const var_list& in_args, const cs::SX &out,
+             const var_inarg_list &in_args, const cs::SX &out,
              approx_order order = approx_order::first) : custom_func(name, in_args, out, order, __usr_func) {
     }
 };

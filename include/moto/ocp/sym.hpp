@@ -7,9 +7,10 @@
 namespace moto {
 namespace cs = casadi;
 class sym;
-struct var : public shared_object<sym> {
-    using base = shared_object<sym>;
-    using base::shared_object;
+struct var : public shared_expr {
+    using base = shared_expr;
+    using base::base;
+    sym *operator->() const; ///< convert to sym
 };
 /**
  * @brief pointer wrapper of symbolic expressions like primal variables or parameters
@@ -64,7 +65,7 @@ class sym : public expr, public cs::SX {
         auto next = var(sym(name + "_nxt", dim, __y));
         temp->dual_ = next;
         next->dual_ = temp;
-        return std::make_pair(temp, next);
+        return std::make_pair(std::move(temp), std::move(next));
     }
     static auto state(const std::string &name, size_t dim) {
         auto [x, y] = states(name, dim);
@@ -79,9 +80,20 @@ class sym : public expr, public cs::SX {
         return dual_;
     }
 };
-
+inline sym *var::operator->() const {
+    return static_cast<sym *>(base::operator->());
+} ///< convert to sym
 struct var_list : public std::vector<var> {
     using std::vector<var>::vector; ///< inherit constructors from std::vector
+}; ///< list of symbolic expressions
+struct var_inarg_list : public std::vector<std::reference_wrapper<sym>> {
+    using std::vector<std::reference_wrapper<sym>>::vector; ///< inherit constructors from std::vector
+    var_inarg_list(const var_list &v) {
+        this->reserve(v.size());
+        for (const auto &i : v) {
+            this->emplace_back(i);
+        }
+    } ///< construct from var_list
 }; ///< list of symbolic expressions
 } // namespace moto
 

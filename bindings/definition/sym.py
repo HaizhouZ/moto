@@ -25,31 +25,31 @@ class sym(cs.SX):
 
     @property
     def name(self):
-        return self.sym_base.as_expr().name
+        return self.sym_base.name
 
     @name.setter
     def name(self, value):
-        self.sym_base.as_expr().name = value
+        self.sym_base.name = value
 
     @property
     def dim(self):
-        return self.sym_base.as_expr().dim
+        return self.sym_base.dim
 
     @dim.setter
     def dim(self, value):
-        self.sym_base.as_expr().dim = value
+        self.sym_base.dim = value
 
     @property
     def field(self):
-        return self.sym_base.as_expr().field
+        return self.sym_base.field
 
     @field.setter
     def field(self, value):
-        self.sym_base.as_expr().field = value
+        self.sym_base.field = value
 
     @property
     def uid(self):
-        return self.sym_base.as_expr().uid
+        return self.sym_base.uid
 
     @staticmethod
     def inputs(name: str, dim: int = 1):

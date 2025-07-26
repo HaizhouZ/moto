@@ -22,7 +22,7 @@ class cost : public func_base {
     cost(const std::string &name, approx_order order = approx_order::second)
         : base(name, order, 1, __cost) {}
 
-    cost(const std::string &name, const var_list &in_args, const cs::SX &out, approx_order order = approx_order::second)
+    cost(const std::string &name, const var_inarg_list &in_args, const cs::SX &out, approx_order order = approx_order::second)
         : base(name, in_args, out, order, __cost) {
         assert(out.is_scalar() && "cost output must be a scalar");
     }
@@ -31,6 +31,7 @@ class cost : public func_base {
         tmp.name() += "_terminal";
         return tmp;
     }
+    DEF_FUNC_CLONE;
 };
 
 } // namespace moto

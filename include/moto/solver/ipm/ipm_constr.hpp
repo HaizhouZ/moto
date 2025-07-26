@@ -65,6 +65,7 @@ class ipm_constr final : public ineq_constr {
     func_approx_map_ptr_t create_approx_map(sym_data &primal, dense_approx_data &raw, shared_data &shared) const override {
         return func_approx_map_ptr_t(make_approx<ipm_constr>(primal, raw, shared));
     }
+    DEF_FUNC_CLONE;
 };
 } // namespace solver
 using ipm = solver::ipm_constr;

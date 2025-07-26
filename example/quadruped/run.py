@@ -18,7 +18,6 @@ print("------------------------------")
 moto.print_all_sx([q, q_next])
 prob = moto.ocp.create()
 prob.add([q, q_next])
-
 d = moto.constr("d", [q, q_next], q.T @ q_next, field=moto.field_eq_x).as_eq()
 # print(c.uid)
 # e = moto.expr()
@@ -32,6 +31,10 @@ d = moto.constr("d", [q, q_next], q.T @ q_next, field=moto.field_eq_x).as_eq()
 # q_next.dim = 13
 
 print(d.uid)
+print(prob.exprs(moto.field.field_x))
+
+print("------------------------------")
+exit(0)
 # prob = moto.ocp.create()
 # prob.add([q, q_next, c])
 # print(c.use_count)

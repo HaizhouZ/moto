@@ -51,9 +51,7 @@ constexpr auto func_fields = concat_fields(constr_fields, std::array{__cost});
 constexpr auto custom_func_fields = std::array{__pre_comp, __usr_func};
 
 namespace field {
-
 constexpr auto name(field_t f) { return magic_enum::enum_name<field_t>(f); }
-constexpr inline auto format_as(field_t f) { return name(f); }
 constexpr size_t num_sym = __p + 1;                   // number of symbolic fields
 constexpr size_t num_prim = std::size(primal_fields); // number of primal fields
 constexpr size_t num = NUM;
@@ -61,6 +59,7 @@ constexpr size_t num_func = __cost + 1 - num_sym;
 constexpr size_t num_constr = num_func - 1; // exclude cost
 } // namespace field
 
+constexpr inline auto format_as(field_t f) { return field::name(f); }
 } // namespace moto
 
 #endif /*__FIELDS_*/

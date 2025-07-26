@@ -62,15 +62,9 @@ class ocp {
             expr_[static_cast<const expr &>(ex).field()].emplace_back(std::forward<T>(ex));
     }
 
-    void add(const expr_list &exprs) {
-        for (auto &ex : exprs) {
+    void add(const expr_inarg_list &exprs) {
+        for (expr &ex : exprs) {
             add(ex);
-        }
-    }
-
-    void add(expr_list &&exprs) {
-        for (auto &ex : exprs) {
-            add(std::move(ex));
         }
     }
 
