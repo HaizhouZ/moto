@@ -54,7 +54,7 @@ struct node_data {
      * @param f
      * @return auto&
      */
-    auto &data(const func &f) const { return *sparse_[f.field()][prob_->pos(f)]; }
+    auto &data(const func &f) const { return *sparse_[f->field()][prob_->pos(f)]; }
 
     scalar_t cost() const { return dense_->cost_; }
 
@@ -66,13 +66,13 @@ struct node_data {
     void update_approximation(bool eval_only = false);
 
     template <std::array fields, typename Callback>
-        requires std::is_invocable_r_v<void, Callback, const func &, func_approx_map &> &&
+        requires std::is_invocable_r_v<void, Callback, const func_base &, func_approx_map &> &&
                  std::is_same_v<std::tuple_element_t<0, decltype(fields)>, field_t>
     void for_each(Callback &&callback) {
         for (const auto &field : fields) {
             size_t idx = 0;
             auto &s = this->sparse_[field];
-            for (const func &f : prob_->exprs(field)) {
+            for (const func_base &f : prob_->exprs(field)) {
                 callback(f, *s[idx]);
                 idx++;
             }

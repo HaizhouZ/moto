@@ -1,10 +1,10 @@
 #include <moto/core/expr.hpp>
 namespace moto {
-INIT_UID_(expr::impl);
+INIT_UID_(expr);
 bool expr::finalize() {
     if (!finalized()) {
-        impl_->finalize_impl();
-        impl_->finalized_ = (field() != __undefined);
+        finalize_impl();
+        finalized_ = (field() != __undefined);
     }
     return finalized();
 }

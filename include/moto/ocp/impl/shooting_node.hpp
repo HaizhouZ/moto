@@ -21,7 +21,7 @@ struct shooting_node final : public graph_types::node_base<T, shooting_node<T>> 
      * @param formulation problem formulation of this shootin gnode
      */
     shooting_node(const ocp_ptr_t &formulation)
-        : mem_(impl::data_mgr::get<data_type>()) {
+        : mem_(data_mgr::get<data_type>()) {
         base::data_ = dynamic_cast<data_type *>(mem_.acquire(formulation));
     }
     /**
@@ -41,7 +41,7 @@ struct shooting_node final : public graph_types::node_base<T, shooting_node<T>> 
         if (base::data_)
             mem_.release(base::data_);
     }
-    impl::data_mgr &mem_;
+    data_mgr &mem_;
 };
 } // namespace impl
 } // namespace moto

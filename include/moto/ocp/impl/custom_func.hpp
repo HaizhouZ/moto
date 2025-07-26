@@ -5,29 +5,18 @@
 
 namespace moto {
 
-class custom_func : public func {
+class custom_func : public func_base {
+
+  protected:
+    void finalize_impl() override {
+        if (in_field(field_, moto::func_fields) || field_ == __undefined) {
+            throw std::runtime_error(fmt::format("func {} field type {} not qualified as custom function - finalization failed",
+                                                 name_, field::name(field_)));
+        }
+    }
 
   public:
-    struct impl : public func::impl {
-        /// @brief callback to make data（for non-approx) @note will not be called in @ref create_approx_map
-        std::function<func_arg_map_ptr_t(sym_data &, shared_data &)> create_custom_data_;
-        /// @brief callback to call a non-approximation function
-        std::function<void(func_arg_map &)> custom_call_;
-
-        impl() = default;           ///< default constructor
-        impl(impl &&rhs) = default; ///< move constructor
-        explicit impl(func::impl &&rhs)
-            : func::impl(std::move(rhs)) {}
-
-        void finalize_impl() override {
-            if (in_field(field_, moto::func_fields) || field_ == __undefined) {
-                throw std::runtime_error(fmt::format("func {} field type {} not qualified as custom function - finalization failed",
-                                                     name_, field::name(field_)));
-            }
-        }
-    };
-
-    using func::func;
+    using func_base::func_base;
     /**
      * @brief create the argument mapping for the custom function
      *
@@ -40,8 +29,10 @@ class custom_func : public func {
         return std::make_unique<func_arg_map>(primal, shared, *this);
     }
 
-    IMPL_ATTR_GETTER(create_custom_data, custom_func);
-    IMPL_ATTR_GETTER(custom_call, custom_func);
+    /// @brief callback to make data（for non-approx) @note will not be called in @ref create_approx_map
+    std::function<func_arg_map_ptr_t(sym_data &, shared_data &)> create_custom_data;
+    /// @brief callback to call a non-approximation function
+    std::function<void(func_arg_map &)> custom_call;
 };
 
 } // namespace moto

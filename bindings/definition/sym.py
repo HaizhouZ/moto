@@ -1,4 +1,4 @@
-from moto import shared_expr, create_sym, get_sym_sx, create_states
+from moto import var, create_sym, get_sym_sx, create_states
 from moto import field
 import casadi as cs
 
@@ -12,9 +12,9 @@ class sym(cs.SX):
     """
 
     def __init__(
-        self, name: str = None, dim: int = None, field: field = field.field_undefined, base: shared_expr = None
+        self, name: str = None, dim: int = None, field: field = field.field_undefined, base: var = None
     ):
-        self.sym_base: shared_expr = base if base is not None else create_sym(name, dim, field)
+        self.sym_base: var = base if base is not None else create_sym(name, dim, field)
         self.next: sym = None
         self.prev: sym = None
         cs.SX.__init__(self, get_sym_sx(self.sym_base))
@@ -62,6 +62,7 @@ class sym(cs.SX):
     @staticmethod
     def states(name: str, dim: int = 1):
         x, y = create_states(name, dim)
+        print(f"Created states: {x}, {y}")
         x = sym(base=x)
         y = sym(base=y)
         x.next = y

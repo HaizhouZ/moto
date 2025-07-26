@@ -258,7 +258,7 @@ void run(
     fs::create_directories(output_dir);
     json j;
     j["name"] = func_name;
-    for (const auto &e : sx_inputs) {
+    for (const sym &e : sx_inputs) {
         j["inputs"][e.name()] = {e.dim(), static_cast<int>(e.field())};
     }
     for (const auto &e : sx_outputs) {

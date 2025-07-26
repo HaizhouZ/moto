@@ -2,7 +2,7 @@
 #include <moto/ocp/cost.hpp>
 
 namespace moto {
-void cost::impl::finalize_impl() {
+void cost::finalize_impl() {
     if (finalize_hint_.substitute_x_to_y) {
         for (sym &arg : in_args_) {
             switch (arg.field()) {
@@ -22,7 +22,7 @@ void cost::impl::finalize_impl() {
         }
     }
     // finalize the base class
-    func::impl::finalize_impl();
+    func_base::finalize_impl();
     return;
 }
 } // namespace moto

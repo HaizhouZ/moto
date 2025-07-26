@@ -14,17 +14,17 @@ struct doubleIntegratorCosts {
         struct impl : public cost::impl {
             vector d_r = vector::Constant(3, 10);
             vector d_v = vector::Constant(3, 0.1); ///< derivatives of the cost wrt r and v
-            using cost::impl::impl;                ///< inherit constructor from cost::impl
+            using cost::impl;                ///< inherit constructor from cost::impl
             impl(sym r, sym v, cost::impl &&rhs) : cost::impl(std::move(rhs)) {
-                value_ = [=](func_approx_map &data) {
+                value = [=](func_approx_map &data) {
                     data.v_.noalias() += 0.5 * d_r.transpose() * data[r].cwiseAbs2();
                     data.v_.noalias() += 0.5 * d_v.transpose() * data[v].cwiseAbs2();
                 };
-                jacobian_ = [=](func_approx_map &data) { // make sure use +=
+                jacobian = [=](func_approx_map &data) { // make sure use +=
                     data.jac_[0].noalias() += data[0].transpose() * d_r.asDiagonal();
                     data.jac_[1].noalias() += data[1].transpose() * d_v.asDiagonal();
                 };
-                hessian_ = [=](func_approx_map &data) {
+                hessian = [=](func_approx_map &data) {
                     data.hess_[0][0].diagonal() += d_r;
                     data.hess_[1][1].diagonal() += d_v;
                 };
@@ -39,15 +39,15 @@ struct doubleIntegratorCosts {
     auto input_cost(sym a) {
         struct impl : public cost::impl {
             vector d_a = vector::Constant(3, 1e-3);
-            using cost::impl::impl;
+            using cost::impl;
             impl(sym a, cost::impl &&rhs) : cost::impl(std::move(rhs)) {
-                value_ = [=](func_approx_map &data) {
+                value = [=](func_approx_map &data) {
                     data.v_.noalias() += 0.5 * d_a.transpose() * data[a].cwiseAbs2();
                 };
-                jacobian_ = [=](func_approx_map &data) {
+                jacobian = [=](func_approx_map &data) {
                     data.jac_[0].noalias() += data[0].transpose() * d_a.asDiagonal();
                 };
-                hessian_ = [=](func_approx_map &data) {
+                hessian = [=](func_approx_map &data) {
                     data.hess_[0][0].diagonal() += d_a;
                 };
             }

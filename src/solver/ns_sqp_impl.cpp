@@ -16,7 +16,7 @@ void ns_sqp::update(size_t n_iter) {
     fmt::print("Initialization for SQP...\n");
     graph_.apply_all_unary_parallel([this](data *cur) {
         // setup solver settings
-        cur->for_each_constr([this](const func &c, func_approx_map &d) { c.get_impl().setup_workspace_data(d, &settings); });
+        cur->for_each_constr([this](const func_base &c, func_approx_map &d) { c.setup_workspace_data(d, &settings); });
         cur->update_approximation(true);
         // initialize the data
         solver::ineq_soft::initialize(cur);

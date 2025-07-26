@@ -24,19 +24,19 @@ void constr::approx_map::map_merit_jac_from_raw(decltype(dense_approx_data::jac_
     auto &in_args = func_.in_args();
     jac.clear();
     for (size_t i : range(in_args_.size())) {
-        if (in_args[i].field() < field::num_prim) {
-            jac.push_back(raw[in_args[i].field()].segment(problem()->get_expr_start(in_args[i]), in_args[i].dim()));
+        if (in_args[i]->field() < field::num_prim) {
+            jac.push_back(raw[in_args[i]->field()].segment(problem()->get_expr_start(in_args[i]), in_args[i]->dim()));
         } else { // useless
             static row_vector empty;
             jac.push_back(empty);
         }
     }
 }
-constr::approx_data::approx_data(const func &f) : f_(f) {
+constr::approx_data::approx_data(const func_base &f) : f_(f) {
     v_data_.resize(f.dim());
     v_data_.setZero();
     jac_data_.reserve(f.in_args().size());
-    for (auto &arg : f.in_args()) {
+    for (sym &arg : f.in_args()) {
         if (arg.field() < field::num_prim) {
             jac_data_.emplace_back(f.dim(), arg.dim());
             jac_data_.back().setZero();
@@ -46,10 +46,10 @@ constr::approx_data::approx_data(const func &f) : f_(f) {
         };
     }
 }
-void constr::impl::finalize_impl() {
+void constr::finalize_impl() {
     if (field_ == __undefined) {
         bool has_[3] = {false, false, false}; // x, u, y
-        for (const auto &arg : in_args_) {
+        for (const sym &arg : in_args_) {
             if (arg.field() <= __y)
                 has_[arg.field()] = true;
         }
@@ -69,9 +69,9 @@ void constr::impl::finalize_impl() {
                 throw std::runtime_error(fmt::format("unsupported eq constr \"{}\" type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set _field or hints?",
                                                      name_, has_[__x], has_[__u], has_[__y], field_hint_.is_soft));
         } else {
-            if (has_[__u] && !has_[__y] && !field_hint_.is_soft)
+            if (has_[__u] && !has_[__y])
                 _field = __ineq_xu;
-            else if (!has_[__u] && (has_[__x] ^ has_[__y]) && !field_hint_.is_soft)
+            else if (!has_[__u] && (has_[__x] ^ has_[__y]))
                 _field = __ineq_x;
             else
                 throw std::runtime_error(fmt::format("unsupported ineq constr \"{}\" type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set _field or hints?",
@@ -93,12 +93,12 @@ void constr::impl::finalize_impl() {
             throw;
         }
     }
-    func::impl::finalize_impl();
+    func_base::finalize_impl();
     assert(field_ >= __dyn && field_ - __dyn < field::num_constr);
 }
 
-void constr::impl::value_impl(func_approx_map &data) const {
-    value_(data);
+void constr::value_impl(func_approx_map &data) const {
+    value(data);
     // compute contribution to merit function
     auto &d = static_cast<approx_map &>(data);
     scalar_t res = d.multiplier_.dot(d.v_);
@@ -112,9 +112,9 @@ void constr::impl::value_impl(func_approx_map &data) const {
     // }
     // fmt::print("\t{}:\tm:{}\n", name(), d.multiplier_.transpose());
 } // namespace moto
-void constr::impl::jacobian_impl(func_approx_map &data) const {
+void constr::jacobian_impl(func_approx_map &data) const {
     // compute jacobian first
-    jacobian_(data);
+    jacobian(data);
     // update multiplier - jacobian product
     auto &d = static_cast<approx_map &>(data);
     for (size_t i = 0; i < d.in_arg_data().size(); i++) {

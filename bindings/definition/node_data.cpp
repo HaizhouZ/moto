@@ -1,16 +1,16 @@
+#include <definition/sym_type_caster.hpp>
 #include <moto/ocp/impl/node_data.hpp>
 #include <type_cast.hpp>
-#include <definition/sym_type_caster.hpp>
 
 void register_submodule_node_data(nb::module_ &m) {
     using namespace moto;
     nb::class_<ocp>(m, "ocp")
         .def("add", &ocp::add<expr>, nb::arg("ex"), "Add an expression to the OCP problem")
-        .def("add", [](ocp &self, sym_in_list &&exprs) { self.add(exprs); }, nb::arg("exprs"), "Add a list of expressions to the OCP problem")
+        .def("add", [](ocp &self, expr_list &&exprs) { self.add(exprs); }, nb::arg("exprs"), "Add a list of expressions to the OCP problem")
         .def_static("create", &ocp::create, "Create a new OCP problem")
         .def("clone", &ocp::clone, "Clone the OCP problem")
-        .def("dim", &ocp::dim, nb::arg("field"), "Get the dimension of the field")
-        .def("exprs", &ocp::exprs<expr>, nb::arg("field"), "Get the expressions in the field")
+        .def("dim", [](ocp &self, field_t field) { return self.dim(field); }, nb::arg("field"), "Get the dimension of the field")
+        .def("exprs", [](ocp &self, field_t field) { return self.exprs<shared_expr>(field); }, nb::arg("field"), "Get the expressions in the field", nb::rv_policy::reference_internal)
         .def_prop_ro("uid", &ocp::uid, "Get the unique identifier of the OCP problem");
 
     nb::class_<sym_data>(m, "sym_data")
@@ -27,7 +27,7 @@ void register_submodule_node_data(nb::module_ &m) {
         .def_rw("jac_modification", &dense_approx_data::jac_modification_);
     nb::class_<shared_data>(m, "shared_data")
         .def_prop_ro("prob", [](node_data &self) -> auto & { return self.problem(); })
-        .def("__getitem__", [](shared_data &self, const func &f) -> auto & { return self[f]; });
+        .def("__getitem__", [](shared_data &self, const func_base &f) -> auto & { return self[f]; });
     nb::class_<node_data>(m, "node_data")
         .def_prop_ro("prob", [](node_data &self) -> auto & { return self.problem(); })
         .def_prop_ro("sym", [](node_data &self) -> auto & { return self.sym_val(); })
