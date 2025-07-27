@@ -36,6 +36,7 @@ struct worker {
 struct worker_list {
     std::vector<worker> workers;
     void wait_until_finished() {
+#pragma omp parallel for schedule(static)
         for (auto &w : workers) {
             w.wait_until_finished();
         }
@@ -45,6 +46,9 @@ struct worker_list {
     }
     void add(const worker_list &other) {
         workers.insert(workers.end(), other.workers.begin(), other.workers.end());
+    }
+    void add(worker_list &&other) {
+        workers.insert(workers.end(), std::make_move_iterator(other.workers.begin()), std::make_move_iterator(other.workers.end()));
     }
 };
 

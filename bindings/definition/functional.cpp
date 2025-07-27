@@ -85,15 +85,12 @@ void register_submodule_functional(nb::module_ &m) {
         .def("to_sx", [](var &v) { return static_cast<sym &>(v); }, nb::rv_policy::reference_internal);
 
     m.def("create_sym", [](const std::string &name, size_t dim, field_t field) {
-        nb::print("create called\n");
         return var(sym(name, dim, field)); }, nb::arg("name"), nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined);
     m.def("get_sym_sx", [](var &&s) {
         auto &ex = static_cast<sym &>(s);
-        // fmt::print("get_sym_sx called {}\n", s.weak_from_this().use_count());
         return cs::SX(ex); }, nb::arg("s"));
     m.def("create_states", [](const std::string &name, size_t dim) {
         auto&& [x, y] = sym::states(name, dim);
-        fmt::print("CPp: Created states: {}, {}\n", x->name(), y->name());
         return std::make_pair(var(std::move(x)), var(std::move(y))); }, nb::arg("name"), nb::arg("dim") = dim_tbd);
     m.def("print_all_sx", [](var_inarg_list &&s) {
         for (sym &ex : s) {
@@ -142,7 +139,7 @@ void register_submodule_functional(nb::module_ &m) {
             [](func &self, const decltype(custom_func::create_custom_data) &v) { static_cast<custom_func &>(self).create_custom_data = v; })
         .def(
             "add_argument",
-            [](func &self, const var &v) { self->add_argument(v); },
+            [](func &self, const nb::handle &v) { self->add_argument(nb::cast<var &>(v.attr("sym_base"))); },
             nb::arg("in"))
         .def(
             "add_arguments",
@@ -150,7 +147,10 @@ void register_submodule_functional(nb::module_ &m) {
         .def(
             "create_approx_map",
             [](func &self, sym_data &primal, dense_approx_data &raw, shared_data &shared) { return self->create_approx_map(primal, raw, shared); },
-            nb::arg("primal"), nb::arg("raw"), nb::arg("shared"));
+            nb::arg("primal"), nb::arg("raw"), nb::arg("shared"))
+        .def(
+            "as_terminal",
+            [](func &self) -> func & { static_cast<cost &>(self).as_terminal(); return self; });
 
     m.def(
          "constr",

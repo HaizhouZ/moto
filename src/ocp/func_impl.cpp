@@ -40,17 +40,17 @@ void func_base::set_from_casadi(const var_inarg_list &in_args, const cs::SX &out
     add_arguments(in_args);
     gen_.out_ = out;
 }
+static utils::cs_codegen::worker_list func_codegen_workers_;
 void func_base::finalize_impl() {
     if (!gen_.out_.is_empty()) {
+        func_codegen::make_codegen_task(this);
         if (!impl_func_gen_delegated_) {
-            gen_.res_ = func_codegen::make_codegen_task(this);
-            gen_.res_.wait(); // wait until codegen is done
+            func_codegen_workers_.wait_until_finished();
             load_external_impl();
-        } else
-            func_codegen::add(this);
+        }
     }
 }
-std::future<void> func_codegen::make_codegen_task(func_base *f) {
+void func_codegen::make_codegen_task(func_base *f) {
     utils::cs_codegen::task t;
     t.func_name = f->name_;
     t.sx_inputs = f->in_args_;
@@ -62,36 +62,23 @@ std::future<void> func_codegen::make_codegen_task(func_base *f) {
     t.append_jac = f->field_ == __cost;
     t.verbose = true;
     t.force_recompile = false;
+    t.keep_generated_src = true;
     auto workers = utils::cs_codegen::generate_and_compile(std::move(t));
-    return std::async(std::launch::async, [w = std::move(workers)]() mutable {
-        w.wait_until_finished();
-    });
+    if (impl_func_gen_delegated_) {
+        func_codegen_workers_.add(std::move(workers));
+    } else {
+        func_codegen_workers_.add(workers);
+    }
 }
-void func_codegen::add(func_base *f) { code_gen_funcs_.push_back(f); }
-std::vector<func_base *> func_codegen::code_gen_funcs_ = {};
+
 void func_codegen::enable() {
     impl_func_gen_delegated_ = true; // enable codegen delegation
 }
-void func_codegen::wait_until_all_compiled(size_t njobs) {
-    std::vector<func_base *> jobs;
-    size_t cnt = 0;
-    auto &funcs_ = code_gen_funcs_;
-    for (auto it_f = funcs_.begin(); it_f != funcs_.end(); ++it_f) {
-        jobs.push_back(*it_f);
-        cnt++;
-        if (cnt == njobs || it_f + 1 == funcs_.end()) {
-            for (auto f : jobs) {
-                f->gen_.res_ = make_codegen_task(f); // make codegen task for each function
-            }
-            for (auto f : jobs) {
-                f->gen_.res_.wait(); // wait until codegen is done
-                f->load_external();
-            }
-            cnt = 0; // reset counter
-            jobs.clear();
-        }
-    }
 
-    funcs_.clear();
+void func_codegen::wait_until_all_compiled(size_t njobs) {
+    size_t n_thread_bak = omp_get_num_threads();
+    omp_set_num_threads(njobs);
+    func_codegen_workers_.wait_until_finished();
+    omp_set_num_threads(n_thread_bak);
 }
 } // namespace moto

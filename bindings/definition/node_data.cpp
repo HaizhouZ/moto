@@ -15,9 +15,11 @@ void register_submodule_node_data(nb::module_ &m) {
         .def_prop_ro("uid", &ocp::uid, "Get the unique identifier of the OCP problem");
 
     nb::class_<sym_data>(m, "sym_data")
+        .def(nb::init<ocp *>(), nb::arg("prob"), "Constructor for sym_data with OCP problem")
         .def_prop_ro("prob", [](sym_data &self) -> ocp & { return *self.prob_; })
         .def("__getitem__", [](sym_data &self, const var &s) -> auto { return self[s]; });
     nb::class_<dense_approx_data>(m, "dense_approx_data")
+        .def(nb::init<ocp *>(), nb::arg("prob"), "Constructor for dense_approx_data with OCP problem")
         .def_prop_ro("prob", [](dense_approx_data &self) -> ocp & { return *self.prob_; })
         .def_rw("cost", &dense_approx_data::cost_)
         .def_rw("approx", &dense_approx_data::approx_)
@@ -27,6 +29,8 @@ void register_submodule_node_data(nb::module_ &m) {
         .def_rw("jac", &dense_approx_data::jac_)
         .def_rw("jac_modification", &dense_approx_data::jac_modification_);
     nb::class_<shared_data>(m, "shared_data")
+        .def(nb::init<const ocp *, sym_data *>(), nb::arg("prob"), nb::arg("primal"),
+             "Constructor for shared data with OCP problem and sym data")
         .def_prop_ro("prob", [](node_data &self) -> auto & { return self.problem(); })
         .def("__getitem__", [](shared_data &self, const func_base &f) -> auto & { return self[f]; });
     nb::class_<node_data>(m, "node_data")

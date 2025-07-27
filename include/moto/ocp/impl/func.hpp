@@ -127,12 +127,6 @@ inline func_base *func::operator->() const {
  */
 struct func_codegen {
     /**
-     * @brief add a function to the list of functions to be compiled
-     * @note this will be called by the func class
-     * @param f function to be added
-     */
-    static void add(func_base *f);
-    /**
      * @brief wait until all functions are compiled
      * @note this will block until all functions are compiled
      * @param njobs number of jobs to run in parallel, default is 4
@@ -147,10 +141,7 @@ struct func_codegen {
      * @brief make codegen task for the function
      *
      */
-    static std::future<void> make_codegen_task(func_base *f);
-
-  private:
-    static std::vector<func_base *> code_gen_funcs_;
+    static void make_codegen_task(func_base *f);
 };
 
 } // namespace moto

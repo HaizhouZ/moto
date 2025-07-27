@@ -18,7 +18,6 @@ class sym(cs.SX):
         self.next: sym = None
         self.prev: sym = None
         cs.SX.__init__(self, get_sym_sx(self.sym_base))
-        print(self)
 
     def __str__(self):
         return f'sym(uid={self.uid}, name="{self.name}", dim={self.dim}, field={self.field})'
@@ -51,24 +50,6 @@ class sym(cs.SX):
     def uid(self):
         return self.sym_base.uid
 
-    @staticmethod
-    def inputs(name: str, dim: int = 1):
-        return sym(name, dim, field=field.field_u)
-
-    @staticmethod
-    def params(name: str, dim: int = 1):
-        return sym(name, dim, field=field.field_p)
-
-    @staticmethod
-    def states(name: str, dim: int = 1):
-        x, y = create_states(name, dim)
-        print(f"Created states: {x}, {y}")
-        x = sym(base=x)
-        y = sym(base=y)
-        x.next = y
-        y.prev = x
-        return x, y
-
     @property
     def use_count(self):
         return self.sym_base.use_count
@@ -76,3 +57,18 @@ class sym(cs.SX):
     @property
     def impl_use_count(self):
         return self.sym_base.impl_use_count
+
+def inputs(name: str, dim: int = 1):
+    return sym(name, dim, field=field.field_u)
+
+def params(name: str, dim: int = 1):
+    return sym(name, dim, field=field.field_p)
+
+def states(name: str, dim: int = 1):
+    x, y = create_states(name, dim)
+    print(f"Created states: {x}, {y}")
+    x = sym(base=x)
+    y = sym(base=y)
+    x.next = y
+    y.prev = x
+    return x, y
