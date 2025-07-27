@@ -47,7 +47,6 @@ struct node_data {
             return sym_->value_[f];
     }
     auto value(const sym &s) const { return (*sym_)[s]; }
-    auto value(sym *s) const { return (*sym_)[*s]; }
     /**
      * @brief get the sparse func data by pointer
      *

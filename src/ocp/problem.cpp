@@ -1,5 +1,5 @@
 #include <moto/ocp/problem.hpp>
-#include <moto/ocp/sym.hpp>
+
 namespace moto {
 INIT_UID_(ocp);
 bool ocp::add_impl(expr &ex) {

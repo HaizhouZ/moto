@@ -10,7 +10,8 @@ class sym;
 struct var : public shared_expr {
     using base = shared_expr;
     using base::base;
-    sym *operator->() const; ///< convert to sym
+    sym *operator->() const;         ///< convert to sym
+    operator sym &() const noexcept; ///< convert to sym
 };
 /**
  * @brief pointer wrapper of symbolic expressions like primal variables or parameters
@@ -23,10 +24,13 @@ class sym : public expr, public cs::SX {
   protected:
     var dual_;
     void finalize_impl() override;
+    operator double() const = delete; ///< disable implicit conversion to double
+    operator casadi_int() const = delete; ///< disable implicit conversion to casadi_int
 
   public:
     using expr::dim;
     using expr::name; ///< name of the symbolic variable
+    using expr::operator bool;
 
     sym() = default; ///< default constructor, will create a not-a-number symbolic variable
     /**
@@ -82,7 +86,10 @@ class sym : public expr, public cs::SX {
 };
 inline sym *var::operator->() const {
     return static_cast<sym *>(base::operator->());
-} ///< convert to sym
+}
+inline var::operator sym &() const noexcept {
+    return *static_cast<sym *>(base::operator->());
+}
 struct var_list : public std::vector<var> {
     using std::vector<var>::vector; ///< inherit constructors from std::vector
 }; ///< list of symbolic expressions

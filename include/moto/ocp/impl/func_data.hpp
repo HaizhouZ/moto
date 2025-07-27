@@ -74,7 +74,6 @@ struct func_arg_map {
     auto operator[](const sym &in) const {
         return in_args_[sym_uid_idx_.at(in.uid())];
     }
-    auto operator[](sym *in) const { return this->operator[](*in); }
     /// @brief get the input argument values by index
     auto operator[](size_t i) const { return in_args_.at(i); }
 
@@ -134,7 +133,6 @@ struct func_approx_map : public func_arg_map {
     auto jac(const sym &in) const {
         return jac_[sym_uid_idx_.at(in.uid())];
     }
-    auto jac(sym *in) const { return jac(*in); }
 };
 
 def_unique_ptr(func_approx_map);

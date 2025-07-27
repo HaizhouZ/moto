@@ -23,7 +23,7 @@ struct type_caster<moto::var_inarg_list> {
         for (auto &ex : l) {
             auto type = ex.type();
             if (nb::isinstance<moto::shared_expr>(ex)) {
-                value.push_back(nb::cast<moto::shared_expr &>(ex));
+                value.push_back(nb::cast<moto::shared_expr>(ex));
             } else if (nb::isinstance<moto::var>(ex)) {
                 value.push_back(nb::cast<moto::var &>(ex));
             } else if (nb::hasattr(ex, "sym_base")) {

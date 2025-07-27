@@ -6,86 +6,58 @@
 namespace moto {
 class expr; // forward declaration of expr
 /**
- * @brief shared pointer to expr wrapper, used for sharing the wrapper
- * @note can be converted to expr reference
+ * @brief shared reference wrapper of expressions
+ * @note can be converted to expr (and its derived types) references
  */
-template <typename T>
-class shared_object {
+class shared_expr {
   private:
-    using ptr_t = std::shared_ptr<T>;
+    using ptr_t = std::shared_ptr<expr>;
     ptr_t ptr_;
-    template <typename U>
-    friend class shared_object; ///< allow shared_object to access private members
 
   public:
-    shared_object() = default; ///< default constructor
+    shared_expr() = default; ///< default constructor
     template <typename U>
     void reset(U *u) { ptr_.reset(u); } ///< reset the pointer
     template <typename U, typename U_ = std::remove_cvref_t<U>>
-        requires std::is_base_of_v<T, U_>
-    shared_object(U &&u) {
+        requires std::is_base_of_v<expr, U_>
+    shared_expr(U &&u) {
         if (u.use_count() > 0) {
             *this = const_cast<U_ &&>(u).get_shared();
         } else {
             ptr_.reset(new U_(std::forward<U>(u)));
             if (u) {
-                const_cast<U_ &>(u).set_shared(shared_object(*this));
+                const_cast<U_ &>(u).set_shared(shared_expr(*this));
             }
         }
     } ///< constructor from a reference
-    template <typename U, typename U_ = std::remove_cvref_t<U>>
-        requires std::is_base_of_v<T, U_> || std::is_base_of_v<U_, T>
-    shared_object(const shared_object<U> &rhs) {
-        bool rhs_empty = !rhs.ptr_;
-        ptr_ = std::static_pointer_cast<T>(rhs.ptr_);
-        assert(ptr_ || rhs_empty && "Cannot move a null shared_object");
-    }
-    template <typename U, typename U_ = std::remove_cvref_t<U>>
-        requires std::is_base_of_v<T, U_> || std::is_base_of_v<U_, T>
-    shared_object(shared_object<U> &&rhs) noexcept {
-        bool rhs_empty = !rhs.ptr_;
-        ptr_ = std::static_pointer_cast<T>(std::move(rhs.ptr_));
-        assert(ptr_ || rhs_empty && "Cannot move a null shared_object");
-    }
-    shared_object(ptr_t &&p) : ptr_(std::move(p)) {} ///< constructor from a shared pointer
-    shared_object(const ptr_t &p) : ptr_(p) {} ///< constructor from a shared pointer
-    shared_object(const shared_object &rhs) = default; ///< copy constructor
-    shared_object(shared_object &&rhs) noexcept = default; ///< move constructor
-    shared_object& operator=(const shared_object &rhs) = default;
-    shared_object& operator=(shared_object &&rhs) noexcept = default; ///< move assignment operator
-    template <typename U, typename U_ = std::remove_cvref_t<U>>
-        requires std::is_base_of_v<T, U_> || std::is_base_of_v<U_, T>
-    operator U &() const { return static_cast<U &>(*ptr_); } ///< dereference operator
-    T *operator->() const { return ptr_.get(); }             ///< arrow operator
+    shared_expr(ptr_t &&p) : ptr_(std::move(p)) {}                ///< constructor from a shared pointer
+    shared_expr(const ptr_t &p) : ptr_(p) {}                      ///< constructor from a shared pointer
+    shared_expr(const shared_expr &rhs) = default;                ///< copy constructor
+    shared_expr(shared_expr &&rhs) noexcept = default;            ///< move constructor
+    shared_expr &operator=(const shared_expr &rhs) = default;     ///< copy assignment operator
+    shared_expr &operator=(shared_expr &&rhs) noexcept = default; ///< move assignment operator
 
-    bool operator==(const shared_object &rhs) const {
+    template <typename U, typename U_ = std::remove_cvref_t<U>>
+        requires std::is_base_of_v<expr, U_> || std::is_base_of_v<U_, expr>
+    operator U &() const { return static_cast<U &>(*ptr_); } ///< dereference operator for derived types
+
+    expr *operator->() const { return ptr_.get(); }
+
+    bool operator==(const shared_expr &rhs) const {
         return ptr_ == rhs.ptr_;
     } ///< equality operator
     template <typename U>
-        requires std::is_base_of_v<T, std::remove_cvref_t<U>>
+        requires std::is_base_of_v<expr, std::remove_cvref_t<U>>
     bool operator==(const U &rhs) const { return ptr_.get() == &rhs; }
 
-    operator bool() const { return static_cast<bool>(ptr_); } ///< conversion to bool operator
+    explicit operator bool() const { return static_cast<bool>(ptr_); } ///< conversion to bool operator
     size_t use_count() const { return ptr_.use_count(); }     ///< get the use count of the pointer
-    virtual ~shared_object() {
-        if (ptr_)
-            fmt::print("Shared object {} with uid {} is destroyed\n", ptr_->name(), ptr_->uid());
-    }
+    virtual ~shared_expr(); ///< virtual destructor
 };
-
-using shared_expr = shared_object<expr>; ///< type alias for shared expression reference
+/// @brief list of expressions, used for storing expressions in a vector
 struct expr_list : public std::vector<shared_expr> {
     using std::vector<shared_expr>::vector; ///< inherit constructors from std::vector
 };
-struct expr_inarg_list : public std::vector<std::reference_wrapper<expr>> {
-    using std::vector<std::reference_wrapper<expr>>::vector; ///< inherit constructors from std::vector
-    expr_inarg_list(const expr_list &exprs) { ///< constructor from a vector of shared_expr
-        reserve(exprs.size());
-        for (expr &ex : exprs) {
-            emplace_back(ex);
-        }
-    } ///< constructor from a vector of shared_expr
-}; ///< list of expressions
 
 constexpr size_t dim_tbd = 0;
 
@@ -128,17 +100,10 @@ class expr : public std::enable_shared_from_this<expr> {
     auto &dep() { return dep_; } ///< get the dependencies of this expression
 
     template <typename T>
-        requires std::is_base_of_v<expr, std::remove_reference_t<T>>
-    void add_dep(shared_object<T> &&e) {
+        requires std::is_base_of_v<shared_expr, std::remove_reference_t<T>>
+    void add_dep(T &&e) {
         assert(static_cast<const expr &>(e) && "cannot add expr dependency to a null expression");
-        dep_.emplace_back(std::move(e));
-    }
-
-    template <typename T>
-        requires std::is_base_of_v<expr, std::remove_reference_t<T>>
-    void add_dep(const shared_object<T> &e) {
-        assert(static_cast<const expr &>(e) && "cannot add expr dependency to a null expression");
-        dep_.emplace_back(e);
+        dep_.emplace_back(std::forward<T>(e));
     }
 
     auto get_shared() {
@@ -207,6 +172,22 @@ class expr : public std::enable_shared_from_this<expr> {
 
     size_t use_count() const { return weak_from_this().use_count(); } ///< get the use count of the expression
 };
+/// @brief list of expressions, used for function arguments
+struct expr_inarg_list : public std::vector<std::reference_wrapper<expr>> {
+    using std::vector<std::reference_wrapper<expr>>::vector; ///< inherit constructors from std::vector
+    expr_inarg_list(const expr_list &exprs) {                ///< constructor from a vector of shared_expr
+        reserve(exprs.size());
+        for (expr &ex : exprs) {
+            emplace_back(ex);
+        }
+    } ///< constructor from a vector of shared_expr
+}; ///< list of expressions
+
+inline shared_expr::~shared_expr() {
+    if (ptr_ && *ptr_)
+        fmt::print("Shared object {} with uid {} is destroyed\n", ptr_->name(), ptr_->uid());
+} ///< destructor
+
 } // namespace moto
 
 #endif /*__EXPRESSION_BASE__*/
