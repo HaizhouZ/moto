@@ -6,12 +6,12 @@ bool ocp::add_impl(expr &ex) {
     size_t _uid = ex.uid();
     if (d_idx_.find(_uid) == d_idx_.end()) { // skip repeated
         // add dependencies
+        if (!ex.finalize()) {
+            throw std::runtime_error(fmt::format("cannot finalize expr {} uid {}", ex.name(), ex.uid()));
+        }
         const auto &dep = ex.dep();
         if (!dep.empty()) {
             add(dep);
-        }
-        if (!ex.finalize()) {
-            throw std::runtime_error(fmt::format("cannot finalize expr {} uid {}", ex.name(), ex.uid()));
         }
         size_t &n0 = dim_[ex.field()];
         size_t n1 = n0 + ex.dim();

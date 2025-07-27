@@ -26,9 +26,10 @@ class cost : public func_base {
         : base(name, in_args, out, order, __cost) {
         assert(out.is_scalar() && "cost output must be a scalar");
     }
-    cost as_terminal() {
+    func as_terminal() {
         cost tmp(*this);
         tmp.name() += "_terminal";
+        tmp.finalize_hint_.substitute_x_to_y = true;
         return tmp;
     }
     DEF_FUNC_CLONE;

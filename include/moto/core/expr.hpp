@@ -153,7 +153,7 @@ class expr : public std::enable_shared_from_this<expr> {
     }
     expr(const expr &rhs)
         : name_(rhs.name_), dim_(rhs.dim_), field_(rhs.field_),
-          uid_(max_uid++), finalized_(rhs.finalized_), dep_(rhs.dep_) {
+          uid_(max_uid++), finalized_(false), dep_(rhs.dep_) {
         fmt::print("Copying expr {} with uid {} to new uid {}\n", rhs.name_, rhs.uid_, uid_);
     } ///< copy constructor
 

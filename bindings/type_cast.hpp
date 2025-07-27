@@ -126,3 +126,45 @@ struct type_caster<moto::shifted_array<Entry, Size, shift>> {
 
 } // namespace detail
 } // namespace nanobind
+
+#include <moto/ocp/impl/func.hpp>
+
+namespace moto {
+shared_expr &cast_to_shared_expr(const nb::handle &h);
+var &cast_to_var(const nb::handle &h);
+func &cast_to_func(const nb::handle &h);
+} // namespace moto
+
+namespace nanobind {
+namespace detail {
+template <>
+struct type_caster<moto::expr_inarg_list> {
+    NB_TYPE_CASTER(moto::expr_inarg_list, io_name(NB_TYPING_SEQUENCE, NB_TYPING_LIST) +
+                                              const_name("[") +
+                                              make_caster<moto::var>::Name +
+                                              const_name(" | ") +
+                                              make_caster<moto::func>::Name +
+                                              const_name(" | moto.sym]"))
+
+    list_caster<std::vector<handle>, handle> list_cast;
+
+    bool from_python(handle src, uint8_t flags, cleanup_list *cleanup) {
+        if (!list_cast.from_python(src, flags, cleanup)) {
+            return false;
+        }
+        auto &l = list_cast.value;
+        value.reserve(l.size());
+        value.clear();
+        for (auto &ex : l) {
+            try {
+                value.push_back(moto::cast_to_shared_expr(ex));
+            } catch (const std::exception &e) {
+                fmt::print("Failed to cast to shared_expr: {}\n", e.what());
+                return false;
+            }
+        }
+        return true;
+    }
+};
+} // namespace detail
+} // namespace nanobind

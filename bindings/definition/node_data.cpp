@@ -1,12 +1,13 @@
-#include <definition/sym_type_caster.hpp>
 #include <moto/ocp/impl/node_data.hpp>
 #include <type_cast.hpp>
 
 void register_submodule_node_data(nb::module_ &m) {
     using namespace moto;
     nb::class_<ocp>(m, "ocp")
-        .def("add", &ocp::add<expr>, nb::arg("ex"), "Add an expression to the OCP problem")
         .def("add", [](ocp &self, expr_inarg_list &&exprs) { self.add(exprs); }, nb::arg("exprs"), "Add a list of expressions to the OCP problem")
+        .def("add", [](ocp &self, const nb::handle &ex) {
+          auto& _ex = moto::cast_to_shared_expr(ex);
+          self.add(_ex); }, nb::arg("ex"), "Add an expression to the OCP problem")
         .def_static("create", &ocp::create, "Create a new OCP problem")
         .def("clone", &ocp::clone, "Clone the OCP problem")
         .def("dim", [](ocp &self, field_t field) { return self.dim(field); }, nb::arg("field"), "Get the dimension of the field")

@@ -15,9 +15,9 @@ namespace moto {
  */
 class ocp {
   protected:
-    ocp() = default; // default constructor
+    ocp() : uid_(max_uid++) {}; // default constructor
     ocp(const ocp &rhs)
-        : expr_(rhs.expr_), d_idx_(rhs.d_idx_),
+        : expr_(rhs.expr_), d_idx_(rhs.d_idx_), uid_(max_uid++),
           pos_by_uid_(rhs.pos_by_uid_), dim_(rhs.dim_) {}
     bool add_impl(expr &);
     static size_t max_uid; ///< uid used to index global expressions
@@ -56,7 +56,7 @@ class ocp {
      * @param ex expression to be added
      */
     template <typename T>
-        requires std::is_convertible_v<T, const expr&>
+        requires std::is_convertible_v<T, const expr &>
     void add(T &&ex) {
         if (add_impl(ex))
             expr_[static_cast<const expr &>(ex).field()].emplace_back(std::forward<T>(ex));

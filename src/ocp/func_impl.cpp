@@ -33,8 +33,10 @@ void func_base::substitute(const sym &arg, const sym &rhs) {
     }
     auto nh = sym_uid_idx_.extract(arg.uid());
     nh.key() = rhs.uid();
-    sym_uid_idx_.insert(std::move(nh));            // update the uid index
-    in_args_.at(sym_uid_idx_.at(rhs.uid())) = rhs; // update the in_args_ to point to the new sym
+    auto it = sym_uid_idx_.insert(std::move(nh)); // update the uid index
+    assert(it.inserted && "substitute failed");
+    in_args_.at(it.position->second) = rhs; // update the in_args_ to point to the new sym
+    dep_.at(it.position->second) = rhs;     // update the dep_ to point to the new sym
 }
 void func_base::set_from_casadi(const var_inarg_list &in_args, const cs::SX &out) {
     add_arguments(in_args);
@@ -62,7 +64,7 @@ void func_codegen::make_codegen_task(func_base *f) {
     t.append_jac = f->field_ == __cost;
     t.verbose = true;
     t.force_recompile = false;
-    t.keep_generated_src = true;
+    t.keep_generated_src = false;
     auto workers = utils::cs_codegen::generate_and_compile(std::move(t));
     if (impl_func_gen_delegated_) {
         func_codegen_workers_.add(std::move(workers));

@@ -1,9 +1,44 @@
 
 #include <nanobind/stl/function.h>
 #include <type_cast.hpp>
+#include <moto/ocp/constr.hpp>
+#include <moto/ocp/cost.hpp>
+#include <moto/ocp/pre_comp.hpp>
+#include <moto/ocp/sym.hpp>
+#include <moto/ocp/usr_func.hpp>
 
-#include <definition/sym_type_caster.hpp>
-
+namespace moto {
+shared_expr &cast_to_shared_expr(const nb::handle &h) {
+    if (nb::isinstance<moto::shared_expr>(h)) {
+        return nb::cast<moto::shared_expr &>(h);
+    } else if (nb::hasattr(h, "sym_base")) {
+        return nb::cast<moto::var &>(h.attr("sym_base"));
+    } else {
+        nb::print("Unsupported type for cast_to_var: ", h);
+        throw std::runtime_error("Unsupported type for cast_to_shared_expr");
+    }
+}
+var &cast_to_var(const nb::handle &h) {
+    if (nb::isinstance<moto::var>(h)) {
+        return nb::cast<moto::var &>(h);
+    } else if (nb::hasattr(h, "sym_base")) {
+        return nb::cast<moto::var &>(h.attr("sym_base"));
+    } else {
+        nb::print("Unsupported type for cast_to_var: ", h);
+        throw std::runtime_error("Unsupported type for cast_to_var");
+    }
+}
+func &cast_to_func(const nb::handle &h) {
+    if (nb::isinstance<moto::func>(h)) {
+        return nb::cast<moto::func &>(h);
+    } else if (nb::hasattr(h, "sym_base")) {
+        return nb::cast<moto::func &>(h.attr("sym_base"));
+    } else {
+        nb::print("Unsupported type for cast_to_func: ", h);
+        throw std::runtime_error("Unsupported type for cast_to_func");
+    }
+}
+} // namespace moto
 namespace nanobind {
 namespace detail {
 template <>
@@ -21,15 +56,11 @@ struct type_caster<moto::var_inarg_list> {
         value.reserve(l.size());
         value.clear();
         for (auto &ex : l) {
-            auto type = ex.type();
-            if (nb::isinstance<moto::shared_expr>(ex)) {
-                value.push_back(nb::cast<moto::shared_expr>(ex));
-            } else if (nb::isinstance<moto::var>(ex)) {
-                value.push_back(nb::cast<moto::var &>(ex));
-            } else if (nb::hasattr(ex, "sym_base")) {
-                value.push_back(nb::cast<moto::var &>(ex.attr("sym_base")));
-            } else {
-                nb::print("Unknown type in var_list caster: ", ex);
+            try {
+                value.push_back(moto::cast_to_var(ex));
+            } catch (const std::exception &e) {
+                fmt::print("Failed to cast to var: {}\n", e.what());
+                return false;
             }
         }
         return true;
@@ -84,8 +115,7 @@ void register_submodule_functional(nb::module_ &m) {
                                                               v->name(), v->dim(), v->field(), v->uid()); })
         .def("to_sx", [](var &v) { return static_cast<sym &>(v); }, nb::rv_policy::reference_internal);
 
-    m.def("create_sym", [](const std::string &name, size_t dim, field_t field) {
-        return var(sym(name, dim, field)); }, nb::arg("name"), nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined);
+    m.def("create_sym", [](const std::string &name, size_t dim, field_t field) { return var(sym(name, dim, field)); }, nb::arg("name"), nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined);
     m.def("get_sym_sx", [](var &&s) {
         auto &ex = static_cast<sym &>(s);
         return cs::SX(ex); }, nb::arg("s"));
@@ -139,7 +169,7 @@ void register_submodule_functional(nb::module_ &m) {
             [](func &self, const decltype(custom_func::create_custom_data) &v) { static_cast<custom_func &>(self).create_custom_data = v; })
         .def(
             "add_argument",
-            [](func &self, const nb::handle &v) { self->add_argument(nb::cast<var &>(v.attr("sym_base"))); },
+            [](func &self, const nb::handle &v) { self->add_argument(moto::cast_to_var(v)); },
             nb::arg("in"))
         .def(
             "add_arguments",
@@ -150,7 +180,7 @@ void register_submodule_functional(nb::module_ &m) {
             nb::arg("primal"), nb::arg("raw"), nb::arg("shared"))
         .def(
             "as_terminal",
-            [](func &self) -> func & { static_cast<cost &>(self).as_terminal(); return self; });
+            [](func &self) { return static_cast<cost &>(self).as_terminal(); }, nb::rv_policy::move);
 
     m.def(
          "constr",
