@@ -8,18 +8,18 @@
 namespace biped_srbd {
 using namespace moto;
 struct srbd_dynamics {
-    sym r, r_n;                     // position
-    sym v, v_n;                     // velocity
-    sym r_l, r_l_n;                 // left foot position
-    sym r_r, r_r_n;                 // right foot position
-    sym v_l, v_r;                   // left/right foot velocity
-    sym f_l;                        // left foot force
-    sym f_r;                        // right foot force
+    var r, r_n;                     // position
+    var v, v_n;                     // velocity
+    var r_l, r_l_n;                 // left foot position
+    var r_r, r_r_n;                 // right foot position
+    var v_l, v_r;                   // left/right foot velocity
+    var f_l;                        // left foot force
+    var f_r;                        // right foot force
     scalar_t m;                     // mass
     scalar_t dt;                    // time step
-    sym r_d;                        // desired position
-    sym active_l, active_r;         // left/right foot active
-    sym active_l_cur, active_r_cur; // left/right foot active
+    var r_d;                        // desired position
+    var active_l, active_r;         // left/right foot active
+    var active_l_cur, active_r_cur; // left/right foot active
     srbd_dynamics() {
         std::tie(r, r_n) = sym::states("r", 3);
         std::tie(r_l, r_l_n) = sym::states("r_l", 3);

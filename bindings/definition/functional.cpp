@@ -1,11 +1,11 @@
 
-#include <nanobind/stl/function.h>
-#include <type_cast.hpp>
 #include <moto/ocp/constr.hpp>
 #include <moto/ocp/cost.hpp>
 #include <moto/ocp/pre_comp.hpp>
 #include <moto/ocp/sym.hpp>
 #include <moto/ocp/usr_func.hpp>
+#include <nanobind/stl/function.h>
+#include <type_cast.hpp>
 
 namespace moto {
 shared_expr &cast_to_shared_expr(const nb::handle &h) {
@@ -113,7 +113,7 @@ void register_submodule_functional(nb::module_ &m) {
     nb::class_<var, shared_expr>(m, "var")
         .def("__str__", [](const var &v) { return fmt::format("var(name='{}', dim={}, field={}, uid={})",
                                                               v->name(), v->dim(), v->field(), v->uid()); })
-        .def("to_sx", [](var &v) { return static_cast<sym &>(v); }, nb::rv_policy::reference_internal);
+        .def("to_sx", [](var &v) { return (cs::SX &)static_cast<sym &>(v); }, nb::rv_policy::reference_internal);
 
     m.def("create_sym", [](const std::string &name, size_t dim, field_t field) { return var(sym(name, dim, field)); }, nb::arg("name"), nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined);
     m.def("get_sym_sx", [](var &&s) {
@@ -157,12 +157,12 @@ void register_submodule_functional(nb::module_ &m) {
         .def("clone", [](const func &self) { return self->clone(); })
         .def(
             "as_eq",
-            [](func &self, bool soft) -> func & { static_cast<constr &>(self).as_eq<constr>(soft); return self; },
+            [](func &self, bool soft) { return static_cast<constr &>(self).as_eq<constr>(soft); },
             nb::arg("soft") = false, nb::rv_policy::move)
         .def(
             "as_ineq",
-            [](func &self, const std::string &type_name) { return func(static_cast<constr &>(self).as_ineq(type_name)); },
-            nb::arg("type_name") = "ipm")
+            [](func &self, const std::string &type_name) { return static_cast<constr &>(self).as_ineq(type_name); },
+            nb::arg("type_name") = "ipm", nb::rv_policy::move)
         .def_prop_rw(
             "create_custom_data",
             [](func &self) { return static_cast<custom_func &>(self).create_custom_data; },

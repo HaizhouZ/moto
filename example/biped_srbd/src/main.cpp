@@ -24,6 +24,7 @@ int main() {
     terminal_prob->add(dyn.terminal_cost());
     moto::func_codegen::wait_until_all_compiled(8);
     utils::print_problem(prob);
+    utils::print_problem(terminal_prob);
 
     ns_sqp solver;
     auto &graph = solver.graph_;
@@ -92,6 +93,7 @@ int main() {
     // });
     // std::cout << "\n";
     // solver.settings.mu_method = solver::ipm_config::mehrotra_probing; // default method
+    // solver.settings.mu_method = solver::ipm_config::quality_function_based; // default method
     solver.settings.mu_method = solver::ipm_config::mehrotra_predictor_corrector; // default method
     // solver.settings.ipm_conditional_corrector = true;
     solver.update(10);

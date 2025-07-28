@@ -21,7 +21,7 @@ void cost::finalize_impl() {
             }
         }
     }
-    fmt::print("field_hint for cost {} is {}\n", name_, finalize_hint_.substitute_x_to_y);
+    // fmt::print("field_hint for cost {} is {}\n", name_, finalize_hint_.substitute_x_to_y);
     // finalize the base class
     func_base::finalize_impl();
     return;

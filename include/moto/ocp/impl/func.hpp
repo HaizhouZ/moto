@@ -12,6 +12,11 @@ struct func : public shared_expr {
     using base = shared_expr;
     using base::base;
     func_base *operator->() const; ///< convert to func_base
+    template <typename T>
+        requires std::is_base_of_v<func_base, std::remove_cvref_t<T>>
+    T &as() const {
+        return static_cast<T &>(*this);
+    } ///< convert to derived type
 };
 /**
  * @brief approximation class for generic functions
@@ -49,6 +54,12 @@ class func_base : public expr {
     virtual void hessian_impl([[maybe_unused]] func_approx_map &data) const { hessian(data); }
     virtual void load_external_impl(const std::string &path = "gen");
 
+    func_base(const func_base &) = default;
+    func_base &operator=(const func_base &) = default;
+
+    friend class shared_expr; ///< allow shared_expr to access private members
+    friend class func;
+
   public:
     virtual void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const {}
     func_base() = default;
@@ -64,9 +75,7 @@ class func_base : public expr {
         set_from_casadi(in_args, out);
     }
 
-    func_base(const func_base &) = default;
     func_base(func_base &&) = default;
-    func_base &operator=(const func_base &) = default;
     func_base &operator=(func_base &&) = default;
 
     PROPERTY(order)
@@ -75,7 +84,8 @@ class func_base : public expr {
 
     template <typename T>
         requires std::is_same_v<var, std::remove_cvref_t<T>> ||
-                 std::is_same_v<shared_expr, std::remove_cvref_t<T>>
+                 std::is_same_v<shared_expr, std::remove_cvref_t<T>> ||
+                 std::is_same_v<sym, std::remove_cvref_t<T>>
     void add_argument(T &&in) {
         in_args_.emplace_back(std::forward<T>(in));
         add_dep(in_args_.back());
@@ -83,7 +93,7 @@ class func_base : public expr {
     }
     void add_arguments(const var_inarg_list &args) {
         for (sym &in : args) {
-            add_argument(var(in));
+            add_argument(in);
         }
     }
 
@@ -111,9 +121,10 @@ class func_base : public expr {
     std::function<void(func_approx_map &)> jacobian; ///< jacobian callback
     std::function<void(func_approx_map &)> hessian;  ///< hessian callback
 
-#define DEF_FUNC_CLONE           \
-    virtual func clone() const { \
-        return func(*this);      \
+#define DEF_FUNC_CLONE                                                                            \
+    virtual func clone() const {                                                                  \
+        assert(uid_ != uid_max && "cannot clone a null function");                                \
+        return func(std::shared_ptr<func_base>(new std::remove_cvref_t<decltype(*this)>(*this))); \
     }
 
     DEF_FUNC_CLONE;

@@ -43,13 +43,15 @@ void func_base::set_from_casadi(const var_inarg_list &in_args, const cs::SX &out
     gen_.out_ = out;
 }
 static utils::cs_codegen::worker_list func_codegen_workers_;
+std::vector<func_base *> cg_funcs_;
 void func_base::finalize_impl() {
     if (!gen_.out_.is_empty()) {
         func_codegen::make_codegen_task(this);
         if (!impl_func_gen_delegated_) {
             func_codegen_workers_.wait_until_finished();
             load_external_impl();
-        }
+        } else
+            cg_funcs_.push_back(this); // will be loaded later
     }
 }
 void func_codegen::make_codegen_task(func_base *f) {
@@ -64,7 +66,7 @@ void func_codegen::make_codegen_task(func_base *f) {
     t.append_jac = f->field_ == __cost;
     t.verbose = true;
     t.force_recompile = false;
-    t.keep_generated_src = false;
+    t.keep_generated_src = true;
     auto workers = utils::cs_codegen::generate_and_compile(std::move(t));
     if (impl_func_gen_delegated_) {
         func_codegen_workers_.add(std::move(workers));
@@ -81,6 +83,10 @@ void func_codegen::wait_until_all_compiled(size_t njobs) {
     size_t n_thread_bak = omp_get_num_threads();
     omp_set_num_threads(njobs);
     func_codegen_workers_.wait_until_finished();
+    for (auto f : cg_funcs_) {
+        f->load_external_impl();
+    }
+    cg_funcs_.clear();
     omp_set_num_threads(n_thread_bak);
 }
 } // namespace moto

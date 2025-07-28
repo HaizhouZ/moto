@@ -64,8 +64,8 @@ struct func_arg_map {
     func_arg_map(std::vector<vector_ref> &&primal, shared_data &shared, const func_base &f);
 
     virtual ~func_arg_map() = default;
-    const func_base &func_;  ///< pointer to the func
-    shared_data &impl_; ///< ref to shared data
+    const func_base &func_; ///< pointer to the func
+    shared_data &impl_;     ///< ref to shared data
     /**
      * @brief get the input argument values
      * @note this is a wrapper of in_args_ to access the values
@@ -130,9 +130,8 @@ struct func_approx_map : public func_arg_map {
     /// @brief setup hessian from raw approx storage
     void setup_hessian(dense_approx_data &raw);
     /// @brief get the jacobian reference
-    auto jac(const sym &in) const {
-        return jac_[sym_uid_idx_.at(in.uid())];
-    }
+    auto jac(const sym &in) const { return jac_[sym_uid_idx_.at(in.uid())]; }
+    auto jac(size_t i) const { return jac_.at(i); }
 };
 
 def_unique_ptr(func_approx_map);

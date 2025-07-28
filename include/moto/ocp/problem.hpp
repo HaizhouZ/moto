@@ -56,7 +56,8 @@ class ocp {
      * @param ex expression to be added
      */
     template <typename T>
-        requires std::is_convertible_v<T, const expr &>
+        requires std::is_base_of_v<shared_expr, std::remove_cvref_t<T>> ||
+                 std::is_base_of_v<expr, std::remove_reference_t<T>>
     void add(T &&ex) {
         if (add_impl(ex))
             expr_[static_cast<const expr &>(ex).field()].emplace_back(std::forward<T>(ex));

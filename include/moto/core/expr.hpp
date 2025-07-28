@@ -51,8 +51,8 @@ class shared_expr {
     bool operator==(const U &rhs) const { return ptr_.get() == &rhs; }
 
     explicit operator bool() const { return static_cast<bool>(ptr_); } ///< conversion to bool operator
-    size_t use_count() const { return ptr_.use_count(); }     ///< get the use count of the pointer
-    virtual ~shared_expr(); ///< virtual destructor
+    size_t use_count() const { return ptr_.use_count(); }              ///< get the use count of the pointer
+    virtual ~shared_expr();                                            ///< virtual destructor
 };
 /// @brief list of expressions, used for storing expressions in a vector
 struct expr_list : public std::vector<shared_expr> {
@@ -89,6 +89,15 @@ class expr : public std::enable_shared_from_this<expr> {
     virtual void finalize_impl() {}
 
     shared_expr shared_;
+
+    expr(const expr &rhs)
+        : name_(rhs.name_), dim_(rhs.dim_), field_(rhs.field_),
+          uid_(max_uid++), finalized_(false), dep_(rhs.dep_) {
+        assert(rhs.uid_ != uid_max && "cannot copy a null expression");
+        fmt::print("Copying expr {} with uid {} to new uid {}\n", rhs.name_, rhs.uid_, uid_);
+    } ///< copy constructor
+
+    friend class shared_expr;
 
   public:
     PROPERTY(name);      ///< getter for name
@@ -151,11 +160,6 @@ class expr : public std::enable_shared_from_this<expr> {
           uid_(rhs.uid_), finalized_(rhs.finalized_), dep_(std::move(rhs.dep_)) {
         rhs.uid_ = uid_max;
     }
-    expr(const expr &rhs)
-        : name_(rhs.name_), dim_(rhs.dim_), field_(rhs.field_),
-          uid_(max_uid++), finalized_(false), dep_(rhs.dep_) {
-        fmt::print("Copying expr {} with uid {} to new uid {}\n", rhs.name_, rhs.uid_, uid_);
-    } ///< copy constructor
 
     virtual ~expr() = default;
 
@@ -170,7 +174,7 @@ class expr : public std::enable_shared_from_this<expr> {
 
     bool finalize();
 
-    size_t use_count() const { return weak_from_this().use_count(); } ///< get the use count of the expression
+    size_t use_count() const { return shared_ ? shared_->use_count() : weak_from_this().use_count(); } ///< get the use count of the expression
 };
 /// @brief list of expressions, used for function arguments
 struct expr_inarg_list : public std::vector<std::reference_wrapper<expr>> {
@@ -184,8 +188,8 @@ struct expr_inarg_list : public std::vector<std::reference_wrapper<expr>> {
 }; ///< list of expressions
 
 inline shared_expr::~shared_expr() {
-    if (ptr_ && *ptr_)
-        fmt::print("Shared object {} with uid {} is destroyed\n", ptr_->name(), ptr_->uid());
+    // if (ptr_ && *ptr_)
+    //     fmt::print("Shared object {} with uid {} is destroyed\n", ptr_->name(), ptr_->uid());
 } ///< destructor
 
 } // namespace moto

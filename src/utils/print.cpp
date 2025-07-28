@@ -11,7 +11,7 @@ void print_problem(const ocp_ptr_t &prob) {
                        field::name(static_cast<field_t>(i)),
                        prob->dim(i));
             for (const auto &expr : prob->exprs(i)) {
-                fmt::print(" - {} dim: {}\n", expr->name(), expr->dim());
+                fmt::print(" - {} uid {} dim: {}\n", expr->name(), expr->uid(), expr->dim());
             }
         }
     }

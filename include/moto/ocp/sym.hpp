@@ -5,13 +5,20 @@
 #include <moto/core/expr.hpp>
 
 namespace moto {
-namespace cs = casadi;
 class sym;
-struct var : public shared_expr {
+namespace cs = casadi;
+struct var : public shared_expr, public cs::SX {
+  public:
     using base = shared_expr;
-    using base::base;
-    sym *operator->() const;         ///< convert to sym
-    operator sym &() const noexcept; ///< convert to sym
+    using sym = moto::sym;
+    sym *operator->() const; ///< convert to sym
+    var() = default;         ///< default constructor, will create a not-a-number symbolic variable
+    template <typename T, typename T_ = std::remove_cvref_t<T>>
+    var(T &&rhs) noexcept : base(std::forward<T>(rhs)), cs::SX((sym &)*this) {}
+    var(var &&rhs) noexcept : base(std::move(rhs)), cs::SX(static_cast<cs::SX &&>(rhs)) {}
+    var(const var&) = default; ///< copy constructor
+    var &operator=(const var &) = default; ///< copy assignment operator
+    var &operator=(var &&) noexcept = default;      ///< move assignment operator
 };
 /**
  * @brief pointer wrapper of symbolic expressions like primal variables or parameters
@@ -24,8 +31,14 @@ class sym : public expr, public cs::SX {
   protected:
     var dual_;
     void finalize_impl() override;
-    operator double() const = delete; ///< disable implicit conversion to double
+    operator double() const = delete;     ///< disable implicit conversion to double
     operator casadi_int() const = delete; ///< disable implicit conversion to casadi_int
+
+    sym(const sym &rhs) = default;            ///< copy constructor
+    sym &operator=(const sym &rhs) = default; ///< copy assignment operator
+
+    friend class shared_expr; ///< allow shared_expr to access private members
+    friend class var; ///< allow var to access private members
 
   public:
     using expr::dim;
@@ -44,23 +57,16 @@ class sym : public expr, public cs::SX {
         : expr(name, dim, type), cs::SX(cs::SX::sym(name, dim)) {
         assert(size_t(type) <= field::num_sym || type == __usr_var);
     }
-    /// @brief Construct a new sym object from an existing expr
-    /// @note it is assumed that the expr pointing to a @ref sym::impl
-    template <typename T>
-        requires std::is_same_v<expr, std::remove_cvref_t<T>>
-    sym(T &&rhs) : expr(std::forward<T>(rhs)) {}
 
-    sym(const sym &rhs) = default;            ///< copy constructor
     sym(sym &&rhs) = default;                 ///< move constructor
-    sym &operator=(const sym &rhs) = default; ///< copy assignment operator
     sym &operator=(sym &&rhs) = default;      ///< move assignment operator
 
     /// @brief make a symbolic input
-    static auto inputs(const std::string &name, size_t dim) {
+    static var inputs(const std::string &name, size_t dim) {
         return sym(name, dim, __u);
     }
     /// @brief make a symbolic parameter
-    static auto params(const std::string &name, size_t dim) {
+    static var params(const std::string &name, size_t dim) {
         return sym(name, dim, __p);
     }
     /// @brief make a pair of symbolic state
@@ -75,11 +81,11 @@ class sym : public expr, public cs::SX {
         auto [x, y] = states(name, dim);
         return x;
     }
-    sym &next() const {
+    var &next() {
         assert(field_ == __x && "next() can only be used with __x state to get its dual in __y");
         return dual_;
     }
-    sym &prev() const {
+    var &prev() {
         assert(field_ == __y && "dual() can only be used with __y state to get its dual in __x");
         return dual_;
     }
@@ -87,9 +93,7 @@ class sym : public expr, public cs::SX {
 inline sym *var::operator->() const {
     return static_cast<sym *>(base::operator->());
 }
-inline var::operator sym &() const noexcept {
-    return *static_cast<sym *>(base::operator->());
-}
+
 struct var_list : public std::vector<var> {
     using std::vector<var>::vector; ///< inherit constructors from std::vector
 }; ///< list of symbolic expressions

@@ -11,9 +11,6 @@ else()
     FetchContent_MakeAvailable(Catch2)
 endif()
 
-enable_testing()
-
-
 function(add_moto_test name)
     set(test_name ${name}_test)
     set(test_file ${name}.cpp)
@@ -30,4 +27,4 @@ endfunction()
 # add_moto_test(external_function)
 # add_moto_test(symbolic_comp)
 add_moto_test(expr_ownership)
-add_moto_test(expr_cast)
+add_moto_test(constr_cast)

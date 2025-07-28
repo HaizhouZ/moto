@@ -8,41 +8,47 @@
 
 TEST_CASE("exprOwnership") {
     using namespace moto;
-    sym a("a", 3, __x);
-    sym b("b", 3, __x);
-    a.add_dep(b);      // add b as a dependency of a
-    cs::SX c_ = a + b; // convert sym to SX
+    var a = sym("a", 3, __x);
+    var b = sym("b", 3, __y);
+    sym l("l", 3, __x);
+    a->next() = b;
+    a->add_dep(b);   // add b as a dependency of a
+    auto c_ = a + b; // convert sym to SX
     std::cout << "a is: " << a << std::endl;
     std::cout << "b is: " << b << std::endl;
     std::cout << "c_ is: " << c_ << std::endl;
-    func c("c", {b}, c_, approx_order::first, __eq_x);
-    c.add_argument(a);
-    assert(c.in_args().size() == 2 && "Function should have 2 input argument");
-    std::cout << "a has uid: " << a.uid() << " and b has uid: " << b.uid() << std::endl;
-    for (sym &arg : c.dep()) {
+    func c = func_base("c", {a, b}, c_, approx_order::first, __eq_x);
+    assert(c->in_args().size() == 2 && "Function should have 2 input argument");
+    std::cout << "a has uid: " << a->uid() << " and b has uid: " << b->uid() << std::endl;
+    for (sym &arg : c->dep()) {
         std::cout << "Function argument: " << arg.name() << " with uid: " << arg.uid() << std::endl;
     }
-    auto d = c;
-    for (sym &arg : d.dep()) {
-        std::cout << "Function argument: " << arg.name() << " with uid: " << arg.uid() << std::endl;
+    auto d = c; // shallow copy
+    assert(d->in_args().size() == c->in_args().size() && "Function d should have same input arguments as c");
+    {
+        size_t d_arg_idx = 0;
+        for (sym &arg : d->dep()) {
+            assert(arg.uid() == c->in_args()[d_arg_idx++]->uid() &&
+                   "Function d should have same input arguments as c");
+        }
     }
-    sym e("e", 3, __x);
-    d.add_dep(e); // add a as a dependency of d
-    for (sym &arg : c.dep()) {
-        std::cout << "Function argument: " << arg.name() << " with uid: " << arg.uid() << std::endl;
+    var e = sym("e", 3, __u);
+    {
+        d->add_argument(e); // add a as a dependency of d
+        size_t d_arg_idx = 0;
+        assert(d->in_args().size() == c->in_args().size() && "Function d should have same input arguments as c");
+        for (sym &arg : d->dep()) {
+            assert(arg.uid() == c->in_args()[d_arg_idx++]->uid() &&
+                   "Function d should have same input arguments as c");
+        }
     }
-    sym f("f", 3, __x);
-    auto p = d.clone<func>(); // clone d to p
-    p.add_argument(f);        // add f as an argument to p
-    for (sym &arg : c.dep()) {
-        std::cout << "Function argument: " << arg.name() << " with uid: " << arg.uid() << std::endl;
-    }
-    for (sym &arg : p.dep()) {
-        std::cout << "Function argument: " << arg.name() << " with uid: " << arg.uid() << std::endl;
-    }
+    var f = sym("f", 3, __p);
+    auto p = d->clone(); // clone d to p
+    p->add_argument(f);  // add f as an argument to p
+    assert(p->in_args().size() == c->in_args().size() + 1 && "Function p should have one more input argument than c");
     auto prob = ocp::create();
     prob->add(c);
-    for (const func &f : prob->exprs(__eq_x)) {
+    for (const func_base &f : prob->exprs(__eq_x)) {
         std::cout << "Function in problem: " << f.name() << " with uid: " << f.uid() << std::endl;
     }
     for (const sym &arg : prob->exprs(__x)) {

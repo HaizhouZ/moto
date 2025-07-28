@@ -29,6 +29,7 @@ std::string process_generated_code(
     const std::vector<cs::SX> &sx_inputs,
     const std::vector<cs::SX> &sx_outputs,
     bool append) {
+    bool is_hessian = func_name.find("_hess") != std::string::npos;
     // Pre-compute CCS to (row, col) index maps
     std::vector<std::vector<std::pair<int, int>>> ij_pairs_all;
     for (const auto &x : sx_inputs) {
@@ -37,8 +38,9 @@ std::string process_generated_code(
     for (const auto &y : sx_outputs) {
         ij_pairs_all.push_back(ccs_index_to_ij(y.sparsity()));
     }
+    size_t n_in = sx_inputs.size();
 
-    bool vec_out = sx_outputs[0].is_column();
+    bool vec_out = sx_outputs.size() == 1 && sx_outputs[0].is_column() && !is_hessian;
 
     // Lambda for generating replacement strings
     auto make_input_ref_access = [&](int arg_idx, int index) -> std::string {
@@ -46,12 +48,16 @@ std::string process_generated_code(
         return "inputs[" + std::to_string(arg_idx) + "](" + std::to_string(i) + ")";
     };
     auto make_output_ref_access = [&](int arg_idx, int index) -> std::string {
-        auto [i, j] = ij_pairs_all.at(sx_inputs.size() + arg_idx).at(index);
+        auto [i, j] = ij_pairs_all.at(n_in + arg_idx).at(index);
         std::string out;
-        if (vec_out) {
-            out = "outputs(" + std::to_string(i) + ")";
+        if (is_hessian) {
+            size_t row = arg_idx / n_in;
+            size_t col = arg_idx % n_in;
+            out = fmt::format("outputs[{}][{}]({},{})", row, col, i, j);
+        } else if (vec_out) {
+            out = fmt::format("outputs({})", i);
         } else {
-            out = "outputs[" + std::to_string(arg_idx) + "](" + std::to_string(i) + "," + std::to_string(j) + ")";
+            out = fmt::format("outputs[{}]({},{})", arg_idx, i, j);
         }
         if (append)
             out += "+";
@@ -90,7 +96,11 @@ std::string process_generated_code(
                 if (vec_out) {
                     processed_code << "  Eigen::Ref<Eigen::VectorXd> outputs) {\n";
                 } else {
-                    processed_code << "  std::vector<Eigen::Ref<Eigen::MatrixXd>>& outputs) {\n";
+                    if (is_hessian) {
+                        processed_code << "  std::vector<std::vector<Eigen::Ref<Eigen::MatrixXd>>>& outputs) {\n";
+                    } else {
+                        processed_code << "  std::vector<Eigen::Ref<Eigen::MatrixXd>>& outputs) {\n";
+                    }
                 }
                 func_found = true;
             }
@@ -224,14 +234,17 @@ void run(
         std::cout << "Generated: " << final_cpp_path << std::endl;
 
     // Step 5: Compile if necessary
-    std::string so_file_path = fs::path(output_dir) / ("lib" + func_name + ".so");
-    std::string json_path = fs::path(output_dir) / (func_name + ".json");
+    fs::path so_file_path = fs::path(output_dir) / ("lib" + func_name + ".so");
+    fs::path json_path = fs::path(output_dir) / (func_name + ".json");
     std::string md5_hash = compute_md5(final_cpp_path);
 
     bool needs_compile = true;
-    if (!force_recompile && fs::exists(json_path) && fs::exists(so_file_path)) {
+    bool json_exists = fs::exists(json_path);
+    bool so_exists = fs::exists(so_file_path);
+    json data;
+    if (!force_recompile && json_exists && so_exists) {
         std::ifstream jf(json_path);
-        json data = json::parse(jf);
+        data = json::parse(jf);
         if (data["md5"] == md5_hash && data["compile_flag"] == compile_flag) {
             if (verbose)
                 std::cout << "Skipping " << func_name << " as it is already up-to-date." << std::endl;
@@ -242,7 +255,7 @@ void run(
     if (needs_compile) {
         std::string eigen_include_path = "/usr/include/eigen3"; // Adjust if necessary
         std::string compile_command = "g++ -shared -fPIC -std=c++20 " + compile_flag +
-                                      " -o " + so_file_path + " " + final_cpp_path +
+                                      " -o " + so_file_path.string() + " " + final_cpp_path +
                                       " -I " + eigen_include_path;
         int ret = std::system(compile_command.c_str());
         if (verbose) {
@@ -381,26 +394,25 @@ void task::finalize(worker_list &workers_) {
         // use AD of vjp to compute hessian
 
         auto lbd = vjp_for_hess ? sym(func_name + "_lbd", sx_output.rows(), __usr_var) : sym();
-        size_t idx_i = 0;
-        for (sym &i : sx_inputs) {
+        for (size_t idx_i = 0; idx_i < sx_inputs.size(); ++idx_i) {
+            sym &i = sx_inputs[idx_i];
             hess[idx_i].resize(sx_inputs.size());
             cs::SX vjp_;
             bool i_excluded = excluded.contains(i.uid());
             if (vjp_for_hess && !i_excluded)
                 vjp_ = cs::SX::jtimes(sx_output, i, lbd, true);
             size_t idx_j = 0;
-            for (sym &j : sx_inputs) {
+            for (size_t idx_j = 0; idx_j < sx_inputs.size(); ++idx_j) {
+                sym &j = sx_inputs[idx_j];
                 if (i_excluded or excluded.contains(j.uid()) or i.field() < j.field()) {
                     continue;
                 }
                 if (!vjp_for_hess) {
                     if (external_hess.contains({i.uid(), j.uid()})) {
                         hess[idx_i][idx_j] = external_hess[{i.uid(), j.uid()}];
-                        idx_j++;
                         continue;
                     } else if (external_hess.contains({j.uid(), i.uid()})) {
                         hess[idx_i][idx_j] = external_hess[{j.uid(), i.uid()}].T();
-                        idx_j++;
                         continue;
                     }
                 } else if (i.field() == j.field() and idx_i > idx_j) {
@@ -416,7 +428,9 @@ void task::finalize(worker_list &workers_) {
             }
             hess_inputs.reserve(sx_inputs.size() + 1);
             hess_inputs = sx_inputs;
-            hess_inputs.push_back(lbd);
+            if (vjp_for_hess) {
+                hess_inputs.push_back(lbd);
+            }
         }
         // hess = [item for sublist in hess for item in sublist]
         std::vector<cs::SX> hess_flat;
@@ -427,7 +441,7 @@ void task::finalize(worker_list &workers_) {
         workers_.add(std::async(std::launch::deferred,
                                 &impl::run,
                                 full_func_name + "_hess",
-                                sx_inputs,
+                                hess_inputs,
                                 std::move(hess_flat),
                                 output_dir,
                                 hess_compile_flag,

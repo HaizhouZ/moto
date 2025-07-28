@@ -149,13 +149,13 @@ class constr : public func_base {
      */
     template <typename derived = constr>
         requires(std::derived_from<derived, constr>)
-    decltype(auto) as_eq(bool soft = false) {
+    func as_eq(bool soft = false) {
         field_hint().is_eq = true;
         field_hint().is_soft = soft;
         if constexpr (!std::is_same_v<derived, constr>) {
             return derived(std::move(*this));
         } else
-            return *this;
+            return std::move(*this);
     }
     /**
      * @brief set the constraint as inequality constraint
@@ -164,7 +164,7 @@ class constr : public func_base {
      */
     template <typename derived>
         requires(std::derived_from<derived, constr>)
-    auto as_ineq() {
+    func as_ineq() {
         field_hint_.is_eq = false;
         return derived(std::move(*this));
     }
