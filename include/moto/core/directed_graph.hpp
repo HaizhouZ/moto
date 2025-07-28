@@ -271,6 +271,8 @@ class directed_graph {
     node *head() { return head_; }
     node *tail() { return tail_; }
 
+    auto& nodes() { return nodes_; } ///< get the nodes in the graph
+
   private:
     def_unique_ptr(node);
     def_unique_ptr(edge);

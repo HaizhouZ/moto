@@ -6,12 +6,31 @@
 #define ENABLE_TIMED_BLOCK
 #include <moto/utils/timed_block.hpp>
 
-#define stat_col_width 15
+#define stat_width 15
 
 namespace moto {
 void ns_sqp::forward() {
     graph_.apply_all_unary_parallel(data::update_approx);
 }
+
+struct stat_item {
+    std::string_view name;
+    size_t width; // default width for each stat item
+    stat_item(std::string_view n, size_t w = stat_width) : name(n), width(w) {}
+    void print_header() const {
+        fmt::print("| {:<{}} |", name, width);
+    }
+};
+
+stat_item stats[] = {{"no.", 3},
+                     {"objective"},
+                     {"prim_res"},
+                     {"dual_res"},
+                     {"comp_res"},
+                     {"alpha_p"},
+                     {"alpha_d"},
+                     {"ipm_mu", stat_width + 5}};
+
 void ns_sqp::update(size_t n_iter) {
     fmt::print("Initialization for SQP...\n");
     graph_.apply_all_unary_parallel([this](data *cur) {
@@ -29,17 +48,19 @@ void ns_sqp::update(size_t n_iter) {
     graph_.apply_all_unary_parallel(data::update_approx);
 
     // print statistics header
-    constexpr std::string_view terms[] = {"objective", "inf_prim_res", "inf_dual_res", "inf_comp_res", "alpha_primal", "alpha_dual", "ipm_mu"};
-    size_t total_length = 4 + std::size(terms) * (stat_col_width + 4) + 1;
-    fmt::print("{:-<{}}\n", "", total_length);
-    fmt::print("no. |");
-    for (const auto &term : terms) {
-        fmt::print("| {:<{}} |", term, stat_col_width);
+
+    size_t widths[] = {3, stat_width, stat_width, stat_width, stat_width, stat_width, stat_width, stat_width};
+    for (const auto &term : stats) {
+        term.print_header();
     }
     fmt::print("\n");
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     //// main loop
     for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
+        bool has_ineq = false;
+        for (auto &n : graph_.nodes()) {
+            has_ineq = (*n)->problem().dim(__ineq_x) > 0 || (*n)->problem().dim(__ineq_xu) > 0;
+        }
         settings.ls_config_reset();
         size_t n_worker = get_num_threads();
         settings_t::worker setting_per_thread[n_worker];
@@ -62,7 +83,7 @@ void ns_sqp::update(size_t n_iter) {
         graph_.apply_all_binary_forward<false, true>(solver::ns_riccati::fwd_linear_rollout);
 
         bool finalize_dual = true;
-        if (settings.ipm_enable_affine_step()) { // compute the affine step, no need to finalize dual step
+        if (has_ineq && settings.ipm_enable_affine_step()) { // compute the affine step, no need to finalize dual step
             settings.ipm_start_predictor_computation();
             finalize_dual = false; // do not finalize dual step
         }
@@ -73,7 +94,7 @@ void ns_sqp::update(size_t n_iter) {
             solver::ineq_soft::calculate_line_search_bounds(d, &setting_per_thread[tid]);
         });
         finalize_bound_and_set_to_max();
-        if (settings.ipm_enable_affine_step()) {
+        if (has_ineq && settings.ipm_enable_affine_step()) {
             // line search with max bounds
             graph_.apply_all_unary_parallel([&setting_per_thread](size_t tid, auto *d) {
                 solver::ineq_soft::finalize_predictor_step(d, &setting_per_thread[tid]);
@@ -136,14 +157,29 @@ void ns_sqp::update(size_t n_iter) {
                 info.inf_dual_res = std::max(info.inf_dual_res, cur->dense().jac_[__y].cwiseAbs().maxCoeff());
         });
         // print statistics
-        scalar_t stats[] = {info.objective, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res,
-                            settings.alpha_primal, settings.alpha_dual, settings.mu};
-        fmt::print("{:<3} |", i_iter);
-        for (const auto &stat : stats) {
-            fmt::print("| {:<{}.6e} |", stat, stat_col_width);
+        scalar_t stats_value[] = {i_iter, info.objective, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res,
+                                  settings.alpha_primal, settings.alpha_dual, settings.mu};
+        std::string_view ipm_flags;
+        if (has_ineq && settings.ipm_enable_corrector()) {
+            if (settings.ipm_accept_corrector()) {
+                ipm_flags = "[c:a]";
+            } else {
+                ipm_flags = "[c:r]";
+            }
         }
-        fmt::print("\n");
+        size_t idx_stat = 0;
+        for (auto &item : stats) {
+            if (item.name == "no.") {
+                fmt::print("| {:<{}} |", size_t(i_iter), item.width);
+            } else if (item.name == "ipm_mu") {
+                fmt::print("| {:<{}} |", fmt::format("{:.6e}{}", stats_value[idx_stat], ipm_flags), item.width);
+            } else {
+                fmt::print("| {:<{}.6e} |", stats_value[idx_stat], item.width);
+            }
+            idx_stat++;
+        }
 
+        fmt::print("\n");
         // });
         moto::utils::timing_storage<"all">::get().count = n_iter;
     }

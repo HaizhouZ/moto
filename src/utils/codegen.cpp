@@ -178,7 +178,7 @@ cs::Function filter_func_near_zero(
         cs::SX filtered = cs::SX::zeros(cs::Sparsity(expr[k].rows(), expr[k].columns()));
         for (int i = 0; i < nz_cnt[k].rows(); ++i) {
             for (int j = 0; j < nz_cnt[k].columns(); ++j) {
-                if (std::round(nz_cnt[k](i, j).scalar()) == ntrials) {
+                if (nz_cnt[k](i, j).scalar() > 0.) {
                     filtered(i, j) = expr[k](i, j);
                 }
             }
@@ -236,7 +236,7 @@ void run(
     // Step 5: Compile if necessary
     fs::path so_file_path = fs::path(output_dir) / ("lib" + func_name + ".so");
     fs::path json_path = fs::path(output_dir) / (func_name + ".json");
-    std::string md5_hash = compute_md5(final_cpp_path);
+    std::string md5_hash = compute_md5(raw_c_path);
 
     bool needs_compile = true;
     bool json_exists = fs::exists(json_path);
@@ -249,6 +249,10 @@ void run(
             if (verbose)
                 std::cout << "Skipping " << func_name << " as it is already up-to-date." << std::endl;
             needs_compile = false;
+        } else {
+            fmt::print("Recompiling {}: md5 mismatch or compile flag changed.\n", func_name);
+            fmt::print("  Current md5: {}, compile flag: {}\n", md5_hash, compile_flag);
+            fmt::print("  Previous md5: {}, compile flag: {}\n", std::string(data["md5"]), std::string(data["compile_flag"]));
         }
     }
 
