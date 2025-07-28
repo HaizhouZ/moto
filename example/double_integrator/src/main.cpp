@@ -23,8 +23,8 @@ int main() {
 
     ns_sqp sqp;
 
-    auto &init_node = sqp.graph_.add(ns_sqp::node_type(prob));
-    auto &end_node = sqp.graph_.add(ns_sqp::node_type(prob_terminal));
+    auto &init_node = sqp.graph_.add(sqp.create_node(prob));
+    auto &end_node = sqp.graph_.add(sqp.create_node(prob_terminal));
 
     sqp.graph_.add_edge(init_node, end_node, 100);
 

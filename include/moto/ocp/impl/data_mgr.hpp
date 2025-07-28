@@ -27,6 +27,7 @@ class data_mgr {
     data_mgr(data_constructor maker) : maker_(maker) {}
 
   public:
+    data_mgr(data_mgr &&rhs) = default;
     /**
      * @brief get the data_mgr for a specific data_type
      *
@@ -35,7 +36,7 @@ class data_mgr {
      * @return data_mgr& reference to the data_mgr instance of the data_type
      */
     template <typename data_type>
-    static data_mgr &get() {
+    static data_mgr create() {
         static_assert(std::is_base_of<node_data, data_type>::value,
                       "data_type must be derived from node_data");
         static_assert(
@@ -46,9 +47,7 @@ class data_mgr {
             return new data_type(prob);
         };
 
-        static data_mgr s_(maker);
-
-        return s_;
+        return data_mgr(maker);
     }
 
     /**

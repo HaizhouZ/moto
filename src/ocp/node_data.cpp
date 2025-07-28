@@ -93,6 +93,7 @@ void data_mgr::create_data_batch(const ocp_ptr_t &prob, size_t N) {
 }
 
 node_data_ptr_t data_mgr::get_data(const ocp_ptr_t &prob) {
+    data_.try_emplace(prob->uid());
     auto &pool = data_[prob->uid()];
     std::lock_guard _lock(pool.mtx_);
     if (!pool.empty()) {

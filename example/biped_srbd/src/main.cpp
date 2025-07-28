@@ -28,8 +28,8 @@ int main() {
 
     ns_sqp solver;
     auto &graph = solver.graph_;
-    auto &init_node = graph.set_head(graph.add(ns_sqp::node_type(prob)));
-    auto &end_node = graph.set_tail(graph.add(ns_sqp::node_type(terminal_prob)));
+    auto &init_node = graph.set_head(graph.add(solver.create_node(prob)));
+    auto &end_node = graph.set_tail(graph.add(solver.create_node(terminal_prob)));
 
     graph.add_edge(init_node, end_node, 100); // 100 steps
 

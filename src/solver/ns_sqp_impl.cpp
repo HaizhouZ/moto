@@ -58,8 +58,11 @@ void ns_sqp::update(size_t n_iter) {
     //// main loop
     for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
         bool has_ineq = false;
-        for (auto &n : graph_.nodes()) {
-            has_ineq = (*n)->problem().dim(__ineq_x) > 0 || (*n)->problem().dim(__ineq_xu) > 0;
+        for (data &n : graph_.nodes()) {
+            if (n.problem().dim(__ineq_x) > 0 || n.problem().dim(__ineq_xu) > 0) {
+                has_ineq = true;
+                break;
+            }
         }
         settings.ls_config_reset();
         size_t n_worker = get_num_threads();

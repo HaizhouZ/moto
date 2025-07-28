@@ -33,6 +33,12 @@ struct ns_sqp {
 
     ns_sqp();
     using node_type = impl::shooting_node<data>;
+
+    auto create_node(const ocp_ptr_t &formulation) {
+        return node_type(formulation, mem_);
+    }
+
+    impl::data_mgr mem_;
     directed_graph<node_type> graph_;
 };
 

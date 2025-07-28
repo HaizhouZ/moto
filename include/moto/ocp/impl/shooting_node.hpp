@@ -20,8 +20,8 @@ struct shooting_node final : public graph_types::node_base<T, shooting_node<T>> 
      *
      * @param formulation problem formulation of this shootin gnode
      */
-    shooting_node(const ocp_ptr_t &formulation)
-        : mem_(data_mgr::get<data_type>()) {
+    shooting_node(const ocp_ptr_t &formulation, data_mgr &mem)
+        : mem_(mem) {
         base::data_ = dynamic_cast<data_type *>(mem_.acquire(formulation));
     }
     /**
@@ -32,7 +32,7 @@ struct shooting_node final : public graph_types::node_base<T, shooting_node<T>> 
     shooting_node(const shooting_node &rhs) : base(rhs), mem_(rhs.mem_) {
         base::data_ = dynamic_cast<data_type *>(mem_.acquire(rhs.data_));
     }
-    shooting_node(shooting_node &&rhs) : base(std::move(rhs)), mem_(rhs.mem_) {
+    shooting_node(shooting_node &&rhs) noexcept : base(std::move(rhs)), mem_(rhs.mem_) {
         base::data_ = rhs.data_;
         rhs.data_ = nullptr; // avoid double release
     }

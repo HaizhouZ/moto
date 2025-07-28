@@ -20,3 +20,9 @@ print(prob.uid, prob_term.uid)
 c_term = c_state.clone().as_terminal()
 print(c_term.name)
 prob_term.add(c_term)
+
+sqp = moto.ns_sqp()
+g = sqp.graph
+g.add(sqp.create_node(prob))
+# end_node = g.add(sqp.node_type(prob_term))
+# g.add_edge(init_node, end_node, 50)

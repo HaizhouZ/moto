@@ -1,6 +1,6 @@
 #include <moto/ocp/impl/node_data.hpp>
 #include <type_cast.hpp>
-
+#include <moto/ocp/impl/data_mgr.hpp>
 void register_submodule_node_data(nb::module_ &m) {
     using namespace moto;
     nb::class_<ocp>(m, "ocp")
@@ -35,6 +35,7 @@ void register_submodule_node_data(nb::module_ &m) {
         .def_prop_ro("prob", [](node_data &self) -> auto & { return self.problem(); })
         .def("__getitem__", [](shared_data &self, const generic_func &f) -> auto & { return self[f]; });
     nb::class_<node_data>(m, "node_data")
+        .def(nb::init<ocp_ptr_t>(), nb::arg("prob"), "Constructor for node_data with OCP problem")
         .def_prop_ro("prob", [](node_data &self) -> auto & { return self.problem(); })
         .def_prop_ro("sym", [](node_data &self) -> auto & { return self.sym_val(); })
         .def_prop_ro("dense", [](node_data &self) -> auto & { return self.dense(); })
