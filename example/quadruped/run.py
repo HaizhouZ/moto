@@ -23,6 +23,6 @@ prob_term.add(c_term)
 
 sqp = moto.ns_sqp()
 g = sqp.graph
-g.add(sqp.create_node(prob))
-# end_node = g.add(sqp.node_type(prob_term))
-# g.add_edge(init_node, end_node, 50)
+end_node = g.add(sqp.create_node(prob_term))
+init_node = g.add(sqp.create_node(prob))
+g.add_edge(init_node, end_node, 50)

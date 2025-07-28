@@ -13,11 +13,17 @@ class movable_ptr {
     movable_ptr(movable_ptr &&rhs) : ptr(rhs.ptr) { rhs.ptr = nullptr; }
     movable_ptr(const movable_ptr &) = delete;
     movable_ptr &operator=(const movable_ptr &) = delete;
+    movable_ptr &operator=(T *p) {
+        ptr = p;
+        return *this;
+    }
     T *operator->() { return ptr; }
     T &operator*() { return *ptr; }
     T *get() { return ptr; }
     bool operator==(const movable_ptr &rhs) const { return ptr == rhs.ptr; }
     operator bool() const { return ptr != nullptr; }
+    operator T *() { return ptr; }             ///< allow implicit conversion to T*
+    operator const T *() const { return ptr; } ///< allow implicit conversion to T*
 };
 
 #endif

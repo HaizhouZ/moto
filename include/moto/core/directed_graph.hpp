@@ -1,12 +1,13 @@
 #ifndef MOTO_OCP_CORE_DIRECTED_GRAPH_HPP
 #define MOTO_OCP_CORE_DIRECTED_GRAPH_HPP
 
-#include <atomic>
 #include <moto/core/fwd.hpp>
 #include <moto/core/parallel_job.hpp>
+#include <moto/utils/movable_ptr.hpp>
 #include <ranges>
 #include <set>
 #include <vector>
+#include <list>
 
 namespace moto {
 namespace graph_types {
@@ -35,6 +36,7 @@ struct edge_base {
      */
     edge_base(node *start, node *end, int length)
         : st(start), ed(end) {
+        nodes.reserve(length + 2); // reserve space for start and end nodes
         st->out_edges.emplace(this);
         ed->in_edges.emplace(this);
         while (length--) {                 // exclude ed node
@@ -57,13 +59,13 @@ template <typename dtype, typename derived>
 struct node_base {
     using data_type = dtype;
     using edge_type = edge_base<derived>;
-    std::set<edge_type *> in_edges;            ///< incoming edges
-    std::set<edge_type *> out_edges;           ///< outgoing edges
-    std::atomic<size_t> in_cnt{0}, out_cnt{0}; ///< counts of in and out edges
-    data_type *data_;                          ///< pointer to the data
+    std::set<edge_type *> in_edges;  ///< incoming edges
+    std::set<edge_type *> out_edges; ///< outgoing edges
+    size_t in_cnt{0}, out_cnt{0};    ///< counts of in and out edges
+    movable_ptr<data_type> data_;    ///< pointer to the data
     /// necessary as proxy, e.g., node->(member of @ref node_base::data_type)
     data_type *operator->() { return data_; }
-    operator data_type &() const { return *data_; } ///< convert to data_type reference
+    operator data_type &() { return *data_; } ///< convert to data_type reference
     /// @brief default constructor, initializes @ref data_ to nullptr
     node_base() : data_(nullptr) {}
     /// @brief copy constructor (not really copied), initializes @ref data_ to nullptr
@@ -112,8 +114,7 @@ class directed_graph {
      * @return node& reference to the added node
      */
     node &add(node &&d) {
-        nodes_.emplace_back(node(std::move(d)));
-        return nodes_.back();
+        return nodes_.emplace_back(std::move(d));
     }
 
     node &set_tail(node &tail) { return *(tail_ = &tail); }
@@ -195,7 +196,7 @@ class directed_graph {
         while (!cur_edges.empty()) {
             for (auto e : cur_edges) {
                 // edge forward
-                auto cur = e->st->data_;
+                data_type *cur = e->st->data_;
                 for (auto &next : e->nodes) {
                     binary_in_.emplace_back(cur, next.data_);
                     cur = next.data_;
@@ -244,7 +245,7 @@ class directed_graph {
             for (size_t i = 0; i < cur_edges.size(); ++i) {
                 for (auto e : cur_edges) {
                     // edge forward
-                    auto cur = e->ed->data_;
+                    data_type *cur = e->ed->data_;
                     for (auto &prev : e->nodes | std::views::reverse) {
                         binary_in_.emplace_back(cur, prev.data_);
                         cur = prev.data_;
@@ -276,9 +277,9 @@ class directed_graph {
   private:
     node *head_ = nullptr; /// < head node of the graph, i.e., the first node in the graph
     /// @todo: multiple tail
-    node *tail_ = nullptr;    ///< tail node of the graph, i.e., the last node in the graph
-    std::vector<node> nodes_; ///< key nodes used to describe the graph
-    std::vector<edge> edges_; ///< edges used to connect the key nodes
+    node *tail_ = nullptr;  ///< tail node of the graph, i.e., the last node in the graph
+    std::list<node> nodes_; ///< key nodes used to describe the graph
+    std::list<edge> edges_; ///< edges used to connect the key nodes
 
     // temporary storage for unary and binary functions
     std::vector<data_type *> unary_in_;                          ///< data pointers for unary functions
