@@ -29,7 +29,7 @@ stat_item stats[] = {{"no.", 3},
                      {"comp_res"},
                      {"alpha_p"},
                      {"alpha_d"},
-                     {"ipm_mu", stat_width + 5}};
+                     {"ipm_mu", stat_width + 2}};
 
 void ns_sqp::update(size_t n_iter) {
     fmt::print("Initialization for SQP...\n");
@@ -144,7 +144,8 @@ void ns_sqp::update(size_t n_iter) {
             info.inf_dual_res = std::max(info.inf_dual_res, n->dense().jac_[__u].cwiseAbs().maxCoeff());
             info.inf_comp_res = std::max(info.inf_comp_res, n->inf_comp_res_);
         }
-        graph_.apply_all_binary_forward<false, true>([&info](node_data *cur, node_data *next) {
+        size_t step = 0;
+        graph_.apply_all_binary_forward<false, true>([&step, &info](node_data *cur, node_data *next) {
             if (next != nullptr) [[likely]] {
                 // cancellation of jacobian from y to x
                 static row_vector tmp;
@@ -155,6 +156,10 @@ void ns_sqp::update(size_t n_iter) {
                 info.inf_dual_res = std::max(info.inf_dual_res, tmp.cwiseAbs().maxCoeff());
             } else /// @todo: include initial jac[__x] inf norm if init is optimized
                 info.inf_dual_res = std::max(info.inf_dual_res, cur->dense().jac_[__y].cwiseAbs().maxCoeff());
+            // fmt::println("------ step {} dual_res: ", step++);
+            // fmt::println("{}", cur->dense().jac_[__x].cwiseAbs().maxCoeff());
+            // fmt::println("{}", cur->dense().jac_[__u].cwiseAbs().maxCoeff());
+            // fmt::println("{}", cur->dense().jac_[__y].cwiseAbs().maxCoeff());
         });
         // print statistics
         scalar_t stats_value[] = {i_iter, info.objective, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res,
@@ -172,7 +177,7 @@ void ns_sqp::update(size_t n_iter) {
             if (item.name == "no.") {
                 fmt::print("| {:<{}} |", size_t(i_iter), item.width);
             } else if (item.name == "ipm_mu") {
-                fmt::print("| {:<{}} |", fmt::format("{:.6e}{}", stats_value[idx_stat], ipm_flags), item.width);
+                fmt::print("| {:<{}} |", has_ineq ? fmt::format("{:.6e}{}", stats_value[idx_stat], ipm_flags) : "---------", item.width);
             } else {
                 fmt::print("| {:<{}.6e} |", stats_value[idx_stat], item.width);
             }
