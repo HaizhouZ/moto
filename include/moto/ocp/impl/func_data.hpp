@@ -7,7 +7,7 @@
 namespace moto {
 struct func_arg_map;
 def_unique_ptr(func_arg_map);
-class func_base;
+class generic_func;
 /**
  * @brief shared data for all funcs in one problem formulation
  * @note it will store (class derived from) func_arg_map
@@ -24,7 +24,7 @@ class shared_data {
     void add(size_t uid, func_arg_map_ptr_t &&data) { data_.try_emplace(uid, std::move(data)); }
     /// @brief add data by func shared pointer (owner of the data)
     template <typename derived>
-        requires std::is_base_of_v<func_base, derived>
+        requires std::is_base_of_v<generic_func, derived>
     void add(const derived &ex, func_arg_map_ptr_t &&data) {
         assert(ex.field() == __pre_comp || ex.field() == __usr_func);
         add(ex.uid(), std::move(data));
@@ -33,7 +33,7 @@ class shared_data {
     auto &get(size_t uid) { return *data_.at(uid); }
     /// @brief get the data of the func (by uid)
     template <typename derived>
-        requires std::is_base_of_v<func_base, derived>
+        requires std::is_base_of_v<generic_func, derived>
     auto &operator[](const derived &ex) { return get(ex.uid()); }
 };
 def_unique_ptr(shared_data);
@@ -46,6 +46,8 @@ enum class approx_order { none = 0,
                           zero,
                           first,
                           second };
+
+constexpr inline auto format_as(approx_order order) { return magic_enum::enum_name<approx_order>(order); }
 /////////////////////////////////////////////////////////////////////
 /**
  * @brief sparse primal data
@@ -59,12 +61,12 @@ struct func_arg_map {
      * @param shared shared data
      * @param f function implementation pointer
      */
-    func_arg_map(sym_data &primal, shared_data &shared, const func_base &f);
+    func_arg_map(sym_data &primal, shared_data &shared, const generic_func &f);
     // constructor for sparse primal data with vector_ref
-    func_arg_map(std::vector<vector_ref> &&primal, shared_data &shared, const func_base &f);
+    func_arg_map(std::vector<vector_ref> &&primal, shared_data &shared, const generic_func &f);
 
     virtual ~func_arg_map() = default;
-    const func_base &func_; ///< pointer to the func
+    const generic_func &func_; ///< pointer to the func
     shared_data &impl_;     ///< ref to shared data
     /**
      * @brief get the input argument values
@@ -115,7 +117,7 @@ struct func_approx_map : public func_arg_map {
      * @param shared shared data
      * @param f approximation
      */
-    func_approx_map(sym_data &primal, dense_approx_data &raw, shared_data &shared, const func_base &f);
+    func_approx_map(sym_data &primal, dense_approx_data &raw, shared_data &shared, const generic_func &f);
     /**
      * @brief Construct a new sparse approx data object
      *
@@ -126,7 +128,7 @@ struct func_approx_map : public func_arg_map {
      * @param f approximation function implementation pointer (unique_ptr const ref)
      * @note this constructor is used for approximations not mapped from @ref dense_approx_data
      */
-    func_approx_map(sym_data &primal, vector_ref v, std::vector<matrix_ref> &&jac, shared_data &shared, const func_base &f);
+    func_approx_map(sym_data &primal, vector_ref v, std::vector<matrix_ref> &&jac, shared_data &shared, const generic_func &f);
     /// @brief setup hessian from raw approx storage
     void setup_hessian(dense_approx_data &raw);
     /// @brief get the jacobian reference

@@ -5,7 +5,7 @@ namespace moto {
 std::map<std::string, const std::type_info *, std::less<>> ineq_derived_registry = {
     {"ipm", &typeid(ipm)}};
 
-func constr::as_ineq(std::string_view type_name) {
+constr& constr::as_ineq(std::string_view type_name) {
     auto it = ineq_derived_registry.find(type_name);
     if (it != ineq_derived_registry.end()) {
         const std::type_info *type_info = it->second;

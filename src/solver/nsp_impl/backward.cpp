@@ -49,7 +49,7 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
         } else
             nsp.llt_ns_.solveInPlace(d.d_u.K);
     } else {
-        // constr rank > 0
+        // generic_constr rank > 0
         nsp.z_u_k.noalias() = nsp.u_0_p_k - nsp.U * nsp.u_y_k;
         nsp.z_u_K.noalias() = nsp.u_0_p_K - nsp.U * nsp.u_y_K;
         if (d.rank_status_ == rank_status::fully_constrained) {

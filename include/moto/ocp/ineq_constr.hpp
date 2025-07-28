@@ -30,9 +30,9 @@ class ineq_constr : public soft_constr {
 
   public:
     using base::base;
-    ineq_constr(constr &&rhs) : base(std::move(rhs)) {
+    ineq_constr(generic_constr &&rhs) : base(std::move(rhs)) {
         field_hint().is_eq = false; ///< set the field hint to inequality
-    } ///< move constructor from constr
+    } ///< move constructor from generic_constr
     /***
      * @brief make approximation data for the inequality constraint, will use default @ref data_type
      */

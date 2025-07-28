@@ -1,11 +1,20 @@
 #include <moto/ocp/impl/func.hpp>
 
 namespace moto {
+class generic_cost;
+struct cost : public func {
+    using func::func; ///< inherit base constructor
+    cost(const std::string &name, approx_order order = approx_order::second);
+    cost(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
+         approx_order order = approx_order::second);
+    cost &as_terminal(); ///< convert to terminal cost
+    generic_cost *operator->() const;
+};
 /**
  * @brief simple cost implementation
  *
  */
-class cost : public func_base {
+class generic_cost : public generic_func {
   protected:
     struct finalize_hint {
         bool substitute_x_to_y = false;
@@ -13,26 +22,19 @@ class cost : public func_base {
 
     void finalize_impl() override;
 
+    friend struct cost;
+    using wrapper_type = cost;
+
   public:
-    using base = func_base;
-    cost() = default;
+    using base = generic_func;
+    using base::base; ///< inherit base constructor
 
     PROPERTY(finalize_hint)
 
-    cost(const std::string &name, approx_order order = approx_order::second)
-        : base(name, order, 1, __cost) {}
-
-    cost(const std::string &name, const var_inarg_list &in_args, const cs::SX &out, approx_order order = approx_order::second)
-        : base(name, in_args, out, order, __cost) {
-        assert(out.is_scalar() && "cost output must be a scalar");
-    }
-    func as_terminal() {
-        cost tmp(*this);
-        tmp.name() += "_terminal";
-        tmp.finalize_hint_.substitute_x_to_y = true;
-        return tmp;
-    }
     DEF_FUNC_CLONE;
 };
 
+generic_cost *cost::operator->() const {
+    return static_cast<generic_cost *>(func::operator->());
+} ///< convert to generic_cost
 } // namespace moto

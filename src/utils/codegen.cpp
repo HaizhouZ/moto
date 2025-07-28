@@ -397,7 +397,7 @@ void task::finalize(worker_list &workers_) {
         hess.resize(sx_inputs.size());
         // use AD of vjp to compute hessian
 
-        auto lbd = vjp_for_hess ? sym(func_name + "_lbd", sx_output.rows(), __usr_var) : sym();
+        auto lbd = vjp_for_hess ? sym::usr_var(func_name + "_lbd", sx_output.rows()) : var();
         for (size_t idx_i = 0; idx_i < sx_inputs.size(); ++idx_i) {
             sym &i = sx_inputs[idx_i];
             hess[idx_i].resize(sx_inputs.size());

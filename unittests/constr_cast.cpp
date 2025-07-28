@@ -5,23 +5,22 @@
 #include <moto/ocp/constr.hpp>
 #include <moto/ocp/ineq_constr.hpp>
 
-struct test_ineq : public moto::constr {
-    test_ineq(moto::constr &&rhs) : moto::constr(std::move(rhs)) {
+struct test_ineq : public moto::generic_constr {
+    test_ineq(moto::generic_constr &&rhs) : moto::generic_constr(std::move(rhs)) {
         // Custom initialization for test_ineq if needed
     }
-    test_ineq(const moto::constr &rhs) : moto::constr(rhs) {
+    test_ineq(const moto::generic_constr &rhs) : moto::generic_constr(rhs) {
         // Custom initialization for test_ineq if needed
     }
 };
 
 TEST_CASE("exprOwnership") {
     using namespace moto;
-    var a = sym("a", 3, __x);
-    var b = sym("b", 3, __y);
-    func c = constr("a_plus_b", {a, b}, a + b, approx_order::first).as_eq();
+    auto [a, b] = sym::states("a", 3);
+    auto c = constr("a_plus_b", {a, b}, a + b, approx_order::first);
     c->finalize();
-    func p = c.as<constr>().as_ineq<test_ineq>();
+    auto p = c.as_ineq<test_ineq>();
     assert(p->finalized());
-    func ip = p->clone().as<constr>().as_ineq<test_ineq>();
+    auto ip = p->clone().as_ineq<test_ineq>();
     assert(!ip->finalized());
 }

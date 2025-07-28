@@ -115,7 +115,7 @@ void register_submodule_functional(nb::module_ &m) {
                                                               v->name(), v->dim(), v->field(), v->uid()); })
         .def("to_sx", [](var &v) { return (cs::SX &)static_cast<sym &>(v); }, nb::rv_policy::reference_internal);
 
-    m.def("create_sym", [](const std::string &name, size_t dim, field_t field) { return var(sym(name, dim, field)); }, nb::arg("name"), nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined);
+    m.def("create_sym", [](const std::string &name, size_t dim, field_t field) { return var(sym::symbol(name, dim, field)); }, nb::arg("name"), nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined);
     m.def("get_sym_sx", [](var &&s) {
         auto &ex = static_cast<sym &>(s);
         return cs::SX(ex); }, nb::arg("s"));
@@ -147,26 +147,10 @@ void register_submodule_functional(nb::module_ &m) {
             "order",
             [](func &self) { return self->order(); },
             [](func &self, const approx_order &value) { self->order() = value; })
-        .def_prop_rw(
-            "custom_call",
-            [](func &self) { return static_cast<custom_func &>(self).custom_call; },
-            [](func &self, const decltype(custom_func::custom_call) &v) { static_cast<custom_func &>(self).custom_call = v; })
         .def("__str__",
              [](const func &f) { return fmt::format("func(name='{}', uid={}, order={}, dim={}, field={})",
-                                                    f->name(), f->uid(), magic_enum::enum_name<approx_order>(f->order()), f->dim(), field::name(f->field())); })
+                                                    f->name(), f->uid(), f->order(), f->dim(), f->field()); })
         .def("clone", [](const func &self) { return self->clone(); })
-        .def(
-            "as_eq",
-            [](func &self, bool soft) { return static_cast<constr &>(self).as_eq<constr>(soft); },
-            nb::arg("soft") = false, nb::rv_policy::move)
-        .def(
-            "as_ineq",
-            [](func &self, const std::string &type_name) { return static_cast<constr &>(self).as_ineq(type_name); },
-            nb::arg("type_name") = "ipm", nb::rv_policy::move)
-        .def_prop_rw(
-            "create_custom_data",
-            [](func &self) { return static_cast<custom_func &>(self).create_custom_data; },
-            [](func &self, const decltype(custom_func::create_custom_data) &v) { static_cast<custom_func &>(self).create_custom_data = v; })
         .def(
             "add_argument",
             [](func &self, const nb::handle &v) { self->add_argument(moto::cast_to_var(v)); },
@@ -177,37 +161,57 @@ void register_submodule_functional(nb::module_ &m) {
         .def(
             "create_approx_map",
             [](func &self, sym_data &primal, dense_approx_data &raw, shared_data &shared) { return self->create_approx_map(primal, raw, shared); },
-            nb::arg("primal"), nb::arg("raw"), nb::arg("shared"))
-        .def(
-            "as_terminal",
-            [](func &self) { return static_cast<cost &>(self).as_terminal(); }, nb::rv_policy::move);
+            nb::arg("primal"), nb::arg("raw"), nb::arg("shared"));
 
-    m.def(
-         "constr",
-         [](const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
-            approx_order order = approx_order::first, field_t field = field_t::__undefined) { return func(moto::constr(name, in_args, out, order, field)); },
-         nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("order") = approx_order::first, nb::arg("field") = field_t::__undefined)
+    nb::class_<constr, func>(m, "constr")
         .def(
-            "constr",
-            [](const std::string &name, approx_order order, size_t dim, field_t field) { return func(moto::constr(name, order, dim, field)); },
+            nb::init<const std::string &, const var_inarg_list &, const cs::SX &, approx_order, field_t>(),
+            nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("order") = approx_order::first, nb::arg("field") = field_t::__undefined)
+        .def(
+            nb::init<const std::string &, approx_order, size_t, field_t>(),
             nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined)
+        .def("clone", [](const constr &self) { return self->clone(); })
         .def(
-            "cost",
-            [](const std::string &name, const var_inarg_list &in_args, const cs::SX &out, approx_order order = approx_order::second) { return func(moto::cost(name, in_args, out, order)); },
+            "as_eq",
+            [](constr &self, bool soft) { return self.as_soft(); },
+            nb::arg("soft") = false, nb::rv_policy::move)
+        .def(
+            "as_ineq",
+            [](constr &self, const std::string &type_name) { return self.as_ineq(type_name); },
+            nb::arg("type_name") = "ipm", nb::rv_policy::move);
+
+    nb::class_<cost, func>(m, "cost")
+        .def(
+            nb::init<const std::string &, const var_inarg_list &, const cs::SX &, approx_order>(),
             nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("order") = approx_order::second)
         .def(
-            "cost",
-            [](const std::string &name, approx_order order = approx_order::second) { return func(moto::cost(name, order)); },
+            nb::init<const std::string &, approx_order>(),
             nb::arg("name"), nb::arg("order") = approx_order::second)
         .def(
-            "usr_func",
-            [](const std::string &name, const var_inarg_list &in_args, const cs::SX &out, approx_order order = approx_order::first) { return func(moto::usr_func(name, in_args, out, order)); },
+            "as_terminal",
+            [](cost &self) { return self.as_terminal(); }, nb::rv_policy::move)
+        .def("clone", [](const cost &self) { return self->clone(); });
+
+    nb::class_<custom_func, func>(m, "custom_func")
+        .def_prop_rw(
+            "custom_call",
+            [](custom_func &self) { return self->custom_call; },
+            [](custom_func &self, const decltype(generic_custom_func::custom_call) &v) { self->custom_call = v; })
+        .def_prop_rw(
+            "create_custom_data",
+            [](custom_func &self) { return self->create_custom_data; },
+            [](custom_func &self, const decltype(generic_custom_func::create_custom_data) &v) { self->create_custom_data = v; });
+
+    nb::class_<usr_func, custom_func>(m, "usr_func")
+        .def(
+            nb::init<const std::string &, const var_inarg_list &, const cs::SX &, approx_order>(),
             nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("order") = approx_order::first)
         .def(
-            "usr_func",
-            [](const std::string &name, approx_order order = approx_order::first) { return func(moto::usr_func(name, order)); },
-            nb::arg("name"), nb::arg("order") = approx_order::first)
+            nb::init<const std::string &, approx_order, size_t>(),
+            nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd);
+
+    nb::class_<pre_compute, custom_func>(m, "pre_compute")
         .def(
-            "pre_compute",
-            [](const std::string &name) { return func(moto::pre_compute(name)); }, nb::arg("name"));
+            nb::init<const std::string &>(),
+            nb::arg("name") = "pre_compute");
 }

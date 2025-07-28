@@ -8,9 +8,9 @@ namespace moto {
  * @brief soft constraint interface class
  * @warning jacobian modification should be added to @ approx_map::jac_modification_
  */
-class soft_constr : public constr {
+class soft_constr : public generic_constr {
   private:
-    using base = constr;
+    using base = generic_constr;
 
   public:
     /**
@@ -39,9 +39,9 @@ class soft_constr : public constr {
 
   public:
     using base::base; ///< inherit constructors
-    soft_constr(constr &&rhs) : base(std::move(rhs)) {
+    soft_constr(generic_constr &&rhs) : base(std::move(rhs)) {
         field_hint().is_soft = true; ///< set the field hint to soft
-    } ///< move constructor from constr
+    } ///< move constructor from generic_constr
     /// initialize the soft constraint data
     virtual void initialize(data_map_t &data) const = 0;
     /// post rollout operation for the soft constraint to compute the newton step
@@ -60,7 +60,7 @@ class soft_constr : public constr {
     /// @param data data map
     /// @param worker_cfg workspace data pointer to the config to be updated
     virtual void update_linesearch_config(data_map_t &data, workspace_data *worker_cfg) const {}
-    // soft_constr(base &&rhs) : base(std::move(rhs)) { field_hint().is_soft = true; } ///< move constructor from constr
+    // soft_constr(base &&rhs) : base(std::move(rhs)) { field_hint().is_soft = true; } ///< move constructor from generic_constr
     /***
      * @brief make approximation data for the soft constraint, will use default @ref data_type
      */

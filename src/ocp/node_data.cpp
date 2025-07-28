@@ -18,7 +18,7 @@ vector_ref sym_data::get(const sym &s) {
         return prob_->extract(value_.at(s.field()), s);
 }
 /**
- * @brief for loop shortcut for funcs (dyn,cost,constr...)
+ * @brief for loop shortcut for funcs (dyn,cost,generic_constr...)
  *
  * @param prob
  * @param callback [idx of field, idx of expr, pointer to expr]
@@ -28,7 +28,7 @@ inline void for_each_func(const ocp_ptr_t &prob, Callback &&callback) {
     // loop with two variables due to the difference between idx and field no.
     for (size_t field : func_fields) {
         size_t idx = 0;
-        for (const func_base &f : prob->exprs(field)) {
+        for (const generic_func &f : prob->exprs(field)) {
             callback(idx++, f);
         }
     }
@@ -39,7 +39,7 @@ node_data::node_data(const ocp_ptr_t &prob)
       sym_(new sym_data(prob.get())), 
       dense_(new dense_approx_data(prob.get())), 
       shared_(new shared_data(prob.get(), sym_.get())) {
-    for_each_func(prob, [&]([[maybe_unused]] size_t idx, const func_base &_f) {
+    for_each_func(prob, [&]([[maybe_unused]] size_t idx, const generic_func &_f) {
         auto p = _f.create_approx_map(*sym_, *dense_, *shared_);
         sparse_[_f.field()].push_back(std::move(p));
     });
@@ -59,11 +59,11 @@ void node_data::update_approximation(bool eval_only) {
             hess_l_1.setZero();
         }
     }
-    for (const custom_func &f : prob_->exprs(__pre_comp)) {
+    for (const generic_custom_func &f : prob_->exprs(__pre_comp)) {
         f.custom_call((*shared_)[f]);
     }
     for_each_func(prob_,
-                  [this, eval_only](size_t idx, const func_base &_f) {
+                  [this, eval_only](size_t idx, const generic_func &_f) {
                       _f.compute_approx(*sparse_[_f.field()][idx], true,
                                         !eval_only && _f.order() >= approx_order::first,
                                         !eval_only && _f.order() >= approx_order::second);

@@ -29,41 +29,41 @@ public:
 private:
     func make_dyn_pos() {
         auto d = constr("doubleIntegratorDynamics_pos", approx_order::first, 3, __dyn);
-        d.value = [](func_approx_map &data) {
+        d->value = [](func_approx_map &data) {
             data.v_ = -data[0] + data[1] - 0.01 * data[2];
         };
-        d.jacobian = [this](func_approx_map &data) {
+        d->jacobian = [this](func_approx_map &data) {
             data.jac(0).diagonal().setConstant(-1);
             data.jac(1).setIdentity();
             data.jac(2).diagonal().setConstant(-0.01);
         };
-        d.add_arguments({r, r_next, v_next});
+        d->add_arguments({r, r_next, v_next});
         return d;
     }
 
     func make_dyn_vel() {
         auto d = constr("doubleIntegratorDynamics_vel", approx_order::first, 3, __dyn);
-        d.value = [](func_approx_map &data) {
+        d->value = [](func_approx_map &data) {
             data.v_ = -data[0] + data[1] - 0.01 * data[2];
         };
-        d.jacobian = [](func_approx_map &data) {
+        d->jacobian = [](func_approx_map &data) {
             data.jac(0).diagonal().setConstant(-1);
             data.jac(1).setIdentity();
             data.jac(2).diagonal().setConstant(-0.01);
         };
-        d.add_arguments({v, v_next, a});
+        d->add_arguments({v, v_next, a});
         return d;
     }
 
     func make_zero_vel() {
         auto d = constr("doubleIntegratorDynamics_zero_vel", approx_order::first, 3, __eq_x);
-        d.value = [](func_approx_map &data) {
+        d->value = [](func_approx_map &data) {
             data.v_ = data[0];
         };
-        d.jacobian = [](func_approx_map &data) {
+        d->jacobian = [](func_approx_map &data) {
             data.jac(0).setIdentity();
         };
-        d.add_arguments({v});
+        d->add_arguments({v});
         return d;
     }
 };

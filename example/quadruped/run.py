@@ -17,6 +17,6 @@ prob.add([dint, c_state, c_input])
 
 prob_term = prob.clone()
 print(prob.uid, prob_term.uid)
-c_term = c_state.as_terminal()
+c_term = c_state.clone().as_terminal()
 print(c_term.name)
 prob_term.add(c_term)

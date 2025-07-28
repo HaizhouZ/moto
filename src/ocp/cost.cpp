@@ -2,7 +2,7 @@
 #include <moto/ocp/cost.hpp>
 
 namespace moto {
-void cost::finalize_impl() {
+void generic_cost::finalize_impl() {
     if (finalize_hint_.substitute_x_to_y) {
         for (sym &arg : in_args_) {
             switch (arg.field()) {
@@ -23,7 +23,21 @@ void cost::finalize_impl() {
     }
     // fmt::print("field_hint for cost {} is {}\n", name_, finalize_hint_.substitute_x_to_y);
     // finalize the base class
-    func_base::finalize_impl();
+    generic_func::finalize_impl();
     return;
+}
+
+cost::cost(const std::string &name, approx_order order)
+    : func(generic_cost(name, order, 1, __cost)) {}
+
+cost::cost(const std::string &name, const var_inarg_list &in_args, const cs::SX &out, approx_order order)
+    : func(generic_cost(name, in_args, out, order, __cost)) {
+    assert(out.is_scalar() && "cost output must be a scalar");
+}
+
+cost &cost::as_terminal() {
+    (*this)->name_ += "_terminal";
+    (*this)->finalize_hint_.substitute_x_to_y = true;
+    return (*this);
 }
 } // namespace moto

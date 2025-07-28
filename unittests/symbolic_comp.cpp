@@ -30,7 +30,7 @@ TEST_CASE("symbolicComp") {
     // c(0) = cs::SX::dot(a, b);
     // // auto f = cs::Function("test", {a, b}, {c});
     // // f.save("gen/test");
-    // auto cstr = constr("cdotab", {a, b}, c, __eq_xu, approx_order::first);
+    // auto cstr = generic_constr("cdotab", {a, b}, c, __eq_xu, approx_order::first);
     // std::cout << c.serialize() << '\n';
     // std::cout << a << '\n';
     // std::cout << c << '\n';

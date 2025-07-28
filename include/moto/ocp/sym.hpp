@@ -16,9 +16,9 @@ struct var : public shared_expr, public cs::SX {
     template <typename T, typename T_ = std::remove_cvref_t<T>>
     var(T &&rhs) noexcept : base(std::forward<T>(rhs)), cs::SX((sym &)*this) {}
     var(var &&rhs) noexcept : base(std::move(rhs)), cs::SX(static_cast<cs::SX &&>(rhs)) {}
-    var(const var&) = default; ///< copy constructor
-    var &operator=(const var &) = default; ///< copy assignment operator
-    var &operator=(var &&) noexcept = default;      ///< move assignment operator
+    var(const var &) = default;                ///< copy constructor
+    var &operator=(const var &) = default;     ///< copy assignment operator
+    var &operator=(var &&) noexcept = default; ///< move assignment operator
 };
 /**
  * @brief pointer wrapper of symbolic expressions like primal variables or parameters
@@ -38,12 +38,7 @@ class sym : public expr, public cs::SX {
     sym &operator=(const sym &rhs) = default; ///< copy assignment operator
 
     friend class shared_expr; ///< allow shared_expr to access private members
-    friend class var; ///< allow var to access private members
-
-  public:
-    using expr::dim;
-    using expr::name; ///< name of the symbolic variable
-    using expr::operator bool;
+    friend class var;         ///< allow var to access private members
 
     sym() = default; ///< default constructor, will create a not-a-number symbolic variable
     /**
@@ -58,8 +53,13 @@ class sym : public expr, public cs::SX {
         assert(size_t(type) <= field::num_sym || type == __usr_var);
     }
 
-    sym(sym &&rhs) = default;                 ///< move constructor
-    sym &operator=(sym &&rhs) = default;      ///< move assignment operator
+    sym(sym &&rhs) = default;            ///< move constructor
+    sym &operator=(sym &&rhs) = default; ///< move assignment operator
+
+  public:
+    using expr::dim;
+    using expr::name; ///< name of the symbolic variable
+    using expr::operator bool;
 
     /// @brief make a symbolic input
     static var inputs(const std::string &name, size_t dim) {
@@ -89,6 +89,14 @@ class sym : public expr, public cs::SX {
         assert(field_ == __y && "dual() can only be used with __y state to get its dual in __x");
         return dual_;
     }
+
+    static var usr_var(const std::string &name, size_t dim) {
+        return sym(name, dim, __usr_var);
+    } ///< make a user defined variable
+
+    static var symbol(const std::string &name, size_t dim, field_t field) {
+        return sym(name, dim, field);
+    } ///< make a symbolic primitive
 };
 inline sym *var::operator->() const {
     return static_cast<sym *>(base::operator->());

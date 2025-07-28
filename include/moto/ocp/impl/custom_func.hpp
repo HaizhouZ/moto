@@ -4,8 +4,15 @@
 #include <moto/ocp/impl/func.hpp>
 
 namespace moto {
+class generic_custom_func;
+struct usr_func;
+struct pre_compute;
+struct custom_func : public func {
+    using func::func; ///< inherit base constructor
+    generic_custom_func *operator->() const;
+};
 
-class custom_func : public func_base {
+class generic_custom_func final : public generic_func {
 
   protected:
     void finalize_impl() override {
@@ -14,9 +21,14 @@ class custom_func : public func_base {
                                                  name_, field::name(field_)));
         }
     }
+    using wrapper_type = custom_func;
+
+    friend struct custom_func; ///< allow custom_func to access private members
+    friend struct usr_func;    ///< allow usr_func to access private members
+    friend struct pre_compute; ///< allow pre_compute to access private members
 
   public:
-    using func_base::func_base;
+    using generic_func::generic_func;
     /**
      * @brief create the argument mapping for the custom function
      *
@@ -34,7 +46,9 @@ class custom_func : public func_base {
     /// @brief callback to call a non-approximation function
     std::function<void(func_arg_map &)> custom_call;
 };
-
+inline generic_custom_func *custom_func::operator->() const {
+    return static_cast<generic_custom_func *>(func::operator->());
+} ///< convert to generic_custom_func
 } // namespace moto
 
 #endif // MOTO_OCP_IMPL_CUSTOM_FUNC_HPP

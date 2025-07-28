@@ -1,5 +1,5 @@
-#ifndef __approx__
-#define __approx__
+#ifndef __MOTO_OCP_IMPL_FUNC_HPP__
+#define __MOTO_OCP_IMPL_FUNC_HPP__
 
 #include <future>
 #include <moto/core/workspace_data.hpp>
@@ -7,13 +7,13 @@
 
 namespace moto {
 class func_codegen;
-class func_base;
+class generic_func;
 struct func : public shared_expr {
     using base = shared_expr;
     using base::base;
-    func_base *operator->() const; ///< convert to func_base
+    generic_func *operator->() const; ///< convert to generic_func
     template <typename T>
-        requires std::is_base_of_v<func_base, std::remove_cvref_t<T>>
+        requires std::is_base_of_v<generic_func, std::remove_cvref_t<T>>
     T &as() const {
         return static_cast<T &>(*this);
     } ///< convert to derived type
@@ -22,7 +22,7 @@ struct func : public shared_expr {
  * @brief approximation class for generic functions
  * @todo: change to differentiable for precompute
  */
-class func_base : public expr {
+class generic_func : public expr {
   public:
     // --- All members from impl are now protected in func ---
   protected:
@@ -54,29 +54,29 @@ class func_base : public expr {
     virtual void hessian_impl([[maybe_unused]] func_approx_map &data) const { hessian(data); }
     virtual void load_external_impl(const std::string &path = "gen");
 
-    func_base(const func_base &) = default;
-    func_base &operator=(const func_base &) = default;
+    generic_func(const generic_func &) = default;
+    generic_func &operator=(const generic_func &) = default;
 
     friend class shared_expr; ///< allow shared_expr to access private members
     friend class func;
 
-  public:
-    virtual void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const {}
-    func_base() = default;
-    func_base(const std::string &name, approx_order order = approx_order::first,
-              size_t dim = dim_tbd, field_t field = __undefined)
+    using wrapper_type = func;
+
+    generic_func() = default;
+    generic_func(const std::string &name, approx_order order, size_t dim, field_t field)
         : expr(name, dim, field), order_(order) {}
-    func_base(const std::string &name,
-              const var_inarg_list &in_args,
-              const cs::SX &out,
-              approx_order order = approx_order::first, field_t field = __undefined)
-        : func_base(name, order, (size_t)out.size1(), field) {
-        assert(out.size2() == 1 && "constr output cols must be 1");
+    generic_func(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
+                 approx_order order, field_t field)
+        : generic_func(name, order, (size_t)out.size1(), field) {
+        assert(out.size2() == 1 && "generic_constr output cols must be 1");
         set_from_casadi(in_args, out);
     }
 
-    func_base(func_base &&) = default;
-    func_base &operator=(func_base &&) = default;
+  public:
+    virtual void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const {}
+
+    generic_func(generic_func &&) = default;
+    generic_func &operator=(generic_func &&) = default;
 
     PROPERTY(order)
     PROPERTY(in_args)
@@ -121,17 +121,17 @@ class func_base : public expr {
     std::function<void(func_approx_map &)> jacobian; ///< jacobian callback
     std::function<void(func_approx_map &)> hessian;  ///< hessian callback
 
-#define DEF_FUNC_CLONE                                                                            \
-    virtual func clone() const {                                                                  \
-        assert(uid_ != uid_max && "cannot clone a null function");                                \
-        return func(std::shared_ptr<func_base>(new std::remove_cvref_t<decltype(*this)>(*this))); \
+#define DEF_FUNC_CLONE                                                                                       \
+    wrapper_type clone() const {                                                                             \
+        assert(uid_ != uid_max && "cannot clone a null function");                                           \
+        return wrapper_type(std::shared_ptr<generic_func>(new std::remove_cvref_t<decltype(*this)>(*this))); \
     }
 
     DEF_FUNC_CLONE;
 };
-inline func_base *func::operator->() const {
-    return static_cast<func_base *>(base::operator->());
-} ///< convert to func_base
+inline generic_func *func::operator->() const {
+    return static_cast<generic_func *>(base::operator->());
+} ///< convert to generic_func
 /**
  * @brief Code generation helper for functions
  *
@@ -152,9 +152,9 @@ struct func_codegen {
      * @brief make codegen task for the function
      *
      */
-    static void make_codegen_task(func_base *f);
+    static void make_codegen_task(generic_func *f);
 };
 
 } // namespace moto
 
-#endif /*__approx_*/
+#endif /*__MOTO_OCP_IMPL_FUNC_HPP__*/

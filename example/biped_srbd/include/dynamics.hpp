@@ -61,12 +61,11 @@ struct srbd_dynamics {
         return {constr("stance_u",
                        {v_l, f_l, active_l_cur, v_r, f_r, active_r_cur},
                        cs::SX::vertcat({active_l_cur * v_l(cs::Slice(0, 2)), (1 - active_l_cur) * f_l,
-                                        active_r_cur * v_r(cs::Slice(0, 2)), (1 - active_r_cur) * f_r}))
-                    .as_eq(),
+                                        active_r_cur * v_r(cs::Slice(0, 2)), (1 - active_r_cur) * f_r})),
+
                 constr("stance_z",
                        {r_l_n, r_r_n, active_l, active_r},
-                       cs::SX::vertcat({active_l * r_l_n(2), active_r * r_r_n(2)}))
-                    .as_eq()};
+                       cs::SX::vertcat({active_l * r_l_n(2), active_r * r_r_n(2)}))};
     }
     expr_list running_cost() {
         auto running_cost = 100 * cs::SX::sumsqr(r - r_d) +                      // position cost

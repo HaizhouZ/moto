@@ -33,7 +33,7 @@ void register_submodule_node_data(nb::module_ &m) {
         .def(nb::init<const ocp *, sym_data *>(), nb::arg("prob"), nb::arg("primal"),
              "Constructor for shared data with OCP problem and sym data")
         .def_prop_ro("prob", [](node_data &self) -> auto & { return self.problem(); })
-        .def("__getitem__", [](shared_data &self, const func_base &f) -> auto & { return self[f]; });
+        .def("__getitem__", [](shared_data &self, const generic_func &f) -> auto & { return self[f]; });
     nb::class_<node_data>(m, "node_data")
         .def_prop_ro("prob", [](node_data &self) -> auto & { return self.problem(); })
         .def_prop_ro("sym", [](node_data &self) -> auto & { return self.sym_val(); })

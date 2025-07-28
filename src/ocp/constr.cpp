@@ -2,13 +2,13 @@
 #include <moto/ocp/problem.hpp>
 
 namespace moto {
-constr::approx_map::approx_map(dense_approx_data &raw,
-                               func_approx_map &&d)
+generic_constr::approx_map::approx_map(dense_approx_data &raw,
+                                       func_approx_map &&d)
     : approx_map(raw.prob_->extract(raw.dual_[d.func_.field()], d.func_), raw, std::move(d)) {
 }
-constr::approx_map::approx_map(vector_ref multiplier,
-                               dense_approx_data &raw,
-                               func_approx_map &&d)
+generic_constr::approx_map::approx_map(vector_ref multiplier,
+                                       dense_approx_data &raw,
+                                       func_approx_map &&d)
     : func_approx_map(std::move(d)), merit_(&raw.merit_),
       multiplier_(multiplier) {
     auto &f = func_;
@@ -20,7 +20,7 @@ constr::approx_map::approx_map(vector_ref multiplier,
         in_args_.push_back(multiplier_);
     }
 }
-void constr::approx_map::map_merit_jac_from_raw(decltype(dense_approx_data::jac_) &raw, std::vector<row_vector_ref> &jac) {
+void generic_constr::approx_map::map_merit_jac_from_raw(decltype(dense_approx_data::jac_) &raw, std::vector<row_vector_ref> &jac) {
     auto &in_args = func_.in_args();
     jac.clear();
     for (size_t i : range(in_args_.size())) {
@@ -32,7 +32,7 @@ void constr::approx_map::map_merit_jac_from_raw(decltype(dense_approx_data::jac_
         }
     }
 }
-constr::approx_data::approx_data(const func_base &f) : f_(f) {
+generic_constr::approx_data::approx_data(const generic_func &f) : f_(f) {
     v_data_.resize(f.dim());
     v_data_.setZero();
     jac_data_.reserve(f.in_args().size());
@@ -46,7 +46,7 @@ constr::approx_data::approx_data(const func_base &f) : f_(f) {
         };
     }
 }
-void constr::finalize_impl() {
+void generic_constr::finalize_impl() {
     if (field_ == __undefined) {
         bool has_[3] = {false, false, false}; // x, u, y
         for (const sym &arg : in_args_) {
@@ -56,7 +56,7 @@ void constr::finalize_impl() {
         // make this long enough so that people will not easily remove the const :D
         auto &_field = field_;
         if (field_hint_.is_eq == utils::optional_bool::Unset) {
-            throw std::runtime_error(fmt::format("constr {} eq/ineq hint unset, please set it using as_eq_ or as_ineq_", name_));
+            throw std::runtime_error(fmt::format("generic_constr {} eq/ineq hint unset, please set it using as_eq_ or as_ineq_", name_));
         }
         if (field_hint_.is_eq) {
             if (has_[__u] && !has_[__y])
@@ -66,7 +66,7 @@ void constr::finalize_impl() {
             else if (!has_[__u] && (has_[__x] ^ has_[__y]))
                 _field = field_hint_.is_soft ? __eq_x_soft : __eq_x;
             else
-                throw std::runtime_error(fmt::format("unsupported eq constr \"{}\" type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set _field or hints?",
+                throw std::runtime_error(fmt::format("unsupported eq generic_constr \"{}\" type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set _field or hints?",
                                                      name_, has_[__x], has_[__u], has_[__y], field_hint_.is_soft));
         } else {
             if (has_[__u] && !has_[__y])
@@ -74,7 +74,7 @@ void constr::finalize_impl() {
             else if (!has_[__u] && (has_[__x] ^ has_[__y]))
                 _field = __ineq_x;
             else
-                throw std::runtime_error(fmt::format("unsupported ineq constr \"{}\" type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set _field or hints?",
+                throw std::runtime_error(fmt::format("unsupported ineq generic_constr \"{}\" type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set _field or hints?",
                                                      name_, has_[__x], has_[__u], has_[__y], field_hint_.is_soft));
         }
     }
@@ -83,7 +83,7 @@ void constr::finalize_impl() {
         try {
             for (sym &arg : in_args_) {
                 if (arg.field() == __x) {
-                    fmt::print("substitution in constr {} of type {}: inarg {} with {}\n",
+                    fmt::print("substitution in generic_constr {} of type {}: inarg {} with {}\n",
                                name_, field::name(field_), arg.name(), arg.name() + "_nxt");
                     substitute(arg, arg.next());
                 }
@@ -93,11 +93,11 @@ void constr::finalize_impl() {
             throw;
         }
     }
-    func_base::finalize_impl();
+    generic_func::finalize_impl();
     assert(field_ >= __dyn && field_ - __dyn < field::num_constr);
 }
 
-void constr::value_impl(func_approx_map &data) const {
+void generic_constr::value_impl(func_approx_map &data) const {
     value(data);
     // compute contribution to merit function
     auto &d = static_cast<approx_map &>(data);
@@ -112,7 +112,7 @@ void constr::value_impl(func_approx_map &data) const {
     // }
     // fmt::print("\t{}:\tm:{}\n", name(), d.multiplier_.transpose());
 } // namespace moto
-void constr::jacobian_impl(func_approx_map &data) const {
+void generic_constr::jacobian_impl(func_approx_map &data) const {
     // compute jacobian first
     jacobian(data);
     // update multiplier - jacobian product
@@ -124,4 +124,15 @@ void constr::jacobian_impl(func_approx_map &data) const {
         // fmt::print("{}\t{}:jac\n{:.3}\n", i, name(), d.jac_[i]);
     }
 }
+constr::constr(const std::string &name, approx_order order, size_t dim, field_t field)
+    : func(generic_constr(name, order, dim, field)) {
+} ///< create a generic constraint with name and dimension
+constr::constr(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
+               approx_order order, field_t field)
+    : func(generic_constr(name, in_args, out, order, field)) {
+    assert(out.size2() == 1 && "generic_constr output cols must be 1");
+}
+generic_constr *constr::operator->() const {
+    return static_cast<generic_constr *>(base::operator->());
+} ///< access the generic_func interface
 } // namespace moto

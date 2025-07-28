@@ -8,7 +8,7 @@ void sym::finalize_impl() {
         assert(dual_ && "dual pointer should not be null when field == __x");
     }
 }
-func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, const func_base &f)
+func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, const generic_func &f)
     : func_(f), impl_(shared), sym_uid_idx_(f.sym_uid_idx_) {
     auto &in_args = f.in_args();
     in_args_.reserve(in_args.size());
@@ -16,13 +16,13 @@ func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, const func_bas
         in_args_.push_back(primal[arg]);
     }
 }
-func_arg_map::func_arg_map(std::vector<vector_ref> &&primal, shared_data &shared, const func_base &f)
+func_arg_map::func_arg_map(std::vector<vector_ref> &&primal, shared_data &shared, const generic_func &f)
     : in_args_(std::move(primal)), func_(f), impl_(shared), sym_uid_idx_(f.sym_uid_idx_) {
 }
 func_approx_map::func_approx_map(sym_data &primal,
                                  dense_approx_data &raw,
                                  shared_data &shared,
-                                 const func_base &f)
+                                 const generic_func &f)
     : func_arg_map(primal, shared, f),
       v_(f.field() == __cost
              ? vector_ref(mapped_vector(&raw.cost_, 1))
@@ -62,7 +62,7 @@ func_approx_map::func_approx_map(sym_data &primal,
                                  vector_ref v,
                                  std::vector<matrix_ref> &&jac,
                                  shared_data &shared,
-                                 const func_base &f)
+                                 const generic_func &f)
     : v_(v), jac_(jac), func_arg_map(primal, shared, f) {
 }
 void func_approx_map::setup_hessian(dense_approx_data &raw) {

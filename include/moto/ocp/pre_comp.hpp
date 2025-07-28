@@ -10,7 +10,7 @@ namespace moto {
  */
 struct pre_compute : public custom_func {
     pre_compute() = default; ///< default constructor
-    pre_compute(const std::string &name) : custom_func(name, approx_order::none, 0, __pre_comp) {
+    pre_compute(const std::string &name) : custom_func(generic_custom_func(name, approx_order::none, 0, __pre_comp)) {
     }
 };
 } // namespace moto

@@ -3,21 +3,20 @@
 #include <filesystem>
 #include <iostream>
 #include <moto/core/expr.hpp>
-#include <moto/ocp/impl/func.hpp>
+#include <moto/ocp/constr.hpp>
 #include <moto/ocp/problem.hpp>
 
 TEST_CASE("exprOwnership") {
     using namespace moto;
-    var a = sym("a", 3, __x);
-    var b = sym("b", 3, __y);
-    sym l("l", 3, __x);
+    var a = sym::state("a", 3);
+    var b = a->next();
     a->next() = b;
     a->add_dep(b);   // add b as a dependency of a
     auto c_ = a + b; // convert sym to SX
     std::cout << "a is: " << a << std::endl;
     std::cout << "b is: " << b << std::endl;
     std::cout << "c_ is: " << c_ << std::endl;
-    func c = func_base("c", {a, b}, c_, approx_order::first, __eq_x);
+    func c = constr("c", {a, b}, c_, approx_order::first, __eq_x);
     assert(c->in_args().size() == 2 && "Function should have 2 input argument");
     std::cout << "a has uid: " << a->uid() << " and b has uid: " << b->uid() << std::endl;
     for (sym &arg : c->dep()) {
@@ -32,7 +31,7 @@ TEST_CASE("exprOwnership") {
                    "Function d should have same input arguments as c");
         }
     }
-    var e = sym("e", 3, __u);
+    var e = sym::inputs("e", 3);
     {
         d->add_argument(e); // add a as a dependency of d
         size_t d_arg_idx = 0;
@@ -42,13 +41,13 @@ TEST_CASE("exprOwnership") {
                    "Function d should have same input arguments as c");
         }
     }
-    var f = sym("f", 3, __p);
+    var f = sym::params("f", 3);
     auto p = d->clone(); // clone d to p
     p->add_argument(f);  // add f as an argument to p
     assert(p->in_args().size() == c->in_args().size() + 1 && "Function p should have one more input argument than c");
     auto prob = ocp::create();
     prob->add(c);
-    for (const func_base &f : prob->exprs(__eq_x)) {
+    for (const generic_func &f : prob->exprs(__eq_x)) {
         std::cout << "Function in problem: " << f.name() << " with uid: " << f.uid() << std::endl;
     }
     for (const sym &arg : prob->exprs(__x)) {

@@ -5,7 +5,7 @@
 namespace moto {
 static bool impl_func_gen_delegated_ = false; ///< true if the codegen is delegated to @ref moto::func_codegen
 
-func_approx_map_ptr_t func_base::create_approx_map(sym_data &primal, dense_approx_data &raw, shared_data &shared) const {
+func_approx_map_ptr_t generic_func::create_approx_map(sym_data &primal, dense_approx_data &raw, shared_data &shared) const {
     if (field() - __dyn >= field::num_func)
         throw std::runtime_error(fmt::format("create_approx_map cannot be called for func {} type {}",
                                              name(), field::name(field())));
@@ -14,7 +14,7 @@ func_approx_map_ptr_t func_base::create_approx_map(sym_data &primal, dense_appro
                                              name(), field::name(field())));
     return std::make_unique<func_approx_map>(primal, raw, shared, *this);
 }
-void func_base::load_external_impl(const std::string &path) {
+void generic_func::load_external_impl(const std::string &path) {
     auto funcs = load_approx(name_, true, order_ >= approx_order::first, order_ >= approx_order::second);
     value = [eval = funcs[0]](func_approx_map &d) {
         eval.invoke(d.in_arg_data(), d.v_);
@@ -27,7 +27,7 @@ void func_base::load_external_impl(const std::string &path) {
         hess.invoke(d.in_arg_data(), d.hess_);
     };
 }
-void func_base::substitute(const sym &arg, const sym &rhs) {
+void generic_func::substitute(const sym &arg, const sym &rhs) {
     if (!gen_.out_.is_empty()) {
         gen_.out_ = cs::SX::substitute(gen_.out_, arg, rhs);
     }
@@ -38,13 +38,13 @@ void func_base::substitute(const sym &arg, const sym &rhs) {
     in_args_.at(it.position->second) = rhs; // update the in_args_ to point to the new sym
     dep_.at(it.position->second) = rhs;     // update the dep_ to point to the new sym
 }
-void func_base::set_from_casadi(const var_inarg_list &in_args, const cs::SX &out) {
+void generic_func::set_from_casadi(const var_inarg_list &in_args, const cs::SX &out) {
     add_arguments(in_args);
     gen_.out_ = out;
 }
 static utils::cs_codegen::worker_list func_codegen_workers_;
-std::vector<func_base *> cg_funcs_;
-void func_base::finalize_impl() {
+std::vector<generic_func *> cg_funcs_;
+void generic_func::finalize_impl() {
     if (!gen_.out_.is_empty()) {
         func_codegen::make_codegen_task(this);
         if (!impl_func_gen_delegated_) {
@@ -54,7 +54,7 @@ void func_base::finalize_impl() {
             cg_funcs_.push_back(this); // will be loaded later
     }
 }
-void func_codegen::make_codegen_task(func_base *f) {
+void func_codegen::make_codegen_task(generic_func *f) {
     utils::cs_codegen::task t;
     t.func_name = f->name_;
     t.sx_inputs = f->in_args_;
