@@ -2,7 +2,7 @@
 
 namespace moto {
 namespace solver {
-data_base::data_base(sym_data* s, dense_approx_data *dense)
+data_base::data_base(sym_data* s, merit_data *dense)
     : nx(dense->jac_[__x].size()),
       nu(dense->jac_[__u].size()),
       ny(dense->jac_[__y].size()),

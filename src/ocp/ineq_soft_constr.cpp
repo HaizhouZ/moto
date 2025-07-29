@@ -17,13 +17,13 @@ void ineq_constr::finalize_impl() {
             "Inequality constraint {} must have field in ineq_constr_fields, but got {}", name_, field::name(field_)));
 }
 
-ineq_constr::approx_map::approx_map(dense_approx_data &raw, approx_map::map_base &&d)
-    : base::approx_map(raw, std::move(d)),
-      comp_(problem()->extract(raw.comp_[func_.field()], func_)) {}
+ineq_constr::approx_data::approx_data(approx_data::data_base &&d)
+    : base::approx_data(std::move(d)),
+      comp_(problem()->extract(merit_data_->comp_[func_.field()], func_)) {}
 
-void ineq_constr::value_impl(func_approx_map &data) const {
+void ineq_constr::value_impl(func_approx_data &data) const {
     base::value_impl(data);
-    auto &d = data.as<approx_map>();
+    auto &d = data.as<approx_data>();
     d.comp_.array() = d.multiplier_.array() * d.v_.array();
 } // namespace impl
 } // namespace moto

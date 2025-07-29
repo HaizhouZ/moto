@@ -17,16 +17,16 @@ class ineq_constr : public soft_constr {
      * @brief inequality constraint approximation map with the complementarity residual map
      *
      */
-    struct approx_map : public base::approx_map {
+    struct approx_data : public base::approx_data {
         vector_ref comp_;
-        approx_map(dense_approx_data &raw, map_base &&d);
+        approx_data(data_base &&d);
     };
 
   protected:
     /// @brief finalize the inequality constraint, will be called upon added to a problem
     void finalize_impl() override;
     /// @brief evaluate the value of the constraint and compute the complementarity residual
-    void value_impl(func_approx_map &data) const override;
+    void value_impl(func_approx_data &data) const override;
 
   public:
     using base::base;
@@ -36,8 +36,8 @@ class ineq_constr : public soft_constr {
     /***
      * @brief make approximation data for the inequality constraint, will use default @ref data_type
      */
-    func_approx_map_ptr_t create_approx_map(sym_data &primal, dense_approx_data &raw, shared_data &shared) const override {
-        return func_approx_map_ptr_t(make_approx<ineq_constr>(primal, raw, shared));
+    func_approx_data_ptr_t create_approx_data(sym_data &primal, merit_data &raw, shared_data &shared) const override {
+        return func_approx_data_ptr_t(make_approx<ineq_constr>(primal, raw, shared));
     }
 };
 

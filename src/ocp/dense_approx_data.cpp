@@ -1,15 +1,15 @@
-#include <moto/ocp/impl/dense_approx_data.hpp>
+#include <moto/ocp/impl/merit_data.hpp>
 #include <moto/ocp/problem.hpp>
 
 namespace moto {
 
-dense_approx_data::dense_approx_data(ocp *prob) : prob_(prob) {
+merit_data::merit_data(ocp *prob) : prob_(prob) {
     for (auto i : range_n(__dyn, field::num_constr)) {
         if (prob_->exprs(i).empty()) {
             continue;
         }
         size_t dim = prob_->dim(i);
-        if (in_field(i, dense_approx_data::stored_constr_fields)) {
+        if (in_field(i, merit_data::stored_constr_fields)) {
             approx_[i].v_.resize(dim);
             approx_[i].v_.setZero();
             for (auto j : range(field::num_prim)) {

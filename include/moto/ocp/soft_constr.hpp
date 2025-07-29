@@ -6,7 +6,7 @@
 namespace moto {
 /**
  * @brief soft constraint interface class
- * @warning jacobian modification should be added to @ approx_map::jac_modification_
+ * @warning jacobian modification should be added to @ approx_data::jac_modification_
  */
 class soft_constr : public generic_constr {
   private:
@@ -19,17 +19,17 @@ class soft_constr : public generic_constr {
      * 2. jacobian modification data for the soft constraint
      *
      */
-    struct approx_map : public base::approx_map {
+    struct approx_data : public base::approx_data {
         std::vector<vector_ref> prim_step_;            // to be set
         std::vector<row_vector_ref> jac_modification_; ///< merit jacobian modification
-        using map_base = base::approx_map;
-        approx_map(dense_approx_data &raw, map_base &&rhs) : map_base(std::move(rhs)) {
-            map_merit_jac_from_raw(raw.jac_modification_, jac_modification_);
+        using data_base = base::approx_data;
+        approx_data(data_base &&rhs) : data_base(std::move(rhs)) {
+            map_merit_jac_from_raw(merit_data_->jac_modification_, jac_modification_);
         }
     };
 
-    /// public type alias for @ref approx_map to ensure common interface of all soft constraints
-    using data_map_t = approx_map;
+    /// public type alias for @ref approx_data to ensure common interface of all soft constraints
+    using data_map_t = approx_data;
 
   protected:
     bool skip_field_check = false; ///< skip field check in finalize_impl
@@ -64,8 +64,8 @@ class soft_constr : public generic_constr {
     /***
      * @brief make approximation data for the soft constraint, will use default @ref data_type
      */
-    func_approx_map_ptr_t create_approx_map(sym_data &primal, dense_approx_data &raw, shared_data &shared) const override {
-        return func_approx_map_ptr_t(make_approx<soft_constr>(primal, raw, shared));
+    func_approx_data_ptr_t create_approx_data(sym_data &primal, merit_data &raw, shared_data &shared) const override {
+        return func_approx_data_ptr_t(make_approx<soft_constr>(primal, raw, shared));
     }
 };
 } // namespace moto

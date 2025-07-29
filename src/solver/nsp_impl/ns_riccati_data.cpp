@@ -4,7 +4,7 @@
 namespace moto {
 namespace solver {
 namespace ns_riccati {
-ns_node_data::ns_node_data(sym_data *s, dense_approx_data *dense)
+ns_node_data::ns_node_data(sym_data *s, merit_data *dense)
     : solver::data_base(s, dense),
       ns(dense->approx_[__eq_x].v_.size()),
       nc(dense->approx_[__eq_xu].v_.size()), ncstr(ns + nc), d_u(nu, nx),

@@ -41,7 +41,7 @@ class generic_custom_func final : public generic_func {
         return std::make_unique<func_arg_map>(primal, shared, *this);
     }
 
-    /// @brief callback to make data（for non-approx) @note will not be called in @ref create_approx_map
+    /// @brief callback to make data（for non-approx) @note will not be called in @ref create_approx_data
     std::function<func_arg_map_ptr_t(sym_data &, shared_data &)> create_custom_data;
     /// @brief callback to call a non-approximation function
     std::function<void(func_arg_map &)> custom_call;

@@ -22,9 +22,9 @@ struct node_data {
   protected:
     ocp_ptr_t prob_;                /// < pointer to the problem
     sym_data_ptr_t sym_;            /// < dense storage of symbolic data
-    dense_approx_data_ptr_t dense_; /// <dense storage of the func data
+    merit_data_ptr_t dense_; /// <dense storage of the func data
     shared_data_ptr_t shared_;      /// < shared data
-    shifted_array<std::vector<func_approx_map_ptr_t>, field::num_func, __dyn>
+    shifted_array<std::vector<func_approx_data_ptr_t>, field::num_func, __dyn>
         sparse_; /// < sparse view per func
 
     friend class impl::data_mgr; ///< data manager can access private members
@@ -65,7 +65,7 @@ struct node_data {
     void update_approximation(bool eval_only = false);
 
     template <std::array fields, typename Callback>
-        requires std::is_invocable_r_v<void, Callback, const generic_func &, func_approx_map &> &&
+        requires std::is_invocable_r_v<void, Callback, const generic_func &, func_approx_data &> &&
                  std::is_same_v<std::tuple_element_t<0, decltype(fields)>, field_t>
     void for_each(Callback &&callback) {
         for (const auto &field : fields) {

@@ -37,10 +37,10 @@ inline void for_each_func(const ocp_ptr_t &prob, Callback &&callback) {
 node_data::node_data(const ocp_ptr_t &prob)
     : prob_(prob),
       sym_(new sym_data(prob.get())), 
-      dense_(new dense_approx_data(prob.get())), 
+      dense_(new merit_data(prob.get())), 
       shared_(new shared_data(prob.get(), sym_.get())) {
     for_each_func(prob, [&]([[maybe_unused]] size_t idx, const generic_func &_f) {
-        auto p = _f.create_approx_map(*sym_, *dense_, *shared_);
+        auto p = _f.create_approx_data(*sym_, *dense_, *shared_);
         sparse_[_f.field()].push_back(std::move(p));
     });
 }

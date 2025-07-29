@@ -10,8 +10,8 @@ class ocp;
  * @brief dense raw approximation data
  * deserialized data storage of all function fields
  */
-struct dense_approx_data {
-    dense_approx_data(ocp *prob);
+struct merit_data {
+    merit_data(ocp *prob);
 
     ocp *prob_;
     struct raw_approx {
@@ -35,7 +35,7 @@ struct dense_approx_data {
     /// cost hessian h[a][b] is h_ab. Note only the upper block-triangular part is stored
     array<array<matrix, field::num_prim>, field::num_prim> hessian_;
 };
-def_unique_ptr(dense_approx_data);
+def_unique_ptr(merit_data);
 } // namespace moto
 
 #endif // MOTO_OCP_PROBLEM_DATA_HPP

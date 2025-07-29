@@ -128,7 +128,7 @@ void register_submodule_functional(nb::module_ &m) {
         }
     });
 
-    using func_callback_t = std::function<void(func_approx_map &)>;
+    using func_callback_t = std::function<void(func_approx_data &)>;
 
     nb::class_<func, shared_expr>(m, "func")
         .def_prop_rw(
@@ -159,8 +159,8 @@ void register_submodule_functional(nb::module_ &m) {
             "add_arguments",
             [](func &self, const var_inarg_list &args) { self->add_arguments(args); })
         .def(
-            "create_approx_map",
-            [](func &self, sym_data &primal, dense_approx_data &raw, shared_data &shared) { return self->create_approx_map(primal, raw, shared); },
+            "create_approx_data",
+            [](func &self, sym_data &primal, merit_data &raw, shared_data &shared) { return self->create_approx_data(primal, raw, shared); },
             nb::arg("primal"), nb::arg("raw"), nb::arg("shared"));
 
     nb::class_<constr, func>(m, "constr")

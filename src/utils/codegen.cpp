@@ -335,19 +335,19 @@ void task::finalize(worker_list &workers_) {
         gen_jacobian = true;
     if (!ext_hess.empty())
         gen_hessian = true;
-    bool vjp_for_hess = false;
+    bool merit_jac_for_hess = false;
 
     assert(sx_output.columns() == 1);
 
     if (sx_output.rows() > 1 && ext_hess.empty() && gen_hessian) {
         // will use jacobian to compute vjp->hessian
-        vjp_for_hess = true;
+        merit_jac_for_hess = true;
     }
 
     std::vector<cs::SX> jacs;
     std::vector<cs::SX> jacs_copy;
     // generate jacobian
-    if (gen_jacobian or vjp_for_hess) {
+    if (gen_jacobian or merit_jac_for_hess) {
         for (sym &s : sx_inputs) {
             if (!excluded.contains(s.uid())) {
                 if (!external_jac.empty() and external_jac.contains(s.uid())) {
@@ -369,7 +369,7 @@ void task::finalize(worker_list &workers_) {
                 }
                 f_ad = cs::Function(func_name + "_ad", sx_inputs_cs, jac_ad);
             }
-            if (gen_hessian && !vjp_for_hess) {
+            if (gen_hessian && !merit_jac_for_hess) {
                 // if we are generating hessian, we need to copy jacs
                 if (gen_jacobian)
                     jacs_copy = jacs;
@@ -397,21 +397,21 @@ void task::finalize(worker_list &workers_) {
         hess.resize(sx_inputs.size());
         // use AD of vjp to compute hessian
 
-        auto lbd = vjp_for_hess ? sym::usr_var(func_name + "_lbd", sx_output.rows()) : var();
+        auto lbd = merit_jac_for_hess ? sym::usr_var(func_name + "_lbd", sx_output.rows()) : var();
         for (size_t idx_i = 0; idx_i < sx_inputs.size(); ++idx_i) {
             sym &i = sx_inputs[idx_i];
             hess[idx_i].resize(sx_inputs.size());
-            cs::SX vjp_;
+            cs::SX merit_jac_;
             bool i_excluded = excluded.contains(i.uid());
-            if (vjp_for_hess && !i_excluded)
-                vjp_ = cs::SX::jtimes(sx_output, i, lbd, true);
+            if (merit_jac_for_hess && !i_excluded)
+                merit_jac_ = cs::SX::jtimes(sx_output, i, lbd, true);
             size_t idx_j = 0;
             for (size_t idx_j = 0; idx_j < sx_inputs.size(); ++idx_j) {
                 sym &j = sx_inputs[idx_j];
                 if (i_excluded or excluded.contains(j.uid()) or i.field() < j.field()) {
                     continue;
                 }
-                if (!vjp_for_hess) {
+                if (!merit_jac_for_hess) {
                     if (external_hess.contains({i.uid(), j.uid()})) {
                         hess[idx_i][idx_j] = external_hess[{i.uid(), j.uid()}];
                         continue;
@@ -424,15 +424,15 @@ void task::finalize(worker_list &workers_) {
                     hess[idx_i][idx_j] = hess[idx_j][idx_i].T();
                     continue;
                 }
-                if (vjp_for_hess) {
-                    hess[idx_i][idx_j] = cs::SX::jacobian(vjp_, j);
+                if (merit_jac_for_hess) {
+                    hess[idx_i][idx_j] = cs::SX::jacobian(merit_jac_, j);
                 } else {
                     hess[idx_i][idx_j] = cs::SX::jacobian(jacs_copy[idx_i], j);
                 }
             }
             hess_inputs.reserve(sx_inputs.size() + 1);
             hess_inputs = sx_inputs;
-            if (vjp_for_hess) {
+            if (merit_jac_for_hess) {
                 hess_inputs.push_back(lbd);
             }
         }

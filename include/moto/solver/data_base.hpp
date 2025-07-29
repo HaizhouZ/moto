@@ -1,7 +1,7 @@
 #ifndef MOTO_SOLVER_DATA_BASE_HPP
 #define MOTO_SOLVER_DATA_BASE_HPP
 
-#include <moto/ocp/impl/dense_approx_data.hpp>
+#include <moto/ocp/impl/merit_data.hpp>
 
 namespace moto {
 class sym_data;
@@ -15,7 +15,7 @@ namespace solver {
 struct data_base {
     size_t nx, nu, ny; ///< dimensions of the problem
     sym_data *sym_;
-    dense_approx_data *dense_; ///< pointer to the dense approximation data
+    merit_data *dense_; ///< pointer to the dense approximation data
     // value function
     row_vector &Q_x;
     row_vector &Q_u;
@@ -31,7 +31,7 @@ struct data_base {
     /// @brief create solver data
     /// @param sym_ pointer to the symbolic data
     /// @param dense pointer to the dense approximation data
-    data_base(sym_data *sym_, dense_approx_data *dense);
+    data_base(sym_data *sym_, merit_data *dense);
     data_base(const data_base &rhs) = delete;
     data_base(data_base &&rhs) = default;
     void merge_jacobian_modification();

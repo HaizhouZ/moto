@@ -92,14 +92,14 @@ void ipm_constr::line_search_step(ipm::data_map_t &data, workspace_data *cfg) co
         d.multiplier_ = d.multiplier_.array().max(1e-20);
     }
 }
-void ipm_constr::value_impl(func_approx_map &data) const {
+void ipm_constr::value_impl(func_approx_data &data) const {
     base::value_impl(data);
     auto &d = data.as<ipm_data>();
     d.g_ = d.v_;
     d.v_ = d.g_ + d.slack_; // r_g = g_ + slack
     d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array();
 }
-void ipm_constr::jacobian_impl(func_approx_map &data) const {
+void ipm_constr::jacobian_impl(func_approx_data &data) const {
     base::jacobian_impl(data);
     auto &d = data.as<ipm_data>();
     // setup T^{-1} N
@@ -144,7 +144,7 @@ void ipm_constr::propagate_jacobian(ipm_data &d) const {
 void ipm_constr::propagate_hessian(ipm_data &d) const {
     // modification of hessian
     size_t outer_idx = 0;
-    for (auto &outer : d.hess_) {
+    for (auto &outer : d.merit_hess_) {
         size_t inner_idx = 0;
         if (outer.size()) { // skip empty hess
             for (auto &inner : outer) {

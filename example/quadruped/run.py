@@ -7,24 +7,35 @@ v = moto.inputs("v", 2)
 dt = moto.params("dt", 1)
 r_d = moto.params("r_d", 2)
 
-# dint = moto.constr("dint", 2, field=moto.field_dyn)
-# dint.add_arguments([rn, r, v])
+dint = moto.constr("dint", dim=2, field=moto.field_dyn)
+dint.add_arguments([rn, r, v, dt])
 # dt = 0.01
-dint = moto.constr("dint", [rn, r, v, dt], rn - (r + v * dt), field=moto.field_dyn)
-
-# def dyn_value(data: moto.func_approx_map):
-#     data.v = data[rn] - (data[r] + data[v] * dt)
+# dint = moto.constr("dint", [rn, r, v, dt], rn - (r + v * dt), field=moto.field_dyn)
 
 
-# def dyn_jac(data: moto.func_approx_map):
-#     print("good")
-#     data.jac[rn] = np.eye(2)
-#     data.jac[r] = -np.eye(2)
-#     data.jac[v] = -dt * np.eye(2)
+def dyn_value(data: moto.func_approx_data):
+    data.v = data[rn] - (data[r] + data[v] * data[dt])
+
+nice = np.arange(9).reshape(3, 3)
+
+print("Nice array:", nice)
+
+moto.test([nice])
+
+print("Nice array:", nice)
 
 
-# dint.value = dyn_value
-# dint.jacobian = dyn_jac
+exit(0)
+
+def dyn_jac(data: moto.func_approx_data):
+    data.jac(rn)
+    data.set_jac(rn, np.eye(2))
+    data.set_jac(r, -np.eye(2))
+    data.set_jac(v, -data[dt] * np.eye(2))
+
+
+dint.value = dyn_value
+dint.jacobian = dyn_jac
 
 c_state = moto.cost("c", [r, r_d, dt], 100 * cs.sumsqr(r - r_d) * dt)
 c_input = moto.cost("c_input", [v, dt], 1 * cs.sumsqr(v) * dt)

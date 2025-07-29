@@ -1,7 +1,7 @@
 #ifndef MOTO_OCP_IMPL_FUNC_DATA_HPP
 #define MOTO_OCP_IMPL_FUNC_DATA_HPP
 
-#include <moto/ocp/impl/dense_approx_data.hpp>
+#include <moto/ocp/impl/merit_data.hpp>
 #include <moto/ocp/impl/sym_data.hpp>
 
 namespace moto {
@@ -62,12 +62,10 @@ struct func_arg_map {
      * @param f function implementation pointer
      */
     func_arg_map(sym_data &primal, shared_data &shared, const generic_func &f);
-    // constructor for sparse primal data with vector_ref
-    func_arg_map(std::vector<vector_ref> &&primal, shared_data &shared, const generic_func &f);
 
     virtual ~func_arg_map() = default;
     const generic_func &func_; ///< pointer to the func
-    shared_data &impl_;     ///< ref to shared data
+    shared_data &impl_;        ///< ref to shared data
     /**
      * @brief get the input argument values
      * @note this is a wrapper of in_args_ to access the values
@@ -102,13 +100,19 @@ struct func_arg_map {
  * @note in hess_ only the upper block triangular part are stored!(blocked by field)
  * for example Q_ux is store instead of Q_ux;
  */
-struct func_approx_map : public func_arg_map {
-
-    vector_ref v_; ///< value ref
-    /// jacobian, by default index correspond to @ref func_arg_map::in_args_
-    std::vector<matrix_ref> jac_;
+struct func_approx_data : public func_arg_map {
+    bool stored_ = false; ///< true if the data is stored in the merit_data
+    vector v_data_; ///< value data
+    /// jacobian data, by default index correspond to @ref func_arg_map::in_args_
+    std::vector<matrix> jac_data_;
+    merit_data* merit_data_ = nullptr; ///< reference to the merit data
+    ///////////////////////////////////////////////////
+    vector_ref v_;  ///< value ref
+    std::vector<matrix_ref> jac_; ///< jacobian references
+    /// jacobian for cost, index corresponds to @ref func_arg_map::in_args_
+    std::vector<row_vector_ref> merit_jac_;
     /// hessian for cost. index corresponds to @ref func_arg_map::in_args_
-    std::vector<std::vector<matrix_ref>> hess_;
+    std::vector<std::vector<matrix_ref>> merit_hess_;
     /**
      * @brief Construct a new sparse approx data object
      *
@@ -117,26 +121,15 @@ struct func_approx_map : public func_arg_map {
      * @param shared shared data
      * @param f approximation
      */
-    func_approx_map(sym_data &primal, dense_approx_data &raw, shared_data &shared, const generic_func &f);
-    /**
-     * @brief Construct a new sparse approx data object
-     *
-     * @param primal sym data including states inputs etc
-     * @param v value vector reference
-     * @param jac jacobian matrix references
-     * @param shared shared data
-     * @param f approximation function implementation pointer (unique_ptr const ref)
-     * @note this constructor is used for approximations not mapped from @ref dense_approx_data
-     */
-    func_approx_map(sym_data &primal, vector_ref v, std::vector<matrix_ref> &&jac, shared_data &shared, const generic_func &f);
+    func_approx_data(sym_data &primal, merit_data &raw, shared_data &shared, const generic_func &f);
     /// @brief setup hessian from raw approx storage
-    void setup_hessian(dense_approx_data &raw);
+    void setup_hessian(merit_data &raw);
     /// @brief get the jacobian reference
     auto jac(const sym &in) const { return jac_[sym_uid_idx_.at(in.uid())]; }
     auto jac(size_t i) const { return jac_.at(i); }
 };
 
-def_unique_ptr(func_approx_map);
+def_unique_ptr(func_approx_data);
 /////////////////////////////////////////////////////////////////////
 /**
  * @brief composing several data types into one type

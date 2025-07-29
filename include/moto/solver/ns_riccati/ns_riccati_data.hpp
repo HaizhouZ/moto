@@ -33,7 +33,7 @@ struct ns_node_data : public data_base {
 
     array_type<vector, hard_constr_fields> dual_step; // dual rollout
     
-    ns_node_data(sym_data *, dense_approx_data *);
+    ns_node_data(sym_data *, merit_data *);
     ns_node_data(const ns_node_data &rhs) = delete;
     ns_node_data(ns_node_data &&rhs) = default;
     ~ns_node_data();

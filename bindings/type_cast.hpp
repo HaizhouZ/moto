@@ -198,7 +198,12 @@ template <>
 struct type_caster<moto::py_var_wrapper> {
     NB_TYPE_CASTER(moto::py_var_wrapper, const_name("moto.var | moto.sym"));
     bool from_python(handle src, uint8_t flags, void *ptr) {
-        value = std::move(moto::py_var_wrapper(moto::cast_to_var(src)));
+        try{
+            value = std::move(moto::py_var_wrapper(moto::cast_to_var(src)));
+        } catch (const std::exception &e) {
+            fmt::print("Failed to cast to moto.var: {}\n", e.what());
+            return false;
+        }
         return true;
     }
 };

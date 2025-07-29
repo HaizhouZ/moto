@@ -23,17 +23,17 @@ class ipm_constr final : public ineq_constr {
         vector d_multipler_;           ///< newton step for multipliers
         approx_data(base::approx_data &&rhs)
             : base::approx_data(std::move(rhs)) {
-            slack_.resize(f_.dim());
-            diag_scaling.resize(f_.dim());
-            scaled_res_.resize(f_.dim());
+            slack_.resize(func_.dim());
+            diag_scaling.resize(func_.dim());
+            scaled_res_.resize(func_.dim());
         }
     };
     using base::base;
     using ipm_data = data_type<ipm_constr>;
     /// update the IPM slack and residuals
-    void value_impl(func_approx_map &data) const override final;
+    void value_impl(func_approx_data &data) const override final;
     /// update the IPM-modified cost jacobian and hessian
-    void jacobian_impl(func_approx_map &data) const override final;
+    void jacobian_impl(func_approx_data &data) const override final;
 
     void propagate_jacobian(ipm_data &d) const;
     void propagate_hessian(ipm_data &d) const;
@@ -60,10 +60,10 @@ class ipm_constr final : public ineq_constr {
      * @param primal sym data including states inputs etc
      * @param raw dense raw data of approximation
      * @param shared shared data
-     * @return func_approx_map_ptr_t
+     * @return func_approx_data_ptr_t
      */
-    func_approx_map_ptr_t create_approx_map(sym_data &primal, dense_approx_data &raw, shared_data &shared) const override {
-        return func_approx_map_ptr_t(make_approx<ipm_constr>(primal, raw, shared));
+    func_approx_data_ptr_t create_approx_data(sym_data &primal, merit_data &raw, shared_data &shared) const override {
+        return func_approx_data_ptr_t(make_approx<ipm_constr>(primal, raw, shared));
     }
     DEF_FUNC_CLONE;
 };
