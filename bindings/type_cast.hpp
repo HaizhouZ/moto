@@ -62,8 +62,8 @@ struct type_caster<cs::SX> {
 } // namespace detail
 } // namespace nanobind
 
-#include <nanobind/stl/array.h>
 #include <moto/core/array.hpp>
+#include <nanobind/stl/array.h>
 
 namespace nanobind {
 namespace detail {
@@ -163,6 +163,50 @@ struct type_caster<moto::expr_inarg_list> {
                 return false;
             }
         }
+        return true;
+    }
+};
+} // namespace detail
+} // namespace nanobind
+
+namespace moto {
+struct py_var_wrapper {
+    moto::var *v = nullptr;
+    py_var_wrapper() = default;
+    py_var_wrapper(moto::var &vref) : v(&vref) {}
+    py_var_wrapper(const py_var_wrapper &rhs) = default;
+    py_var_wrapper(py_var_wrapper &&rhs) noexcept = default;
+    py_var_wrapper &operator=(const py_var_wrapper &rhs) = default;
+    py_var_wrapper &operator=(py_var_wrapper &&rhs) noexcept = default;
+    operator moto::var &() const { return *v; }
+    operator moto::sym &() const { return *v; }
+};
+struct py_shared_expr_wrapper {
+    moto::shared_expr *v = nullptr;
+    py_shared_expr_wrapper() = default;
+    py_shared_expr_wrapper(moto::shared_expr &vref) : v(&vref) {}
+    py_shared_expr_wrapper(const py_shared_expr_wrapper &rhs) = default;
+    py_shared_expr_wrapper(py_shared_expr_wrapper &&rhs) noexcept = default;
+    py_shared_expr_wrapper &operator=(const py_shared_expr_wrapper &rhs) = default;
+    py_shared_expr_wrapper &operator=(py_shared_expr_wrapper &&rhs) noexcept = default;
+    operator moto::shared_expr &() const { return *v; }
+};
+} // namespace moto
+namespace nanobind {
+namespace detail {
+template <>
+struct type_caster<moto::py_var_wrapper> {
+    NB_TYPE_CASTER(moto::py_var_wrapper, const_name("moto.var | moto.sym"));
+    bool from_python(handle src, uint8_t flags, void *ptr) {
+        value = std::move(moto::py_var_wrapper(moto::cast_to_var(src)));
+        return true;
+    }
+};
+template <>
+struct type_caster<moto::py_shared_expr_wrapper> {
+    NB_TYPE_CASTER(moto::py_shared_expr_wrapper, const_name("moto.shared_expr | moto.sym"));
+    bool from_python(handle src, uint8_t flags, void *ptr) {
+        value = std::move(moto::py_shared_expr_wrapper(moto::cast_to_shared_expr(src)));
         return true;
     }
 };

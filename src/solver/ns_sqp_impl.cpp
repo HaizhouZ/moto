@@ -10,7 +10,7 @@
 
 namespace moto {
 void ns_sqp::forward() {
-    graph_.apply_all_unary_parallel(data::update_approx);
+    graph_.for_each_parallel(data::update_approx);
 }
 
 struct stat_item {
@@ -33,7 +33,7 @@ stat_item stats[] = {{"no.", 3},
 
 void ns_sqp::update(size_t n_iter) {
     fmt::print("Initialization for SQP...\n");
-    graph_.apply_all_unary_parallel([this](data *cur) {
+    graph_.for_each_parallel([this](data *cur) {
         // setup solver settings
         cur->for_each_constr([this](const generic_func &c, func_approx_map &d) { c.setup_workspace_data(d, &settings); });
         cur->update_approximation(true);
@@ -41,11 +41,11 @@ void ns_sqp::update(size_t n_iter) {
         solver::ineq_soft::initialize(cur);
     });
     std::atomic<double> cost_all{0.};
-    graph_.apply_all_unary_parallel([&cost_all](solver::data_base *n) {
+    graph_.for_each_parallel([&cost_all](solver::data_base *n) {
         cost_all += n->dense_->cost_;
     });
     fmt::print("initial cost_total: {}\n", cost_all.load());
-    graph_.apply_all_unary_parallel(data::update_approx);
+    graph_.for_each_parallel(data::update_approx);
 
     // print statistics header
 
@@ -80,17 +80,17 @@ void ns_sqp::update(size_t n_iter) {
             }
         };
         // timed_block_labeled("all",
-        graph_.apply_all_unary_parallel(solver::ns_riccati::ns_factorization);
-        graph_.apply_all_binary_backward<true>(solver::ns_riccati::riccati_recursion);
-        graph_.apply_all_unary_parallel(solver::ns_riccati::compute_primal_sensitivity);
-        graph_.apply_all_binary_forward<false, true>(solver::ns_riccati::fwd_linear_rollout);
+        graph_.for_each_parallel(solver::ns_riccati::ns_factorization);
+        graph_.apply_backward<true>(solver::ns_riccati::riccati_recursion);
+        graph_.for_each_parallel(solver::ns_riccati::compute_primal_sensitivity);
+        graph_.apply_forward<true>(solver::ns_riccati::fwd_linear_rollout);
 
         bool finalize_dual = true;
         if (has_ineq && settings.ipm_enable_affine_step()) { // compute the affine step, no need to finalize dual step
             settings.ipm_start_predictor_computation();
             finalize_dual = false; // do not finalize dual step
         }
-        graph_.apply_all_unary_parallel([finalize_dual, &setting_per_thread](size_t tid, auto *d) {
+        graph_.for_each_parallel([finalize_dual, &setting_per_thread](size_t tid, auto *d) {
             solver::ns_riccati::finalize_newton_step(d, finalize_dual);
             solver::ineq_soft::finalize_newton_step(d);
             // decide line search bounds (e.g., fraction-to-bounds)
@@ -99,7 +99,7 @@ void ns_sqp::update(size_t n_iter) {
         finalize_bound_and_set_to_max();
         if (has_ineq && settings.ipm_enable_affine_step()) {
             // line search with max bounds
-            graph_.apply_all_unary_parallel([&setting_per_thread](size_t tid, auto *d) {
+            graph_.for_each_parallel([&setting_per_thread](size_t tid, auto *d) {
                 solver::ineq_soft::finalize_predictor_step(d, &setting_per_thread[tid]);
             });
             settings.ipm_end_predictor_computation(); // ipm affine step computation is done
@@ -111,12 +111,12 @@ void ns_sqp::update(size_t n_iter) {
             // adaptive mu update
             settings.adaptive_mu_update(main_worker);
             // use the new mu to update the rhs jacobian
-            graph_.apply_all_unary_parallel(solver::ineq_soft::first_order_correction_start);
+            graph_.for_each_parallel(solver::ineq_soft::first_order_correction_start);
             // solve the problem again with updated mu
-            graph_.apply_all_binary_backward<true>(solver::ns_riccati::riccati_recursion_correction);
-            graph_.apply_all_unary_parallel(solver::ns_riccati::compute_primal_sensitivity_correction);
-            graph_.apply_all_binary_forward<false, true>(solver::ns_riccati::fwd_linear_rollout_correction);
-            graph_.apply_all_unary_parallel([](auto *d) {
+            graph_.apply_backward<true>(solver::ns_riccati::riccati_recursion_correction);
+            graph_.for_each_parallel(solver::ns_riccati::compute_primal_sensitivity_correction);
+            graph_.apply_forward<true>(solver::ns_riccati::fwd_linear_rollout_correction);
+            graph_.for_each_parallel([](auto *d) {
                 solver::ineq_soft::first_order_correction_end(d);
                 solver::ns_riccati::finalize_newton_step_correction(d);
                 solver::ineq_soft::finalize_newton_step(d);
@@ -126,29 +126,29 @@ void ns_sqp::update(size_t n_iter) {
             for (size_t i : range(n_worker)) {
                 setting_per_thread[i].ls_config_reset();
             }
-            graph_.apply_all_unary_parallel([&setting_per_thread](size_t tid, data *d) {
+            graph_.for_each_parallel([&setting_per_thread](size_t tid, data *d) {
                 solver::ineq_soft::calculate_line_search_bounds(d, &setting_per_thread[tid]);
             });
             finalize_bound_and_set_to_max();
         }
         /// @todo: update the line search stepsize?
         // real line search step
-        graph_.apply_all_unary_parallel([this](data *d) {
+        graph_.for_each_parallel([this](data *d) {
             solver::ns_riccati::line_search_step(d, &settings);
             solver::ineq_soft::line_search_step(d, &settings);
         });
 
-        graph_.apply_all_unary_parallel(data::update_approx);
+        graph_.for_each_parallel(data::update_approx);
         // );
         kkt_info info;
-        for (node_data *n : graph_.get_unordered_flattened_nodes()) {
+        for (node_data *n : graph_.flatten_nodes()) {
             info.objective += n->cost();
             info.inf_prim_res = std::max(info.inf_prim_res, n->inf_prim_res_);
             info.inf_dual_res = std::max(info.inf_dual_res, n->dense().jac_[__u].cwiseAbs().maxCoeff());
             info.inf_comp_res = std::max(info.inf_comp_res, n->inf_comp_res_);
         }
         size_t step = 0;
-        graph_.apply_all_binary_forward<false, true>([&step, &info](node_data *cur, node_data *next) {
+        graph_.apply_forward<true>([&step, &info](node_data *cur, node_data *next) {
             if (next != nullptr) [[likely]] {
                 // cancellation of jacobian from y to x
                 static row_vector tmp;

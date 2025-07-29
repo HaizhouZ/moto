@@ -34,7 +34,7 @@ int main() {
     init_node->value(dyn.r).setConstant(6);
     init_node->value(dyn.v).setZero();
 
-    sqp.graph_.apply_all_binary_forward([&dyn](auto *cur, auto *next) {
+    sqp.graph_.apply_forward([&dyn](auto *cur, auto *next) {
         next->value(dyn.r) = cur->value(dyn.r);
         cur->value(dyn.r_next) = next->value(dyn.r);
     });
@@ -55,7 +55,7 @@ int main() {
     // auto &data = ns_riccati::get_data(init_node.get());
     // std::cout << data.rollout_->prim_[__x].transpose() << '\n';
     // sqp.update();
-    sqp.graph_.apply_all_unary_forward([&dyn](auto *node) {
+    sqp.graph_.apply_forward([&dyn](auto *node) {
         // std::cout << "delX  " << data.rollout_->prim_[__x].transpose() << '\n';
         // std::cout << field::name(data.rank_status_) << '\n';
         // std::cout << "state " << node->value(__x).transpose() << '\n';

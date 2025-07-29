@@ -153,7 +153,7 @@ void register_submodule_functional(nb::module_ &m) {
         .def("clone", [](const func &self) { return self->clone(); })
         .def(
             "add_argument",
-            [](func &self, const nb::handle &v) { self->add_argument(moto::cast_to_var(v)); },
+            [](func &self, const py_var_wrapper &v) { self->add_argument((var &)v); },
             nb::arg("in"))
         .def(
             "add_arguments",

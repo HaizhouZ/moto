@@ -144,7 +144,7 @@ class directed_graph {
      *
      * @return auto& the unordered flattened nodes list
      */
-    auto &get_unordered_flattened_nodes() {
+    auto &flatten_nodes() {
         unary_unordered_flatten();
         return unary_in_;
     }
@@ -155,7 +155,7 @@ class directed_graph {
      */
     template <typename callback_t>
         requires std::invocable<callback_t, data_type *>
-    void apply_all_unary_parallel(callback_t &&callback) {
+    void for_each_parallel(callback_t &&callback) {
         unary_unordered_flatten();
         parallel_for(0, unary_in_.size(), [this, &callback](size_t i) { callback(unary_in_[i]); });
     }
@@ -166,7 +166,7 @@ class directed_graph {
      */
     template <typename callback_t>
         requires std::invocable<callback_t, size_t, data_type *>
-    void apply_all_unary_parallel(callback_t &&callback) {
+    void for_each_parallel(callback_t &&callback) {
         unary_unordered_flatten();
         parallel_for(0, unary_in_.size(), [this, &callback](size_t tid, size_t i) { callback(tid, unary_in_[i]); });
     }
@@ -177,7 +177,7 @@ class directed_graph {
      */
     template <typename callback_t>
         requires std::invocable<callback_t, data_type *>
-    void apply_all_unary_forward(callback_t &&callback) {
+    void apply_forward(callback_t &&callback) {
         unary_unordered_flatten();
         sequential_for(0, unary_in_.size(), [this, &callback](size_t i) { callback(unary_in_[i]); });
     }
@@ -186,9 +186,9 @@ class directed_graph {
      *
      * @param callback function [d, d+1]
      */
-    template <bool parallel = false, bool tail_null_edge = false, typename callback_t>
+    template <bool tail_null_edge = false, typename callback_t>
         requires std::invocable<callback_t, data_type *, data_type *>
-    void apply_all_binary_forward(callback_t &&callback) {
+    void apply_forward(callback_t &&callback) {
         std::ranges::for_each(nodes_, [](auto &p) { p.reset_cnt(); });
         // std::vector<std::pair<data_type *, data_type *>> binary_in_;
         // std::vector<edge *> cur_edges;                               // st nodes for this round
@@ -210,17 +210,10 @@ class directed_graph {
                     next_edges.insert(next_edges.end(), e->ed->out_edges.begin(), e->ed->out_edges.end());
                 }
             }
-            if constexpr (parallel) { // parallel by segments
-                parallel_for(0, binary_in_.size(),
-                             [&callback, this](size_t i) {
-                                 callback(binary_in_[i].first, binary_in_[i].second);
-                             });
-            } else { // parallel by edges
-                sequential_for(0, binary_in_.size(),
-                               [&callback, this](size_t i) {
-                                   callback(binary_in_[i].first, binary_in_[i].second);
-                               });
-            }
+            sequential_for(0, binary_in_.size(),
+                           [&callback, this](size_t i) {
+                               callback(binary_in_[i].first, binary_in_[i].second);
+                           });
             cur_edges.swap(next_edges);
             next_edges.clear();
         }
@@ -235,7 +228,7 @@ class directed_graph {
      */
     template <bool head_null_edge = true, typename callback_t>
         requires std::invocable<callback_t, data_type *, data_type *>
-    void apply_all_binary_backward(callback_t &&callback) {
+    void apply_backward(callback_t &&callback) {
         std::for_each(nodes_.begin(), nodes_.end(), [](auto &p) { p.reset_cnt(); });
         // std::vector<std::pair<data_type *, data_type *>> binary_in_;
         // std::vector<edge *> cur_edges;                             // st nodes for this round

@@ -46,7 +46,7 @@ int main() {
     int n = -10;
     int phase = -1; // -1 stance, 0 left swing, 1 right swing
     int steps = 0;
-    graph.apply_all_unary_forward([&](node_data *data) {
+    graph.apply_forward([&](node_data *data) {
         if (n >= 0) {
             if (steps < 3) {
                 if (n % 25 == 0) { // every 25 steps, switch phase
@@ -74,7 +74,7 @@ int main() {
         n++;
     });
     // propogate parameters
-    graph.apply_all_binary_forward([&](node_data *cur, node_data *next) {
+    graph.apply_forward([&](node_data *cur, node_data *next) {
         next->value(__u) = cur->value(__u);
         next->value(__x) = cur->value(__x);
         utils::copy_x_to_y(next->value(__x), cur->value(__y), &next->problem(), &cur->problem());
@@ -84,11 +84,11 @@ int main() {
     });
 
     // std::cout << "\nleft\n";
-    // graph.apply_all_unary_forward([&](node_data *data) {
+    // graph.apply_forward([&](node_data *data) {
     //     std::cout << data->value(dyn.active_l) << ',';
     // });
     // std::cout << "\nright\n";
-    // graph.apply_all_unary_forward([&](node_data *data) {
+    // graph.apply_forward([&](node_data *data) {
     //     std::cout << data->value(dyn.active_r) << ',';
     // });
     // std::cout << "\n";
@@ -98,7 +98,7 @@ int main() {
     solver.settings.ipm_conditional_corrector = true;
     solver.update(20);
     size_t step = 0;
-    // graph.apply_all_unary_forward([&](node_data *data) {
+    // graph.apply_forward([&](node_data *data) {
     //     std::cout << "------------- Step: " << step++ << '\n';
     //     //     // std::cout << "cost: " << data->cost() << '\n';
     //     //     // std::cout << "merit: " << data->dense_->merit_ << '\n';

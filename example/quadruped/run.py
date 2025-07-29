@@ -45,4 +45,9 @@ init_node = g.set_head(g.add(sqp.create_node(prob)))
 end_node = g.set_tail(g.add(sqp.create_node(prob_term)))
 g.add_edge(init_node, end_node, 50)
 
+def init(cur: moto.ns_sqp.data_type):
+    cur.value[r_d.sym_base] = np.array([1.0, 1.0])
+
+g.for_each_parallel(init)
+
 sqp.update(10)
