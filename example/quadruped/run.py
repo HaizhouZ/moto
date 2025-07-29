@@ -1,16 +1,34 @@
 import moto
 import casadi as cs
+import numpy as np
 
 r, rn = moto.states("r", 2)
 v = moto.inputs("v", 2)
-dt = moto.params("dt", 1)
+# dt = moto.params("dt", 1)
 r_d = moto.params("r_d", 2)
 
-dint = moto.constr("dint", 2, field=moto.field_dyn)
-dint.add_arguments([r, v, dt])
+# dint = moto.constr("dint", 2, field=moto.field_dyn)
+# dint.add_arguments([rn, r, v])
+dt = 0.01
+dint = moto.constr("dint", [rn, r, v], rn - (r + v * dt), field=moto.field_dyn)
 
-c_state = moto.cost("c", [r, r_d], 100 * cs.sumsqr(r - r_d))
-c_input = moto.cost("c_input", [v], 10 * cs.sumsqr(v))
+# def dyn_value(data: moto.func_approx_map):
+#     data.v = data[rn] - (data[r] + data[v] * dt)
+
+
+# def dyn_jac(data: moto.func_approx_map):
+#     print("good")
+#     data.jac[rn] = np.eye(2)
+#     data.jac[r] = -np.eye(2)
+#     data.jac[v] = -dt * np.eye(2)
+
+
+# dint.value = dyn_value
+# dint.jacobian = dyn_jac
+
+
+c_state = moto.cost("c", [r, r_d], 100 * cs.sumsqr(r - r_d) * dt)
+c_input = moto.cost("c_input", [v], 1 * cs.sumsqr(v) * dt)
 
 prob = moto.ocp.create()
 prob.add([dint, c_state, c_input])
@@ -23,6 +41,8 @@ prob_term.add(c_term)
 
 sqp = moto.ns_sqp()
 g = sqp.graph
-end_node = g.add(sqp.create_node(prob_term))
-init_node = g.add(sqp.create_node(prob))
+init_node = g.set_head(g.add(sqp.create_node(prob)))
+end_node = g.set_tail(g.add(sqp.create_node(prob_term)))
 g.add_edge(init_node, end_node, 50)
+
+sqp.update(10)

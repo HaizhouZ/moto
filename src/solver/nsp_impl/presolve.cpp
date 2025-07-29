@@ -27,6 +27,7 @@ void ns_factorization(ns_node_data *cur) {
     }
     d.Q_xx.noalias() += -(d.Q_yx.transpose() * nsp.F_0_K + nsp.F_0_K.transpose() * d.Q_yx);
     // nullspace computation
+    d.rank_status_ = rank_status::unconstrained;
     if (d.ncstr) {
         if (d.ns) {
             nsp.s_u.noalias() = -nsp.s_y * nsp.F_u;

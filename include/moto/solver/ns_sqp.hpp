@@ -32,6 +32,7 @@ struct ns_sqp {
     };
 
     ns_sqp();
+    ns_sqp(const ns_sqp &) = delete;
     using node_type = impl::shooting_node<data>;
 
     auto create_node(const ocp_ptr_t &formulation) {

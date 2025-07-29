@@ -1,6 +1,6 @@
+#include <moto/ocp/impl/data_mgr.hpp>
 #include <moto/ocp/impl/node_data.hpp>
 #include <type_cast.hpp>
-#include <moto/ocp/impl/data_mgr.hpp>
 void register_submodule_node_data(nb::module_ &m) {
     using namespace moto;
     nb::class_<ocp>(m, "ocp")
@@ -64,8 +64,8 @@ void register_submodule_node_data(nb::module_ &m) {
              "Constructor for func_approx_map with sym_data, vector_ref to input, list of matrix_ref to jacobian and shared_data")
         .def("setup_hessian", &func_approx_map::setup_hessian, nb::arg("raw"),
              "Setup hessian from raw approximation data")
-        .def("jac", [](func_approx_map &self, const func &in) -> auto { return self.jac(in); }, nb::arg("in"), "Get the jacobian reference for the input variable")
         .def_prop_ro("v", [](func_approx_map &self) -> auto { return self.v_; }, "Value vector reference")
-        .def_prop_ro("jac", [](func_approx_map &self) -> auto & { return self.jac_; }, "Jacobian matrix references indexed by input arguments")
-        .def_prop_ro("hess", [](func_approx_map &self) -> auto & { return self.hess_; }, "Hessian matrix references for merit, 2-D indexed by input arguments");
+        .def("jac", [](func_approx_map &self, size_t idx) -> auto { return self.jac_[idx]; }, "Jacobian matrix references indexed by input arguments")
+        .def_prop_ro("hess", [](func_approx_map &self) -> auto & { return self.hess_; }, "Hessian matrix references for merit, 2-D indexed by input arguments")
+        .def("jac", [](func_approx_map &self, const var &in) -> auto { return self.jac(in); }, nb::arg("in"), "Get the jacobian reference for the input variable");
 }

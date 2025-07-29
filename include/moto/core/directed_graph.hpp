@@ -1,13 +1,13 @@
 #ifndef MOTO_OCP_CORE_DIRECTED_GRAPH_HPP
 #define MOTO_OCP_CORE_DIRECTED_GRAPH_HPP
 
+#include <list>
 #include <moto/core/fwd.hpp>
 #include <moto/core/parallel_job.hpp>
 #include <moto/utils/movable_ptr.hpp>
 #include <ranges>
 #include <set>
 #include <vector>
-#include <list>
 
 namespace moto {
 namespace graph_types {
@@ -22,8 +22,8 @@ class node_base; // fwd
 template <typename node>
 struct edge_base {
     using node_type = node;
-    node *st; /// < start node of the edge
-    node *ed; /// < end node of the edge
+    movable_ptr<node> st; /// < start node of the edge
+    movable_ptr<node> ed; /// < end node of the edge
 
     /// intermediate nodes, cloned from start node
     std::vector<node_type> nodes;
@@ -39,13 +39,15 @@ struct edge_base {
         nodes.reserve(length + 2); // reserve space for start and end nodes
         st->out_edges.emplace(this);
         ed->in_edges.emplace(this);
-        while (length--) {                 // exclude ed node
-            nodes.emplace_back(node(*st)); // clone the start node
+        while (length--) {           // exclude ed node
+            nodes.emplace_back(*st); // clone the start node
         }
     }
     ~edge_base() {
-        st->out_edges.erase(this);
-        ed->in_edges.erase(this);
+        if (st)
+            st->out_edges.erase(this);
+        if (ed)
+            ed->in_edges.erase(this);
     }
 };
 /**
@@ -91,6 +93,8 @@ class directed_graph {
   public:
     using data_type = typename node::data_type;
     using edge = graph_types::edge_base<node>;
+    directed_graph() = default;
+    directed_graph(const directed_graph &rhs) = delete; ///< copy constructor is deleted
     /**
      * @brief add an edge from start node to end node with a given length
      * @ref graph_types::edge_base
@@ -103,7 +107,7 @@ class directed_graph {
         if (len < 2) {
             throw std::invalid_argument("Edge length must be no less than 2");
         }
-        edges_.emplace_back(edge(&st, &ed, len - 2));
+        edges_.emplace_back(&st, &ed, len - 2);
         // return edges_.back();
     }
 
