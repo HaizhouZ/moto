@@ -1,7 +1,6 @@
 #ifndef __MOTO_OCP_IMPL_FUNC_HPP__
 #define __MOTO_OCP_IMPL_FUNC_HPP__
 
-#include <future>
 #include <moto/core/workspace_data.hpp>
 #include <moto/ocp/impl/func_data.hpp>
 
@@ -28,14 +27,6 @@ class generic_func : public expr {
   protected:
     struct gen_info {
         cs::SX out_;
-        std::future<void> res_;
-        gen_info() = default;
-        gen_info(gen_info &&) = default;
-        gen_info(const gen_info &rhs) : out_(rhs.out_) {}
-        gen_info &operator=(const gen_info &rhs) {
-            out_ = rhs.out_;
-            return *this;
-        }
     };
     gen_info gen_;
     approx_order order_ = approx_order::first;

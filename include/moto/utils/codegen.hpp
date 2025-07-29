@@ -36,9 +36,13 @@ struct worker {
 struct worker_list {
     std::vector<worker> workers;
     void wait_until_finished() {
+        try {
 #pragma omp parallel for schedule(static)
-        for (auto &w : workers) {
-            w.wait_until_finished();
+            for (auto &w : workers) {
+                w.wait_until_finished();
+            }
+        } catch (...) {
+            throw;
         }
     }
     void add(worker::future_type &&w) {

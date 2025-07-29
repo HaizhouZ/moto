@@ -1,12 +1,18 @@
 #include <moto/ocp/impl/data_mgr.hpp>
 #include <moto/ocp/impl/node_data.hpp>
+#include <nanobind/stl/variant.h>
 #include <type_cast.hpp>
+#include <variant>
 
 void register_submodule_node_data(nb::module_ &m) {
     using namespace moto;
     nb::class_<ocp>(m, "ocp")
-        .def("add", [](ocp &self, expr_inarg_list &&exprs) { self.add(exprs); }, nb::arg("exprs"), "Add a list of expressions to the OCP problem")
-        .def("add", [](ocp &self, const py_shared_expr_wrapper &ex) { self.add((shared_expr &)ex); }, nb::arg("ex"), "Add an expression to the OCP problem")
+        .def("add", [](ocp &self, expr_inarg_list &&exprs) { 
+            nb::gil_scoped_release rel;
+            self.add(exprs); }, nb::arg("exprs"), "Add a list of expressions to the OCP problem")
+        .def("add", [](ocp &self, const py_shared_expr_wrapper &ex) { 
+            nb::gil_scoped_release rel;
+            self.add((shared_expr &)ex); }, nb::arg("ex"), "Add an expression to the OCP problem")
         .def_static("create", &ocp::create, "Create a new OCP problem")
         .def("clone", &ocp::clone, "Clone the OCP problem")
         .def("dim", [](ocp &self, field_t field) { return self.dim(field); }, nb::arg("field"), "Get the dimension of the field")
@@ -18,7 +24,15 @@ void register_submodule_node_data(nb::module_ &m) {
         .def(nb::init<ocp *>(), nb::arg("prob"), "Constructor for sym_data with OCP problem")
         .def_prop_ro("prob", [](sym_data &self) -> ocp & { return *self.prob_; })
         .def("__getitem__", [](sym_data &self, const py_var_wrapper &s) -> auto { return self[s]; })
-        .def("__setitem__", [](sym_data &self, const py_var_wrapper &s, vector_ref d) { self[s] = d; });
+        .def("__setitem__", [](sym_data &self, const py_var_wrapper &s, std::variant<vector_ref, scalar_t> d) { 
+            if (std::holds_alternative<vector_ref>(d)) {
+                self[s] = std::get<vector_ref>(d);
+            } else if (std::holds_alternative<scalar_t>(d)) {
+                assert(self[s].size() == 1 && "Cannot assign scalar to a vector variable");
+                self[s](0) = std::get<scalar_t>(d);
+            } else {
+                throw std::runtime_error("Invalid type for sym_data assignment");
+            } });
     nb::class_<dense_approx_data>(m, "dense_approx_data")
         .def(nb::init<ocp *>(), nb::arg("prob"), "Constructor for dense_approx_data with OCP problem")
         .def_prop_ro("prob", [](dense_approx_data &self) -> ocp & { return *self.prob_; })
