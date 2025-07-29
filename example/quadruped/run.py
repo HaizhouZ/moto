@@ -16,17 +16,6 @@ dint.add_arguments([rn, r, v, dt])
 def dyn_value(data: moto.func_approx_data):
     data.v = data[rn] - (data[r] + data[v] * data[dt])
 
-nice = np.arange(9).reshape(3, 3)
-
-print("Nice array:", nice)
-
-moto.test([nice])
-
-print("Nice array:", nice)
-
-
-exit(0)
-
 def dyn_jac(data: moto.func_approx_data):
     data.jac(rn)
     data.set_jac(rn, np.eye(2))
