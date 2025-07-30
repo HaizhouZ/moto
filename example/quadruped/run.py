@@ -38,7 +38,7 @@ print(prob.uid, prob_term.uid)
 # c_term = c_state.clone().as_terminal()
 prob_term.add(c_state_terminal)
 
-sqp = moto.ns_sqp()
+sqp = moto.sqp()
 g = sqp.graph
 init_node = g.set_head(g.add(sqp.create_node(prob)))
 end_node = g.set_tail(g.add(sqp.create_node(prob_term)))
@@ -50,6 +50,6 @@ def init(cur: moto.ns_sqp.data_type):
     cur.value[dt] = 0.01
 
 
-g.for_each_parallel(init)
+sqp.for_each(init)
 
 sqp.update(10)

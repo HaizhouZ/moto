@@ -94,7 +94,12 @@ class directed_graph {
   public:
     using data_type = typename node::data_type;
     using edge = graph_types::edge_base<node>;
-    directed_graph() = default;
+    directed_graph(size_t n_jobs = MAX_THREADS)
+        : n_jobs_(n_jobs) {
+        unary_in_.reserve(100 * n_jobs);
+        unary_view_.reserve(100 * n_jobs);
+        binary_view_.reserve(100 * n_jobs);
+    }
     directed_graph(const directed_graph &rhs) = delete; ///< copy constructor is deleted
     /**
      * @brief add an edge from start node to end node with a given length
@@ -338,9 +343,15 @@ class directed_graph {
         constexpr bool is_unary_with_tid = std::is_invocable_r_v<void, callback_t, size_t, data_type *>;
         unary_unordered_flatten();
         if constexpr (is_unary_with_tid) {
-            parallel_for(0, unary_in_.size(), [&callback, this](size_t tid, size_t i) { callback(tid, unary_in_[i]); });
+            parallel_for(
+                0, unary_in_.size(),
+                [&callback, this](size_t tid, size_t i) { callback(tid, unary_in_[i]); },
+                n_jobs_);
         } else if constexpr (is_unary) {
-            parallel_for(0, unary_in_.size(), [&callback, this](size_t i) { callback(unary_in_[i]); });
+            parallel_for(
+                0, unary_in_.size(),
+                [&callback, this](size_t i) { callback(unary_in_[i]); },
+                n_jobs_);
         } else {
             static_assert(false, "Callback function arity not supported in for_each_parallel()");
         }
@@ -362,13 +373,15 @@ class directed_graph {
                 while (unary_view_.update()) {
                     sequential_for(
                         0, unary_view_.size(),
-                        [&callback, this](size_t tid, size_t i) { callback(tid, unary_view_[i]); });
+                        [&callback, this](size_t tid, size_t i) { callback(tid, unary_view_[i]); },
+                        n_jobs_);
                 }
             } else {
                 while (unary_view_.update()) {
                     sequential_for(
                         0, unary_view_.size(),
-                        [&callback, this](size_t i) { callback(unary_view_[i]); });
+                        [&callback, this](size_t i) { callback(unary_view_[i]); },
+                        n_jobs_);
                 }
             }
         } else if constexpr (is_binary || is_binary_with_tid) {
@@ -383,13 +396,15 @@ class directed_graph {
                         0, binary_view_.size(),
                         [&callback, this](size_t tid, size_t i) {
                             callback(tid, binary_view_[i].first, binary_view_[i].second);
-                        });
+                        },
+                        n_jobs_);
                 } else
                     sequential_for(
                         0, binary_view_.size(),
                         [&callback, this](size_t i) {
                             callback(binary_view_[i].first, binary_view_[i].second);
-                        });
+                        },
+                        n_jobs_);
             }
         } else {
             static_assert(false, "Callback function arity not supported in apply()");
@@ -420,7 +435,8 @@ class directed_graph {
     } ///< get the nodes in the graph
 
   private:
-    node *head_ = nullptr; /// < head node of the graph, i.e., the first node in the graph
+    size_t n_jobs_ = MAX_THREADS; ///< number of jobs to run in parallel
+    node *head_ = nullptr;        /// < head node of the graph, i.e., the first node in the graph
     /// @todo: multiple tail
     node *tail_ = nullptr;  ///< tail node of the graph, i.e., the last node in the graph
     std::list<node> nodes_; ///< key nodes used to describe the graph

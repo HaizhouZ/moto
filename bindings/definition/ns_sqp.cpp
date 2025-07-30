@@ -16,8 +16,8 @@ NB_MAKE_OPAQUE(binary_list);
 
 void register_submodule_ns_sqp(nb::module_ &m) {
 
-    nb::class_<ns_sqp> sqp(m, "ns_sqp");
-    sqp.def(nb::init<>())
+    nb::class_<ns_sqp> sqp(m, "ns_sqp_impl");
+    sqp.def(nb::init<size_t>(), "Constructor for the SQP solver with a specified number of jobs")
         .def_prop_ro("graph", [](ns_sqp &self) -> auto & { return self.graph_; })
         .def("update", [](ns_sqp &self, size_t n_iter) {
             nb::gil_scoped_release rel;

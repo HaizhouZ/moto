@@ -30,12 +30,13 @@ inline size_t get_num_threads() {
  * @param callback
  */
 template <typename callback_t, bool reverse_block = true>
-inline void parallel_for(size_t start, size_t stop, callback_t &&callback) {
+inline void parallel_for(size_t start, size_t stop, callback_t &&callback, size_t n_jobs = MAX_THREADS) {
 
-    size_t n_threads = MAX_THREADS;
+    size_t n_threads = n_jobs;
     size_t chunk_size = (stop - start + n_threads - 1) / n_threads;
     try {
 #ifdef MOTO_USE_OMP
+        omp_set_num_threads(n_threads);
 #pragma omp parallel for schedule(static, 1)
 #endif
         for (size_t j = 0; j < n_threads; j++) {
@@ -63,12 +64,13 @@ inline void parallel_for(size_t start, size_t stop, callback_t &&callback) {
 
 template <typename callback_t>
     requires std::invocable<callback_t, size_t>
-inline void sequential_for(size_t start, size_t stop, callback_t &&callback) {
+inline void sequential_for(size_t start, size_t stop, callback_t &&callback, size_t n_jobs = MAX_THREADS) {
 
-    size_t n_threads = MAX_THREADS;
+    size_t n_threads = n_jobs;
     size_t chunk_size = (stop - start + n_threads - 1) / n_threads;
     try {
 #ifdef MOTO_USE_OMP
+        omp_set_num_threads(n_threads);
 #pragma omp parallel for ordered schedule(static, 1)
 #endif
         for (size_t j = 0; j < n_threads; j++) {

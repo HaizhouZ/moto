@@ -31,7 +31,7 @@ struct ns_sqp {
         scalar_t inf_comp_res = 0.; // (inequality) complementarity residual
     };
 
-    ns_sqp();
+    ns_sqp(size_t n_jobs = MAX_THREADS);
     ns_sqp(const ns_sqp &) = delete;
     using node_type = impl::shooting_node<data>;
 
