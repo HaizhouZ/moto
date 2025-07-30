@@ -81,7 +81,7 @@ int main() {
         next->value(dyn.active_l_cur) = cur->value(dyn.active_l);
         next->value(dyn.active_r_cur) = cur->value(dyn.active_r);
         next->value(dyn.r_d) = cur->value(dyn.r_d);
-    });
+    }, false);
 
     // std::cout << "\nleft\n";
     // graph.apply_forward([&](node_data *data) {

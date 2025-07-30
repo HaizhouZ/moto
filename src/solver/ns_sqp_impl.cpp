@@ -81,16 +81,16 @@ void ns_sqp::update(size_t n_iter) {
         };
         // timed_block_labeled("all",
         graph_.for_each_parallel(solver::ns_riccati::ns_factorization);
-        graph_.apply_backward<true>(solver::ns_riccati::riccati_recursion);
+        graph_.apply_backward(solver::ns_riccati::riccati_recursion, true);
         graph_.for_each_parallel(solver::ns_riccati::compute_primal_sensitivity);
-        graph_.apply_forward<true>(solver::ns_riccati::fwd_linear_rollout);
+        graph_.apply_forward(solver::ns_riccati::fwd_linear_rollout, true);
 
         bool finalize_dual = true;
         if (has_ineq && settings.ipm_enable_affine_step()) { // compute the affine step, no need to finalize dual step
             settings.ipm_start_predictor_computation();
             finalize_dual = false; // do not finalize dual step
         }
-        graph_.for_each_parallel([finalize_dual, &setting_per_thread](size_t tid, auto *d) {
+        graph_.for_each_parallel([finalize_dual, &setting_per_thread](size_t tid, data *d) {
             solver::ns_riccati::finalize_newton_step(d, finalize_dual);
             solver::ineq_soft::finalize_newton_step(d);
             // decide line search bounds (e.g., fraction-to-bounds)
@@ -99,7 +99,7 @@ void ns_sqp::update(size_t n_iter) {
         finalize_bound_and_set_to_max();
         if (has_ineq && settings.ipm_enable_affine_step()) {
             // line search with max bounds
-            graph_.for_each_parallel([&setting_per_thread](size_t tid, auto *d) {
+            graph_.for_each_parallel([&setting_per_thread](size_t tid, data *d) {
                 solver::ineq_soft::finalize_predictor_step(d, &setting_per_thread[tid]);
             });
             settings.ipm_end_predictor_computation(); // ipm affine step computation is done
@@ -113,10 +113,10 @@ void ns_sqp::update(size_t n_iter) {
             // use the new mu to update the rhs jacobian
             graph_.for_each_parallel(solver::ineq_soft::first_order_correction_start);
             // solve the problem again with updated mu
-            graph_.apply_backward<true>(solver::ns_riccati::riccati_recursion_correction);
+            graph_.apply_backward(solver::ns_riccati::riccati_recursion_correction, true);
             graph_.for_each_parallel(solver::ns_riccati::compute_primal_sensitivity_correction);
-            graph_.apply_forward<true>(solver::ns_riccati::fwd_linear_rollout_correction);
-            graph_.for_each_parallel([](auto *d) {
+            graph_.apply_forward(solver::ns_riccati::fwd_linear_rollout_correction, true);
+            graph_.for_each_parallel([](data *d) {
                 solver::ineq_soft::first_order_correction_end(d);
                 solver::ns_riccati::finalize_newton_step_correction(d);
                 solver::ineq_soft::finalize_newton_step(d);
@@ -141,14 +141,14 @@ void ns_sqp::update(size_t n_iter) {
         graph_.for_each_parallel(data::update_approx);
         // );
         kkt_info info;
-        for (node_data *n : graph_.flatten_nodes()) {
+        for (auto n : graph_.flatten_nodes()) {
             info.objective += n->cost();
             info.inf_prim_res = std::max(info.inf_prim_res, n->inf_prim_res_);
             info.inf_dual_res = std::max(info.inf_dual_res, n->dense().jac_[__u].cwiseAbs().maxCoeff());
             info.inf_comp_res = std::max(info.inf_comp_res, n->inf_comp_res_);
         }
         size_t step = 0;
-        graph_.apply_forward<true>([&step, &info](node_data *cur, node_data *next) {
+        graph_.apply_forward([&step, &info](node_data *cur, node_data *next) {
             if (next != nullptr) [[likely]] {
                 // cancellation of jacobian from y to x
                 static row_vector tmp;

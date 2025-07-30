@@ -18,8 +18,16 @@ class movable_ptr {
         return *this;
     }
     T *operator->() { return ptr; }
-    T &operator*() { return *ptr; }
+    template <typename U = T>
+    typename std::enable_if<!std::is_void<U>::value, U &>::type operator*() { return *ptr; }
+    template <typename U = T>
+    operator const U *() const {
+        return ptr;
+    } ///< allow implicit conversion to T*
+    template <typename U = T>
+    operator U *() { return ptr; } ///< allow implicit conversion to T*
     T *get() { return ptr; }
+    const T *get() const { return ptr; }
     bool operator==(const movable_ptr &rhs) const { return ptr == rhs.ptr; }
     operator bool() const { return ptr != nullptr; }
     operator T *() { return ptr; }             ///< allow implicit conversion to T*

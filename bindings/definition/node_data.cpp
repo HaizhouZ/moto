@@ -1,6 +1,5 @@
 #include <moto/ocp/impl/data_mgr.hpp>
 #include <moto/ocp/impl/node_data.hpp>
-#include <nanobind/stl/optional.h>
 #include <nanobind/stl/variant.h>
 #include <type_cast.hpp>
 #include <variant>
