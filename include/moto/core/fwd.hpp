@@ -4,7 +4,6 @@
 #include <Eigen/Core>
 #include <cstddef> // For size_t
 #include <fmt/core.h>
-#include <magic_enum/magic_enum.hpp>
 #include <memory>
 #include <ranges>
 #include <new>

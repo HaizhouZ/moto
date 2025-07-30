@@ -2,6 +2,7 @@
 #define __OPT_FIELDS__
 
 #include <moto/core/fwd.hpp>
+#include <magic_enum/magic_enum.hpp>
 
 namespace moto {
 enum field_t : size_t {

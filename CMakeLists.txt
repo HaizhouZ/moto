@@ -6,6 +6,7 @@ if(POLICY CMP0148)
 endif()
 
 include(cmake/depHelpers.cmake)
+include(cmake/Findccache.cmake)
 
 add_project_dependency(Eigen3 REQUIRED)
 add_project_dependency(magic_enum REQUIRED)
