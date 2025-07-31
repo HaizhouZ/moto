@@ -144,7 +144,7 @@ struct type_caster<moto::expr_inarg_list> {
                                               make_caster<moto::var>::Name +
                                               const_name(" | ") +
                                               make_caster<moto::func>::Name +
-                                              const_name(" | moto.sym]"))
+                                              const_name(" | casadi.SX]"))
 
     list_caster<std::vector<handle>, handle> list_cast;
 
@@ -196,7 +196,7 @@ namespace nanobind {
 namespace detail {
 template <>
 struct type_caster<moto::py_var_wrapper> {
-    NB_TYPE_CASTER(moto::py_var_wrapper, const_name("moto.var | moto.sym"));
+    NB_TYPE_CASTER(moto::py_var_wrapper, const_name("moto.var | casadi.SX"));
     bool from_python(handle src, uint8_t flags, void *ptr) {
         try{
             value = std::move(moto::py_var_wrapper(moto::cast_to_var(src)));
@@ -209,7 +209,7 @@ struct type_caster<moto::py_var_wrapper> {
 };
 template <>
 struct type_caster<moto::py_shared_expr_wrapper> {
-    NB_TYPE_CASTER(moto::py_shared_expr_wrapper, const_name("moto.shared_expr | moto.sym"));
+    NB_TYPE_CASTER(moto::py_shared_expr_wrapper, const_name("moto.shared_expr | casadi.SX"));
     bool from_python(handle src, uint8_t flags, void *ptr) {
         value = std::move(moto::py_shared_expr_wrapper(moto::cast_to_shared_expr(src)));
         return true;

@@ -44,7 +44,7 @@ namespace detail {
 template <>
 struct type_caster<moto::var_inarg_list> {
     NB_TYPE_CASTER(moto::var_inarg_list, io_name(NB_TYPING_SEQUENCE, NB_TYPING_LIST) + const_name("[") +
-                                             make_caster<moto::var>::Name + const_name(" | moto.sym") +
+                                             make_caster<moto::var>::Name + const_name(" | casadi.SX") +
                                              const_name("]"))
 
     list_caster<std::vector<handle>, handle> list_cast;
