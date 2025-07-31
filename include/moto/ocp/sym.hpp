@@ -27,9 +27,13 @@ class sym : public expr, public cs::SX {
 
   public:
     friend class expr;
+    using default_val_t = std::variant<vector, scalar_t, std::monostate>;
+    using default_val_none_t = std::monostate;
 
   protected:
+    vector default_value_;
     var dual_;
+
     void finalize_impl() override;
     operator double() const = delete;     ///< disable implicit conversion to double
     operator casadi_int() const = delete; ///< disable implicit conversion to casadi_int
@@ -48,9 +52,15 @@ class sym : public expr, public cs::SX {
      * @param dim dimension of the symbolic variable
      * @param type type of the symbolic variable, must be one of the symbolic fields
      */
-    sym(const std::string &name, size_t dim, field_t type)
+    sym(const std::string &name, size_t dim, field_t type,
+        default_val_t default_val = default_val_none_t())
         : expr(name, dim, type), cs::SX(cs::SX::sym(name, dim)) {
         assert(size_t(type) <= field::num_sym || type == __usr_var);
+        if (std::holds_alternative<vector>(default_val)) {
+            default_value_ = std::move(std::get<vector>(default_val));
+        } else if (std::holds_alternative<scalar_t>(default_val)) {
+            default_value_ = vector::Constant(dim, std::get<scalar_t>(default_val));
+        } /// leave empty
     }
 
     sym(sym &&rhs) = default;            ///< move constructor
@@ -61,24 +71,26 @@ class sym : public expr, public cs::SX {
     using expr::name; ///< name of the symbolic variable
     using expr::operator bool;
 
+    PROPERTY(default_value) ///< default value of the symbolic variable
+
     /// @brief make a symbolic input
-    static var inputs(const std::string &name, size_t dim) {
-        return sym(name, dim, __u);
+    static var inputs(const std::string &name, size_t dim, default_val_t default_val = default_val_none_t()) {
+        return sym(name, dim, __u, default_val);
     }
     /// @brief make a symbolic parameter
-    static var params(const std::string &name, size_t dim) {
-        return sym(name, dim, __p);
+    static var params(const std::string &name, size_t dim, default_val_t default_val = default_val_none_t()) {
+        return sym(name, dim, __p, default_val);
     }
     /// @brief make a pair of symbolic state
-    static auto states(const std::string &name, size_t dim) {
-        auto temp = var(sym(name, dim, __x));
-        auto next = var(sym(name + "_nxt", dim, __y));
+    static auto states(const std::string &name, size_t dim, default_val_t default_val = default_val_none_t()) {
+        auto temp = var(sym(name, dim, __x, default_val));
+        auto next = var(sym(name + "_nxt", dim, __y, default_val));
         temp->dual_ = next;
         next->dual_ = temp;
         return std::make_pair(std::move(temp), std::move(next));
     }
-    static auto state(const std::string &name, size_t dim) {
-        auto [x, y] = states(name, dim);
+    static auto state(const std::string &name, size_t dim, default_val_t default_val = default_val_none_t()) {
+        auto [x, y] = states(name, dim, default_val);
         return x;
     }
     var &next() {
@@ -90,12 +102,12 @@ class sym : public expr, public cs::SX {
         return dual_;
     }
 
-    static var usr_var(const std::string &name, size_t dim) {
-        return sym(name, dim, __usr_var);
+    static var usr_var(const std::string &name, size_t dim, default_val_t default_val = default_val_none_t()) {
+        return sym(name, dim, __usr_var, default_val);
     } ///< make a user defined variable
 
-    static var symbol(const std::string &name, size_t dim, field_t field) {
-        return sym(name, dim, field);
+    static var symbol(const std::string &name, size_t dim, field_t field, default_val_t default_val = default_val_none_t()) {
+        return sym(name, dim, field, default_val);
     } ///< make a symbolic primitive
 };
 inline sym *var::operator->() const {

@@ -38,7 +38,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def("add", &graph_type::add, nb::arg("node"), "Add a node to the graph and return a reference to it", nb::rv_policy::reference)
         .def("set_head", &graph_type::set_head, nb::arg("node"), nb::rv_policy::reference)
         .def("set_tail", &graph_type::set_tail, nb::arg("node"), nb::rv_policy::reference)
-        .def("add_edge", &graph_type::add_edge, nb::arg("from"), nb::arg("to"), nb::arg("steps") = 1,
+        .def("add_edge", &graph_type::add_edge, nb::arg("start"), nb::arg("to"), nb::arg("steps") = 1,
              "Add an edge from one node to another with a given number of steps")
         .def("flatten_nodes", &graph_type::flatten_nodes, nb::rv_policy::reference, "Get the unordered flattened list of all nodes in the graph")
         .def_prop_ro("nodes", &graph_type::nodes, nb::rv_policy::reference, "key nodes")

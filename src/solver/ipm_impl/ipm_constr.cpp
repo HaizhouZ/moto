@@ -120,10 +120,12 @@ void ipm_constr::jacobian_impl(func_approx_data &data) const {
 }
 void ipm_constr::propagate_jacobian(ipm_data &d) const {
     size_t j_idx = 0;
+    bool nan_found = false;
     for (auto &j : d.jac_data_) {
         if (j.size() != 0) {
             d.jac_modification_[j_idx].noalias() += d.scaled_res_.transpose() * j;
             if (d.jac_modification_[j_idx].hasNaN()) {
+                nan_found = true;
                 fmt::print("--------------------\n");
                 fmt::print("constraint name: {}\n", d.func_.name());
                 for (sym &arg : d.func_.in_args()) {
@@ -139,6 +141,10 @@ void ipm_constr::propagate_jacobian(ipm_data &d) const {
             }
         }
         j_idx++;
+    }
+    if (nan_found) {
+        fmt::print("NaN found in jacobian modification for constraint: {}\n", d.func_.name());
+        throw std::runtime_error("NaN found in jacobian modification");
     }
 }
 void ipm_constr::propagate_hessian(ipm_data &d) const {

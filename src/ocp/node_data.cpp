@@ -5,10 +5,21 @@ sym_data::sym_data(ocp *prob) : prob_(prob) {
     for (size_t i = 0; i < field::num_sym; i++) {
         value_[i].resize(prob_->dim(i));
         value_[i].setZero();
+        auto &syms = prob_->exprs(static_cast<field_t>(i));
+        for (const sym &s : syms) {
+            auto v = prob_->extract(value_[i], s);
+            if (s.default_value().size() > 0) {
+                assert(s.default_value().size() == s.dim() && "default value size mismatch");
+                v = s.default_value();
+            }
+        }
     }
-    for (const sym &v : prob_->exprs(__usr_var)) {
-        usr_value_[v.uid()] = vector(prob_->dim(__usr_var));
-        usr_value_[v.uid()].setZero();
+    for (const sym &s : prob_->exprs(__usr_var)) {
+        auto &v = usr_value_[s.uid()] = vector::Zero(s.dim());
+        if (s.default_value().size() > 0) {
+            assert(s.default_value().size() == s.dim() && "default value size mismatch for usr_var");
+            v = s.default_value();
+        }
     }
 }
 vector_ref sym_data::get(const sym &s) {
@@ -36,8 +47,8 @@ inline void for_each_func(const ocp_ptr_t &prob, Callback &&callback) {
 
 node_data::node_data(const ocp_ptr_t &prob)
     : prob_(prob),
-      sym_(new sym_data(prob.get())), 
-      dense_(new merit_data(prob.get())), 
+      sym_(new sym_data(prob.get())),
+      dense_(new merit_data(prob.get())),
       shared_(new shared_data(prob.get(), sym_.get())) {
     for_each_func(prob, [&]([[maybe_unused]] size_t idx, const generic_func &_f) {
         auto p = _f.create_approx_data(*sym_, *dense_, *shared_);

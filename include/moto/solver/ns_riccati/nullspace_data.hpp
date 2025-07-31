@@ -41,6 +41,7 @@ struct nullspace_data {
     Eigen::FullPivLU<matrix> lu_eq_;     ///< LU factorizer of the eq constraints
     Eigen::LLT<matrix> llt_ns_;          ///< LLT solver of the projected hessian
     Eigen::PartialPivLU<matrix> lu_dyn_; ///< LU solver of the dynamics derivative \f$f_y\f$
+    size_t rank{0};                      ///< rank of the equality constraints, 0 if unconstrained, ncstr if fully constrained
     nullspace_data(matrix &_s_y) : s_y(_s_y) {}
 };
 } // namespace ns_riccati

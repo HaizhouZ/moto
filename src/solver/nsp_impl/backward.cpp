@@ -1,4 +1,3 @@
-#include <Eigen/Eigenvalues>
 #include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
 #include <moto/utils/field_conversion.hpp>
@@ -6,13 +5,8 @@
 namespace moto {
 namespace solver {
 namespace ns_riccati {
-void kkt_diagnosis(ns_node_data *cur) {
-    auto &d = *cur;
-    fmt::print("U is not positive definite\n");
-    fmt::print("Eigenvalues of U: \n{}\n", d.nsp_->U.eigenvalues().transpose());
-    fmt::print("Eigenvalues of Q_yy: \n{}\n", d.Q_yy.eigenvalues().transpose());
-    /// @todo some more maybe about constraints
-}
+extern void kkt_diagnosis(ns_node_data *cur);
+extern void print_debug(ns_node_data *cur);
 void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
     auto &d = *cur;
     auto &nsp = *d.nsp_;
@@ -24,7 +18,8 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
     d.Q_yy.diagonal().array() += 1e-6; // ensure positive definiteness
     if (d.Q_yy.hasNaN()) {
         fmt::print("Q_yy: \n {}\n", d.Q_yy);
-        fmt::print("Q_yy has NaN\n");
+        print_debug(cur);
+        throw std::runtime_error("Q_yy has NaN");
     }
     nsp.U.noalias() = d.Q_uu + nsp.F_u.transpose() * d.Q_yy * nsp.F_u;
     // compute bar{u}_0
@@ -45,6 +40,7 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
             fmt::print("Q_yy: \n{}\n", d.Q_yy);
             fmt::print("U: \n{}\n", nsp.U);
             kkt_diagnosis(cur);
+            print_debug(cur);
             throw std::runtime_error("U is not positive definite");
         } else
             nsp.llt_ns_.solveInPlace(d.d_u.K);

@@ -5,6 +5,7 @@
 #include <moto/ocp/sym.hpp>
 #include <moto/ocp/usr_func.hpp>
 #include <nanobind/stl/function.h>
+#include <nanobind/stl/variant.h>
 #include <type_cast.hpp>
 
 namespace moto {
@@ -115,13 +116,18 @@ void register_submodule_functional(nb::module_ &m) {
                                                               v->name(), v->dim(), v->field(), v->uid()); })
         .def("to_sx", [](var &v) { return (cs::SX &)static_cast<sym &>(v); }, nb::rv_policy::reference_internal);
 
-    m.def("create_sym", [](const std::string &name, size_t dim, field_t field) { return var(sym::symbol(name, dim, field)); }, nb::arg("name"), nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined);
+    m.def(
+        "create_sym",
+        [](const std::string &name, size_t dim, field_t field, sym::default_val_t default_val) { return var(sym::symbol(name, dim, field, default_val)); },
+        nb::arg("name"), nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined, nb::arg("default_val") = nb::none());
     m.def("get_sym_sx", [](var &&s) {
         auto &ex = static_cast<sym &>(s);
         return cs::SX(ex); }, nb::arg("s"));
-    m.def("create_states", [](const std::string &name, size_t dim) {
-        auto&& [x, y] = sym::states(name, dim);
-        return std::make_pair(var(std::move(x)), var(std::move(y))); }, nb::arg("name"), nb::arg("dim") = dim_tbd);
+    m.def(
+        "create_states", [](const std::string &name, size_t dim, sym::default_val_t default_val = sym::default_val_none_t()) {
+        auto&& [x, y] = sym::states(name, dim, default_val);
+        return std::make_pair(var(std::move(x)), var(std::move(y))); },
+        nb::arg("name"), nb::arg("dim") = dim_tbd, nb::arg("default_val") = nb::none());
     m.def("print_all_sx", [](var_inarg_list &&s) {
         for (sym &ex : s) {
             std::cout << ex.name() << ": " << ex << '\n';

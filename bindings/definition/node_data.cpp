@@ -3,6 +3,7 @@
 #include <nanobind/stl/variant.h>
 #include <type_cast.hpp>
 #include <variant>
+#include <moto/utils/print.hpp>
 
 void register_submodule_node_data(nb::module_ &m) {
     using namespace moto;
@@ -15,6 +16,8 @@ void register_submodule_node_data(nb::module_ &m) {
         //    .def("exprs", [](ocp &self, field_t field) { return expr_inarg_list(self.exprs<shared_expr>(field)); }, nb::arg("field"), "Get the expressions in the field")
         .def("exprs", [](ocp &self, field_t field) -> auto & { return static_cast<const std::vector<shared_expr> &>(self.exprs<shared_expr>(field)); }, nb::arg("field"), "Get the expressions in the field", nb::rv_policy::reference_internal)
         .def_prop_ro("uid", &ocp::uid, "Get the unique identifier of the OCP problem");
+
+    m.def("print_problem", &utils::print_problem);
 
     nb::class_<sym_data>(m, "sym_data")
         .def(nb::init<ocp *>(), nb::arg("prob"), "Constructor for sym_data with OCP problem")

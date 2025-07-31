@@ -38,7 +38,8 @@ void ns_factorization(ns_node_data *cur) {
             nsp.s_c_stacked.bottomRows(d.nc) = _approx[__eq_xu].jac_[__u];
         }
         nsp.lu_eq_.compute(nsp.s_c_stacked);
-        size_t rank = nsp.lu_eq_.rank();
+        nsp.rank = nsp.lu_eq_.rank();
+        auto& rank = nsp.rank;
         // fmt::print("rank of equality constraints: {}\n", rank);
 
         if (rank == 0)
