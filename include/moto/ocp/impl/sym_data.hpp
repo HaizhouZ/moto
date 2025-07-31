@@ -28,6 +28,7 @@ struct sym_data {
     /// dense storage of symbolic variables, indexed by field
     std::array<vector, field::num_sym> value_;
     std::unordered_map<size_t, vector> usr_value_;
+    void print();
 };
 
 def_unique_ptr(sym_data);

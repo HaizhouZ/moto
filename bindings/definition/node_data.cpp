@@ -23,6 +23,7 @@ void register_submodule_node_data(nb::module_ &m) {
         .def(nb::init<ocp *>(), nb::arg("prob"), "Constructor for sym_data with OCP problem")
         .def_prop_ro("prob", [](sym_data &self) -> ocp & { return *self.prob_; })
         .def("__getitem__", [](sym_data &self, const py_var_wrapper &s) -> auto { return self[s]; })
+        .def("print", &sym_data::print, "Print the symbolic data")
         .def("__setitem__", [](sym_data &self, const py_var_wrapper &s, std::variant<vector_ref, scalar_t> d) { 
             if (std::holds_alternative<vector_ref>(d)) {
                 self[s] = std::get<vector_ref>(d);

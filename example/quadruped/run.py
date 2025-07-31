@@ -28,7 +28,6 @@ class pinCasadiModel(cpin.Model):
 dt = moto.inputs("dt", 1, default_val=0.01)
 go2 = load("go2", display=True, verbose=True)
 
-
 model = pin.buildModelFromUrdf(go2.urdf, pin.JointModelFreeFlyer())
 model = pinCasadiModel(model, dt=dt, q_nom=go2.q0)
 
@@ -59,7 +58,7 @@ def make_foot_kin_constr(i: int):
 kin_constr = [make_foot_kin_constr(i) for i in range(len(foot_frames))]
 
 # floating base inverse dynamics
-f_f = [moto.inputs(f"f_{f}", 3) for f in foot_frames]
+f_f = [moto.inputs(f"f_{f}", 3, default_val=np.array([0.0, 0.0, 0.01])) for f in foot_frames]
 inv_dyn = cpin.rnea(model, model.data, model.q, model.v, model.a)
 F_f = [foot_jacs[i].T @ f_f[i] for i in range(len(foot_frames))]
 floating_base_inv_dyn = (inv_dyn * dt - sum(F_f))[:6]
@@ -93,6 +92,7 @@ contact = [make_contact_constr(i, f) for i, f in enumerate(f_f)]
 
 # timestep constraint
 dt_constr = moto.constr("dt", [dt], cs.vcat([1e-4 - dt, dt - 3e-2])).as_ineq()
+# dt_constr = moto.constr("dt_fix", [dt], dt - 1e-2)
 
 
 # implicit euler
@@ -109,16 +109,16 @@ q_nom = moto.params("q_nom", model.nq, default_val=go2.q0)
 state_cost = 1 * cs.sumsqr(model.q - q_nom) + 1e-2 * cs.sumsqr(model.v)
 input_cost = 1e-4 * cs.sumsqr(model.a) + 1e-2 * cs.sumsqr(cs.vcat(f_f))
 
-running_cost = moto.cost("c", [model.q, model.v, model.a, q_nom, *f_f, dt], (state_cost + input_cost) * dt)
-timing_cost = moto.cost("c_t", [dt], 10 * cs.sumsqr(dt - 1e-2))
+running_cost = moto.cost("c", [model.q, model.v, model.a, q_nom, *f_f], (state_cost + input_cost))
+timing_cost = moto.cost("c_t", [dt], 1000 * cs.sumsqr(dt - 1e-2))
 terminal_cost = moto.cost("c", [model.q, model.v, q_nom], state_cost).as_terminal()
 
 prob = moto.ocp.create()
 prob.add(kin_constr + fric + contact)
 prob.add(implicit_euler())
+prob.add(dt_constr)
 prob.add(fb_id_constr)
 prob.add([running_cost, timing_cost])
-prob.add(dt_constr)
 
 prob_term = prob.clone()
 prob_term.add(terminal_cost)
@@ -134,4 +134,12 @@ n0 = g.set_head(g.add(sqp.create_node(prob)))
 n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
 g.add_edge(n0, n1, 100)
 
-sqp.update(10)
+sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
+
+sqp.update(30)
+
+
+# def print_sym(node: moto.sqp.data_type):
+#     node.sym.print()
+
+# sqp.apply_forward(print_sym, early_stop=20)

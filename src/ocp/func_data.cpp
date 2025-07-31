@@ -44,7 +44,8 @@ func_approx_data::func_approx_data(sym_data &primal,
         }
         // bind approx jacobian
         if (f.field() != __cost) {
-            jac_data_.reserve(in_args.size());
+            if (!stored_)
+                jac_data_.reserve(in_args.size());
             jac_.reserve(in_args.size());
             for (size_t i : range(in_args.size())) {
                 if (in_args[i]->field() < field::num_prim) {
@@ -52,16 +53,17 @@ func_approx_data::func_approx_data(sym_data &primal,
                         jac_data_.emplace_back(f.dim(), in_args[i]->dim());
                         jac_data_.back().setZero();
                     }
-                    if (stored_)
-                        jac_.push_back(raw.approx_[f.field()].jac_[in_args[i]->field()].block(
+                    if (stored_) {
+                        jac_.emplace_back(raw.approx_[f.field()].jac_[in_args[i]->field()].block(
                             f_st, raw.prob_->get_expr_start(in_args[i]),
                             f.dim(), in_args[i]->dim()));
-                    else {
+                    } else {
                         jac_.emplace_back(jac_data_.back());
                     }
                 } else { // useless
                     static matrix empty;
-                    jac_data_.emplace_back();
+                    if (!stored_)
+                        jac_data_.emplace_back();
                     jac_.push_back(empty);
                 }
             }

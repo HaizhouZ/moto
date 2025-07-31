@@ -11,7 +11,6 @@ generic_constr::approx_data::approx_data(vector_ref multiplier,
     : func_approx_data(std::move(d)), merit_(&raw.merit_),
       multiplier_(multiplier) {
     auto &f = func_;
-    const auto &in_args = f.in_args();
     if (f.order() >= approx_order::second) { // for hessian from vjp autodiff codegen
         in_args_.push_back(multiplier_);
     }
@@ -19,7 +18,7 @@ generic_constr::approx_data::approx_data(vector_ref multiplier,
 void generic_constr::approx_data::map_merit_jac_from_raw(decltype(merit_data::jac_) &raw, std::vector<row_vector_ref> &jac) {
     auto &in_args = func_.in_args();
     jac.clear();
-    for (size_t i : range(in_args_.size())) {
+    for (size_t i : range(in_args.size())) {
         if (in_args[i]->field() < field::num_prim) {
             jac.push_back(raw[in_args[i]->field()].segment(problem()->get_expr_start(in_args[i]), in_args[i]->dim()));
         } else { // useless
@@ -96,18 +95,19 @@ void generic_constr::value_impl(func_approx_data &data) const {
 } // namespace moto
 void generic_constr::jacobian_impl(func_approx_data &data) const {
     // compute jacobian first
+    auto &d = static_cast<approx_data &>(data);
     jacobian(data);
     // update multiplier - jacobian product
-    auto &d = static_cast<approx_data &>(data);
-    for (size_t i = 0; i < d.in_arg_data().size(); i++) {
-        if (d.merit_jac_[i].size() != 0) // skip if no jacobian for this input
+    for (size_t i = 0; i < in_args_.size(); i++) {
+        if (d.merit_jac_[i].size() != 0) { // skip if no jacobian for this input
             if (d.stored_) {
                 d.merit_jac_[i].noalias() += d.multiplier_.transpose() * d.jac_[i];
             } else {
                 d.merit_jac_[i].noalias() += d.multiplier_.transpose() * d.jac_data_[i];
             }
-        // fmt::print("{}\t{}:i\t{:.3}\n", i, name(), d.in_args_[i].transpose());
-        // fmt::print("{}\t{}:jac\n{:.3}\n", i, name(), d.jac_[i]);
+            // fmt::print("{}\t{}:i\t{:.3}\n", i, name(), d.in_args_[i].transpose());
+            // fmt::print("{}\t{}:jac\n{:.3}\n", i, name(), d.jac_[i]);
+        }
     }
 }
 constr::constr(const std::string &name, approx_order order, size_t dim, field_t field)

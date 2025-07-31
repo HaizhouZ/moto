@@ -15,7 +15,7 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
     d.Q_yy.array() /= 2;
     /// @todo: temporary
     d.Q_yy = d.Q_yy + d.Q_yy.transpose().eval();
-    d.Q_yy.diagonal().array() += 1e-6; // ensure positive definiteness
+    // d.Q_yy.diagonal().array() += 1e-6; // ensure positive definiteness
     if (d.Q_yy.hasNaN()) {
         fmt::print("Q_yy: \n {}\n", d.Q_yy);
         print_debug(cur);

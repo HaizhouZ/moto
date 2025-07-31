@@ -40,7 +40,9 @@ std::string process_generated_code(
     }
     size_t n_in = sx_inputs.size();
 
-    bool vec_out = sx_outputs.size() == 1 && sx_outputs[0].is_column() && !is_hessian;
+    bool is_jac = func_name.find("_jac") != std::string::npos;
+
+    bool vec_out = !is_jac && !is_hessian;
 
     // Lambda for generating replacement strings
     auto make_input_ref_access = [&](int arg_idx, int index) -> std::string {
@@ -236,7 +238,7 @@ void run(
     // Step 5: Compile if necessary
     fs::path so_file_path = fs::path(output_dir) / ("lib" + func_name + ".so");
     fs::path json_path = fs::path(output_dir) / (func_name + ".json");
-    std::string md5_hash = compute_md5(raw_c_path);
+    std::string md5_hash = compute_md5(raw_c_path) + compute_md5(final_cpp_path);
 
     bool needs_compile = true;
     bool json_exists = fs::exists(json_path);

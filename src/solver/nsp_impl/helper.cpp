@@ -15,19 +15,9 @@ void kkt_diagnosis(ns_node_data *cur) {
     /// @todo some more maybe about constraints
 }
 
-void print_sym(ns_node_data *cur) {
-    auto p = cur->sym_->prob_;
-    for (auto f : concat_fields(primal_fields, std::array{__p, __usr_var})) {
-        if (p->dim(f) == 0)
-            continue; // skip empty fields
-        fmt::println("Field {}: dim {}", field::name(f), p->dim(f));
-        for (const sym &s : p->exprs(f)) {
-            fmt::println("{}: dim {} value {}", s.name(), s.dim(), cur->sym_->get(s).transpose());
-        }
-    }
-}
+
 void print_debug(ns_node_data *cur) {
-    print_sym(cur);
+    cur->sym_->print();
     fmt::println("F_u: \n{}", cur->nsp_->F_u);
     fmt::println("F_0_k: \n{}", cur->nsp_->F_0_k.transpose());
     fmt::println("F_0_K: \n{}", cur->nsp_->F_0_K);

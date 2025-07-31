@@ -22,6 +22,18 @@ sym_data::sym_data(ocp *prob) : prob_(prob) {
         }
     }
 }
+
+void sym_data::print() {
+    auto p = prob_;
+    for (auto f : concat_fields(primal_fields, std::array{__p, __usr_var})) {
+        if (p->dim(f) == 0)
+            continue; // skip empty fields
+        fmt::println("Field {}: dim {}", field::name(f), p->dim(f));
+        for (const sym &s : p->exprs(f)) {
+            fmt::println("{}: dim {} value {}", s.name(), s.dim(), get(s).transpose());
+        }
+    }
+}
 vector_ref sym_data::get(const sym &s) {
     if (s.field() == __usr_var)
         return usr_value_.at(s.uid());

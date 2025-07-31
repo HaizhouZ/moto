@@ -45,7 +45,8 @@ void ns_sqp::update(size_t n_iter) {
         cost_all += n->dense_->cost_;
     });
     fmt::print("initial cost_total: {}\n", cost_all.load());
-    graph_.for_each_parallel(data::update_approx);
+    // graph_.for_each_parallel(data::update_approx);
+    graph_.for_each_parallel([this](data *cur) { cur->update_approximation(); });
 
     // print statistics header
 

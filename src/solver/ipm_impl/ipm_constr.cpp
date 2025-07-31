@@ -61,8 +61,8 @@ void ipm_constr::update_linesearch_config(ipm::data_map_t &data, workspace_data 
     }
     // ls_cfg.primal.alpha_max = std::max(ls_cfg.primal.alpha_max, 1e-10);
     // ls_cfg.dual.alpha_max = std::m ax(ls_cfg.dual.alpha_max, 1e-10);
-    assert(ls_cfg.primal.alpha_max > 1e-10);
-    assert(ls_cfg.dual.alpha_max > 1e-10);
+    assert(ls_cfg.primal.alpha_max > 1e-20);
+    assert(ls_cfg.dual.alpha_max > 1e-20);
 }
 void ipm_constr::finalize_predictor_step(ipm::data_map_t &data, workspace_data *cfg) const {
     auto &d = data.as<ipm_data>();

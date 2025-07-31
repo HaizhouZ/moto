@@ -22,8 +22,21 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def("update", [](ns_sqp &self, size_t n_iter) {
             nb::gil_scoped_release rel;
             self.update(n_iter); }, nb::arg("n_iter") = 1, "Update the SQP solver for a given number of iterations")
+        .def_rw("settings", &ns_sqp::settings, "Get the settings of the SQP solver")
         .def("forward", &ns_sqp::forward)
         .def("create_node", &ns_sqp::create_node, nb::arg("formulation"), nb::rv_policy::reference, "Create a new node in the SQP graph with the given OCP problem formulation");
+
+    nb::class_<ns_sqp::settings_t>(sqp, "settings_type")
+        .def_rw("mu_method", &ns_sqp::settings_t::mu_method, "Adaptive mu method for the IPM solver")
+        .def_rw("adaptive_mu_allowed", &ns_sqp::settings_t::adaptive_mu_allowed, "Whether to adapt mu during line search");
+
+    nb::enum_<moto::solver::ipm_config::adaptive_mu_t> enum_binder(sqp, "adaptive_mu_t");
+
+    // Iterate over all enum values provided by magic_enum
+    for (auto [value, name] : magic_enum::enum_entries<moto::solver::ipm_config::adaptive_mu_t>()) {
+        enum_binder.value(std::string(name).c_str(), value);
+    }
+    enum_binder.export_values(); // Makes enum members accessible like MyEnum.MEMBER
 
     nb::class_<ns_sqp::node_type>(sqp, "node_type")
         .def_prop_ro("addr", [](ns_sqp::node_type &self) { return fmt::format("{:p}", static_cast<const void *>(self.data_)); }, "Get the data address associated with this node")
