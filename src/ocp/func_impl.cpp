@@ -14,16 +14,25 @@ func_approx_data_ptr_t generic_func::create_approx_data(sym_data &primal, merit_
                                              name(), field::name(field())));
     return std::make_unique<func_approx_data>(primal, raw, shared, *this);
 }
+void generic_func::compute_approx(func_approx_data &data,
+                                  bool eval_val, bool eval_jac, bool eval_hess) const {
+    if (eval_val)
+        value_impl(data);
+    if (eval_jac)
+        jacobian_impl(data);
+    if (eval_hess)
+        hessian_impl(data);
+}
 void generic_func::load_external_impl(const std::string &path) {
     auto funcs = load_approx(name_, true, order_ >= approx_order::first, order_ >= approx_order::second);
-    value = [eval = funcs[0]](func_approx_data &d) {
+    value = [eval = std::move(funcs[0])](func_approx_data &d) {
         eval.invoke(d.in_arg_data(), d.v_);
     };
-    jacobian = [jac = funcs[1]](func_approx_data &d) {
+    jacobian = [jac = std::move(funcs[1])](func_approx_data &d) {
         jac.invoke(d.in_arg_data(), d.jac_);
     };
 
-    hessian = [hess = funcs[2]](func_approx_data &d) {
+    hessian = [hess = std::move(funcs[2])](func_approx_data &d) {
         hess.invoke(d.in_arg_data(), d.merit_hess_);
     };
 }
@@ -42,7 +51,7 @@ void generic_func::set_from_casadi(const var_inarg_list &in_args, const cs::SX &
     add_arguments(in_args);
     gen_.out_ = out;
 }
-static utils::cs_codegen::worker_list func_codegen_workers_;
+static utils::cs_codegen::job_list func_codegen_workers_;
 std::vector<generic_func *> cg_funcs_;
 void generic_func::finalize_impl() {
     if (order_ != approx_order::none && dim_ == dim_tbd) {

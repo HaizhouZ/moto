@@ -79,7 +79,7 @@ void generic_constr::finalize_impl() {
 }
 
 void generic_constr::value_impl(func_approx_data &data) const {
-    value(data);
+    base::value_impl(data);
     // compute contribution to merit function
     auto &d = static_cast<approx_data &>(data);
     scalar_t res = d.multiplier_.dot(d.v_);

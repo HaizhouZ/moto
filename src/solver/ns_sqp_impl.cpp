@@ -2,6 +2,7 @@
 #include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
 #include <moto/solver/ns_sqp.hpp>
 #include <moto/utils/field_conversion.hpp>
+#include <numeric>
 
 #define ENABLE_TIMED_BLOCK
 #include <moto/utils/timed_block.hpp>
@@ -31,30 +32,52 @@ stat_item stats[] = {{"no.", 3},
                      {"alpha_d"},
                      {"ipm_mu", stat_width + 2}};
 
+void ns_sqp::print_stats(int i_iter, const kkt_info &info, bool has_ineq) {
+    scalar_t stats_value[] = {i_iter, info.objective, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res,
+                              settings.alpha_primal, settings.alpha_dual, settings.mu};
+    std::string_view ipm_flags;
+    if (has_ineq && settings.ipm_enable_corrector()) {
+        if (settings.ipm_accept_corrector()) {
+            ipm_flags = "[c:a]";
+        } else {
+            ipm_flags = "[c:r]";
+        }
+    }
+    size_t idx_stat = 0;
+    for (auto &item : stats) {
+        if (item.name == "no.") {
+            fmt::print("| {:<{}} |", i_iter < 0 ? "--" : std::to_string(i_iter), item.width);
+        } else if (item.name == "ipm_mu") {
+            fmt::print("| {:<{}} |", has_ineq ? fmt::format("{:.6e}{}", stats_value[idx_stat], ipm_flags) : "---------", item.width);
+        } else {
+            fmt::print("| {:<{}.6e} |", stats_value[idx_stat], item.width);
+        }
+        idx_stat++;
+    }
+
+    fmt::print("\n");
+};
+
 void ns_sqp::update(size_t n_iter) {
     fmt::print("Initialization for SQP...\n");
     graph_.for_each_parallel([this](data *cur) {
         // setup solver settings
         cur->for_each_constr([this](const generic_func &c, func_approx_data &d) { c.setup_workspace_data(d, &settings); });
-        cur->update_approximation(true);
+        cur->update_approximation(node_data::update_mode::eval_val);
         // initialize the data
         solver::ineq_soft::initialize(cur);
     });
-    std::atomic<double> cost_all{0.};
-    graph_.for_each_parallel([&cost_all](solver::data_base *n) {
-        cost_all += n->dense_->cost_;
+    graph_.for_each_parallel([](data *cur) {
+        cur->update_approximation(node_data::update_mode::eval_derivatives);
     });
-    fmt::print("initial cost_total: {}\n", cost_all.load());
-    // graph_.for_each_parallel(data::update_approx);
-    graph_.for_each_parallel([this](data *cur) { cur->update_approximation(); });
 
     // print statistics header
-
     size_t widths[] = {3, stat_width, stat_width, stat_width, stat_width, stat_width, stat_width, stat_width};
     for (const auto &term : stats) {
         term.print_header();
     }
     fmt::print("\n");
+    print_stats(-1, compute_kkt_info(), false); // print initial stats
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     //// main loop
     for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
@@ -66,7 +89,7 @@ void ns_sqp::update(size_t n_iter) {
             }
         }
         settings.ls_config_reset();
-        size_t n_worker = get_num_threads();
+        size_t n_worker = graph_.n_jobs();
         settings_t::worker setting_per_thread[n_worker];
         auto finalize_bound_and_set_to_max = [&]() {
             for (size_t i : range(n_worker)) {
@@ -113,6 +136,7 @@ void ns_sqp::update(size_t n_iter) {
             settings.adaptive_mu_update(main_worker);
             // use the new mu to update the rhs jacobian
             graph_.for_each_parallel(solver::ineq_soft::first_order_correction_start);
+            /// @todo compute the residuals
             // solve the problem again with updated mu
             graph_.apply_backward(solver::ns_riccati::riccati_recursion_correction, true);
             graph_.for_each_parallel(solver::ns_riccati::compute_primal_sensitivity_correction);
@@ -141,15 +165,24 @@ void ns_sqp::update(size_t n_iter) {
 
         graph_.for_each_parallel(data::update_approx);
         // );
-        kkt_info info;
-        for (auto n : graph_.flatten_nodes()) {
-            info.objective += n->cost();
-            info.inf_prim_res = std::max(info.inf_prim_res, n->inf_prim_res_);
-            info.inf_dual_res = std::max(info.inf_dual_res, n->dense().jac_[__u].cwiseAbs().maxCoeff());
-            info.inf_comp_res = std::max(info.inf_comp_res, n->inf_comp_res_);
-        }
-        size_t step = 0;
-        graph_.apply_forward([&step, &info](node_data *cur, node_data *next) {
+        kkt_info info = compute_kkt_info();
+        // print statistics
+        print_stats(i_iter, info, has_ineq);
+        // });
+        moto::utils::timing_storage<"all">::get().count = n_iter;
+    }
+}
+ns_sqp::kkt_info ns_sqp::compute_kkt_info() {
+    kkt_info info;
+    for (auto n : graph_.flatten_nodes()) {
+        info.objective += n->cost();
+        info.inf_prim_res = std::max(info.inf_prim_res, n->inf_prim_res_);
+        info.inf_dual_res = std::max(info.inf_dual_res, n->dense().jac_[__u].cwiseAbs().maxCoeff());
+        info.inf_comp_res = std::max(info.inf_comp_res, n->inf_comp_res_);
+    }
+    size_t step = 0;
+    graph_.apply_forward(
+        [&step, &info](node_data *cur, node_data *next) {
             if (next != nullptr) [[likely]] {
                 // cancellation of jacobian from y to x
                 static row_vector tmp;
@@ -164,33 +197,8 @@ void ns_sqp::update(size_t n_iter) {
             // fmt::println("{}", cur->dense().jac_[__x].cwiseAbs().maxCoeff());
             // fmt::println("{}", cur->dense().jac_[__u].cwiseAbs().maxCoeff());
             // fmt::println("{}", cur->dense().jac_[__y].cwiseAbs().maxCoeff());
-        });
-        // print statistics
-        scalar_t stats_value[] = {i_iter, info.objective, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res,
-                                  settings.alpha_primal, settings.alpha_dual, settings.mu};
-        std::string_view ipm_flags;
-        if (has_ineq && settings.ipm_enable_corrector()) {
-            if (settings.ipm_accept_corrector()) {
-                ipm_flags = "[c:a]";
-            } else {
-                ipm_flags = "[c:r]";
-            }
-        }
-        size_t idx_stat = 0;
-        for (auto &item : stats) {
-            if (item.name == "no.") {
-                fmt::print("| {:<{}} |", size_t(i_iter), item.width);
-            } else if (item.name == "ipm_mu") {
-                fmt::print("| {:<{}} |", has_ineq ? fmt::format("{:.6e}{}", stats_value[idx_stat], ipm_flags) : "---------", item.width);
-            } else {
-                fmt::print("| {:<{}.6e} |", stats_value[idx_stat], item.width);
-            }
-            idx_stat++;
-        }
-
-        fmt::print("\n");
-        // });
-        moto::utils::timing_storage<"all">::get().count = n_iter;
-    }
+        },
+        true);
+    return info;
 }
 } // namespace moto

@@ -40,9 +40,9 @@ class generic_func : public expr {
     void set_from_casadi(const var_inarg_list &in_args, const cs::SX &out);
 
     virtual void finalize_impl() override;
-    virtual void value_impl([[maybe_unused]] func_approx_data &data) const { value(data); }
-    virtual void jacobian_impl([[maybe_unused]] func_approx_data &data) const { jacobian(data); }
-    virtual void hessian_impl([[maybe_unused]] func_approx_data &data) const { hessian(data); }
+    virtual void value_impl(func_approx_data &data) const { value(data); }
+    virtual void jacobian_impl(func_approx_data &data) const { jacobian(data); }
+    virtual void hessian_impl(func_approx_data &data) const { hessian(data); }
     virtual void load_external_impl(const std::string &path = "gen");
 
     generic_func(const generic_func &) = default;
@@ -89,22 +89,11 @@ class generic_func : public expr {
     }
 
     virtual func_approx_data_ptr_t create_approx_data(sym_data &primal,
-                                                    merit_data &raw,
-                                                    shared_data &shared) const;
+                                                      merit_data &raw,
+                                                      shared_data &shared) const;
     void compute_approx(func_approx_data &data,
-                        bool eval_val, bool eval_jac = false, bool eval_hess = false) const {
-        if (eval_val)
-            value_impl(data);
-        if (eval_jac)
-            jacobian_impl(data);
-        if (eval_hess)
-            hessian_impl(data);
-    }
-    template <typename T>
-    void compute_approx(T &data,
-                        bool eval_val, bool eval_jac = false, bool eval_hess = false) const {
-        compute_approx(dynamic_cast<func_approx_data &>(data), eval_val, eval_jac, eval_hess);
-    }
+                        bool eval_val, bool eval_jac = false, bool eval_hess = false) const;
+
     void load_external(const std::string &path = "gen") {
         load_external_impl(path);
     }

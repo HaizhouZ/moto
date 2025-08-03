@@ -67,43 +67,61 @@ node_data::node_data(const ocp_ptr_t &prob)
         sparse_[_f.field()].push_back(std::move(p));
     });
 }
-void node_data::update_approximation(bool eval_only) {
+void node_data::update_approximation(update_mode config) {
     /// @todo: always eval residual?
     // call to precompute
-    dense_->cost_ = 0.;
-    dense_->merit_ = 0.;
-    // set merit jacobian to zero
-    for (auto field : primal_fields) {
-        dense_->jac_[field].setZero();
-        dense_->jac_modification_[field].setZero();
+    bool update_cost = config == update_mode::eval_val || config == update_mode::eval_all;
+    if (update_cost) {
+        dense_->cost_ = 0.;
+        dense_->merit_ = 0.;
     }
-    for (auto &hess_l_0 : dense_->hessian_) {
-        for (auto &hess_l_1 : hess_l_0) {
-            hess_l_1.setZero();
+    // set merit jacobian to zero
+    if (config > update_mode::eval_val) {
+        for (auto field : primal_fields) {
+            dense_->jac_[field].setZero();
+            dense_->jac_modification_[field].setZero();
         }
+        if (config >= update_mode::eval_hess)
+            for (auto &hess_l_0 : dense_->hessian_) {
+                for (auto &hess_l_1 : hess_l_0) {
+                    hess_l_1.setZero();
+                }
+            }
     }
     for (const generic_custom_func &f : prob_->exprs(__pre_comp)) {
-        f.custom_call((*shared_)[f]);
+        f.custom_call((*shared_)[f]); ///< @todo pass update mode
     }
+    bool no_eval = config != update_mode::eval_val && config != update_mode::eval_all;
+    bool no_jac = config != update_mode::eval_jac && config != update_mode::eval_derivatives && config != update_mode::eval_all;
+    bool no_hess = config != update_mode::eval_hess && config != update_mode::eval_derivatives && config != update_mode::eval_all;
     for_each_func(prob_,
-                  [this, eval_only](size_t idx, const generic_func &_f) {
-                      _f.compute_approx(*sparse_[_f.field()][idx], true,
-                                        !eval_only && _f.order() >= approx_order::first,
-                                        !eval_only && _f.order() >= approx_order::second);
+                  [=, this](size_t idx, const generic_func &_f) {
+                      _f.compute_approx(*sparse_[_f.field()][idx],
+                                        !no_eval && _f.order() >= approx_order::zero,
+                                        !no_jac && _f.order() >= approx_order::first,
+                                        !no_hess && _f.order() >= approx_order::second);
                   });
-    inf_prim_res_ = 0.;
-    for (const auto &field_data : dense_->approx_) {
-        if (field_data.v_.size() == 0)
-            continue; // skip empty fields
-        inf_prim_res_ = std::max(field_data.v_.cwiseAbs().maxCoeff(), inf_prim_res_);
+    if (update_cost) {
+        inf_prim_res_ = 0.;
+        for (const auto &field_data : dense_->approx_) {
+            if (field_data.v_.size() == 0)
+                continue; // skip empty fields
+            inf_prim_res_ = std::max(field_data.v_.cwiseAbs().maxCoeff(), inf_prim_res_);
+        }
+        inf_comp_res_ = 0.;
+        for (const auto &comp : dense_->comp_) {
+            if (comp.size() == 0)
+                continue; // skip empty fields
+            inf_comp_res_ = std::max(comp.cwiseAbs().maxCoeff(), inf_comp_res_);
+        }
+        dense_->merit_ += dense_->cost_;
     }
-    inf_comp_res_ = 0.;
-    for (const auto &comp : dense_->comp_) {
-        if (comp.size() == 0)
-            continue; // skip empty fields
-        inf_comp_res_ = std::max(comp.cwiseAbs().maxCoeff(), inf_comp_res_);
+}
+void node_data::print_residuals() const {
+    for (auto f : merit_data::stored_constr_fields) {
+        fmt::println("Field {}: dim {} residual {}", field::name(f), dense_->approx_[f].v_.size(),
+                     dense_->approx_[f].v_.transpose());
     }
-    dense_->merit_ += dense_->cost_;
 }
 namespace impl {
 void data_mgr::create_data_batch(const ocp_ptr_t &prob, size_t N) {

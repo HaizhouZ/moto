@@ -102,12 +102,12 @@ struct func_arg_map {
  */
 struct func_approx_data : public func_arg_map {
     bool stored_ = false; ///< true if the data is stored in the merit_data
-    vector v_data_; ///< value data
+    vector v_data_;       ///< value data
     /// jacobian data, by default index correspond to @ref func_arg_map::in_args_
     std::vector<matrix> jac_data_;
-    merit_data* merit_data_ = nullptr; ///< reference to the merit data
+    merit_data *merit_data_ = nullptr; ///< reference to the merit data
     ///////////////////////////////////////////////////
-    vector_ref v_;  ///< value ref
+    vector_ref v_;                ///< value ref
     std::vector<matrix_ref> jac_; ///< jacobian references
     /// jacobian for cost, index corresponds to @ref func_arg_map::in_args_
     std::vector<row_vector_ref> merit_jac_;

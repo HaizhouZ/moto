@@ -20,10 +20,10 @@ struct node_data {
     scalar_t inf_comp_res_ = 0.;
 
   protected:
-    ocp_ptr_t prob_;                /// < pointer to the problem
-    sym_data_ptr_t sym_;            /// < dense storage of symbolic data
-    merit_data_ptr_t dense_; /// <dense storage of the func data
-    shared_data_ptr_t shared_;      /// < shared data
+    ocp_ptr_t prob_;           /// < pointer to the problem
+    sym_data_ptr_t sym_;       /// < dense storage of symbolic data
+    merit_data_ptr_t dense_;   /// <dense storage of the func data
+    shared_data_ptr_t shared_; /// < shared data
     shifted_array<std::vector<func_approx_data_ptr_t>, field::num_func, __dyn>
         sparse_; /// < sparse view per func
 
@@ -57,12 +57,19 @@ struct node_data {
 
     scalar_t cost() const { return dense_->cost_; }
 
+    enum class update_mode : size_t {
+        eval_val = 0,     ///< evaluate value
+        eval_jac,         ///< evaluate jacobian
+        eval_hess,        ///< evaluate hessian
+        eval_derivatives, ///< evaluate derivatives (jacobian, hessian)
+        eval_all,         ///< evaluate all (value, jacobian, hessian)
+    };
     /**
      * @brief update the approximation data and compute primal and comp residuals
      *
      * @param eval_only
      */
-    void update_approximation(bool eval_only = false);
+    void update_approximation(update_mode config = update_mode::eval_all);
 
     template <std::array fields, typename Callback>
         requires std::is_invocable_r_v<void, Callback, const generic_func &, func_approx_data &> &&
@@ -85,6 +92,8 @@ struct node_data {
 
     void clear_merit_jac();
     void clear_merit_hessian();
+
+    void print_residuals() const;
 };
 } // namespace moto
 

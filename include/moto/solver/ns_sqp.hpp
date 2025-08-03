@@ -41,6 +41,10 @@ struct ns_sqp {
 
     impl::data_mgr mem_;
     directed_graph<node_type> graph_;
+
+  private:
+    void print_stats(int i_iter, const kkt_info& info, bool has_ineq);
+    kkt_info compute_kkt_info();
 };
 
 } // namespace moto

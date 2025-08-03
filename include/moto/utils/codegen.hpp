@@ -4,7 +4,6 @@
 #include <moto/core/fields.hpp> // Assuming moto::field_t is defined here
 #include <moto/ocp/sym.hpp>
 
-#include <future>
 #include <mutex>
 
 // 3rd-party includes
@@ -22,37 +21,19 @@ using json = nlohmann::json;
 std::string compute_md5(const std::string &file_path);
 
 namespace cs_codegen {
-struct worker {
-    using future_type = std::shared_future<void>;
-    future_type future;
-    void wait_until_finished() {
-        if (future.valid()) {
-            future.get();
-        }
-    }
-    worker(future_type &&f) : future(std::move(f)) {}
-};
 
-struct worker_list {
-    std::vector<worker> workers;
-    void wait_until_finished() {
-        try {
-#pragma omp parallel for schedule(static)
-            for (auto &w : workers) {
-                w.wait_until_finished();
-            }
-        } catch (...) {
-            throw;
-        }
+struct job_list {
+    using job_type = std::function<void()>;
+    std::vector<job_type> jobs;
+    void wait_until_finished();
+    void add(job_type &&w) {
+        jobs.emplace_back(std::move(w));
     }
-    void add(worker::future_type &&w) {
-        workers.emplace_back(std::move(w));
+    void add(const job_list &other) {
+        jobs.insert(jobs.end(), other.jobs.begin(), other.jobs.end());
     }
-    void add(const worker_list &other) {
-        workers.insert(workers.end(), other.workers.begin(), other.workers.end());
-    }
-    void add(worker_list &&other) {
-        workers.insert(workers.end(), std::make_move_iterator(other.workers.begin()), std::make_move_iterator(other.workers.end()));
+    void add(job_list &&other) {
+        jobs.insert(jobs.end(), std::make_move_iterator(other.jobs.begin()), std::make_move_iterator(other.jobs.end()));
     }
 };
 
@@ -78,11 +59,11 @@ struct task {
     std::string prefix = "";
     bool verbose = false; // verbose output
 
-    void finalize(worker_list &workers);
+    void finalize(job_list &jobs);
 };
 
 // Public entry point to start code generation
-worker_list generate_and_compile(task &&_task);
+job_list generate_and_compile(task &&_task);
 
 // // Waits for all compilation threads to finish
 void wait_until_generated();

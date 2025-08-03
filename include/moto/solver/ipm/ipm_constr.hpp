@@ -21,12 +21,7 @@ class ipm_constr final : public ineq_constr {
         vector scaled_res_;            ///< residuals after NT scaling (Nr_g - r_s) T^{-1} = T{-1} N r_g + T^{-1} mu
         vector d_slack_;               ///< newton step for slack variables
         vector d_multipler_;           ///< newton step for multipliers
-        approx_data(base::approx_data &&rhs)
-            : base::approx_data(std::move(rhs)) {
-            slack_.resize(func_.dim());
-            diag_scaling.resize(func_.dim());
-            scaled_res_.resize(func_.dim());
-        }
+        approx_data(base::approx_data &&rhs);
     };
     using base::base;
     using ipm_data = data_type<ipm_constr>;

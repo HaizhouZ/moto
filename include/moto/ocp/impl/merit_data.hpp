@@ -23,7 +23,7 @@ struct merit_data {
     /// raw approximation data of constraints, indexed by field
     array_type<raw_approx, stored_constr_fields> approx_;
     /// dual variables of constratins, indexed by field
-    shifted_array<vector, field::num_constr, __dyn> dual_;
+    array_type<vector, constr_fields> dual_;
     /// complementarity of each inequality fields
     array_type<vector, ineq_constr_fields> comp_;
     scalar_t merit_; ///< cost + sum of all constraints multipler-residual products

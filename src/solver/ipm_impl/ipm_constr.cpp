@@ -2,8 +2,17 @@
 
 namespace moto {
 namespace solver {
+ipm_constr::approx_data::approx_data(base::approx_data &&rhs)
+    : base::approx_data(std::move(rhs)) {
+    slack_.resize(func_.dim());
+    slack_.setZero();
+    diag_scaling.resize(func_.dim());
+    diag_scaling.setZero();
+    scaled_res_.resize(func_.dim());
+    scaled_res_.setZero();
+}
 void ipm_constr::initialize(ipm::data_map_t &data) const {
-    value_impl(data);
+    // value_impl(data);
     auto &d = data.as<ipm_data>();
     d.g_ = d.v_;
     d.slack_ = (-d.g_).cwiseMax(1e-2); // clip
@@ -11,6 +20,11 @@ void ipm_constr::initialize(ipm::data_map_t &data) const {
     d.multiplier_.array() = d.ipm_cfg->mu / d.slack_.array();
     d.multiplier_ = d.multiplier_.cwiseMin(1e3); // clip
     d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array();
+    if (d.multiplier_.hasNaN() || d.slack_.hasNaN()) {
+        fmt::print("multiplier: {}\n", d.multiplier_);
+        fmt::print("slack: {}\n", d.slack_);
+        throw std::runtime_error("ipm_constr initialization failed due to NaN");
+    }
 }
 void ipm_constr::finalize_newton_step(ipm::data_map_t &data) const {
     auto &d = data.as<ipm_data>();

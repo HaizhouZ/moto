@@ -43,22 +43,25 @@ v_f = cs.hcat([cpin.getFrameVelocity(model, model.data, f, pin.LOCAL_WORLD_ALIGN
 foot_jacs = [cpin.getFrameJacobian(model, model.data, f, pin.LOCAL_WORLD_ALIGNED)[:3, :] for f in foot_idx]
 
 # kinematics constraint
-active_foot = moto.params("af", len(foot_idx), default_val=1)
+active_foot = [moto.params(f"af_{f}", 1, default_val=1) for f in foot_frames]  # active foot indicator
 k_f = moto.params("k_f", default_val=100)  # kinematics constraint gain
+
+z_clip = moto.params("z_c", 1, default_val=0.01)  # minimum height for the foot to be considered in contact
 
 
 def make_foot_kin_constr(i: int):
     return moto.constr(
         f"kin_{foot_frames[i]}",
-        [model.q, model.v, k_f, active_foot],
-        cs.vcat([v_f[:2, i], k_f * z_f[i] + v_f[2, i]]) * active_foot[i],
+        [model.q, model.v, k_f, *active_foot, z_clip],
+        cs.vcat([v_f[:2, i], k_f * cs.tanh(z_f[i]) * z_clip + v_f[2, i]]) * active_foot[i],
+        # cs.vcat([v_f[:2, i], k_f * z_f[i]  + v_f[2, i]]) * active_foot[i],
     )
 
 
 kin_constr = [make_foot_kin_constr(i) for i in range(len(foot_frames))]
 
 # floating base inverse dynamics
-f_f = [moto.inputs(f"f_{f}", 3, default_val=np.array([0.0, 0.0, 0.01])) for f in foot_frames]
+f_f = [moto.inputs(f"f_{f}", 3, default_val=np.array([0.0, 0.0, 0.1])) for f in foot_frames]
 inv_dyn = cpin.rnea(model, model.data, model.q, model.v, model.a)
 F_f = [foot_jacs[i].T @ f_f[i] for i in range(len(foot_frames))]
 floating_base_inv_dyn = (inv_dyn * dt - sum(F_f))[:6]
@@ -85,7 +88,7 @@ fric = [make_fric_cone(i, f) for i, f in enumerate(f_f)]
 
 # foot force contact constraints
 def make_contact_constr(i: int, f: moto.sym):
-    return moto.constr(f"contact_{foot_frames[i]}", [active_foot, f], (1 - active_foot[i]) * f)
+    return moto.constr(f"contact_{foot_frames[i]}", [*active_foot, f], (1 - active_foot[i]) * f)
 
 
 contact = [make_contact_constr(i, f) for i, f in enumerate(f_f)]
@@ -104,9 +107,13 @@ def implicit_euler():
     )
 
 
-q_nom = moto.params("q_nom", model.nq, default_val=go2.q0)
+q_d = np.copy(go2.q0)
 
-state_cost = 1 * cs.sumsqr(model.q - q_nom) + 1e-2 * cs.sumsqr(model.v)
+q_nom = moto.params("q_nom", model.nq, default_val=q_d)
+
+q_nom_res = model.q - q_nom
+
+state_cost = 10.0 * cs.sumsqr(q_nom_res[:7]) + 1.0 * cs.sumsqr(q_nom[7:]) + 1e-2 * cs.sumsqr(model.v)
 input_cost = 1e-4 * cs.sumsqr(model.a) + 1e-2 * cs.sumsqr(cs.vcat(f_f))
 
 running_cost = moto.cost("c", [model.q, model.v, model.a, q_nom, *f_f], (state_cost + input_cost))
@@ -128,18 +135,87 @@ print("--" * 20)
 # moto.print_problem(prob_term)
 # exit(0)
 
+N_horizon = 100
+
 sqp = moto.sqp(n_job=1)
 g = sqp.graph
 n0 = g.set_head(g.add(sqp.create_node(prob)))
 n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
-g.add_edge(n0, n1, 100)
+g.add_edge(n0, n1, N_horizon)
 
 sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
+# sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
+# sqp.settings.ipm_conditional_corrector = True
 
-sqp.update(30)
 
+# setup gait
+steps = 2
+nodes_per_step = 40
+total_gait_steps = steps * nodes_per_step
+stance_length = int(N_horizon - total_gait_steps) / 2
+step = 0
+node_idx = 0
+
+
+def gait_setup(data: moto.sqp.data_type):
+    global step, node_idx
+    if node_idx >= stance_length and node_idx + stance_length < N_horizon:
+        switch_step  = (node_idx - stance_length) % nodes_per_step == 0
+        if switch_step:
+            step += 1
+        if step % 2 == 0:
+            data.value[active_foot[0]] = 1
+            data.value[active_foot[3]] = 1
+            data.value[active_foot[1]] = 0
+            data.value[active_foot[2]] = 0
+        elif step % 2 == 1:
+            data.value[active_foot[0]] = 0
+            data.value[active_foot[3]] = 0
+            data.value[active_foot[1]] = 1
+            data.value[active_foot[2]] = 1
+    else:
+        data.value[active_foot[0]] = 1
+        data.value[active_foot[1]] = 1
+        data.value[active_foot[2]] = 1
+        data.value[active_foot[3]] = 1
+    # print(node_idx, data.value[active_foot[0]], data.value[active_foot[1]], data.value[active_foot[2]], data.value[active_foot[3]])
+    node_idx += 1
+
+
+sqp.apply_forward(gait_setup)
+exit(0)
+sqp.update(6)
+
+q_res = []
+dt_res = []
+node_idx = 0
+
+
+def get_sym(node: moto.sqp.data_type):
+    global node_idx
+    q_res.append(node.value[model.q])
+    dt_res.append(node.value[dt])
+    node_idx += 1
+    if node_idx >= N_horizon:
+        q_res.append(node.value[model.qn])
+
+
+sqp.apply_forward(get_sym)
+
+import time
+
+while True:
+    for i in range(len(q_res)):
+        start = time.perf_counter()
+        go2.display(q_res[i])
+        if i is not N_horizon:
+            dt_ = dt_res[i]
+            while time.perf_counter() - start < dt_:
+                pass
+    time.sleep(0.5)
 
 # def print_sym(node: moto.sqp.data_type):
 #     node.sym.print()
+#     node.print_residuals()
 
 # sqp.apply_forward(print_sym, early_stop=20)

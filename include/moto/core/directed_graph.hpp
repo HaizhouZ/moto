@@ -37,11 +37,15 @@ struct edge_base {
      */
     edge_base(node *start, node *end, int length)
         : st(start), ed(end) {
-        nodes.reserve(length + 2); // reserve space for start and end nodes
-        st->out_edges.emplace(this);
-        ed->in_edges.emplace(this);
-        while (length--) {           // exclude ed node
-            nodes.emplace_back(*st); // clone the start node
+        nodes.reserve(length); // reserve space for start and end nodes
+        if (length > 0) {
+            st->out_edges.emplace(this);
+            if (--length > 0) {
+                ed->in_edges.emplace(this);
+                while (--length) {           // exclude ed node
+                    nodes.emplace_back(*st); // clone the start node
+                }
+            }
         }
     }
     ~edge_base() {
@@ -100,6 +104,7 @@ class directed_graph {
         unary_view_.reserve(100 * n_jobs);
         binary_view_.reserve(100 * n_jobs);
     }
+    size_t& n_jobs() { return n_jobs_; } ///< get the number of jobs
     directed_graph(const directed_graph &rhs) = delete; ///< copy constructor is deleted
     /**
      * @brief add an edge from start node to end node with a given length
@@ -113,7 +118,7 @@ class directed_graph {
         if (len < 2) {
             throw std::invalid_argument("Edge length must be no less than 2");
         }
-        edges_.emplace_back(&st, &ed, len - 2);
+        edges_.emplace_back(&st, &ed, len);
         // return edges_.back();
     }
 
@@ -173,52 +178,60 @@ class directed_graph {
         unary_view(node *head, node *tail, bool forward = true)
             : head_(head), tail_(tail), forward_mode(forward) {
             if (head_) {
-                cur_edges_.assign(head_->out_edges.begin(), head_->out_edges.end());
+                cur_nodes_.push_back(head_);
             } else if (tail_) {
-                cur_edges_.assign(tail_->in_edges.begin(), tail_->in_edges.end());
+                cur_nodes_.push_back(tail_);
             }
         }
-        std::vector<edge *> cur_edges_;  ///< current edges in the graph
-        std::vector<edge *> next_edges_; ///< next edges in the graph
+        std::vector<node *> cur_nodes_;  ///< current edges in the graph
+        std::vector<node *> next_nodes_; ///< next edges in the graph
         node *head_ = nullptr;           ///< head node of the graph
         node *tail_ = nullptr;           ///< tail node of the graph
         bool forward_mode = true;        ///< if true, apply unary function in forward direction
         void forward_update() {
             this->clear();
-            if (!cur_edges_.empty()) {
-                for (auto e : cur_edges_) {
+            if (!cur_nodes_.empty()) {
+                for (auto n : cur_nodes_) {
                     // edge forward
-                    this->emplace_back(e->st->data_);
-                    for (auto &next : e->nodes) {
-                        this->emplace_back(next.data_);
-                    }
-                    this->emplace_back(e->ed->data_);
-                    if ((--e->ed->in_cnt) == 0 && !e->ed->out_edges.empty()) { // append ed to the list if no more in edges
-                        next_edges_.insert(next_edges_.end(), e->ed->out_edges.begin(), e->ed->out_edges.end());
+                    this->emplace_back(n->data_);
+                    for (auto out : n->out_edges) {
+                        this->reserve(this->size() + out->nodes.size() + 1);
+                        for (auto &out_node : out->nodes) {
+                            this->emplace_back(out_node.data_);
+                        }
+                        if (--out->ed->in_cnt == 0) {
+                            if (out->ed->out_edges.empty())
+                                this->emplace_back(out->ed->data_);
+                            else
+                                next_nodes_.push_back(out->ed);
+                        }
                     }
                 }
-                cur_edges_.swap(next_edges_);
-                next_edges_.clear();
+                cur_nodes_.swap(next_nodes_);
+                next_nodes_.clear();
             }
         }
         void backward_update() {
             this->clear();
-            if (!cur_edges_.empty()) {
-                for (size_t i = 0; i < cur_edges_.size(); ++i) {
-                    for (auto e : cur_edges_) {
-                        // edge forward
-                        this->emplace_back(e->ed->data_);
-                        for (auto &prev : e->nodes | std::views::reverse) {
-                            this->emplace_back(prev.data_);
+            if (!cur_nodes_.empty()) {
+                for (auto n : cur_nodes_) {
+                    // edge backward
+                    this->emplace_back(n->data_);
+                    for (auto in : n->in_edges) {
+                        this->reserve(this->size() + in->nodes.size() + 1);
+                        for (auto it = in->nodes.rbegin(); it != in->nodes.rend(); ++it) {
+                            this->emplace_back(it->data_);
                         }
-                        this->emplace_back(e->st->data_);
-                        if ((--e->st->out_cnt) == 0 && !e->st->in_edges.empty()) { // append st to the list if no more out edges
-                            next_edges_.insert(next_edges_.end(), e->st->in_edges.begin(), e->st->in_edges.end());
+                        if (--in->st->out_cnt == 0) {
+                            if (in->st->in_cnt == 0)
+                                this->emplace_back(in->st->data_);
+                            else
+                                next_nodes_.push_back(in->st);
                         }
                     }
                 }
-                cur_edges_.swap(next_edges_);
-                next_edges_.clear();
+                cur_nodes_.swap(next_nodes_);
+                next_nodes_.clear();
             }
         }
     };

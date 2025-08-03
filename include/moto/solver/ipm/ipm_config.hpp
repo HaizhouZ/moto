@@ -35,16 +35,16 @@ class ipm_config {
         }
     };
     using worker_type = worker;
-    bool ipm_enable_affine_step() {
+    bool ipm_enable_affine_step() const {
         return adaptive_mu_allowed && (mu_method == mehrotra_predictor_corrector || mu_method == mehrotra_probing);
     }
-    bool ipm_enable_corrector() {
+    bool ipm_enable_corrector() const {
         return adaptive_mu_allowed && mu_method == mehrotra_predictor_corrector;
     }
-    bool ipm_accept_corrector() {
+    bool ipm_accept_corrector() const {
         return ipm_enable_corrector() && !ipm_reject_corrector;
     }
-    bool ipm_computing_affine_step() {
+    bool ipm_computing_affine_step() const {
         return ipm_enable_affine_step() && ipm_compute_affine_step;
     }
     void ipm_start_predictor_computation() {

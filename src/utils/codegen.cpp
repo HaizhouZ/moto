@@ -7,8 +7,20 @@ namespace utils {
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 namespace cs_codegen {
+
+void job_list::wait_until_finished() {
+    // try {
+#pragma omp parallel for schedule(static, 1)
+    for (auto &w : jobs) {
+        w();
+    }
+    // } catch (...) {
+    //     throw;
+    // }
+}
+
 namespace impl {
-worker_list workers_{};
+job_list jobs_{};
 std::mutex mutex_{};
 // Generates a list of (row, col) pairs from CasADi's CCS sparsity format
 std::vector<std::pair<int, int>> ccs_index_to_ij(const cs::Sparsity &sp) {
@@ -161,7 +173,16 @@ cs::Function filter_func_near_zero(
     for (int n = 0; n < ntrials; ++n) {
         std::vector<cs::DM> inputs_data;
         for (const auto &s : sx_inputs) {
-            inputs_data.push_back(2 * (cs::DM::rand(s.rows(), s.columns()) - 0.5));
+            thread_local static std::random_device rd;
+            thread_local static std::mt19937 gen(rd());
+            thread_local static std::uniform_real_distribution<> dis(-1.0, 1.0);
+            cs::DM dm(s.rows(), s.columns());
+            for (int i = 0; i < s.rows(); ++i) {
+                for (int j = 0; j < s.columns(); ++j) {
+                    dm(i, j) = dis(gen);
+                }
+            }
+            inputs_data.push_back(dm);
         }
         auto res = f(inputs_data);
         for (size_t k = 0; k < res.size(); ++k) {
@@ -214,24 +235,29 @@ void run(
     // Step 2: Generate raw C code
     cs::CodeGenerator cgen(func_name + "_raw.c");
     cgen.add(casadi_func);
-    fs::create_directories(output_dir);
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        fs::create_directories(output_dir);
+    }
     std::string raw_c_path = fs::path(output_dir) / (func_name + "_raw.c");
     cgen.generate(output_dir + '/'); // Generates file in the specified dir
 
     // Step 3: Parse raw C code and transform it
-    std::ifstream raw_file(raw_c_path);
     std::stringstream buffer;
-    buffer << raw_file.rdbuf();
-    raw_file.close();
+    {
+        std::ifstream raw_file(raw_c_path);
+        buffer << raw_file.rdbuf();
+    }
 
     std::string processed_code = process_generated_code(
         buffer.str(), func_name, sx_inputs_cs, filtered_outputs, append);
 
     // Step 4: Write new C++ file with Eigen interface
     std::string final_cpp_path = fs::path(output_dir) / (func_name + ".cpp");
-    std::ofstream final_cpp_file(final_cpp_path);
-    final_cpp_file << processed_code;
-    final_cpp_file.close();
+    {
+        std::ofstream final_cpp_file(final_cpp_path);
+        final_cpp_file << processed_code;
+    }
     if (verbose)
         std::cout << "Generated: " << final_cpp_path << std::endl;
 
@@ -245,16 +271,23 @@ void run(
     bool so_exists = fs::exists(so_file_path);
     json data;
     if (!force_recompile && json_exists && so_exists) {
-        std::ifstream jf(json_path);
-        data = json::parse(jf);
-        if (data["md5"] == md5_hash && data["compile_flag"] == compile_flag) {
-            if (verbose)
-                std::cout << "Skipping " << func_name << " as it is already up-to-date." << std::endl;
-            needs_compile = false;
-        } else {
-            fmt::print("Recompiling {}: md5 mismatch or compile flag changed.\n", func_name);
-            fmt::print("  Current md5: {}, compile flag: {}\n", md5_hash, compile_flag);
-            fmt::print("  Previous md5: {}, compile flag: {}\n", std::string(data["md5"]), std::string(data["compile_flag"]));
+        try {
+            {
+                std::ifstream jf(json_path);
+                data = json::parse(jf);
+            }
+            if (data["md5"] == md5_hash && data["compile_flag"] == compile_flag) {
+                if (verbose)
+                    std::cout << "Skipping " << func_name << " as it is already up-to-date." << std::endl;
+                needs_compile = false;
+            } else {
+                fmt::print("Recompiling {}: md5 mismatch or compile flag changed.\n", func_name);
+                fmt::print("  Current md5: {}, compile flag: {}\n", md5_hash, compile_flag);
+                fmt::print("  Previous md5: {}, compile flag: {}\n", std::string(data["md5"]), std::string(data["compile_flag"]));
+            }
+        } catch (const json::parse_error &e) {
+            fmt::print("Error parsing JSON for {}: {}\n", func_name, e.what());
+            needs_compile = true;
         }
     }
 
@@ -271,47 +304,45 @@ void run(
                 std::cerr << "Compilation failed for: " << func_name << std::endl;
             }
         }
-    }
 
-    // Step 6: Create JSON metadata and cleanup
-    fs::create_directories(output_dir);
-    json j;
-    j["name"] = func_name;
-    for (const sym &e : sx_inputs) {
-        j["inputs"][e.name()] = {e.dim(), static_cast<int>(e.field())};
-    }
-    for (const auto &e : sx_outputs) {
-        j["outputs"].push_back({e.rows(), e.columns()});
-    }
-    j["md5"] = md5_hash;
-    j["compile_flag"] = compile_flag;
+        // Step 6: Create JSON metadata and cleanup
+        json j;
+        j["name"] = func_name;
+        for (const sym &e : sx_inputs) {
+            j["inputs"][e.name()] = {e.dim(), static_cast<int>(e.field())};
+        }
+        for (const auto &e : filtered_outputs) {
+            j["outputs"].push_back({e.rows(), e.columns()});
+        }
+        j["md5"] = md5_hash;
+        j["compile_flag"] = compile_flag;
 
-    std::ofstream o(fs::path(output_dir) / (func_name + ".json"));
-    o << std::setw(4) << j << std::endl;
-    if (!keep_generated_src) {
-        fs::remove(raw_c_path);
-        fs::remove(final_cpp_path);
+        std::ofstream o(fs::path(output_dir) / (func_name + ".json"));
+        o << std::setw(4) << j << std::endl;
+        if (!keep_generated_src) {
+            fs::remove(raw_c_path);
+            fs::remove(final_cpp_path);
+        }
     }
 }
 
 }; // namespace impl
 
-void task::finalize(worker_list &workers_) {
+void task::finalize(job_list &jobs_) {
     std::string full_func_name = prefix.empty() ? func_name : prefix + "_" + func_name;
 
     if (gen_eval)
-        workers_.add(std::async(std::launch::deferred,
-                                &impl::run,
-                                full_func_name,
-                                sx_inputs,
-                                std::vector{sx_output},
-                                output_dir,
-                                eval_compile_flag,
-                                force_recompile,
-                                append_value, // 'append' flag
-                                cs::Function(),
-                                keep_generated_src,
-                                verbose));
+        jobs_.add(std::bind(&impl::run,
+                            full_func_name,
+                            sx_inputs,
+                            std::vector{sx_output},
+                            output_dir,
+                            eval_compile_flag,
+                            force_recompile,
+                            append_value, // 'append' flag
+                            cs::Function(),
+                            keep_generated_src,
+                            verbose));
 
     // excluded = [e.name for e in exclude]
     std::set<size_t> excluded;
@@ -378,18 +409,17 @@ void task::finalize(worker_list &workers_) {
                 else
                     jacs_copy = std::move(jacs);
             }
-            workers_.add(std::async(std::launch::deferred,
-                                    &impl::run,
-                                    full_func_name + "_jac",
-                                    sx_inputs,
-                                    std::move(jacs),
-                                    output_dir,
-                                    jac_compile_flag,
-                                    force_recompile,
-                                    append_jac, // 'append' flag
-                                    f_ad,
-                                    keep_generated_src,
-                                    verbose));
+            jobs_.add(std::bind(&impl::run,
+                                full_func_name + "_jac",
+                                sx_inputs,
+                                std::move(jacs),
+                                output_dir,
+                                jac_compile_flag,
+                                force_recompile,
+                                append_jac, // 'append' flag
+                                f_ad,
+                                keep_generated_src,
+                                verbose));
         }
     }
     // generate hessian
@@ -444,36 +474,35 @@ void task::finalize(worker_list &workers_) {
         for (auto &sublist : hess) {
             hess_flat.insert(hess_flat.end(), sublist.begin(), sublist.end());
         }
-        workers_.add(std::async(std::launch::deferred,
-                                &impl::run,
-                                full_func_name + "_hess",
-                                hess_inputs,
-                                std::move(hess_flat),
-                                output_dir,
-                                hess_compile_flag,
-                                force_recompile,
-                                true, // 'append' flag
-                                cs::Function(),
-                                keep_generated_src,
-                                verbose));
+        jobs_.add(std::bind(&impl::run,
+                            full_func_name + "_hess",
+                            hess_inputs,
+                            std::move(hess_flat),
+                            output_dir,
+                            hess_compile_flag,
+                            force_recompile,
+                            true, // 'append' flag
+                            cs::Function(),
+                            keep_generated_src,
+                            verbose));
     }
 }
 // Public entry point to start code generation
-worker_list generate_and_compile(task &&_task) {
-    worker_list workers_tmp;
-    _task.finalize(workers_tmp);
+job_list generate_and_compile(task &&_task) {
+    job_list jobs_tmp;
+    _task.finalize(jobs_tmp);
     std::lock_guard<std::mutex> lock(impl::mutex_);
-    impl::workers_.add(workers_tmp);
+    impl::jobs_.add(jobs_tmp);
     // Launch the implementation in a new thread
-    return workers_tmp;
+    return jobs_tmp;
 }
 
 // Waits for all compilation threads to finish
 void wait_until_generated() {
     std::lock_guard<std::mutex> lock(impl::mutex_);
     std::cout << "Waiting for code generation tasks to complete..." << std::endl;
-    impl::workers_.wait_until_finished();
-    impl::workers_.workers.clear();
+    impl::jobs_.wait_until_finished();
+    impl::jobs_.jobs.clear();
     std::cout << "All code generation completed." << std::endl;
 }
 } // namespace cs_codegen

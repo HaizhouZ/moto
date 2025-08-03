@@ -5,11 +5,11 @@
 using namespace moto;
 
 void register_submodule_codegen(nb::module_ &m) {
-    nb::class_<utils::cs_codegen::worker>(m, "codegen_worker")
-        .def("wait_until_finished", &utils::cs_codegen::worker::wait_until_finished,
-             "Wait until the code generation task is finished.");
-    nb::class_<utils::cs_codegen::worker_list>(m, "codegen_worker_list")
-        .def("wait_until_finished", &utils::cs_codegen::worker_list::wait_until_finished,
+    // nb::class_<utils::cs_codegen::worker>(m, "codegen_worker")
+    //     .def("wait_until_finished", &utils::cs_codegen::worker::wait_until_finished,
+    //          "Wait until the code generation task is finished.");
+    nb::class_<utils::cs_codegen::job_list>(m, "codegen_job_list")
+        .def("wait_until_finished", &utils::cs_codegen::job_list::wait_until_finished,
              "Wait until all code generation tasks in the list are finished.");
     nb::class_<utils::cs_codegen::task>(m, "codegen_task")
         .def(nb::init<>())

@@ -76,6 +76,35 @@ void finalize_newton_step_correction(ns_node_data *cur) {
     d.Q_y += *d.Q_y_corr;
     finalize_dual_newton_step(cur);
 }
+void compute_kkt_residual(ns_node_data *cur) {
+    auto &d = *cur;
+    auto &nsp = *d.nsp_;
+    // compute KKT residual
+    fmt::println("KKT residuals:");
+    matrix res_stat_u = d.Q_uu * d.prim_step[__u] + d.Q_ux * d.prim_step[__x] + d.Q_u.transpose() + d.dense_->approx_[__dyn].jac_[__u].transpose() * d.dual_step[__dyn];
+    if (d.nc) {
+        res_stat_u += d.dense_->approx_[__eq_xu].jac_[__u].transpose() * d.dual_step[__eq_xu];
+    }
+    res_stat_u += d.dense_->jac_modification_[__u].transpose();
+    fmt::println("res_stat_u: {}", res_stat_u.cwiseAbs().maxCoeff());
+    matrix res_stat_y = d.Q_yy * d.prim_step[__y] + d.Q_yx * d.prim_step[__x] + d.Q_y.transpose() + d.dense_->approx_[__dyn].jac_[__y].transpose() * d.dual_step[__dyn];
+    if (d.ns) {
+        res_stat_y += d.dense_->approx_[__eq_x].jac_[__y].transpose() * d.dual_step[__eq_x];
+    }
+    fmt::println("res_stat_y: {}", res_stat_y.cwiseAbs().maxCoeff());
+    matrix res_dyn = d.dense_->approx_[__dyn].v_ + d.dense_->approx_[__dyn].jac_[__x] * d.prim_step[__x] +
+                     d.dense_->approx_[__dyn].jac_[__u] * d.prim_step[__u] + d.dense_->approx_[__dyn].jac_[__y] * d.prim_step[__y];
+    fmt::println("res_dyn: {}", res_dyn.cwiseAbs().maxCoeff());
+    if (d.ns) {
+        matrix res_eq_x = d.dense_->approx_[__eq_x].v_ + d.dense_->approx_[__eq_x].jac_[__y] * d.prim_step[__y];
+        fmt::println("res_eq_x: {}", res_eq_x.cwiseAbs().maxCoeff());
+    }
+    if (d.nc) {
+        matrix res_eq_xu = d.dense_->approx_[__eq_xu].v_ + d.dense_->approx_[__eq_xu].jac_[__x] * d.prim_step[__x] +
+                           d.dense_->approx_[__eq_xu].jac_[__u] * d.prim_step[__u];
+        fmt::println("res_eq_xu: {}", res_eq_xu.cwiseAbs().maxCoeff());
+    }
+}
 } // namespace ns_riccati
 } // namespace solver
 } // namespace moto
