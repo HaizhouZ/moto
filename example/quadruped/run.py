@@ -56,7 +56,7 @@ def make_foot_kin_constr(i: int):
         # [model.q, k_f, *active_foot, z_clip],
         # cs.vcat([v_f[:2, i], k_f * cs.tanh(z_f[i]) * z_clip + v_f[2, i]]) * active_foot[i],
         # cs.vcat([v_f[:2, i], k_f * z_f[i]  + v_f[2, i]]) * active_foot[i],
-        cs.vcat([v_f[:2, i], z_f[i]]) * active_foot[i], order=moto.approx_order_second
+        cs.vcat([v_f[:2, i], z_f[i]]) * active_foot[i]
     )
 
 
@@ -122,7 +122,7 @@ input_cost = 1e-4 * cs.sumsqr(model.a) + 1e-3 * cs.sumsqr(cs.vcat(f_f))
 z_f_d = moto.inputs("z_f_d", 4, default_val=0.0)  # desired foot height when in contact
 
 foot_lift_constr = moto.constr(
-    "foot_lift_constr", [model.q, z_f_d], (z_f - z_f_d)
+    "foot_lift_constr", [model.q, z_f_d], (z_f - z_f_d), order=moto.approx_order_second
 )
 
 running_cost = moto.cost("c", [model.q, model.v, model.a, q_nom, *f_f], (state_cost + input_cost))

@@ -35,7 +35,8 @@ std::string process_generated_code(
     const std::string &func_name,
     const std::vector<cs::SX> &sx_inputs,
     const std::vector<cs::SX> &sx_outputs,
-    bool append) {
+    bool append,
+    bool with_aux) {
     bool is_hessian = func_name.find("_hess") != std::string::npos;
     // Pre-compute CCS to (row, col) index maps
     std::vector<std::vector<std::pair<int, int>>> ij_pairs_all;
@@ -60,8 +61,8 @@ std::string process_generated_code(
         auto [i, j] = ij_pairs_all.at(n_in + arg_idx).at(index);
         std::string out;
         if (is_hessian) {
-            size_t row = arg_idx / n_in;
-            size_t col = arg_idx % n_in;
+            size_t row = arg_idx / (n_in - with_aux);
+            size_t col = arg_idx % (n_in - with_aux);
             out = fmt::format("outputs[{}][{}]({},{})", row, col, i, j);
         } else if (vec_out) {
             out = fmt::format("outputs({})", i);
@@ -149,6 +150,7 @@ cs::Function filter_func_near_zero(
     const std::string &func_name,
     const cs::SXVector &sx_inputs,
     const std::vector<cs::SX> &expr,
+    bool with_aux,
     double tol = 1e-8,
     int ntrials = 50) {
     cs::Function f(func_name, sx_inputs, expr);
@@ -160,17 +162,25 @@ cs::Function filter_func_near_zero(
 
     for (int n = 0; n < ntrials; ++n) {
         std::vector<cs::DM> inputs_data;
+        size_t idx = sx_inputs.size();
         for (const auto &s : sx_inputs) {
-            thread_local static std::random_device rd;
-            thread_local static std::mt19937 gen(rd());
-            thread_local static std::uniform_real_distribution<> dis(-1.0, 1.0);
             cs::DM dm(s.rows(), s.columns());
-            for (int i = 0; i < s.rows(); ++i) {
-                for (int j = 0; j < s.columns(); ++j) {
-                    dm(i, j) = dis(gen);
+            if (with_aux && idx == 1) {
+                dm = cs::DM::ones(s.rows(), s.columns()); // Auxiliary variable is ones
+            } else {
+
+                thread_local static std::random_device rd;
+                thread_local static std::mt19937 gen(rd());
+                thread_local static std::uniform_real_distribution<> dis(-1.0, 1.0);
+
+                for (int i = 0; i < s.rows(); ++i) {
+                    for (int j = 0; j < s.columns(); ++j) {
+                        dm(i, j) = dis(gen);
+                    }
                 }
             }
             inputs_data.push_back(dm);
+            idx--;
         }
         auto res = f(inputs_data);
         for (size_t k = 0; k < res.size(); ++k) {
@@ -223,7 +233,7 @@ void run(
         // throw std::runtime_error("Auxiliary variable is not supported in this context.");
         sx_inputs_cs.emplace_back(aux);
     }
-    cs::Function casadi_func = filter_func_near_zero(func_name, sx_inputs_cs, sx_outputs);
+    cs::Function casadi_func = filter_func_near_zero(func_name, sx_inputs_cs, sx_outputs, !aux.is_empty());
     auto filtered_outputs = casadi_func(sx_inputs_cs);
 
     // Step 2: Generate raw C code
@@ -244,7 +254,7 @@ void run(
     }
 
     std::string processed_code = process_generated_code(
-        buffer.str(), func_name, sx_inputs_cs, filtered_outputs, append);
+        buffer.str(), func_name, sx_inputs_cs, filtered_outputs, append, !aux.is_empty());
 
     // Step 4: Write new C++ file with Eigen interface
     std::string final_cpp_path = fs::path(output_dir) / (func_name + ".cpp");
@@ -428,13 +438,14 @@ void task::finalize(job_list &jobs_) {
             sym &i = sx_inputs[idx_i];
             hess[idx_i].resize(sx_inputs.size());
             cs::SX merit_jac_;
-            bool i_excluded = excluded.contains(i.uid());
-            if (merit_jac_for_hess && !i_excluded)
+            if (excluded.contains(i.uid()))
+                continue;
+            if (merit_jac_for_hess)
                 merit_jac_ = cs::SX::jtimes(sx_output, i, lbd, true);
             size_t idx_j = 0;
             for (size_t idx_j = 0; idx_j < sx_inputs.size(); ++idx_j) {
                 sym &j = sx_inputs[idx_j];
-                if (i_excluded or excluded.contains(j.uid()) or i.field() < j.field()) {
+                if (excluded.contains(j.uid()) or i.field() < j.field()) {
                     continue;
                 }
                 if (!merit_jac_for_hess) {
