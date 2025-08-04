@@ -37,25 +37,23 @@ class sqp(ns_sqp):
         is_binary_with_tid = params == [int, ns_sqp.data_type, ns_sqp.data_type]
         if is_unary or is_unary_with_tid:
             view = self.graph.forward_view() if forward else self.graph.backward_view()
-            if is_unary:
-                while view.update():
-                    for node in view[:early_stop]:
+            while view.update():
+                end_idx = len(view) if early_stop == -1 else min(early_stop, len(view))
+                if is_unary:
+                    for node in view[:end_idx]:
                         callback(node)
-            elif is_unary_with_tid:
-                while view.update():
-                    for tid, node in enumerate(view[:early_stop]):
+                elif is_unary_with_tid:
+                    for tid, node in enumerate(view[:end_idx]):
                         callback(tid, node)
         elif is_binary or is_binary_with_tid:
             view = self.graph.forward_view() if forward else self.graph.backward_view()
-            if early_stop > 0:
-                view = view[: min(early_stop + 1, len(view))]
-            if is_binary:
-                while view.update():
-                    for i in range(len(view) - 1):
+            while view.update():
+                end_idx = len(view) - 1 if early_stop == -1 else min(early_stop, len(view) - 1)
+                if is_binary:
+                    for i in range(end_idx):
                         callback(view[i], view[i + 1])
-            elif is_binary_with_tid:
-                while view.update():
-                    for tid, i in enumerate(range(len(view) - 1)):
+                elif is_binary_with_tid:
+                    for tid, i in enumerate(range(end_idx)):
                         callback(tid, view[i], view[i + 1])
         else:
             raise TypeError("Callback must be a unary or binary function. Arg: ", params)

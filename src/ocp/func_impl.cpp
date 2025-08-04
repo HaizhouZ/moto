@@ -91,9 +91,9 @@ void func_codegen::make_codegen_task(generic_func *f) {
     t.gen_hessian = f->order_ >= approx_order::second;
     t.append_value = f->field_ == __cost;
     t.append_jac = f->field_ == __cost;
-    t.verbose = true;
+    t.verbose = false;
     t.force_recompile = false;
-    t.keep_generated_src = true;
+    t.keep_generated_src = false;
     auto workers = utils::cs_codegen::generate_and_compile(std::move(t));
     if (impl_func_gen_delegated_) {
         func_codegen_workers_.add(std::move(workers));

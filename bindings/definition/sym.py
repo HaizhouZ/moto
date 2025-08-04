@@ -30,7 +30,6 @@ def params(name: str, dim: int = 1, default_val: np.ndarray | float | None = Non
 
 def states(name: str, dim: int = 1, default_val: np.ndarray | float | None = None):
     x, y = create_states(name, dim, default_val)
-    print(f"Created states: {x}, {y}")
     x = sym(base=x)
     y = sym(base=y)
     x.next = y

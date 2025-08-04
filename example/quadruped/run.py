@@ -178,7 +178,7 @@ def gait_setup(data: moto.sqp.data_type):
         data.value[active_foot[1]] = 1
         data.value[active_foot[2]] = 1
         data.value[active_foot[3]] = 1
-    # print(node_idx, data.value[active_foot[0]], data.value[active_foot[1]], data.value[active_foot[2]], data.value[active_foot[3]])
+    print(node_idx, data.value[active_foot[0]], data.value[active_foot[1]], data.value[active_foot[2]], data.value[active_foot[3]], data.prob.uid)
     node_idx += 1
 
 
