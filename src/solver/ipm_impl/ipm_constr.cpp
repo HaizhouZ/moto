@@ -12,9 +12,9 @@ ipm_constr::approx_data::approx_data(base::approx_data &&rhs)
     scaled_res_.setZero();
 }
 void ipm_constr::initialize(ipm::data_map_t &data) const {
-    // value_impl(data);
+    // dont call value_impl here
     auto &d = data.as<ipm_data>();
-    d.g_ = d.v_;
+    // dont do d.g_ = d.v_; cuz already set in value_impl
     d.slack_ = (-d.g_).cwiseMax(1e-2); // clip
     d.v_ = d.g_ + d.slack_;            // r_g = g_ + slack
     d.multiplier_.array() = d.ipm_cfg->mu / d.slack_.array();
