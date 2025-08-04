@@ -9,14 +9,9 @@ using json = nlohmann::json;
 namespace cs_codegen {
 
 void job_list::wait_until_finished() {
-    // try {
-#pragma omp parallel for schedule(static, 1)
     for (auto &w : jobs) {
         w();
     }
-    // } catch (...) {
-    //     throw;
-    // }
 }
 
 namespace impl {

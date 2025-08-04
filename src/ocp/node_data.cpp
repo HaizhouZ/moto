@@ -2,6 +2,7 @@
 #include <moto/ocp/impl/data_mgr.hpp>
 namespace moto {
 sym_data::sym_data(ocp *prob) : prob_(prob) {
+    prob->wait_until_ready();
     for (size_t i = 0; i < field::num_sym; i++) {
         value_[i].resize(prob_->dim(i));
         value_[i].setZero();
@@ -40,32 +41,18 @@ vector_ref sym_data::get(const sym &s) {
     else
         return prob_->extract(value_.at(s.field()), s);
 }
-/**
- * @brief for loop shortcut for funcs (dyn,cost,generic_constr...)
- *
- * @param prob
- * @param callback [idx of field, idx of expr, pointer to expr]
- */
-template <typename Callback>
-inline void for_each_func(const ocp_ptr_t &prob, Callback &&callback) {
-    // loop with two variables due to the difference between idx and field no.
-    for (size_t field : func_fields) {
-        size_t idx = 0;
-        for (const generic_func &f : prob->exprs(field)) {
-            callback(idx++, f);
-        }
-    }
-}
 
 node_data::node_data(const ocp_ptr_t &prob)
     : prob_(prob),
       sym_(new sym_data(prob.get())),
       dense_(new merit_data(prob.get())),
       shared_(new shared_data(prob.get(), sym_.get())) {
-    for_each_func(prob, [&]([[maybe_unused]] size_t idx, const generic_func &_f) {
-        auto p = _f.create_approx_data(*sym_, *dense_, *shared_);
-        sparse_[_f.field()].push_back(std::move(p));
-    });
+    for (size_t field : func_fields) {
+        size_t idx = 0;
+        for (const generic_func &f : prob->exprs(field)) {
+            sparse_[f.field()].push_back(f.create_approx_data(*sym_, *dense_, *shared_));
+        }
+    }
 }
 void node_data::update_approximation(update_mode config) {
     /// @todo: always eval residual?
@@ -94,13 +81,12 @@ void node_data::update_approximation(update_mode config) {
     bool no_eval = config != update_mode::eval_val && config != update_mode::eval_all;
     bool no_jac = config != update_mode::eval_jac && config != update_mode::eval_derivatives && config != update_mode::eval_all;
     bool no_hess = config != update_mode::eval_hess && config != update_mode::eval_derivatives && config != update_mode::eval_all;
-    for_each_func(prob_,
-                  [=, this](size_t idx, const generic_func &_f) {
-                      _f.compute_approx(*sparse_[_f.field()][idx],
-                                        !no_eval && _f.order() >= approx_order::zero,
-                                        !no_jac && _f.order() >= approx_order::first,
-                                        !no_hess && _f.order() >= approx_order::second);
-                  });
+    for_each<func_fields>([=, this](const generic_func &_f, func_approx_data &data) {
+        _f.compute_approx(data,
+                          !no_eval && _f.order() >= approx_order::zero,
+                          !no_jac && _f.order() >= approx_order::first,
+                          !no_hess && _f.order() >= approx_order::second);
+    });
     if (update_cost) {
         inf_prim_res_ = 0.;
         for (const auto &field_data : dense_->approx_) {

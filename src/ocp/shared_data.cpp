@@ -4,6 +4,7 @@
 
 namespace moto {
 shared_data::shared_data(const ocp *prob, sym_data *primal) : prob_(prob) {
+    prob->wait_until_ready();
     data_.reserve(moto::custom_func_fields.size());
     for (auto field : moto::custom_func_fields) {
         for (const generic_custom_func &f : prob->exprs(field)) {

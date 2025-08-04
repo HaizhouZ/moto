@@ -4,6 +4,7 @@
 namespace moto {
 
 merit_data::merit_data(ocp *prob) : prob_(prob) {
+    prob->wait_until_ready();
     for (auto i : range_n(__dyn, field::num_constr)) {
         if (prob_->exprs(i).empty()) {
             continue;

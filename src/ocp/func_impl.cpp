@@ -1,7 +1,10 @@
+#include <condition_variable>
 #include <fmt/ranges.h>
 #include <moto/core/external_function.hpp>
 #include <moto/ocp/impl/func.hpp>
 #include <moto/utils/codegen.hpp>
+#include <mutex>
+
 namespace moto {
 static bool impl_func_gen_delegated_ = false; ///< true if the codegen is delegated to @ref moto::func_codegen
 
@@ -51,19 +54,83 @@ void generic_func::set_from_casadi(const var_inarg_list &in_args, const cs::SX &
     add_arguments(in_args);
     gen_.out_ = out;
 }
-static utils::cs_codegen::job_list func_codegen_workers_;
-std::vector<generic_func *> cg_funcs_;
+
+/**
+ * @brief Code generation helper for functions
+ *
+ */
+struct func_codegen {
+    void make_codegen_task(generic_func *f);
+
+    static auto &get() {
+        static func_codegen instance; ///< static instance of the codegen helper
+        return instance;
+    } ///< get the singleton instance
+
+  private:
+    std::mutex queue_mtx_;             //, terminate_mtx_;
+    std::condition_variable queue_cv_; //, terminate_cv_;
+    utils::cs_codegen::job_list job_buffer_;
+    bool terminated_ = false; ///< flag to terminate the server thread
+    std::thread server_;
+
+    void add_job(utils::cs_codegen::job_list &&w) {
+        std::lock_guard<std::mutex> lock(queue_mtx_);
+        job_buffer_.add(std::move(w));
+        queue_cv_.notify_one();
+    } ///< add a job to the codegen worker
+    func_codegen() {
+        server_ = std::thread([this]() {
+            server(); ///< start the server thread
+        });
+        server_.detach(); ///< detach the server thread
+    }
+    ~func_codegen() {
+        {
+            std::lock_guard<std::mutex> lock(queue_mtx_);
+            terminated_ = true;     ///< set the termination flag
+            queue_cv_.notify_one(); ///< notify the server to terminate}
+        }
+        // std::unique_lock<std::mutex> lock(terminate_mtx_);
+        // terminate_cv_.wait(lock, [this] { return terminated_ == false; });
+    } ///< destructor to clean up the server thread
+    void server() {
+        size_t n_threads = omp_get_max_threads();
+        std::mutex thread_mtx_;
+        std::condition_variable thread_cv_;
+        while (true) {
+            std::unique_lock<std::mutex> lock(queue_mtx_);
+            queue_cv_.wait(lock, [this] { return !job_buffer_.jobs.empty() || terminated_; });
+            if (terminated_) {
+                terminated_ = false;
+                break; ///< exit the loop if terminated
+            }
+            auto jobs = std::move(job_buffer_.jobs);
+            job_buffer_.jobs.clear();
+            lock.unlock();
+            for (auto &w : jobs) {
+                std::unique_lock<std::mutex> thread_lock(thread_mtx_);
+                thread_cv_.wait(thread_lock, [&n_threads] { return n_threads > 0; });
+                n_threads--;
+                std::thread([&, w = std::move(w)]() mutable {
+                    w();
+                    std::lock_guard<std::mutex> thread_lock(thread_mtx_);
+                    n_threads++;
+                    thread_cv_.notify_one(); ///< notify the server that the job is done
+                }).detach();
+            }
+        }
+        // std::lock_guard<std::mutex> lock(terminate_mtx_);
+        // terminate_cv_.notify_one();
+    } ///< daemon to wait for codegen jobs
+};
+
 void generic_func::finalize_impl() {
     if (order_ != approx_order::none && dim_ == dim_tbd) {
         throw std::runtime_error(fmt::format("generic_func {} has no dimension set", name_));
     }
     if (!gen_.out_.is_empty()) {
-        func_codegen::make_codegen_task(this);
-        if (!impl_func_gen_delegated_) {
-            func_codegen_workers_.wait_until_finished();
-            load_external_impl();
-        } else
-            cg_funcs_.push_back(this); // will be loaded later
+        func_codegen::get().make_codegen_task(this);
     } else {
         bool value_missing = order_ >= approx_order::zero && !value;
         bool jacobian_missing = order_ >= approx_order::first && !jacobian;
@@ -79,6 +146,7 @@ void generic_func::finalize_impl() {
                 missing.push_back("hessian");
             throw std::runtime_error(fmt::format("generic_func {} has no codegen set for [{}]", name_, fmt::join(missing, ",")));
         }
+        set_ready_status(true); ///< set the ready status
     }
 }
 void func_codegen::make_codegen_task(generic_func *f) {
@@ -95,25 +163,16 @@ void func_codegen::make_codegen_task(generic_func *f) {
     t.force_recompile = false;
     t.keep_generated_src = false;
     auto workers = utils::cs_codegen::generate_and_compile(std::move(t));
-    if (impl_func_gen_delegated_) {
-        func_codegen_workers_.add(std::move(workers));
-    } else {
-        func_codegen_workers_.add(workers);
+    decltype(workers) workers_set_ready_status;
+    for (auto &w : workers.jobs) {
+        if (w) {
+            workers_set_ready_status.add([w = std::move(w), f]() mutable {
+                w(); ///< execute the codegen job
+                f->set_ready_status(true);
+                f->load_external_impl(); ///< load the generated code
+            });
+        }
     }
-}
-
-void func_codegen::enable() {
-    impl_func_gen_delegated_ = true; // enable codegen delegation
-}
-
-void func_codegen::wait_until_all_compiled(size_t njobs) {
-    size_t n_thread_bak = omp_get_num_threads();
-    omp_set_num_threads(njobs);
-    func_codegen_workers_.wait_until_finished();
-    for (auto f : cg_funcs_) {
-        f->load_external_impl();
-    }
-    cg_funcs_.clear();
-    omp_set_num_threads(n_thread_bak);
+    add_job(std::move(workers_set_ready_status));
 }
 } // namespace moto

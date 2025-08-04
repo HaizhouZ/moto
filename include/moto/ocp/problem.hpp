@@ -15,13 +15,13 @@ namespace moto {
  */
 class ocp {
   protected:
-    ocp() : uid_(max_uid++) {}; // default constructor
+    ocp() { uid_.set_inc(); }; // default constructor
     ocp(const ocp &rhs)
-        : expr_(rhs.expr_), d_idx_(rhs.d_idx_), uid_(max_uid++),
-          pos_by_uid_(rhs.pos_by_uid_), dim_(rhs.dim_) {}
+        : expr_(rhs.expr_), d_idx_(rhs.d_idx_),
+          pos_by_uid_(rhs.pos_by_uid_), dim_(rhs.dim_) { uid_.set_inc(); }
     bool add_impl(expr &);
     static size_t max_uid; ///< uid used to index global expressions
-    size_t uid_;
+    impl::unique_id<ocp> uid_;
     /// collection of all expressions in the problem
     std::array<expr_list, field::num> expr_;
     /// data index of expr in serialized vector, by uid
@@ -37,6 +37,7 @@ class ocp {
     const auto &exprs(size_t f) const { return expr_.at(f); }                  ///< getter for expr_
     const auto &pos(const expr &ex) const { return pos_by_uid_.at(ex.uid()); } ///< getter for pos_by_uid_
     size_t dim(size_t f) const { return dim_.at(f); }                          ///< getter for dim_
+    void wait_until_ready() const;
 
     static auto create() { return std::shared_ptr<ocp>(new ocp()); }
     auto clone() { return std::shared_ptr<ocp>(new ocp(*this)); }

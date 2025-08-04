@@ -1,7 +1,10 @@
 #ifndef __EXPRESSION_BASE__
 #define __EXPRESSION_BASE__
 
+#include <atomic>
 #include <moto/core/fields.hpp>
+
+#include <moto/utils/movable_ptr.hpp>
 
 namespace moto {
 class expr; // forward declaration of expr
@@ -68,9 +71,33 @@ constexpr size_t dim_tbd = 0;
     auto &mem_name() { return mem_name##_; } \
     const auto &mem_name() const { return mem_name##_; }
 
-#define INIT_UID_(type) size_t type::max_uid = 0;
+namespace impl {
+class expr_async_ready_status;
+template <typename T>
+class unique_id {
+  private:
+    size_t uid_;
 
-constexpr size_t uid_max = std::numeric_limits<size_t>::max();
+  public:
+    constexpr static size_t uid_max = std::numeric_limits<size_t>::max();
+    static std::atomic<size_t> max_uid; ///< maximum uid used for this type
+    /// default constructor, assigns a new uid
+    unique_id() : uid_(uid_max) {}
+    void set_inc() { uid_ = max_uid++; } ///< set the uid to a new value
+    /// copy constructor, assigns a new uid
+    unique_id(const unique_id &rhs) : uid_(max_uid++) {}
+    /// move constructor, assigns a new uid
+    unique_id(unique_id &&rhs) noexcept : uid_(rhs.uid_) { rhs.uid_ = uid_max; }
+    bool is_valid() const { return uid_ < uid_max; } ///< check if the uid is valid
+    operator size_t &() { return uid_; }             ///< conversion to size_t operator
+    operator const size_t &() const { return uid_; } ///< conversion to const size_t
+};
+} // namespace impl
+template <typename T>
+inline auto format_as(const impl::unique_id<T> &uid) { return static_cast<size_t>(uid); } ///< format the unique id as a string
+
+#define INIT_UID_(type) template <> \
+                        std::atomic<size_t> impl::unique_id<type>::max_uid = 0;
 /**
  * @brief general expression base class (now merged with impl)
  */
@@ -80,22 +107,23 @@ class expr : public std::enable_shared_from_this<expr> {
 
   protected:
     bool finalized_ = false;
+
     std::string name_;
     size_t dim_ = 0;
-    size_t uid_ = uid_max;
+    impl::unique_id<expr> uid_;
     field_t field_ = __undefined;
     expr_list dep_; // now a direct member, not a pointer
 
-    virtual void finalize_impl() {}
+    mutable movable_ptr<impl::expr_async_ready_status> async_ready_status_; ///< async ready status, if any
 
     shared_expr shared_;
 
-    expr(const expr &rhs)
-        : name_(rhs.name_), dim_(rhs.dim_), field_(rhs.field_),
-          uid_(max_uid++), finalized_(false), dep_(rhs.dep_) {
-        assert(rhs.uid_ != uid_max && "cannot copy a null expression");
-        fmt::print("Copying expr {} with uid {} to new uid {}\n", rhs.name_, rhs.uid_, uid_);
-    } ///< copy constructor
+    /// @brief finalize the expression, immediately set ready
+    virtual void finalize_impl() { set_ready_status(true); }
+
+    void set_ready_status(bool ready); ///< set the ready state and notify condition variable
+
+    expr(const expr &rhs); ///< copy constructor
 
     friend class shared_expr;
 
@@ -135,7 +163,7 @@ class expr : public std::enable_shared_from_this<expr> {
         shared_ = std::move(ref);
     } ///< set the shared pointer
 
-    explicit operator bool() const { return uid_ < uid_max; }
+    explicit operator bool() const { return uid_.is_valid(); }
 
     expr() = default; // default constructor for derived classes
     /**
@@ -145,23 +173,14 @@ class expr : public std::enable_shared_from_this<expr> {
      * @param dim dimension
      * @param field
      */
-    expr(const std::string &name, size_t dim, field_t field) {
-        name_ = name;
-        dim_ = dim;
-        field_ = field;
-        uid_ = max_uid++;
-    }
+    expr(const std::string &name, size_t dim, field_t field);
 
     // Copy assignment operator (gets a new uid and leaves un-finalized)
     expr &operator=(const expr &rhs) = default;
     // Move constructor
-    expr(expr &&rhs)
-        : name_(std::move(rhs.name_)), dim_(rhs.dim_), field_(rhs.field_),
-          uid_(rhs.uid_), finalized_(rhs.finalized_), dep_(std::move(rhs.dep_)) {
-        rhs.uid_ = uid_max;
-    }
+    expr(expr &&rhs) = default;
 
-    virtual ~expr() = default;
+    virtual ~expr();
 
     void set_impl(expr *e) {
         // No-op in merged version, kept for compatibility
@@ -172,7 +191,9 @@ class expr : public std::enable_shared_from_this<expr> {
     [[nodiscard]]
     auto make_vec(const scalar_t *ptr) const { return mapped_const_vector(ptr, dim_); }
 
-    bool finalize();
+    bool finalize(bool block_until_ready = false); ///< finalize the expression, set ready status
+
+    bool wait_until_ready() const; ///< wait until the expression is ready
 
     size_t use_count() const { return shared_ ? shared_->use_count() : weak_from_this().use_count(); } ///< get the use count of the expression
 };

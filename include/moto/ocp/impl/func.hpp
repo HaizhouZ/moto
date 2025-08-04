@@ -103,7 +103,7 @@ class generic_func : public expr {
 
 #define DEF_FUNC_CLONE                                                                                       \
     wrapper_type clone() const {                                                                             \
-        assert(uid_ != uid_max && "cannot clone a null function");                                           \
+        assert(uid_.is_valid() && "cannot clone a null function");                                           \
         return wrapper_type(std::shared_ptr<generic_func>(new std::remove_cvref_t<decltype(*this)>(*this))); \
     }
 
@@ -112,28 +112,6 @@ class generic_func : public expr {
 inline generic_func *func::operator->() const {
     return static_cast<generic_func *>(base::operator->());
 } ///< convert to generic_func
-/**
- * @brief Code generation helper for functions
- *
- */
-struct func_codegen {
-    /**
-     * @brief wait until all functions are compiled
-     * @note this will block until all functions are compiled
-     * @param njobs number of jobs to run in parallel, default is 4
-     */
-    static void wait_until_all_compiled(size_t njobs = 4);
-    /**
-     * @brief enable code generation delegation
-     * @note this will enable the code generation delegation to the helper
-     */
-    static void enable();
-    /**
-     * @brief make codegen task for the function
-     *
-     */
-    static void make_codegen_task(generic_func *f);
-};
 
 } // namespace moto
 

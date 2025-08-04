@@ -7,7 +7,6 @@
 
 int main() {
     using namespace moto;
-    moto::func_codegen::enable();
     biped_srbd::srbd_dynamics dyn;
     std::cout << "Hello, Biped SRBD!" << std::endl;
     auto prob = moto::ocp::create();
@@ -22,7 +21,6 @@ int main() {
     prob->add(dyn.running_cost());
     auto terminal_prob = prob->clone();
     terminal_prob->add(dyn.terminal_cost());
-    moto::func_codegen::wait_until_all_compiled(8);
     utils::print_problem(prob);
     utils::print_problem(terminal_prob);
 

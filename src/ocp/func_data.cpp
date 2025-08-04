@@ -4,9 +4,12 @@
 
 namespace moto {
 void sym::finalize_impl() {
-    if (field_ == __x) {
-        assert(dual_ && "dual pointer should not be null when field == __x");
+    if (field_ == __x && !bool(dual_)) {
+        throw std::runtime_error("dual pointer should not be null when field == __x");
+    } else if (field_ == __y && !bool(dual_)) {
+        throw std::runtime_error("dual pointer should be null when field == __y");
     }
+    set_ready_status(true);
 }
 func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, const generic_func &f)
     : func_(f), impl_(shared), sym_uid_idx_(f.sym_uid_idx_) {

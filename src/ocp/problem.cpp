@@ -22,8 +22,16 @@ bool ocp::add_impl(expr &ex) {
     }
     return false;
 }
-
-
+void ocp::wait_until_ready() const {
+    for (const auto &f : expr_) {
+        for (const auto &e : f) {
+            if (!e->wait_until_ready()) {
+                throw std::runtime_error(fmt::format("Expression {} with uid {} failed to be ready",
+                                                     e->name(), e->uid()));
+            }
+        }
+    }
+}
 } // namespace moto
 
 template void moto::ocp::add<const moto::shared_expr &>(const moto::shared_expr &ex);

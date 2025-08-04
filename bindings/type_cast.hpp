@@ -137,6 +137,19 @@ func &cast_to_func(const nb::handle &h);
 
 namespace nanobind {
 namespace detail {
+template <typename T>
+struct type_caster<moto::impl::unique_id<T>> {
+    NB_TYPE_CASTER(moto::impl::unique_id<T>, const_name("int"));
+
+    bool from_python(handle src, uint8_t flags, cleanup_list *cleanup) {
+        value = size_t(src);
+        return true;
+    }
+
+    static handle from_cpp(const moto::impl::unique_id<T> &src, rv_policy policy, cleanup_list *cleanup) {
+        return nb::int_(size_t(src));
+    }
+};
 template <>
 struct type_caster<moto::expr_inarg_list> {
     NB_TYPE_CASTER(moto::expr_inarg_list, io_name(NB_TYPING_SEQUENCE, NB_TYPING_LIST) +
@@ -198,7 +211,7 @@ template <>
 struct type_caster<moto::py_var_wrapper> {
     NB_TYPE_CASTER(moto::py_var_wrapper, const_name("moto.var | casadi.SX"));
     bool from_python(handle src, uint8_t flags, void *ptr) {
-        try{
+        try {
             value = std::move(moto::py_var_wrapper(moto::cast_to_var(src)));
         } catch (const std::exception &e) {
             fmt::print("Failed to cast to moto.var: {}\n", e.what());

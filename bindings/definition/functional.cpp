@@ -107,7 +107,8 @@ void register_submodule_functional(nb::module_ &m) {
         .def_prop_rw("field", [](shared_expr &self) { return self->field(); }, [](shared_expr &self, const field_t &value) { self->field() = value; })
         .def_prop_rw("dim", [](shared_expr &self) { return self->dim(); }, [](shared_expr &self, const size_t &value) { self->dim() = value; })
         .def_prop_ro("uid", [](shared_expr &self) { return self->uid(); })
-        .def("finalize", [](shared_expr &self) { self->finalize(); })
+        .def("finalize", [](shared_expr &self, bool block_until_ready) { self->finalize(block_until_ready); }, nb::arg("block_until_ready") = true)
+        .def("wait_until_ready", [](shared_expr &self) { return self->wait_until_ready(); })
         .def_prop_ro("finalized", [](expr &self) { return self.finalized(); })
         .def("__bool__", &shared_expr::operator bool);
 
