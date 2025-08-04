@@ -161,15 +161,19 @@ void func_codegen::make_codegen_task(generic_func *f) {
     t.append_jac = f->field_ == __cost;
     t.verbose = false;
     t.force_recompile = false;
-    t.keep_generated_src = false;
+    t.keep_generated_src = true;
     auto workers = utils::cs_codegen::generate_and_compile(std::move(t));
     decltype(workers) workers_set_ready_status;
+    std::shared_ptr<std::atomic<size_t>> n_jobs = std::make_shared<std::atomic<size_t>>(workers.jobs.size());
     for (auto &w : workers.jobs) {
         if (w) {
-            workers_set_ready_status.add([w = std::move(w), f]() mutable {
+            workers_set_ready_status.add([w = std::move(w), n_jobs, f]() mutable {
                 w(); ///< execute the codegen job
-                f->set_ready_status(true);
-                f->load_external_impl(); ///< load the generated code
+                (*n_jobs)--;
+                if (*n_jobs == 0) {
+                    f->set_ready_status(true);
+                    f->load_external_impl(); ///< load the generated code
+                }
             });
         }
     }
