@@ -27,6 +27,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def("create_node", &ns_sqp::create_node, nb::arg("formulation"), nb::rv_policy::reference, "Create a new node in the SQP graph with the given OCP problem formulation");
 
     nb::class_<ns_sqp::settings_t>(sqp, "settings_type")
+        .def_rw("mu", &ns_sqp::settings_t::mu, "Barrier parameter for the IPM solver")
         .def_rw("mu_method", &ns_sqp::settings_t::mu_method, "Adaptive mu method for the IPM solver")
         .def_rw("ipm_conditional_corrector", &ns_sqp::settings_t::ipm_conditional_corrector, "Whether to use conditional corrector in the IPM solver")
         .def_rw("adaptive_mu_allowed", &ns_sqp::settings_t::adaptive_mu_allowed, "Whether to adapt mu during line search");

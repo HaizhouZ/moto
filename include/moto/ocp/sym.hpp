@@ -14,6 +14,7 @@ struct var : public shared_expr, public cs::SX {
     sym *operator->() const; ///< convert to sym
     var() = default;         ///< default constructor, will create a not-a-number symbolic variable
     template <typename T, typename T_ = std::remove_cvref_t<T>>
+        requires std::is_same_v<sym, T_>
     var(T &&rhs) noexcept : base(std::forward<T>(rhs)), cs::SX((sym &)*this) {}
     var(var &&rhs) noexcept : base(std::move(rhs)), cs::SX(static_cast<cs::SX &&>(rhs)) {}
     var(const var &) = default;                ///< copy constructor
@@ -114,9 +115,12 @@ inline sym *var::operator->() const {
     return static_cast<sym *>(base::operator->());
 }
 
+struct var_inarg_list; ///< forward declaration
 struct var_list : public std::vector<var> {
     using std::vector<var>::vector; ///< inherit constructors from std::vector
+    var_list(const var_inarg_list &v);
 }; ///< list of symbolic expressions
+
 struct var_inarg_list : public std::vector<std::reference_wrapper<sym>> {
     using std::vector<std::reference_wrapper<sym>>::vector; ///< inherit constructors from std::vector
     var_inarg_list(const var_list &v) {
@@ -126,6 +130,13 @@ struct var_inarg_list : public std::vector<std::reference_wrapper<sym>> {
         }
     } ///< construct from var_list
 }; ///< list of symbolic expressions
+
+inline var_list::var_list(const var_inarg_list &v) {
+    this->reserve(v.size());
+    for (const auto &i : v) {
+        this->emplace_back(i.get());
+    }
+} ///< construct from var_inarg_list
 } // namespace moto
 
 #endif // MOTO_OCP_SYM_HPP

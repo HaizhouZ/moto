@@ -147,18 +147,11 @@ std::string process_generated_code(
 // Replicates Python's filter_func_near_zero
 cs::Function filter_func_near_zero(
     const std::string &func_name,
-    const task::in_arg_list_t &inputs,
+    const cs::SXVector &sx_inputs,
     const std::vector<cs::SX> &expr,
     double tol = 1e-8,
     int ntrials = 50) {
-    cs::SXVector sx_inputs;
-    for (const sym &i : inputs)
-        sx_inputs.push_back(i);
-    cs::SXVector sx_expr;
-    for (const auto &e : expr)
-        sx_expr.push_back(e);
-
-    cs::Function f(func_name, sx_inputs, sx_expr);
+    cs::Function f(func_name, sx_inputs, expr);
     std::vector<cs::DM> nz_cnt;
     nz_cnt.reserve(expr.size());
     for (const auto &e : expr) {
@@ -218,13 +211,19 @@ void run(
     bool append,
     cs::Function func_ground_truth,
     bool keep_generated_src,
-    bool verbose) {
+    bool verbose,
+    cs::SX aux) {
     // Step 1: Create CasADi function and filter near-zero elements
-    cs::Function casadi_func = filter_func_near_zero(func_name, sx_inputs, sx_outputs);
     std::vector<cs::SX> sx_inputs_cs; //(sx_inputs.begin(), sx_inputs.end());
+    sx_inputs_cs.reserve(sx_inputs.size() + !aux.is_empty());
     for (cs::SX &s : sx_inputs) {
         sx_inputs_cs.emplace_back(s);
     }
+    if (!aux.is_empty()) {
+        // throw std::runtime_error("Auxiliary variable is not supported in this context.");
+        sx_inputs_cs.emplace_back(aux);
+    }
+    cs::Function casadi_func = filter_func_near_zero(func_name, sx_inputs_cs, sx_outputs);
     auto filtered_outputs = casadi_func(sx_inputs_cs);
 
     // Step 2: Generate raw C code
@@ -337,7 +336,8 @@ void task::finalize(job_list &jobs_) {
                             append_value, // 'append' flag
                             cs::Function(),
                             keep_generated_src,
-                            verbose));
+                            verbose,
+                            cs::SX()));
 
     // excluded = [e.name for e in exclude]
     std::set<size_t> excluded;
@@ -414,17 +414,16 @@ void task::finalize(job_list &jobs_) {
                                 append_jac, // 'append' flag
                                 f_ad,
                                 keep_generated_src,
-                                verbose));
+                                verbose, cs::SX()));
         }
     }
     // generate hessian
     std::vector<std::vector<cs::SX>> hess;
-    task::in_arg_list_t hess_inputs;
     if (gen_hessian) {
         hess.resize(sx_inputs.size());
         // use AD of vjp to compute hessian
 
-        auto lbd = merit_jac_for_hess ? sym::usr_var(func_name + "_lbd", sx_output.rows()) : var();
+        auto lbd = merit_jac_for_hess ? cs::SX::sym(func_name + "_lbd", sx_output.rows()) : cs::SX();
         for (size_t idx_i = 0; idx_i < sx_inputs.size(); ++idx_i) {
             sym &i = sx_inputs[idx_i];
             hess[idx_i].resize(sx_inputs.size());
@@ -457,11 +456,6 @@ void task::finalize(job_list &jobs_) {
                     hess[idx_i][idx_j] = cs::SX::jacobian(jacs_copy[idx_i], j);
                 }
             }
-            hess_inputs.reserve(sx_inputs.size() + 1);
-            hess_inputs = sx_inputs;
-            if (merit_jac_for_hess) {
-                hess_inputs.push_back(lbd);
-            }
         }
         // hess = [item for sublist in hess for item in sublist]
         std::vector<cs::SX> hess_flat;
@@ -471,7 +465,7 @@ void task::finalize(job_list &jobs_) {
         }
         jobs_.add(std::bind(&impl::run,
                             full_func_name + "_hess",
-                            hess_inputs,
+                            sx_inputs,
                             std::move(hess_flat),
                             output_dir,
                             hess_compile_flag,
@@ -479,7 +473,8 @@ void task::finalize(job_list &jobs_) {
                             true, // 'append' flag
                             cs::Function(),
                             keep_generated_src,
-                            verbose));
+                            verbose,
+                            lbd));
     }
 }
 // Public entry point to start code generation

@@ -56,7 +56,7 @@ def make_foot_kin_constr(i: int):
         # [model.q, k_f, *active_foot, z_clip],
         # cs.vcat([v_f[:2, i], k_f * cs.tanh(z_f[i]) * z_clip + v_f[2, i]]) * active_foot[i],
         # cs.vcat([v_f[:2, i], k_f * z_f[i]  + v_f[2, i]]) * active_foot[i],
-        cs.vcat([v_f[:2, i], z_f[i]]) * active_foot[i],
+        cs.vcat([v_f[:2, i], z_f[i]]) * active_foot[i], order=moto.approx_order_second
     )
 
 
@@ -156,9 +156,10 @@ n0 = g.set_head(g.add(sqp.create_node(prob)))
 n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
 g.add_edge(n0, n1, N_horizon)
 
-# sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
-sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
-sqp.settings.ipm_conditional_corrector = True
+sqp.settings.mu = 1
+sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
+# sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
+# sqp.settings.ipm_conditional_corrector = True
 
 
 # setup gait
