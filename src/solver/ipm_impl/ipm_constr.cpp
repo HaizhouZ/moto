@@ -10,6 +10,8 @@ ipm_constr::approx_data::approx_data(base::approx_data &&rhs)
     diag_scaling.setZero();
     scaled_res_.resize(func_.dim());
     scaled_res_.setZero();
+    reg_.resize(func_.dim());
+    reg_.setZero();
 }
 void ipm_constr::initialize(ipm::data_map_t &data) const {
     // dont call value_impl here
@@ -40,9 +42,12 @@ void ipm_constr::finalize_newton_step(ipm::data_map_t &data) const {
     }
     // update dual newton step
     if (d.ipm_cfg->ipm_computing_affine_step())
-        d.d_multipler_.array() = -d.multiplier_.array() - d.diag_scaling.array() * d.d_slack_.array();
+        d.d_multipler_.array() = -(d.r_s_.array() + d.multiplier_.array() * d.d_slack_.array()) / (d.slack_.array() + d.reg_.array() * d.multiplier_.array());
+    //     d.d_multipler_.array() = -d.multiplier_.array() - d.diag_scaling.array() * d.d_slack_.array();
     else
-        d.d_multipler_.array() = -d.multiplier_.array() + d.ipm_cfg->mu / d.slack_.array() - d.diag_scaling.array() * d.d_slack_.array();
+        d.d_multipler_.array() = -(d.r_s_.array() - d.ipm_cfg->mu + d.multiplier_.array() * d.d_slack_.array()) / (d.slack_.array() + d.reg_.array() * d.multiplier_.array());
+    // d.d_multipler_.array() = -d.multiplier_.array() + d.ipm_cfg->mu / (d.slack_.array() + d.reg_) - d.diag_scaling.array() * d.d_slack_.array();
+    d.d_slack_.array() += d.reg_.array() * d.d_multipler_.array();
 }
 void ipm_constr::correct_jacobian(data_map_t &data) const {
     auto &d = data.as<ipm_data>();
@@ -51,7 +56,7 @@ void ipm_constr::correct_jacobian(data_map_t &data) const {
     } else {
         d.scaled_res_.array() = d.ipm_cfg->mu;
     }
-    d.scaled_res_.array() /= d.slack_.array();
+    d.scaled_res_.array() /= (d.slack_.array() + d.reg_.array() * d.multiplier_.array());
     propagate_jacobian(d);
 }
 void ipm_constr::update_linesearch_config(ipm::data_map_t &data, workspace_data *cfg) const {
@@ -72,9 +77,9 @@ void ipm_constr::update_linesearch_config(ipm::data_map_t &data, workspace_data 
             ls_cfg.dual.alpha_max = alpha_max;
         }
     }
-    // ls_cfg.primal.alpha_max = std::max(ls_cfg.primal.alpha_max, 1e-10);
-    // ls_cfg.dual.alpha_max = std::m ax(ls_cfg.dual.alpha_max, 1e-10);
-    assert(ls_cfg.primal.alpha_max > 1e-20);
+    // ls_cfg.primal.alpha_max = std::max(ls_cfg.primal.alpha_max, d.reg_);
+    // ls_cfg.dual.alpha_max = std::m ax(ls_cfg.dual.alpha_max, d.reg_);
+    assert(ls_cfg.primal.alpha_max > 0);
     assert(ls_cfg.dual.alpha_max > 1e-20);
 }
 void ipm_constr::finalize_predictor_step(ipm::data_map_t &data, workspace_data *cfg) const {
@@ -109,20 +114,37 @@ void ipm_constr::line_search_step(ipm::data_map_t &data, workspace_data *cfg) co
 void ipm_constr::value_impl(func_approx_data &data) const {
     base::value_impl(data);
     auto &d = data.as<ipm_data>();
-    d.g_ = d.v_.cwiseMin(-1e-8);
+    d.g_ = d.v_;            //.cwiseMin(-d.reg_);
     d.v_ = d.g_ + d.slack_; // r_g = g_ + slack
     d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array();
 }
 void ipm_constr::jacobian_impl(func_approx_data &data) const {
     base::jacobian_impl(data);
     auto &d = data.as<ipm_data>();
+    for (int i = 0; i < dim_; i++) {
+        if (d.slack_(i) < 1e-5)
+            d.reg_(i) = 1;
+        else
+            d.reg_(i) = 0.0; // regularization for slack variables
+    }
     // setup T^{-1} N
-    d.diag_scaling.array() = d.multiplier_.array() / d.slack_.array();
+    d.diag_scaling.array() = d.multiplier_.array() / (d.slack_.array() + d.reg_.array() * d.multiplier_.array());
     // set scaled residual
-    d.scaled_res_ = d.diag_scaling.cwiseProduct(d.g_);
-    if (!d.ipm_cfg->ipm_enable_affine_step())
+    // for (int i = 0; i < dim_; i++) {
+    //     if (std::fabs(d.v_(i)) < 1e-6) {
+    //         // fmt::print("v: {:.3}, slack: {:.3}, g: {:.3}, multiplier: {:.3} ratio {:.3}\n", d.v_(i), d.slack_(i), d.g_(i), d.multiplier_(i), d.g_(i) / d.slack_(i));
+    //         d.scaled_res_(i) = 0;
+    //     } else {
+    //         d.scaled_res_(i) = d.diag_scaling(i) * d.g_(i);
+    //     }
+    // }
+
+    d.scaled_res_.array() = d.diag_scaling.array() * d.g_.array();
+
+    if (!d.ipm_cfg->ipm_enable_affine_step()) {
         // if we are not in the affine step mode, we need to update the scaled residual with mu
-        d.scaled_res_.array() += d.ipm_cfg->mu / d.slack_.array();
+        d.scaled_res_.array() += d.ipm_cfg->mu / (d.slack_.array() + d.reg_.array() * d.multiplier_.array());
+    }
     // fmt::print("scaled_res: {:.3}\n", d.scaled_res_.transpose());
     // fmt::print("ratio: {:.3}\n", ((d.g_).cwiseQuotient(d.slack_)).transpose());
     // fmt::print("g_abs: {:.3}\n", (d.g_).transpose());
