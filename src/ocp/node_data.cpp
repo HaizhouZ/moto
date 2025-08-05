@@ -64,6 +64,9 @@ void node_data::update_approximation(update_mode config) {
     }
     // set merit jacobian to zero
     if (config > update_mode::eval_val) {
+        for (auto &r : dense_->res_stat_) {
+            r.setZero();
+        }
         for (auto field : primal_fields) {
             dense_->jac_[field].setZero();
             dense_->jac_modification_[field].setZero();

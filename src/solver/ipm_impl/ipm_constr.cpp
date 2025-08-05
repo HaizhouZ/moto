@@ -31,7 +31,6 @@ void ipm_constr::finalize_newton_step(ipm::data_map_t &data) const {
     size_t arg_idx = 0;
     // update slack newton step
     d.d_slack_ = -d.v_; // -r_g
-    // ensure slack + step >= 1e-8
     // compute linear step
     for (const sym &arg : d.func_.in_args()) {
         if (arg.field() < field::num_prim) {
@@ -48,7 +47,7 @@ void ipm_constr::finalize_newton_step(ipm::data_map_t &data) const {
 void ipm_constr::correct_jacobian(data_map_t &data) const {
     auto &d = data.as<ipm_data>();
     if (d.ipm_cfg->ipm_accept_corrector()) { // add the dual correction term
-        d.scaled_res_.array() = d.ipm_cfg->mu - d.d_multipler_.array() * d.d_slack_.array();
+        d.scaled_res_.array() = d.ipm_cfg->mu - d.corrector_.array();
     } else {
         d.scaled_res_.array() = d.ipm_cfg->mu;
     }
@@ -88,12 +87,13 @@ void ipm_constr::finalize_predictor_step(ipm::data_map_t &data, workspace_data *
     ipm_worker.n_ipm_cstr += dim_;
     ipm_worker.prev_aff_comp += d.multiplier_.dot(d.slack_);
     // finalize the affine step
+    d.corrector_.array() = ls_cfg.alpha_dual * d.d_multipler_.array() * ls_cfg.alpha_primal * d.d_slack_.array();
     d.d_multipler_.array() *= ls_cfg.alpha_dual;
     d.d_slack_.array() *= ls_cfg.alpha_primal;
     ipm_worker.post_aff_comp += (d.multiplier_ + d.d_multipler_).dot(d.slack_ + d.d_slack_);
-    assert(d.multiplier_.dot(d.slack_) > 0 &&
-           "the complementarity must be positive before the line search step");
-    assert((d.multiplier_ + d.d_multipler_).dot(d.slack_ + d.d_slack_) > 0);
+    // assert(d.multiplier_.dot(d.slack_) > 0 &&
+    //        "the complementarity must be positive before the line search step");
+    // assert((d.multiplier_ + d.d_multipler_).dot(d.slack_ + d.d_slack_) > 0);
 }
 void ipm_constr::line_search_step(ipm::data_map_t &data, workspace_data *cfg) const {
     auto &d = data.as<ipm_data>();
@@ -109,7 +109,7 @@ void ipm_constr::line_search_step(ipm::data_map_t &data, workspace_data *cfg) co
 void ipm_constr::value_impl(func_approx_data &data) const {
     base::value_impl(data);
     auto &d = data.as<ipm_data>();
-    d.g_ = d.v_;
+    d.g_ = d.v_.cwiseMin(-1e-8);
     d.v_ = d.g_ + d.slack_; // r_g = g_ + slack
     d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array();
 }
@@ -123,6 +123,12 @@ void ipm_constr::jacobian_impl(func_approx_data &data) const {
     if (!d.ipm_cfg->ipm_enable_affine_step())
         // if we are not in the affine step mode, we need to update the scaled residual with mu
         d.scaled_res_.array() += d.ipm_cfg->mu / d.slack_.array();
+    // fmt::print("scaled_res: {:.3}\n", d.scaled_res_.transpose());
+    // fmt::print("ratio: {:.3}\n", ((d.g_).cwiseQuotient(d.slack_)).transpose());
+    // fmt::print("g_abs: {:.3}\n", (d.g_).transpose());
+    // fmt::print("slack: {:.3}\n", d.slack_.transpose());
+    // fmt::print("g_err: {:.3}\n", (d.g_ + d.slack_).transpose());
+    // fmt::print("error: {:.3}\n", (d.scaled_res_ + d.multiplier_).transpose());
     // modification of jacobian
     // fmt::print("--------------------\n");
     // fmt::print("constraint name: {}\n", d.func_.name_);

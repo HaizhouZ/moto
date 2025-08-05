@@ -110,13 +110,16 @@ void ns_sqp::update(size_t n_iter) {
         graph_.apply_forward(solver::ns_riccati::fwd_linear_rollout, true);
 
         bool finalize_dual = true;
+        bool update_res_stat = true;
+
         if (has_ineq && settings.ipm_enable_affine_step()) { // compute the affine step, no need to finalize dual step
             settings.ipm_start_predictor_computation();
-            finalize_dual = false; // do not finalize dual step
+            finalize_dual = false;   // do not finalize dual step
+            update_res_stat = false; // do not update stationary residual
         }
         graph_.for_each_parallel([finalize_dual, &setting_per_thread](size_t tid, data *d) {
             solver::ns_riccati::finalize_newton_step(d, finalize_dual);
-            solver::ineq_soft::finalize_newton_step(d);
+            solver::ineq_soft::finalize_newton_step(d, false);
             // decide line search bounds (e.g., fraction-to-bounds)
             solver::ineq_soft::calculate_line_search_bounds(d, &setting_per_thread[tid]);
         });
@@ -141,10 +144,10 @@ void ns_sqp::update(size_t n_iter) {
             graph_.apply_backward(solver::ns_riccati::riccati_recursion_correction, true);
             graph_.for_each_parallel(solver::ns_riccati::compute_primal_sensitivity_correction);
             graph_.apply_forward(solver::ns_riccati::fwd_linear_rollout_correction, true);
-            graph_.for_each_parallel([](data *d) {
+            graph_.for_each_parallel([n_iter](data *d) {
                 solver::ineq_soft::first_order_correction_end(d);
                 solver::ns_riccati::finalize_newton_step_correction(d);
-                solver::ineq_soft::finalize_newton_step(d);
+                solver::ineq_soft::finalize_newton_step(d, false);
             });
             // recompute line search bounds with the corrected newton step
             settings.ls_config_reset();
@@ -156,13 +159,17 @@ void ns_sqp::update(size_t n_iter) {
             });
             finalize_bound_and_set_to_max();
         }
+
         /// @todo: update the line search stepsize?
         // real line search step
         graph_.for_each_parallel([this](data *d) {
             solver::ns_riccati::line_search_step(d, &settings);
             solver::ineq_soft::line_search_step(d, &settings);
         });
-
+        if (i_iter + 1 == n_iter) {
+            fmt::print("after line search step\n");
+            graph_.apply_forward(solver::ns_riccati::compute_kkt_residual);
+        }
         graph_.for_each_parallel(data::update_approx);
         // );
         kkt_info info = compute_kkt_info();
@@ -196,6 +203,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info() {
             // fmt::println("------ step {} dual_res: ", step++);
             // fmt::println("{}", cur->dense().jac_[__x].cwiseAbs().maxCoeff());
             // fmt::println("{}", cur->dense().jac_[__u].cwiseAbs().maxCoeff());
+            // fmt::println("{}", cur->dense().dual_[__ineq_xu].transpose());
             // fmt::println("{}", cur->dense().jac_[__y].cwiseAbs().maxCoeff());
         },
         true);

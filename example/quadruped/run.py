@@ -25,7 +25,8 @@ class pinCasadiModel(cpin.Model):
         self.dt = dt
 
 
-dt = moto.inputs("dt", 1, default_val=0.01)
+dt = moto.inputs("dt", 1, default_val=0.02)
+dt_nom = moto.params("dt_nom", 1, default_val=0.02)
 go2 = load("go2", display=True, verbose=True)
 
 model = pin.buildModelFromUrdf(go2.urdf, pin.JointModelFreeFlyer())
@@ -46,7 +47,7 @@ foot_jacs = [cpin.getFrameJacobian(model, model.data, f, pin.LOCAL_WORLD_ALIGNED
 active_foot = [moto.params(f"af_{f}", 1, default_val=1) for f in foot_frames]  # active foot indicator
 k_f = moto.params("k_f", default_val=100)  # kinematics constraint gain
 
-z_clip = moto.params("z_c", 1, default_val=0.05)  # minimum height for the foot to be considered in contact
+z_clip = moto.params("z_c", 1, default_val=0.01)  # minimum height for the foot to be considered in contact
 
 
 def make_foot_kin_constr(i: int):
@@ -55,8 +56,8 @@ def make_foot_kin_constr(i: int):
         [model.q, model.v, k_f, *active_foot, z_clip],
         # [model.q, k_f, *active_foot, z_clip],
         # cs.vcat([v_f[:2, i], k_f * cs.tanh(z_f[i]) * z_clip + v_f[2, i]]) * active_foot[i],
-        # cs.vcat([v_f[:2, i], k_f * z_f[i]  + v_f[2, i]]) * active_foot[i],
-        cs.vcat([v_f[:2, i], z_f[i]]) * active_foot[i]
+        cs.vcat([v_f[:2, i], k_f * z_f[i]  + v_f[2, i]]) * active_foot[i],
+        # cs.vcat([v_f[:2, i], z_f[i]]) * active_foot[i],
     )
 
 
@@ -96,7 +97,8 @@ def make_contact_constr(i: int, f: moto.sym):
 contact = [make_contact_constr(i, f) for i, f in enumerate(f_f)]
 
 # timestep constraint
-dt_constr = moto.constr("dt", [dt], cs.vcat([1e-4 - dt, dt - 3e-2])).as_ineq()
+dt_bound = moto.params("dt_bound", 2, default_val=np.array([1e-4, 5e-2]))  # bound on dt
+dt_constr = moto.constr("dt", [dt, dt_bound], cs.vcat([dt_bound[0] - dt, dt - dt_bound[1]])).as_ineq()
 # dt_constr = moto.constr("dt_fix", [dt], dt - 1e-2)
 
 
@@ -112,24 +114,22 @@ def implicit_euler():
 q_d = np.copy(go2.q0)
 
 q_nom = moto.params("q_nom", model.nq, default_val=q_d)
-z_f_lift_d = moto.params("z_f_lift_d", 1, default_val=0.05)  # desired foot lift height
+z_f_lift_d = moto.params("z_f_lift_d", 1, default_val=0.07)  # desired foot lift height
 
 q_nom_res = model.q - q_nom
 
-state_cost = 10.0 * cs.sumsqr(q_nom_res[:7]) + 1.0 * cs.sumsqr(q_nom_res[7:]) + 1e-2 * cs.sumsqr(model.v)
+state_cost = 100.0 * cs.sumsqr(q_nom_res[:7]) + 1 * cs.sumsqr(q_nom_res[7:]) + 1.0 * cs.sumsqr(model.v[:6]) + 0.01 * cs.sumsqr(model.v[6:])
 input_cost = 1e-4 * cs.sumsqr(model.a) + 1e-3 * cs.sumsqr(cs.vcat(f_f))
 
 z_f_d = moto.inputs("z_f_d", 4, default_val=0.0)  # desired foot height when in contact
 
-foot_lift_constr = moto.constr(
-    "foot_lift_constr", [model.q, z_f_d], (z_f - z_f_d), order=moto.approx_order_second
-)
+foot_lift_constr = moto.constr("foot_lift_constr", [model.q, z_f_d], (z_f - z_f_d))
 
 running_cost = moto.cost("c", [model.q, model.v, model.a, q_nom, *f_f], (state_cost + input_cost))
 foot_lift_cost = moto.cost(
     "c_z", [z_f_d, z_f_lift_d, *active_foot], 100 * cs.sumsqr((z_f_d - z_f_lift_d) * (1 - cs.vcat(active_foot)))
 )
-timing_cost = moto.cost("c_t", [dt], 1000 * cs.sumsqr(dt - 1e-2))
+timing_cost = moto.cost("c_t", [dt, dt_nom], 1000 * cs.sumsqr(dt - dt_nom))
 terminal_cost = moto.cost("c", [model.q, model.v, q_nom], state_cost).as_terminal()
 
 prob = moto.ocp.create()
@@ -144,7 +144,7 @@ prob_term = prob.clone()
 prob_term.add(terminal_cost)
 
 moto.print_problem(prob)
-print("--" * 20)
+print("--" * 15)
 # moto.print_problem(prob_term)
 # exit(0)
 
@@ -157,10 +157,9 @@ n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
 g.add_edge(n0, n1, N_horizon)
 
 sqp.settings.mu = 1
-sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
-# sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
-# sqp.settings.ipm_conditional_corrector = True
-
+# sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
+sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
+sqp.settings.ipm_conditional_corrector = True
 
 # setup gait
 steps = 4
@@ -192,12 +191,13 @@ def gait_setup(data: moto.sqp.data_type):
         data.value[active_foot[1]] = 1
         data.value[active_foot[2]] = 1
         data.value[active_foot[3]] = 1
+    data.value[q_nom][0] = node_idx / N_horizon * 0.5
     node_idx += 1
 
 
 sqp.apply_forward(gait_setup)
 
-sqp.update(20)
+sqp.update(30)
 
 q_res = []
 dt_res = []

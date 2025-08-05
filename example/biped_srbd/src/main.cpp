@@ -90,10 +90,10 @@ int main() {
     //     std::cout << data->value(dyn.active_r) << ',';
     // });
     // std::cout << "\n";
-    // solver.settings.mu_method = solver::ipm_config::mehrotra_probing; // default method
+    solver.settings.mu_method = solver::ipm_config::mehrotra_probing; // default method
     // solver.settings.mu_method = solver::ipm_config::quality_function_based; // default method
-    solver.settings.mu_method = solver::ipm_config::mehrotra_predictor_corrector; // default method
-    solver.settings.ipm_conditional_corrector = true;
+    // solver.settings.mu_method = solver::ipm_config::mehrotra_predictor_corrector; // default method
+    // solver.settings.ipm_conditional_corrector = true;
     solver.update(20);
     size_t step = 0;
     // graph.apply_forward([&](node_data *data) {

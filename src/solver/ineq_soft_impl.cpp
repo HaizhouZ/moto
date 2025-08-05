@@ -1,5 +1,5 @@
-#include <moto/solver/ineq_soft.hpp>
 #include <moto/ocp/problem.hpp>
+#include <moto/solver/ineq_soft.hpp>
 
 namespace moto {
 namespace solver {
@@ -9,14 +9,15 @@ void initialize(node_data *cur) {
         sd.prim_step_.clear();
         for (const sym &arg : sf.in_args()) {
             if (arg.field() < field::num_prim) {
-                sd.prim_step_.push_back(cur->problem().extract(dynamic_cast<solver::data_base*>(cur)->prim_step[arg.field()], arg));
+                sd.prim_step_.push_back(cur->problem().extract(dynamic_cast<solver::data_base *>(cur)->prim_step[arg.field()], arg));
             }
         }
         sf.initialize(sd);
     });
 }
-void finalize_newton_step(node_data *cur) {
-    for_each(cur, [](auto &sf, auto &sd) {
+void finalize_newton_step(node_data *cur, bool update_res_stat) {
+    auto &prob = cur->problem();
+    for_each(cur, [update_res_stat, &prob](const soft_constr &sf, soft_constr_data_t &sd) {
         sf.finalize_newton_step(sd);
     });
 }
@@ -43,15 +44,15 @@ void first_order_correction_start(data_base *data) {
     for (auto field : primal_fields) {
         data->dense_->jac_modification_[field].setZero();
     }
-    for_each(dynamic_cast<node_data*>(data), [](const soft_constr &sf, soft_constr_data_t &sd) {
+    for_each(dynamic_cast<node_data *>(data), [](const soft_constr &sf, soft_constr_data_t &sd) {
         sf.correct_jacobian(sd);
     });
-    // data->merge_jacobian_modification();
     data->swap_jacobian_modification(); // move modification to the jacobian for later solving
 }
 void first_order_correction_end(data_base *data) {
     data->swap_jacobian_modification();                     // move
     data->Q_y_corr = &data->dense_->jac_modification_[__y]; // cache the Q_y after correction
+    // data->merge_jacobian_modification();
 }
 } // namespace ineq_soft
 } // namespace solver

@@ -32,7 +32,7 @@ void initialize(node_data *data);
  * @details it will call finalize_newton_step on each soft constraint
  * @param data data base
  */
-void finalize_newton_step(node_data *data);
+void finalize_newton_step(node_data *data, bool update_res_stat);
 /**
  * @brief finalize the predictor step, should be called after the rollout (@ref finalize_newton_step)
  * @details it will call finalize_predictor_step on each soft constraint

@@ -20,7 +20,7 @@ class ipm_constr final : public ineq_constr {
         vector diag_scaling;           ///< Nesterov-Todd scaling T^{-1} N
         vector scaled_res_;            ///< residuals after NT scaling (Nr_g - r_s) T^{-1} = T{-1} N r_g + T^{-1} mu
         vector d_slack_;               ///< newton step for slack variables
-        vector d_multipler_;           ///< newton step for multipliers
+        vector corrector_;             ///< newton step for multipliers
         approx_data(base::approx_data &&rhs);
     };
     using base::base;

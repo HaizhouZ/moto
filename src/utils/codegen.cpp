@@ -152,7 +152,7 @@ cs::Function filter_func_near_zero(
     const std::vector<cs::SX> &expr,
     bool with_aux,
     double tol = 1e-8,
-    int ntrials = 50) {
+    int ntrials = 100) {
     cs::Function f(func_name, sx_inputs, expr);
     std::vector<cs::DM> nz_cnt;
     nz_cnt.reserve(expr.size());
