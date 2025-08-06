@@ -17,6 +17,7 @@ struct nullspace_data;
 struct ns_node_data : public data_base {
     // dim
     size_t ns, nc, ncstr;
+    size_t nis, nic; // number of active inequality constraints
     size_t nz;
 
     movable_ptr<nullspace_data> nsp_;
@@ -31,7 +32,7 @@ struct ns_node_data : public data_base {
     // multiplier sensitivity
     vector d_lbd_f, d_lbd_s_c_pre_solve, d_lbd_s_c;
 
-    array_type<vector, hard_constr_fields> dual_step; // dual rollout
+    array_type<vector, constr_fields> dual_step; // dual rollout
     
     ns_node_data(sym_data *, merit_data *);
     ns_node_data(const ns_node_data &rhs) = delete;

@@ -28,24 +28,44 @@ void ns_factorization(ns_node_data *cur) {
     d.Q_xx.noalias() += -(d.Q_yx.transpose() * nsp.F_0_K + nsp.F_0_K.transpose() * d.Q_yx);
     // nullspace computation
     d.rank_status_ = rank_status::unconstrained;
+
+    d.nis = cur->dense_->active_ineqs_[__ineq_x].size();
+    d.nic = cur->dense_->active_ineqs_[__ineq_xu].size();
+    size_t constr_s = d.ns + d.nis;
+    size_t constr_c = d.nc + d.nic;
+    d.ncstr = constr_s + constr_c;
+    nsp.s_c_stacked.conservativeResize(d.ncstr, Eigen::NoChange);
+    d.d_lbd_s_c.conservativeResize(d.ncstr);
     if (d.ncstr) {
-        if (d.ns) {
-            nsp.s_u.noalias() = -nsp.s_y * nsp.F_u;
+        if (constr_s) {
+            if (!d.nis) {
+                nsp.s_u.noalias() = -nsp.s_y * nsp.F_u;
+            } else {
+                d.dual_step[__ineq_x].conservativeResize(d.nis);
+                nsp.s_u.topRows(d.ns).noalias() = -nsp.s_y * nsp.F_u;
+                nsp.s_u.bottomRows(d.nis).noalias() = -cur->dense_->active_ineq_approx_[__ineq_x].jac(__y) * nsp.F_u;
+            }
             // solve pseudo inverse
-            nsp.s_c_stacked.topRows(d.ns) = nsp.s_u;
+            nsp.s_c_stacked.topRows(constr_s) = nsp.s_u;
         }
-        if (d.nc) {
-            nsp.s_c_stacked.bottomRows(d.nc) = _approx[__eq_xu].jac_[__u];
+        if (constr_c) {
+            if (!d.nic)
+                nsp.s_c_stacked.bottomRows(d.nc) = _approx[__eq_xu].jac_[__u];
+            else {
+                d.dual_step[__ineq_xu].conservativeResize(d.nic);
+                nsp.s_c_stacked.bottomRows(constr_c) << _approx[__eq_xu].jac_[__u], cur->dense_->active_ineq_approx_[__ineq_xu].jac(__u);
+            }
         }
         nsp.lu_eq_.compute(nsp.s_c_stacked);
         nsp.rank = nsp.lu_eq_.rank();
-        auto& rank = nsp.rank;
+        auto &rank = nsp.rank;
         // fmt::print("rank of equality constraints: {}\n", rank);
 
         if (rank == 0)
             d.rank_status_ = rank_status::unconstrained;
         else {
             if (rank == d.ncstr) {
+                fmt::print("constrained node detected, rank: {}\n", rank);
                 d.rank_status_ = rank_status::fully_constrained;
             } else {
                 nsp.Z = nsp.lu_eq_.kernel();
@@ -57,17 +77,37 @@ void ns_factorization(ns_node_data *cur) {
             }
         }
         // precompute
-        if (d.ns) {
-            nsp.s_0_p_k.noalias() =
-                _approx[__eq_x].v_ - nsp.s_y * nsp.F_0_k;
-            nsp.s_0_p_K.noalias() =
-                _approx[__eq_x].jac_[__x] - nsp.s_y * nsp.F_0_K;
-            nsp.s_c_stacked_0_k.head(d.ns) = nsp.s_0_p_k;
-            nsp.s_c_stacked_0_K.topRows(d.ns) = nsp.s_0_p_K;
+        nsp.s_0_p_k.conservativeResize(constr_s);
+        nsp.s_0_p_K.conservativeResize(constr_s, Eigen::NoChange);
+        nsp.s_c_stacked_0_k.conservativeResize(d.ncstr);
+        nsp.s_c_stacked_0_K.conservativeResize(d.ncstr, Eigen::NoChange);
+        if (constr_s) {
+            if (!d.nis) {
+                nsp.s_0_p_k.noalias() =
+                    _approx[__eq_x].v_ - nsp.s_y * nsp.F_0_k;
+                nsp.s_0_p_K.noalias() =
+                    _approx[__eq_x].jac_[__x] - nsp.s_y * nsp.F_0_K;
+            } else {
+                nsp.s_0_p_k.head(d.ns).noalias() =
+                    _approx[__eq_x].v_ - nsp.s_y * nsp.F_0_k;
+                nsp.s_0_p_K.topRows(d.ns).noalias() =
+                    _approx[__eq_x].jac_[__x] - nsp.s_y * nsp.F_0_K;
+                nsp.s_0_p_k.tail(d.nis).noalias() =
+                    cur->dense_->active_ineq_approx_[__ineq_x].v() - cur->dense_->active_ineq_approx_[__ineq_x].jac(__y) * nsp.F_0_k;
+                nsp.s_0_p_K.bottomRows(d.nis).noalias() =
+                    cur->dense_->active_ineq_approx_[__ineq_x].jac(__x) - cur->dense_->active_ineq_approx_[__ineq_x].jac(__y) * nsp.F_0_K;
+            }
+            nsp.s_c_stacked_0_k.head(constr_s) = nsp.s_0_p_k;
+            nsp.s_c_stacked_0_K.topRows(constr_s) = nsp.s_0_p_K;
         }
-        if (d.nc) {
-            nsp.s_c_stacked_0_k.tail(d.nc) = _approx[__eq_xu].v_;
-            nsp.s_c_stacked_0_K.bottomRows(d.nc) = _approx[__eq_xu].jac_[__x];
+        if (constr_c) {
+            if (!d.nic) {
+                nsp.s_c_stacked_0_k.tail(d.nc) = _approx[__eq_xu].v_;
+                nsp.s_c_stacked_0_K.bottomRows(d.nc) = _approx[__eq_xu].jac_[__x];
+            } else {
+                nsp.s_c_stacked_0_k.tail(constr_c) << _approx[__eq_xu].v_, cur->dense_->active_ineq_approx_[__ineq_xu].v();
+                nsp.s_c_stacked_0_K.bottomRows(constr_c) << _approx[__eq_xu].jac_[__x], cur->dense_->active_ineq_approx_[__ineq_xu].jac(__x);
+            }
         }
         if (d.rank_status_ != rank_status::unconstrained) {
             // pre compute

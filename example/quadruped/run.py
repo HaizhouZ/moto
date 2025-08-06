@@ -99,7 +99,7 @@ contact = [make_contact_constr(i, f) for i, f in enumerate(f_f)]
 # timestep constraint
 dt_bound = moto.params("dt_bound", 2, default_val=np.array([1e-4, 5e-2]))  # bound on dt
 dt_constr = moto.constr("dt", [dt, dt_bound], cs.vcat([dt_bound[0] - dt, dt - dt_bound[1]])).as_ineq()
-# dt_constr = moto.constr("dt_fix", [dt], dt - 1e-2)
+# dt_constr = moto.constr("dt_fix", [dt], dt - 2e-2)
 
 
 # implicit euler
@@ -146,7 +146,6 @@ prob_term.add(terminal_cost)
 moto.print_problem(prob)
 print("--" * 15)
 # moto.print_problem(prob_term)
-# exit(0)
 
 N_horizon = 100
 
@@ -157,9 +156,9 @@ n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
 g.add_edge(n0, n1, N_horizon)
 
 sqp.settings.mu = 1
-# sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
-sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
-sqp.settings.ipm_conditional_corrector = True
+sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
+# sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
+# sqp.settings.ipm_conditional_corrector = True
 
 # setup gait
 steps = 4
@@ -197,7 +196,7 @@ def gait_setup(data: moto.sqp.data_type):
 
 sqp.apply_forward(gait_setup)
 
-sqp.update(30)
+sqp.update(40)
 
 q_res = []
 dt_res = []

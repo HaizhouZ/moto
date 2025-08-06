@@ -60,6 +60,8 @@ void fwd_linear_rollout_correction(ns_node_data *cur, ns_node_data *next);
  * @param finalize_dual whether to finalize the dual step
  */
 void finalize_newton_step(ns_node_data *cur, bool finalize_dual = true);
+
+void finalize_dual_newton_step(ns_node_data *cur);
 /**
  * @brief finalize the newton step for the current node after correction
  * @details will correct the primal steps before finalizing the dual steps

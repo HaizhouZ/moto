@@ -94,7 +94,7 @@ int main() {
     // solver.settings.mu_method = solver::ipm_config::quality_function_based; // default method
     solver.settings.mu_method = solver::ipm_config::mehrotra_predictor_corrector; // default method
     solver.settings.ipm_conditional_corrector = true;
-    solver.update(20);
+    solver.update(30);
     size_t step = 0;
     // graph.apply_forward([&](node_data *data) {
     //     std::cout << "------------- Step: " << step++ << '\n';

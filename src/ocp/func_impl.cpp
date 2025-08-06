@@ -171,8 +171,8 @@ void func_codegen::make_codegen_task(generic_func *f) {
                 w(); ///< execute the codegen job
                 (*n_jobs)--;
                 if (*n_jobs == 0) {
-                    f->set_ready_status(true);
                     f->load_external_impl(); ///< load the generated code
+                    f->set_ready_status(true);
                 }
             });
         }

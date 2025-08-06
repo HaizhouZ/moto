@@ -109,7 +109,7 @@ std::string process_generated_code(
                     if (is_hessian) {
                         processed_code << "  std::vector<std::vector<Eigen::Ref<Eigen::MatrixXd>>>& outputs) {\n";
                     } else {
-                        processed_code << "  std::vector<Eigen::Ref<Eigen::MatrixXd>>& outputs) {\n";
+                        processed_code << "  std::vector<Eigen::Ref<Eigen::Matrix<double, -1, -1, Eigen::RowMajor | Eigen::AutoAlign>>>& outputs) {\n";
                     }
                 }
                 func_found = true;

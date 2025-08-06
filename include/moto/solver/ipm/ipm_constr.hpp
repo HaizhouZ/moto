@@ -22,6 +22,8 @@ class ipm_constr final : public ineq_constr {
         vector d_slack_;               ///< newton step for slack variables
         vector corrector_;             ///< newton step for multipliers
         vector reg_;
+        vector active_;
+        vector reg_T_inv_;
         approx_data(base::approx_data &&rhs);
     };
     using base::base;

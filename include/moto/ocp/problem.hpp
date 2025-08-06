@@ -51,6 +51,9 @@ class ocp {
     vector_ref extract(vector_ref data, const expr &ex) const {
         return data.segment(get_expr_start(ex), ex.dim());
     }
+    row_vector_ref extract_row(row_vector_ref data, const expr &ex) const {
+        return data.segment(get_expr_start(ex), ex.dim());
+    }
     /**
      * @brief add expr to problem formulation
      * @note will copy the shared pointer

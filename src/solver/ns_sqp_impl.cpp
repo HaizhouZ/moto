@@ -28,12 +28,13 @@ stat_item stats[] = {{"no.", 3},
                      {"prim_res"},
                      {"dual_res"},
                      {"comp_res"},
+                     {"||d||"},
                      {"alpha_p"},
                      {"alpha_d"},
                      {"ipm_mu", stat_width + 2}};
 
 void ns_sqp::print_stats(int i_iter, const kkt_info &info, bool has_ineq) {
-    scalar_t stats_value[] = {i_iter, info.objective, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res,
+    scalar_t stats_value[] = {i_iter, info.objective, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res, info.inf_norm_step,
                               settings.alpha_primal, settings.alpha_dual, settings.mu};
     std::string_view ipm_flags;
     if (has_ineq && settings.ipm_enable_corrector()) {
@@ -148,6 +149,7 @@ void ns_sqp::update(size_t n_iter) {
                 solver::ineq_soft::first_order_correction_end(d);
                 solver::ns_riccati::finalize_newton_step_correction(d);
                 solver::ineq_soft::finalize_newton_step(d, false);
+                solver::ns_riccati::finalize_dual_newton_step(d);
             });
             // recompute line search bounds with the corrected newton step
             settings.ls_config_reset();
@@ -168,10 +170,15 @@ void ns_sqp::update(size_t n_iter) {
         });
         if (i_iter + 1 == n_iter) {
             fmt::print("after line search step\n");
-            graph_.apply_forward(solver::ns_riccati::compute_kkt_residual);
+            // graph_.apply_forward(solver::ns_riccati::compute_kkt_residual);
+            // settings.mu_method = solver::ipm_config::quality_function_based;
         }
         graph_.for_each_parallel(data::update_approx);
-        // );
+        // if (i_iter + 1 == n_iter) {
+        //     graph_.apply_forward([](data *d) {
+        //         d->merge_jacobian_modification();
+        //     });
+        // }
         kkt_info info = compute_kkt_info();
         // print statistics
         print_stats(i_iter, info, has_ineq);
@@ -186,6 +193,12 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info() {
         info.inf_prim_res = std::max(info.inf_prim_res, n->inf_prim_res_);
         info.inf_dual_res = std::max(info.inf_dual_res, n->dense().jac_[__u].cwiseAbs().maxCoeff());
         info.inf_comp_res = std::max(info.inf_comp_res, n->inf_comp_res_);
+        for (auto f : primal_fields)
+            info.inf_norm_step = std::max(info.inf_norm_step, n->prim_step[__x].cwiseAbs().maxCoeff());
+        for (auto f : constr_fields) {
+            if (n->dual_step[f].size() > 0)
+                info.inf_norm_step = std::max(info.inf_norm_step, n->dual_step[f].cwiseAbs().maxCoeff());
+        }
     }
     size_t step = 0;
     graph_.apply_forward(
@@ -202,8 +215,9 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info() {
                 info.inf_dual_res = std::max(info.inf_dual_res, cur->dense().jac_[__y].cwiseAbs().maxCoeff());
             // fmt::println("------ step {} dual_res: ", step++);
             // fmt::println("{}", cur->dense().jac_[__x].cwiseAbs().maxCoeff());
-            // fmt::println("{}", cur->dense().jac_[__u].cwiseAbs().maxCoeff());
-            // fmt::println("{}", cur->dense().dual_[__ineq_xu].transpose());
+            // fmt::println("prim {}: {}", step, cur->value(__u).transpose());
+            // fmt::println("dual {}: {}", step, cur->dense().dual_[__ineq_xu].transpose());
+            // fmt::println("jac  {}: {}", step++, cur->dense().jac_[__u]);
             // fmt::println("{}", cur->dense().jac_[__y].cwiseAbs().maxCoeff());
         },
         true);

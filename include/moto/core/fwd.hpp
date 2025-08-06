@@ -21,6 +21,7 @@ typedef matrix_cm matrix;
 using vector_ref = Eigen::Ref<vector>;
 using row_vector_ref = Eigen::Ref<row_vector>;
 using matrix_ref = Eigen::Ref<matrix>;
+using matrix_rm_ref = Eigen::Ref<matrix_rm>;
 using vector_const_ref = Eigen::Ref<const_vector>;
 
 using mapped_vector = Eigen::Map<vector>;

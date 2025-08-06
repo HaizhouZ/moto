@@ -64,7 +64,7 @@ func_approx_data::func_approx_data(sym_data &primal,
                         jac_.emplace_back(jac_data_.back());
                     }
                 } else { // useless
-                    static matrix empty;
+                    static matrix_rm empty;
                     if (!stored_)
                         jac_data_.emplace_back();
                     jac_.push_back(empty);

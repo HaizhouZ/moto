@@ -1,17 +1,21 @@
+#include <moto/ocp/problem.hpp>
 #include <moto/solver/ipm/ipm_constr.hpp>
-
 namespace moto {
 namespace solver {
 ipm_constr::approx_data::approx_data(base::approx_data &&rhs)
     : base::approx_data(std::move(rhs)) {
     slack_.resize(func_.dim());
-    slack_.setZero();
+    slack_.setConstant(1e-6);
     diag_scaling.resize(func_.dim());
     diag_scaling.setZero();
     scaled_res_.resize(func_.dim());
     scaled_res_.setZero();
     reg_.resize(func_.dim());
     reg_.setZero();
+    reg_T_inv_.resize(func_.dim());
+    reg_T_inv_.setZero();
+    active_.resize(func_.dim());
+    active_.setZero();
 }
 void ipm_constr::initialize(ipm::data_map_t &data) const {
     // dont call value_impl here
@@ -42,12 +46,14 @@ void ipm_constr::finalize_newton_step(ipm::data_map_t &data) const {
     }
     // update dual newton step
     if (d.ipm_cfg->ipm_computing_affine_step())
-        d.d_multipler_.array() = -(d.r_s_.array() + d.multiplier_.array() * d.d_slack_.array()) / (d.slack_.array() + d.reg_.array() * d.multiplier_.array());
-    //     d.d_multipler_.array() = -d.multiplier_.array() - d.diag_scaling.array() * d.d_slack_.array();
+        d.d_multiplier_.array() = -(d.r_s_.array() + d.multiplier_.array() * d.d_slack_.array()) / d.reg_T_inv_.array();
+    //     d.d_multiplier_.array() = -d.multiplier_.array() - d.diag_scaling.array() * d.d_slack_.array();
     else
-        d.d_multipler_.array() = -(d.r_s_.array() - d.ipm_cfg->mu + d.multiplier_.array() * d.d_slack_.array()) / (d.slack_.array() + d.reg_.array() * d.multiplier_.array());
-    // d.d_multipler_.array() = -d.multiplier_.array() + d.ipm_cfg->mu / (d.slack_.array() + d.reg_) - d.diag_scaling.array() * d.d_slack_.array();
-    d.d_slack_.array() += d.reg_.array() * d.d_multipler_.array();
+        d.d_multiplier_.array() = -(d.r_s_.array() - d.ipm_cfg->mu + d.multiplier_.array() * d.d_slack_.array()) / d.reg_T_inv_.array();
+    // d.d_multiplier_.array() = -d.multiplier_.array() + d.ipm_cfg->mu / (d.slack_.array() + d.reg_) - d.diag_scaling.array() * d.d_slack_.array();
+    d.d_slack_.array() += d.reg_.array() * d.d_multiplier_.array();
+    d.d_slack_.array() *= d.active_.array();      // apply the active set
+    d.d_multiplier_.array() *= d.active_.array(); // apply the active
 }
 void ipm_constr::correct_jacobian(data_map_t &data) const {
     auto &d = data.as<ipm_data>();
@@ -57,6 +63,7 @@ void ipm_constr::correct_jacobian(data_map_t &data) const {
         d.scaled_res_.array() = d.ipm_cfg->mu;
     }
     d.scaled_res_.array() /= (d.slack_.array() + d.reg_.array() * d.multiplier_.array());
+    d.scaled_res_.array() *= d.active_.array();
     propagate_jacobian(d);
 }
 void ipm_constr::update_linesearch_config(ipm::data_map_t &data, workspace_data *cfg) const {
@@ -66,13 +73,13 @@ void ipm_constr::update_linesearch_config(ipm::data_map_t &data, workspace_data 
     auto &ls_cfg = cfg->as<solver::linesearch_config>();
     // compute alpha_max
     for (size_t idx : range(dim_)) {
-        if (d.d_slack_(idx) < 0) {
+        if (d.d_slack_(idx) < 0 and d.active_(idx) > 0) {
             alpha_max = (-tau) * d.slack_(idx) / d.d_slack_(idx);
             ls_cfg.primal.clip(alpha_max);
             ls_cfg.primal.alpha_max = alpha_max;
         }
-        if (d.d_multipler_(idx) < 0) {
-            alpha_max = (-tau) * d.multiplier_(idx) / d.d_multipler_(idx);
+        if (d.d_multiplier_(idx) < 0 and d.active_(idx) > 0) {
+            alpha_max = (-tau) * d.multiplier_(idx) / d.d_multiplier_(idx);
             ls_cfg.dual.clip(alpha_max);
             ls_cfg.dual.alpha_max = alpha_max;
         }
@@ -89,23 +96,27 @@ void ipm_constr::finalize_predictor_step(ipm::data_map_t &data, workspace_data *
     assert(d.ipm_cfg->ipm_computing_affine_step() &&
            "ipm affine step computation not started but affine step is requested");
     // if we are in the affine step mode, we need to update the ipm worker data
-    ipm_worker.n_ipm_cstr += dim_;
-    ipm_worker.prev_aff_comp += d.multiplier_.dot(d.slack_);
+    ipm_worker.n_ipm_cstr += (d.active_.array() > 0).count();
+    ipm_worker.prev_aff_comp += d.multiplier_.dot(d.slack_.cwiseProduct(d.active_));
     // finalize the affine step
-    d.corrector_.array() = ls_cfg.alpha_dual * d.d_multipler_.array() * ls_cfg.alpha_primal * d.d_slack_.array();
-    d.d_multipler_.array() *= ls_cfg.alpha_dual;
+    d.corrector_.array() = ls_cfg.alpha_dual * d.d_multiplier_.array() * ls_cfg.alpha_primal * d.d_slack_.array();
+    d.d_multiplier_.array() *= ls_cfg.alpha_dual;
     d.d_slack_.array() *= ls_cfg.alpha_primal;
-    ipm_worker.post_aff_comp += (d.multiplier_ + d.d_multipler_).dot(d.slack_ + d.d_slack_);
+    ipm_worker.post_aff_comp += (d.multiplier_ + d.d_multiplier_).cwiseProduct(d.active_).dot(d.slack_ + d.d_slack_);
     // assert(d.multiplier_.dot(d.slack_) > 0 &&
     //        "the complementarity must be positive before the line search step");
-    // assert((d.multiplier_ + d.d_multipler_).dot(d.slack_ + d.d_slack_) > 0);
+    // assert((d.multiplier_ + d.d_multiplier_).dot(d.slack_ + d.d_slack_) > 0);
 }
 void ipm_constr::line_search_step(ipm::data_map_t &data, workspace_data *cfg) const {
     auto &d = data.as<ipm_data>();
     auto &ls_cfg = cfg->as<solver::linesearch_config>();
     assert(!d.ipm_cfg->ipm_computing_affine_step() && "ipm affine step computation not ended");
-    d.slack_.array() += ls_cfg.alpha_primal * d.d_slack_.array();
-    d.multiplier_.array() += ls_cfg.alpha_dual * d.d_multipler_.array();
+    d.d_slack_.array() *= ls_cfg.alpha_primal;
+    d.d_multiplier_.array() *= ls_cfg.alpha_dual;
+    d.slack_.array() += d.d_slack_.array();
+    d.multiplier_.array() += d.d_multiplier_.array();
+    // d.slack_.array() += ls_cfg.alpha_primal * d.d_slack_.array();
+    // d.multiplier_.array() += ls_cfg.alpha_dual * d.d_multiplier_.array();
     if (d.ipm_cfg->ipm_accept_corrector()) {
         d.slack_ = d.slack_.array().max(1e-20);
         d.multiplier_ = d.multiplier_.array().max(1e-20);
@@ -116,47 +127,56 @@ void ipm_constr::value_impl(func_approx_data &data) const {
     auto &d = data.as<ipm_data>();
     d.g_ = d.v_;            //.cwiseMin(-d.reg_);
     d.v_ = d.g_ + d.slack_; // r_g = g_ + slack
+    for (size_t i = 0; i < dim_; i++) {
+        if (d.slack_(i) < 1e-8 && d.g_(i) < 1e-8) {
+            d.reg_(i) = 1e-8; // regularization for slack variables
+            d.active_[i] = 1; // active constraint
+            d.slack_(i) = 0;
+        } else {
+            d.active_[i] = 0; // inactive constraint
+            d.reg_(i) = 0.;   // regularization for slack variables
+        }
+    }
+    auto &active_ineqs = d.merit_data_->active_ineqs_[field_];
+    auto &approx_ = d.merit_data_->active_ineq_approx_[field_];
+    size_t cur_idx = active_ineqs.size();
+    size_t n_active = (d.active_.array() > 0).count();
+    if (n_active) {
+        approx_.dim += n_active;
+        for (size_t i = 0; i < dim_; i++) {
+            if (d.active_(i) > 1e-3) {
+                cur_idx = active_ineqs.size();
+                approx_.v_[cur_idx] = d.v_[i]; // store the primal value
+                size_t arg_idx = 0;
+                for (sym &arg : in_args_) {
+                    if (arg.field() < field::num_prim) {
+                        data.problem()->extract_row(approx_.jac_[arg.field()].row(cur_idx), arg) = d.jac_data_[arg_idx].row(i);
+                    }
+                    arg_idx++;
+                }
+                auto &q = active_ineqs.emplace_back();
+                q.d_multiplier_ = d.d_multiplier_.data() + i; // pointer to the multiplier
+            }
+        }
+    }
+    d.active_.array() = 1 - d.active_.array(); // invert the active set
     d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array();
 }
 void ipm_constr::jacobian_impl(func_approx_data &data) const {
     base::jacobian_impl(data);
     auto &d = data.as<ipm_data>();
-    for (int i = 0; i < dim_; i++) {
-        if (d.slack_(i) < 1e-5)
-            d.reg_(i) = 1;
-        else
-            d.reg_(i) = 0.0; // regularization for slack variables
-    }
+
     // setup T^{-1} N
-    d.diag_scaling.array() = d.multiplier_.array() / (d.slack_.array() + d.reg_.array() * d.multiplier_.array());
-    // set scaled residual
-    // for (int i = 0; i < dim_; i++) {
-    //     if (std::fabs(d.v_(i)) < 1e-6) {
-    //         // fmt::print("v: {:.3}, slack: {:.3}, g: {:.3}, multiplier: {:.3} ratio {:.3}\n", d.v_(i), d.slack_(i), d.g_(i), d.multiplier_(i), d.g_(i) / d.slack_(i));
-    //         d.scaled_res_(i) = 0;
-    //     } else {
-    //         d.scaled_res_(i) = d.diag_scaling(i) * d.g_(i);
-    //     }
-    // }
-
-    d.scaled_res_.array() = d.diag_scaling.array() * d.g_.array();
-
+    d.reg_T_inv_.array() = d.slack_.array() + d.reg_.array() * d.multiplier_.array();
+    d.diag_scaling.array() = d.active_.array() * d.multiplier_.array() / d.reg_T_inv_.array();
+    
     if (!d.ipm_cfg->ipm_enable_affine_step()) {
         // if we are not in the affine step mode, we need to update the scaled residual with mu
-        d.scaled_res_.array() += d.ipm_cfg->mu / (d.slack_.array() + d.reg_.array() * d.multiplier_.array());
+        d.scaled_res_.array() += d.ipm_cfg->mu / d.reg_T_inv_.array();
     }
-    // fmt::print("scaled_res: {:.3}\n", d.scaled_res_.transpose());
-    // fmt::print("ratio: {:.3}\n", ((d.g_).cwiseQuotient(d.slack_)).transpose());
-    // fmt::print("g_abs: {:.3}\n", (d.g_).transpose());
-    // fmt::print("slack: {:.3}\n", d.slack_.transpose());
-    // fmt::print("g_err: {:.3}\n", (d.g_ + d.slack_).transpose());
-    // fmt::print("error: {:.3}\n", (d.scaled_res_ + d.multiplier_).transpose());
-    // modification of jacobian
-    // fmt::print("--------------------\n");
-    // fmt::print("constraint name: {}\n", d.func_.name_);
-    // for (auto &arg : d.func_.in_args()) {
-    //     fmt::print("arg: {}: {}\n", arg->name(), d[arg].transpose());
-    // }
+    d.scaled_res_.array() *= d.active_.array(); // only active constraints contribute to the scaled residual
+    d.scaled_res_.array() = d.diag_scaling.array() * d.g_.array();
+    
     propagate_jacobian(d);
     propagate_hessian(d);
 }
