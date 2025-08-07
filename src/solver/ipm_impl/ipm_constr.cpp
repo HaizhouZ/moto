@@ -86,7 +86,7 @@ void ipm_constr::update_linesearch_config(ipm::data_map_t &data, workspace_data 
     }
     // ls_cfg.primal.alpha_max = std::max(ls_cfg.primal.alpha_max, d.reg_);
     // ls_cfg.dual.alpha_max = std::m ax(ls_cfg.dual.alpha_max, d.reg_);
-    assert(ls_cfg.primal.alpha_max > 0);
+    assert(ls_cfg.primal.alpha_max >= 0);
     assert(ls_cfg.dual.alpha_max > 1e-20);
 }
 void ipm_constr::finalize_predictor_step(ipm::data_map_t &data, workspace_data *cfg) const {
@@ -129,8 +129,9 @@ void ipm_constr::value_impl(func_approx_data &data) const {
     d.v_ = d.g_ + d.slack_; // r_g = g_ + slack
     for (size_t i = 0; i < dim_; i++) {
         if (d.slack_(i) < 1e-8 && d.g_(i) < 1e-8) {
-            d.reg_(i) = 0; // regularization for slack variables
+            d.reg_(i) = 1e-8; // regularization for slack variables
             d.active_[i] = 0; // active constraint
+            d.slack_(i) = 0;
         } else {
             d.active_[i] = 0; // inactive constraint
             d.reg_(i) = 0.;   // regularization for slack variables
@@ -147,12 +148,12 @@ void ipm_constr::jacobian_impl(func_approx_data &data) const {
     d.reg_T_inv_.array() = d.slack_.array() + d.reg_.array() * d.multiplier_.array();
     d.diag_scaling.array() = d.active_.array() * d.multiplier_.array() / d.reg_T_inv_.array();
     
+    d.scaled_res_.array() = d.diag_scaling.array() * d.g_.array();
     if (!d.ipm_cfg->ipm_enable_affine_step()) {
         // if we are not in the affine step mode, we need to update the scaled residual with mu
         d.scaled_res_.array() += d.ipm_cfg->mu / d.reg_T_inv_.array();
     }
     d.scaled_res_.array() *= d.active_.array(); // only active constraints contribute to the scaled residual
-    d.scaled_res_.array() = d.diag_scaling.array() * d.g_.array();
     
     propagate_jacobian(d);
     propagate_hessian(d);
