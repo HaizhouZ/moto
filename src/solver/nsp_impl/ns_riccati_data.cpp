@@ -31,10 +31,7 @@ ns_node_data::ns_node_data(sym_data *s, merit_data *dense)
     nsp_->s_c_stacked.resize(ncstr, nu);
     nsp_->s_c_stacked_0_k.resize(ncstr);
     nsp_->s_c_stacked_0_K.resize(ncstr, nx);
-    // set rollout data for hard constraints
-    dual_step[__dyn].resize(nx);
-    dual_step[__eq_x].resize(ns);
-    dual_step[__eq_xu].resize(nc);
+
 }
 ns_node_data::~ns_node_data() {
     if (nsp_)

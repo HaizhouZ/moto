@@ -447,6 +447,8 @@ class directed_graph {
         return nodes_;
     } ///< get the nodes in the graph
 
+    auto &tail() {return *tail_; } ///< get the tail node of the graph
+
   private:
     size_t n_jobs_ = MAX_THREADS; ///< number of jobs to run in parallel
     node *head_ = nullptr;        /// < head node of the graph, i.e., the first node in the graph

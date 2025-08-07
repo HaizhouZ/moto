@@ -82,6 +82,7 @@ void func_approx_data::setup_hessian(merit_data &raw) {
     auto &in_args = f.in_args();
     if (f.order() >= approx_order::second || in_field(f.field(), ineq_soft_constr_fields)) {
         size_t field_1, field_2;
+        auto *hessian = f.field() == __cost ? &raw.hessian_ : &raw.hessian_modification_;
         merit_hess_.resize(in_args_.size());
         for (size_t i : range(in_args_.size())) {
             if (in_args[i]->field() < field::num_prim) {
@@ -94,7 +95,7 @@ void func_approx_data::setup_hessian(merit_data &raw) {
                         /// h[i][j] = h[j][i] if i, j in the same field or field(i) < field(j)
                         /// otherwise only keep h[i][j] (empty)
                         if (field_1 >= field_2) {
-                            merit_hess_[i].push_back(raw.hessian_[field_1][field_2].block(
+                            merit_hess_[i].push_back((*hessian)[field_1][field_2].block(
                                 raw.prob_->get_expr_start(in_args[i]),
                                 raw.prob_->get_expr_start(in_args[j]),
                                 in_args[i]->dim(), in_args[j]->dim()));

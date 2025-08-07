@@ -19,7 +19,7 @@ struct merit_data {
         array<matrix_rm, field::num_prim> jac_; ///< dense jacobian
     };
     /// field approximation stored in here
-    static constexpr auto stored_constr_fields = std::array{__dyn, __eq_x, __eq_xu};
+    static constexpr auto stored_constr_fields = constr_fields;
     /// raw approximation data of constraints, indexed by field
     array_type<raw_approx, stored_constr_fields> approx_;
     /// dual variables of constratins, indexed by field
@@ -34,6 +34,7 @@ struct merit_data {
     array<row_vector, field::num_prim> jac_modification_;
     /// cost hessian h[a][b] is h_ab. Note only the upper block-triangular part is stored
     array<array<matrix, field::num_prim>, field::num_prim> hessian_;
+    array<array<matrix, field::num_prim>, field::num_prim> hessian_modification_;
 
     struct active_ineq {
         scalar_t *d_multiplier_; ///< pointer to the multiplier of the active inequality constraint

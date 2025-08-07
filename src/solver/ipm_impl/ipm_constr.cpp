@@ -40,7 +40,7 @@ void ipm_constr::finalize_newton_step(ipm::data_map_t &data) const {
     // compute linear step
     for (const sym &arg : d.func_.in_args()) {
         if (arg.field() < field::num_prim) {
-            d.d_slack_.noalias() -= d.jac_data_[arg_idx] * d.prim_step_[arg_idx];
+            d.d_slack_.noalias() -= d.jac_[arg_idx] * d.prim_step_[arg_idx];
         }
         arg_idx++;
     }
@@ -129,34 +129,11 @@ void ipm_constr::value_impl(func_approx_data &data) const {
     d.v_ = d.g_ + d.slack_; // r_g = g_ + slack
     for (size_t i = 0; i < dim_; i++) {
         if (d.slack_(i) < 1e-8 && d.g_(i) < 1e-8) {
-            d.reg_(i) = 1e-8; // regularization for slack variables
-            d.active_[i] = 1; // active constraint
-            d.slack_(i) = 0;
+            d.reg_(i) = 0; // regularization for slack variables
+            d.active_[i] = 0; // active constraint
         } else {
             d.active_[i] = 0; // inactive constraint
             d.reg_(i) = 0.;   // regularization for slack variables
-        }
-    }
-    auto &active_ineqs = d.merit_data_->active_ineqs_[field_];
-    auto &approx_ = d.merit_data_->active_ineq_approx_[field_];
-    size_t cur_idx = active_ineqs.size();
-    size_t n_active = (d.active_.array() > 0).count();
-    if (n_active) {
-        approx_.dim += n_active;
-        for (size_t i = 0; i < dim_; i++) {
-            if (d.active_(i) > 1e-3) {
-                cur_idx = active_ineqs.size();
-                approx_.v_[cur_idx] = d.v_[i]; // store the primal value
-                size_t arg_idx = 0;
-                for (sym &arg : in_args_) {
-                    if (arg.field() < field::num_prim) {
-                        data.problem()->extract_row(approx_.jac_[arg.field()].row(cur_idx), arg) = d.jac_data_[arg_idx].row(i);
-                    }
-                    arg_idx++;
-                }
-                auto &q = active_ineqs.emplace_back();
-                q.d_multiplier_ = d.d_multiplier_.data() + i; // pointer to the multiplier
-            }
         }
     }
     d.active_.array() = 1 - d.active_.array(); // invert the active set
@@ -183,7 +160,7 @@ void ipm_constr::jacobian_impl(func_approx_data &data) const {
 void ipm_constr::propagate_jacobian(ipm_data &d) const {
     size_t j_idx = 0;
     bool nan_found = false;
-    for (auto &j : d.jac_data_) {
+    for (auto &j : d.jac_) {
         if (j.size() != 0) {
             d.jac_modification_[j_idx].noalias() += d.scaled_res_.transpose() * j;
             if (d.jac_modification_[j_idx].hasNaN()) {
@@ -217,7 +194,7 @@ void ipm_constr::propagate_hessian(ipm_data &d) const {
         if (outer.size()) { // skip empty hess
             for (auto &inner : outer) {
                 if (inner.size() != 0) {
-                    inner.noalias() += d.jac_data_[outer_idx].transpose() * d.diag_scaling.asDiagonal() * d.jac_data_[inner_idx];
+                    inner.noalias() += d.jac_[outer_idx].transpose() * d.diag_scaling.asDiagonal() * d.jac_[inner_idx];
                     if (inner.hasNaN()) {
                         fmt::print("NaN in hess[{}][{}]\n", outer_idx, inner_idx);
                     }

@@ -29,7 +29,8 @@ struct ns_sqp {
         scalar_t inf_prim_res = 0.; // primal residual (constraint violation)
         scalar_t inf_dual_res = 0.; // dual residual (stationary condition)
         scalar_t inf_comp_res = 0.; // (inequality) complementarity residual
-        scalar_t inf_norm_step = 0.; // infinity norm of the step
+        scalar_t inf_prim_step = 0.; // infinity norm of the step
+        scalar_t inf_dual_step = 0.; // infinity norm of the step
     };
 
     ns_sqp(size_t n_jobs = MAX_THREADS);

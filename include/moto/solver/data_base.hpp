@@ -17,17 +17,20 @@ struct data_base {
     sym_data *sym_;
     merit_data *dense_; ///< pointer to the dense approximation data
     // value function
-    row_vector &Q_x;
-    row_vector &Q_u;
-    row_vector &Q_y;
-    matrix &Q_xx;
-    matrix &Q_ux;
-    matrix &Q_uu;
-    matrix &Q_yx;
-    matrix &Q_yy;
+    row_vector &Q_x, Q_x_bak;
+    row_vector &Q_u, Q_u_bak;
+    row_vector &Q_y, Q_y_bak;
+    matrix &Q_xx, Q_xx_bak;
+    matrix &Q_ux, Q_ux_bak;
+    matrix &Q_uu, Q_uu_bak;
+    matrix &Q_yx, Q_yx_bak;
+    matrix &Q_yy, Q_yy_bak;
     array_type<vector, primal_fields> prim_step; ///< primal (newton) step
     array_type<vector, primal_fields> prim_corr; ///< correction for the primal step
     row_vector *Q_y_corr;                        ///< correction for the Q_y
+
+    array_type<vector, constr_fields> dual_step; // dual rollout
+
     /// @brief create solver data
     /// @param sym_ pointer to the symbolic data
     /// @param dense pointer to the dense approximation data

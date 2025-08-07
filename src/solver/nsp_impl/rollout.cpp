@@ -40,30 +40,8 @@ void finalize_dual_newton_step(ns_node_data *cur) {
             cur_idx += d.ns;
             d.d_lbd_f.noalias() -= nsp.s_y.transpose() * d.dual_step[__eq_x];
         }
-        if (d.nis > 0) {
-            d.dual_step[__ineq_x] = d.d_lbd_s_c.segment(cur_idx, d.nis);
-            size_t idx = 0;
-            for (auto &v : d.dense_->active_ineqs_[__ineq_x]) {
-                *v.d_multiplier_ = d.dual_step[__ineq_x](idx++);
-            }
-            cur_idx += d.nis;
-            d.d_lbd_f.noalias() -= d.dense_->active_ineq_approx_[__ineq_x].jac(__y).transpose() * d.dual_step[__ineq_x];
-        }
         if (d.nc > 0) {
             d.dual_step[__eq_xu] = d.d_lbd_s_c.segment(cur_idx, d.nc);
-        }
-        if (d.nic > 0) {
-            d.dual_step[__ineq_xu] = d.d_lbd_s_c.tail(d.nic);
-            size_t idx = 0;
-            for (auto &v : d.dense_->active_ineqs_[__ineq_xu]) {
-                *v.d_multiplier_ = d.dual_step[__ineq_xu](idx++);
-            }
-            // size_t dim = 0;
-            // for (size_t i = 0; i < d.ncstr; i++) {
-            //     dim += nsp.s_c_stacked.row(i).cwiseAbs().maxCoeff() > 1e-30 ? 1 : 0;
-            // }
-            // fmt::print("dim: {}\n", dim);
-            // fmt::print("rank: {}\n", nsp.rank);
         }
     }
     d.dual_step[__dyn].noalias() = nsp.lu_dyn_.transpose().solve(d.d_lbd_f);
@@ -96,30 +74,36 @@ void finalize_newton_step_correction(ns_node_data *cur) {
     /// correct bar{u}_0 (first order term)
     nsp.u_0_p_k += nsp.z_u_k;
     /// update Q_y with correction
-    d.Q_y += *d.Q_y_corr;
-    d.Q_u += d.dense_->jac_modification_[__u];
+    d.Q_y += d.dense_->jac_modification_[__y];
+    // d.Q_u += d.dense_->jac_modification_[__u];
     // finalize_dual_newton_step(cur);
 }
 void compute_kkt_residual(ns_node_data *cur) {
     auto &d = *cur;
     auto &nsp = *d.nsp_;
     // compute KKT residual
-    static size_t step = 0;
-    fmt::println("step {} KKT residuals:", step++);
+    // fmt::println("KKT residuals:");
     auto dense = d.dense_;
-    dense->res_stat_[__u].noalias() = d.Q_uu * d.prim_step[__u] + d.Q_ux * d.prim_step[__x] + d.Q_u.transpose() + d.dense_->approx_[__dyn].jac_[__u].transpose() * d.dual_step[__dyn];
+    // fmt::println("Q_y: {}", d.Q_y);
+    dense->res_stat_[__u].noalias() = d.Q_uu_bak * d.prim_step[__u] + d.Q_ux * d.prim_step[__x] + d.Q_u_bak.transpose() + d.dense_->approx_[__dyn].jac_[__u].transpose() * d.dual_step[__dyn];
     if (d.nc) {
         dense->res_stat_[__u].noalias() += d.dense_->approx_[__eq_xu].jac_[__u].transpose() * d.dual_step[__eq_xu];
     }
-    if (d.nic) {
-        dense->res_stat_[__u].noalias() += d.dense_->active_ineq_approx_[__ineq_xu].jac(__u).transpose() * d.dual_step[__ineq_xu];
+    if (d.dual_step[__eq_xu].size() > 0) {
+        dense->res_stat_[__u].noalias() += d.dense_->approx_[__ineq_xu].jac_[__u].transpose() * d.dual_step[__ineq_xu];
     }
-    fmt::println("res_stat_u: {}", dense->res_stat_[__u].cwiseAbs().maxCoeff());
-    dense->res_stat_[__y].noalias() = d.Q_yy * d.prim_step[__y] + d.Q_yx * d.prim_step[__x] + d.Q_y.transpose() + d.dense_->approx_[__dyn].jac_[__y].transpose() * d.dual_step[__dyn];
+    dense->res_stat_[__y].noalias() = d.Q_yy_bak * d.prim_step[__y] + d.Q_yx * d.prim_step[__x] + d.Q_y_bak.transpose() + d.dense_->approx_[__dyn].jac_[__y].transpose() * d.dual_step[__dyn];
     if (d.ns) {
         dense->res_stat_[__y].noalias() += d.dense_->approx_[__eq_x].jac_[__y].transpose() * d.dual_step[__eq_x];
     }
-    fmt::println("res_stat_y: {}", dense->res_stat_[__y].cwiseAbs().maxCoeff());
+    // dense->res_stat_[__u].noalias() += d.dense_->active_ineq_approx_[__ineq_xu].jac(__u).transpose() * d.dual_step[__ineq_xu];
+    // }
+    // fmt::println("res_stat_u: {}", dense->res_stat_[__u].cwiseAbs().maxCoeff());
+    // dense->res_stat_[__y].noalias() = d.Q_yy_bak * d.prim_step[__y] + d.Q_yx * d.prim_step[__x] + d.Q_y_bak.transpose() + d.dense_->approx_[__dyn].jac_[__y].transpose() * d.dual_step[__dyn];
+    // if (d.ns) {
+    //     dense->res_stat_[__y].noalias() += d.dense_->approx_[__eq_x].jac_[__y].transpose() * d.dual_step[__eq_x];
+    // }
+    // fmt::println("res_stat_y: {}", dense->res_stat_[__y].cwiseAbs().maxCoeff());
     // cur->swap_jacobian_modification();
     // cur->Q_u = dense->res_stat_[__u].transpose();
     // cur->Q_y = dense->res_stat_[__y].transpose();

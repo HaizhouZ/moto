@@ -85,6 +85,11 @@ void node_data::update_approximation(update_mode config) {
                     hess_l_1.setZero();
                 }
             }
+            for (auto &hess_l_0 : dense_->hessian_modification_) {
+                for (auto &hess_l_1 : hess_l_0) {
+                    hess_l_1.setZero();
+                }
+            }
     }
     for (const generic_custom_func &f : prob_->exprs(__pre_comp)) {
         f.custom_call((*shared_)[f]); ///< @todo pass update mode

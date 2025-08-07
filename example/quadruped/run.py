@@ -156,9 +156,9 @@ n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
 g.add_edge(n0, n1, N_horizon)
 
 sqp.settings.mu = 1
-sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
-# sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
-# sqp.settings.ipm_conditional_corrector = True
+# sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
+sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
+sqp.settings.ipm_conditional_corrector = True
 
 # setup gait
 steps = 4

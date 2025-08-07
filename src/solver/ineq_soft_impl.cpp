@@ -5,12 +5,15 @@ namespace moto {
 namespace solver {
 namespace ineq_soft {
 void initialize(node_data *cur) {
-    for_each(cur, [cur](auto &sf, auto &sd) {
+    for_each(cur, [cur](auto &sf, soft_constr_data_t &sd) {
         sd.prim_step_.clear();
         for (const sym &arg : sf.in_args()) {
             if (arg.field() < field::num_prim) {
                 sd.prim_step_.push_back(cur->problem().extract(dynamic_cast<solver::data_base *>(cur)->prim_step[arg.field()], arg));
             }
+            new (&sd.d_multiplier_) mapped_vector{cur->problem().extract(
+                                                      dynamic_cast<solver::data_base *>(cur)->dual_step[sf.field()], sf).data(),
+                                                  sf.dim()};
         }
         sf.initialize(sd);
     });
@@ -54,6 +57,7 @@ void first_order_correction_end(data_base *data) {
     data->Q_y_corr = &data->dense_->jac_modification_[__y]; // cache the Q_y after correction
     // data->merge_jacobian_modification();
 }
+
 } // namespace ineq_soft
 } // namespace solver
 } // namespace moto

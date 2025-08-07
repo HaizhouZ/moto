@@ -40,6 +40,7 @@ merit_data::merit_data(ocp *prob) : prob_(prob) {
         jac_modification_[i].resize(prob_->dim(i));
         jac_modification_[i].setZero();
     }
+    hessian_modification_ = hessian_; // same size
     for (auto f : primal_fields) {
         res_stat_[f].resize(prob_->dim(f));
         res_stat_[f].setZero();

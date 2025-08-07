@@ -28,13 +28,14 @@ stat_item stats[] = {{"no.", 3},
                      {"prim_res"},
                      {"dual_res"},
                      {"comp_res"},
+                     {"||p||"},
                      {"||d||"},
                      {"alpha_p"},
                      {"alpha_d"},
                      {"ipm_mu", stat_width + 2}};
 
 void ns_sqp::print_stats(int i_iter, const kkt_info &info, bool has_ineq) {
-    scalar_t stats_value[] = {i_iter, info.objective, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res, info.inf_norm_step,
+    scalar_t stats_value[] = {i_iter, info.objective, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res, info.inf_prim_step, info.inf_dual_step,
                               settings.alpha_primal, settings.alpha_dual, settings.mu};
     std::string_view ipm_flags;
     if (has_ineq && settings.ipm_enable_corrector()) {
@@ -58,6 +59,25 @@ void ns_sqp::print_stats(int i_iter, const kkt_info &info, bool has_ineq) {
 
     fmt::print("\n");
 };
+void iterative_refinement_start(ns_sqp::data *data) {
+    data->Q_y_corr = nullptr;
+    data->prim_corr[__x].setZero();
+    // data->clear_merit_jac();
+    // clear modification
+    for (auto field : primal_fields) {
+        data->dense().jac_modification_[field].setZero();
+    }
+    /// @todo fill the residual here
+    data->dense().jac_modification_[__u] = data->dense().res_stat_[__u];
+    data->swap_jacobian_modification(); // move modification to the jacobian for later solving
+}
+void iterative_refinement_end(ns_sqp::data *data) {
+    data->swap_jacobian_modification();                     // move
+    data->Q_y_corr = &data->dense().jac_modification_[__y]; // cache the Q_y after correction
+    solver::ns_riccati::finalize_newton_step_correction(data);
+    solver::ineq_soft::finalize_newton_step(data, false);
+    solver::ns_riccati::finalize_dual_newton_step(data);
+}
 
 void ns_sqp::update(size_t n_iter) {
     fmt::print("Initialization for SQP...\n");
@@ -161,7 +181,56 @@ void ns_sqp::update(size_t n_iter) {
             });
             finalize_bound_and_set_to_max();
         }
-
+        // iterative refinement if the step is too small
+        {
+            kkt_info info;
+            for (auto n : graph_.flatten_nodes()) {
+                for (auto f : primal_fields)
+                    info.inf_prim_step = std::max(info.inf_prim_step, n->prim_step[__x].cwiseAbs().maxCoeff());
+                for (auto f : constr_fields) {
+                    if (n->dual_step[f].size() > 0)
+                        info.inf_dual_step = std::max(info.inf_dual_step, n->dual_step[f].cwiseAbs().maxCoeff());
+                }
+            }
+            // if (info.inf_prim_step < 1e-1 || info.inf_dual_step < 1e-1) {
+            size_t iter_refine_max = 3;
+            size_t iter_refine = 0;
+            while (iter_refine < iter_refine_max) {
+                row_vector accm_q_y_mod;
+                // graph_.apply_backward([&accm_q_y_mod](data *cur) {
+                //     accm_q_y_mod.resize(cur->Q_y_bak.size());
+                //     accm_q_y_mod += cur->dense().jac_modification_[__y];
+                //     cur->Q_y_bak = cur->Q_y - accm_q_y_mod; // accumulate the jacobian modification
+                // });
+                graph_.for_each_parallel(solver::ns_riccati::compute_kkt_residual);
+                scalar_t inf_res_stat_u = 0.;
+                scalar_t inf_res_stat_y = 0.;
+                graph_.apply_forward([&](data *d) {
+                    inf_res_stat_u = std::max(inf_res_stat_u, d->dense().res_stat_[__u].cwiseAbs().maxCoeff());
+                    inf_res_stat_y = std::max(inf_res_stat_y, d->dense().res_stat_[__y].cwiseAbs().maxCoeff());
+                });
+                fmt::print("  iterative refinement {}, res_stat_u: {:.3e}, res_stat_y: {:.3e}\n", iter_refine, inf_res_stat_u, inf_res_stat_y);
+                if (inf_res_stat_u < 1e-10) {
+                    break;
+                }
+                graph_.for_each_parallel(iterative_refinement_start);
+                graph_.apply_backward(solver::ns_riccati::riccati_recursion_correction, true);
+                graph_.for_each_parallel(solver::ns_riccati::compute_primal_sensitivity_correction);
+                graph_.apply_forward(solver::ns_riccati::fwd_linear_rollout_correction, true);
+                graph_.for_each_parallel(iterative_refinement_end);
+                // recompute line search bounds with the corrected newton step
+                settings.ls_config_reset();
+                for (size_t i : range(n_worker)) {
+                    setting_per_thread[i].ls_config_reset();
+                }
+                graph_.for_each_parallel([&setting_per_thread](size_t tid, data *d) {
+                    solver::ineq_soft::calculate_line_search_bounds(d, &setting_per_thread[tid]);
+                });
+                finalize_bound_and_set_to_max();
+                iter_refine++;
+            }
+            // }
+        }
         /// @todo: update the line search stepsize?
         // real line search step
         graph_.for_each_parallel([this](data *d) {
@@ -194,10 +263,10 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info() {
         info.inf_dual_res = std::max(info.inf_dual_res, n->dense().jac_[__u].cwiseAbs().maxCoeff());
         info.inf_comp_res = std::max(info.inf_comp_res, n->inf_comp_res_);
         for (auto f : primal_fields)
-            info.inf_norm_step = std::max(info.inf_norm_step, n->prim_step[__x].cwiseAbs().maxCoeff());
+            info.inf_prim_step = std::max(info.inf_prim_step, n->prim_step[__x].cwiseAbs().maxCoeff());
         for (auto f : constr_fields) {
             if (n->dual_step[f].size() > 0)
-                info.inf_norm_step = std::max(info.inf_norm_step, n->dual_step[f].cwiseAbs().maxCoeff());
+                info.inf_dual_step = std::max(info.inf_dual_step, n->dual_step[f].cwiseAbs().maxCoeff());
         }
     }
     size_t step = 0;

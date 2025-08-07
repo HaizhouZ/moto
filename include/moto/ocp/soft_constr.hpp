@@ -22,13 +22,13 @@ class soft_constr : public generic_constr {
     struct approx_data : public base::approx_data {
         std::vector<vector_ref> prim_step_;            // to be set
         std::vector<row_vector_ref> jac_modification_; ///< merit jacobian modification
-        vector d_multiplier_;                           ///< newton step for multipliers
+        mapped_vector d_multiplier_;                          ///< newton step for multipliers
 
         using data_base = base::approx_data;
-        approx_data(data_base &&rhs) : data_base(std::move(rhs)) {
+        approx_data(data_base &&rhs) : data_base(std::move(rhs)), d_multiplier_(nullptr, 0) {
             map_merit_jac_from_raw(merit_data_->jac_modification_, jac_modification_);
-            d_multiplier_.resize(func_.dim());
-            d_multiplier_.setZero();
+            // d_multiplier_.resize(func_.dim());
+            // d_multiplier_.setZero();
         }
     };
 
