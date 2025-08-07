@@ -196,7 +196,7 @@ def gait_setup(data: moto.sqp.data_type):
 
 sqp.apply_forward(gait_setup)
 
-sqp.update(40)
+sqp.update(30)
 
 q_res = []
 dt_res = []

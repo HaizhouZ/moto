@@ -89,13 +89,20 @@ void compute_kkt_residual(ns_node_data *cur) {
     if (d.nc) {
         dense->res_stat_[__u].noalias() += d.dense_->approx_[__eq_xu].jac_[__u].transpose() * d.dual_step[__eq_xu];
     }
-    if (d.dual_step[__eq_xu].size() > 0) {
+    if (d.dual_step[__ineq_xu].size() > 0) {
         dense->res_stat_[__u].noalias() += d.dense_->approx_[__ineq_xu].jac_[__u].transpose() * d.dual_step[__ineq_xu];
     }
     dense->res_stat_[__y].noalias() = d.Q_yy_bak * d.prim_step[__y] + d.Q_yx * d.prim_step[__x] + d.Q_y_bak.transpose() + d.dense_->approx_[__dyn].jac_[__y].transpose() * d.dual_step[__dyn];
     if (d.ns) {
         dense->res_stat_[__y].noalias() += d.dense_->approx_[__eq_x].jac_[__y].transpose() * d.dual_step[__eq_x];
     }
+    dense->res_stat_[__x].noalias() = d.Q_xx_bak * d.prim_step[__x] + d.Q_x_bak.transpose() + d.dense_->approx_[__dyn].jac_[__x].transpose() * d.dual_step[__dyn];
+    if (d.nc) {
+        dense->res_stat_[__x].noalias() += d.dense_->approx_[__eq_xu].jac_[__x].transpose() * d.dual_step[__eq_xu];
+    }
+    // if (d.ns) {
+    //     dense->res_stat_[__x].noalias() += d.dense_->approx_[__eq_x].jac_[__x].transpose() * d.dual_step[__eq_x];
+    // }
     // dense->res_stat_[__u].noalias() += d.dense_->active_ineq_approx_[__ineq_xu].jac(__u).transpose() * d.dual_step[__ineq_xu];
     // }
     // fmt::println("res_stat_u: {}", dense->res_stat_[__u].cwiseAbs().maxCoeff());

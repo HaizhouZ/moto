@@ -37,6 +37,7 @@ void data_base::merge_jacobian_modification() {
     }
     Q_uu_bak = Q_uu; // backup
     Q_yy_bak = Q_yy;
+    Q_xx_bak = Q_xx;
     for (size_t i = 0; i < field::num_prim; i++) {
         for (size_t j = i; j < field::num_prim; j++) {
             dense_->hessian_[j][i] += dense_->hessian_modification_[j][i];

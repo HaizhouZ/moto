@@ -69,6 +69,7 @@ void iterative_refinement_start(ns_sqp::data *data) {
     }
     /// @todo fill the residual here
     data->dense().jac_modification_[__u] = data->dense().res_stat_[__u];
+    data->dense().jac_modification_[__y] = data->dense().res_stat_[__y];
     data->swap_jacobian_modification(); // move modification to the jacobian for later solving
 }
 void iterative_refinement_end(ns_sqp::data *data) {
@@ -193,7 +194,7 @@ void ns_sqp::update(size_t n_iter) {
                 }
             }
             // if (info.inf_prim_step < 1e-1 || info.inf_dual_step < 1e-1) {
-            size_t iter_refine_max = 3;
+            size_t iter_refine_max = 5;
             size_t iter_refine = 0;
             while (iter_refine < iter_refine_max) {
                 row_vector accm_q_y_mod;
@@ -205,12 +206,23 @@ void ns_sqp::update(size_t n_iter) {
                 graph_.for_each_parallel(solver::ns_riccati::compute_kkt_residual);
                 scalar_t inf_res_stat_u = 0.;
                 scalar_t inf_res_stat_y = 0.;
-                graph_.apply_forward([&](data *d) {
+                scalar_t inf_res_stat_x = 0.;
+                size_t step = 0;
+                graph_.apply_forward([&](data *d, data *next) {
                     inf_res_stat_u = std::max(inf_res_stat_u, d->dense().res_stat_[__u].cwiseAbs().maxCoeff());
+                    // inf_res_stat_y = std::max(inf_res_stat_y, d->dense().res_stat_[__y].cwiseAbs().maxCoeff());
+                    // if (step) {
+                    next->dense().res_stat_[__x].applyOnTheRight(utils::permutation_from_y_to_x(&d->problem(), &next->problem()));
+                    d->dense().res_stat_[__y] += next->dense().res_stat_[__x];
+                    // d->dense().res_stat_[__y] += next->dense().res_stat_[__x];
                     inf_res_stat_y = std::max(inf_res_stat_y, d->dense().res_stat_[__y].cwiseAbs().maxCoeff());
+                    // inf_res_stat_x = std::max(inf_res_stat_x, d->dense().res_stat_[__x].cwiseAbs().maxCoeff());
+                    // }
+                    step++;
                 });
-                fmt::print("  iterative refinement {}, res_stat_u: {:.3e}, res_stat_y: {:.3e}\n", iter_refine, inf_res_stat_u, inf_res_stat_y);
-                if (inf_res_stat_u < 1e-10) {
+                fmt::print("  iterative refinement {}, res_stat_u: {:.3e}, res_stat_y: {:.3e}, res_stat_x: {:.3e}\n",
+                           iter_refine, inf_res_stat_u, inf_res_stat_y, inf_res_stat_x);
+                if (inf_res_stat_u < 1e-10 && inf_res_stat_y < 1e-10 || !has_ineq) {
                     break;
                 }
                 graph_.for_each_parallel(iterative_refinement_start);
