@@ -29,14 +29,14 @@ void finalize_predictor_step(node_data *data, workspace_data *config) {
         sf.finalize_predictor_step(sd, cfg);
     });
 }
-void line_search_step(node_data *cur, workspace_data *config) {
+void apply_affine_step(node_data *cur, workspace_data *config) {
     for_each(cur, [cfg = config](const soft_constr &sf, soft_constr_data_t &sd) {
-        sf.line_search_step(sd, cfg);
+        sf.apply_affine_step(sd, cfg);
     });
 }
 void calculate_line_search_bounds(node_data *cur, workspace_data *config) {
     for_each(cur, [cfg = config](const soft_constr &sf, soft_constr_data_t &sd) {
-        sf.update_linesearch_config(sd, cfg);
+        sf.update_linesearch_bounds(sd, cfg);
     });
 }
 void first_order_correction_start(data_base *data) {
@@ -48,7 +48,7 @@ void first_order_correction_start(data_base *data) {
         data->dense_->jac_modification_[field].setZero();
     }
     for_each(dynamic_cast<node_data *>(data), [](const soft_constr &sf, soft_constr_data_t &sd) {
-        sf.correct_jacobian(sd);
+        sf.apply_corrector_step(sd);
     });
     data->swap_jacobian_modification(); // move modification to the jacobian for later solving
 }

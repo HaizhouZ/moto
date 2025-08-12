@@ -55,15 +55,21 @@ class soft_constr : public generic_constr {
     /// @param worker_cfg workspace data pointer to the config to be finalized
     virtual void finalize_predictor_step(data_map_t &data, workspace_data *worker_cfg) const {};
     /// first order correction of the cost jacobian. jac_modification must be reset to zero before calling this
-    virtual void correct_jacobian(data_map_t &data) const {};
+    virtual void apply_corrector_step(data_map_t &data) const {};
     /// @brief line search step for the soft constraint
     /// @param data data map
     /// @param worker_cfg workspace data pointer to the config to be used
-    virtual void line_search_step(data_map_t &data, workspace_data *worker_cfg) const = 0;
+    virtual void apply_affine_step(data_map_t &data, workspace_data *worker_cfg) const = 0;
     /// @brief update the line search configuration (if necessary)
     /// @param data data map
     /// @param worker_cfg workspace data pointer to the config to be updated
-    virtual void update_linesearch_config(data_map_t &data, workspace_data *worker_cfg) const {}
+    virtual void update_linesearch_bounds(data_map_t &data, workspace_data *worker_cfg) const {}
+
+
+    virtual void propagate_jacobian(func_approx_data &data) const = 0;
+    virtual void propagate_hessian(func_approx_data &data) const = 0;
+    virtual void propagate_res_stats(func_approx_data &data) const = 0;
+
     // soft_constr(base &&rhs) : base(std::move(rhs)) { field_hint().is_soft = true; } ///< move constructor from generic_constr
     /***
      * @brief make approximation data for the soft constraint, will use default @ref data_type

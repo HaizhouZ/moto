@@ -246,8 +246,8 @@ void ns_sqp::update(size_t n_iter) {
         /// @todo: update the line search stepsize?
         // real line search step
         graph_.for_each_parallel([this](data *d) {
-            solver::ns_riccati::line_search_step(d, &settings);
-            solver::ineq_soft::line_search_step(d, &settings);
+            solver::ns_riccati::apply_affine_step(d, &settings);
+            solver::ineq_soft::apply_affine_step(d, &settings);
         });
         if (i_iter + 1 == n_iter) {
             fmt::print("after line search step\n");

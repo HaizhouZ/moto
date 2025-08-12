@@ -33,8 +33,9 @@ class ipm_constr final : public ineq_constr {
     /// update the IPM-modified cost jacobian and hessian
     void jacobian_impl(func_approx_data &data) const override final;
 
-    void propagate_jacobian(ipm_data &d) const;
-    void propagate_hessian(ipm_data &d) const;
+    void propagate_jacobian(func_approx_data &d) const override;
+    void propagate_hessian(func_approx_data &d) const override;
+    void propagate_res_stats(func_approx_data &d) const {};
 
   public:
     void setup_workspace_data(func_arg_map &data, workspace_data *settings) const override {
@@ -48,11 +49,11 @@ class ipm_constr final : public ineq_constr {
     /// @brief finalize the predictor step, should be called after the rollout
     void finalize_predictor_step(data_map_t &data, workspace_data *cfg) const override final;
     /// @brief will compute the cost jacobian correction depending on the IPM settings
-    void correct_jacobian(data_map_t &data) const override final;
+    void apply_corrector_step(data_map_t &data) const override final;
     /// @brief line search step for the IPM constraint
-    void line_search_step(data_map_t &data, workspace_data *cfg) const override final;
+    void apply_affine_step(data_map_t &data, workspace_data *cfg) const override final;
     /// @brief update the line search configuration (if necessary)
-    void update_linesearch_config(data_map_t &data, workspace_data *cfg) const override final;
+    void update_linesearch_bounds(data_map_t &data, workspace_data *cfg) const override final;
     /**
      * @brief make the sparse approximation data for the IPM
      * @param primal sym data including states inputs etc

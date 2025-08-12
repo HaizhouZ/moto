@@ -71,7 +71,7 @@ int main() {
         }
         n++;
     });
-    // propogate parameters
+    // propagate parameters
     graph.apply_forward([&](node_data *cur, node_data *next) {
         next->value(__u) = cur->value(__u);
         next->value(__x) = cur->value(__x);

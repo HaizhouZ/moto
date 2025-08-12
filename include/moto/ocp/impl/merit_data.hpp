@@ -36,17 +36,6 @@ struct merit_data {
     array<array<matrix, field::num_prim>, field::num_prim> hessian_;
     array<array<matrix, field::num_prim>, field::num_prim> hessian_modification_;
 
-    struct active_ineq {
-        scalar_t *d_multiplier_; ///< pointer to the multiplier of the active inequality constraint
-    };
-    array_type<std::vector<active_ineq>, ineq_constr_fields> active_ineqs_; ///< active inequality constraints
-    struct raw_ineq_approx : public raw_approx {
-        size_t dim = 0;                                               ///< dimension of the active inequality constraint
-        auto v() { return v_.head(dim); } ///< dense value of the active inequality constraint
-        auto jac(field_t f) { return jac_[f].topRows(dim); } ///< jacobian of the active inequality constraint
-    };
-    array_type<raw_ineq_approx, ineq_constr_fields> active_ineq_approx_;
-
     /// stationary residual
     array_type<row_vector, primal_fields> res_stat_;
 };

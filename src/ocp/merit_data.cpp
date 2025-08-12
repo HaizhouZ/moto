@@ -45,16 +45,5 @@ merit_data::merit_data(ocp *prob) : prob_(prob) {
         res_stat_[f].resize(prob_->dim(f));
         res_stat_[f].setZero();
     }
-    for (auto f : ineq_constr_fields) {
-        auto &approx = active_ineq_approx_[f];
-        approx.v_.resize(prob_->dim(f));
-        approx.v_.setZero();
-        for (auto f_ : primal_fields) {
-            approx.jac_[f_].resize(approx.v_.size() + 1, prob_->dim(f_));
-            approx.jac_[f_].setZero();
-        }
-    }
-    active_ineqs_[__ineq_x].reserve(prob_->dim(__ineq_x));
-    active_ineqs_[__ineq_xu].reserve(prob_->dim(__ineq_xu));
 }
 } // namespace moto

@@ -74,7 +74,7 @@ void finalize_newton_step_correction(ns_node_data *cur);
  * @param cur current node data
  * @param cfg workspace configuration containing line search parameters
  */
-void line_search_step(ns_node_data *cur, workspace_data *cfg);
+void apply_affine_step(ns_node_data *cur, workspace_data *cfg);
 
 void compute_kkt_residual(ns_node_data *cur);
 } // namespace ns_riccati

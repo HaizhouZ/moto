@@ -42,20 +42,20 @@ void finalize_newton_step(node_data *data, bool update_res_stat);
 void finalize_predictor_step(node_data *data, workspace_data *config);
 /**
  * @brief line search step for the soft constraints
- * @details it will call line_search_step on each soft constraint
+ * @details it will call apply_affine_step on each soft constraint
  * @param data data base
  * @param config workspace data pointer (should contain linesearch config) to the config to be used
  */
-void line_search_step(node_data *data, workspace_data *config);
+void apply_affine_step(node_data *data, workspace_data *config);
 /**
  * @brief calculate the line search bounds for the soft constraints
- * @details it will call update_linesearch_config on each soft constraint
+ * @details it will call update_linesearch_bounds on each soft constraint
  * @param data data base
  * @param config workspace data pointer to the config to be updated
  */
 void calculate_line_search_bounds(node_data *data, workspace_data *config);
 /**
- * @brief prepare for the first-order primal correction and call to correct_jacobian on each soft constraint
+ * @brief prepare for the first-order primal correction and call to apply_corrector_step on each soft constraint
  * @details it will set prim_corr[__x] to zero and swap merit jacobian and its modifcation (as a pre-correction cache),
  * i.e., later solving will use the jacobian modification
  * it is @b assumed Q_y will be used in newton step finalization

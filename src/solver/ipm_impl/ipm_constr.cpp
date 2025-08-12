@@ -59,7 +59,7 @@ void ipm_constr::finalize_newton_step(ipm::data_map_t &data) const {
     //     fmt::print("ipm_constr: d_slack: {}, d_multiplier: {}\n", d.d_slack_.transpose(), d.d_multiplier_.transpose());
     // }
 }
-void ipm_constr::correct_jacobian(data_map_t &data) const {
+void ipm_constr::apply_corrector_step(data_map_t &data) const {
     auto &d = data.as<ipm_data>();
     if (d.ipm_cfg->ipm_accept_corrector()) { // add the dual correction term
         d.scaled_res_.array() = d.ipm_cfg->mu - d.corrector_.array();
@@ -70,7 +70,7 @@ void ipm_constr::correct_jacobian(data_map_t &data) const {
     d.scaled_res_.array() *= d.active_.array();
     propagate_jacobian(d);
 }
-void ipm_constr::update_linesearch_config(ipm::data_map_t &data, workspace_data *cfg) const {
+void ipm_constr::update_linesearch_bounds(ipm::data_map_t &data, workspace_data *cfg) const {
     constexpr scalar_t tau = 0.995; // scaling factor
     scalar_t alpha_max = 1.0;       // default max step size
     auto &d = data.as<ipm_data>();
@@ -111,7 +111,7 @@ void ipm_constr::finalize_predictor_step(ipm::data_map_t &data, workspace_data *
     //        "the complementarity must be positive before the line search step");
     // assert((d.multiplier_ + d.d_multiplier_).dot(d.slack_ + d.d_slack_) > 0);
 }
-void ipm_constr::line_search_step(ipm::data_map_t &data, workspace_data *cfg) const {
+void ipm_constr::apply_affine_step(ipm::data_map_t &data, workspace_data *cfg) const {
     auto &d = data.as<ipm_data>();
     auto &ls_cfg = cfg->as<solver::linesearch_config>();
     assert(!d.ipm_cfg->ipm_computing_affine_step() && "ipm affine step computation not ended");
@@ -161,9 +161,10 @@ void ipm_constr::jacobian_impl(func_approx_data &data) const {
     propagate_jacobian(d);
     propagate_hessian(d);
 }
-void ipm_constr::propagate_jacobian(ipm_data &d) const {
+void ipm_constr::propagate_jacobian(func_approx_data &data) const {
     size_t j_idx = 0;
     bool nan_found = false;
+    auto &d = data.as<ipm_data>();
     for (auto &j : d.jac_) {
         if (j.size() != 0) {
             d.jac_modification_[j_idx].noalias() += d.scaled_res_.transpose() * j;
@@ -190,7 +191,7 @@ void ipm_constr::propagate_jacobian(ipm_data &d) const {
         throw std::runtime_error("NaN found in jacobian modification");
     }
 }
-void ipm_constr::propagate_hessian(ipm_data &d) const {
+void ipm_constr::propagate_hessian(func_approx_data &d) const {
     // modification of hessian
     size_t outer_idx = 0;
     for (auto &outer : d.merit_hess_) {
@@ -198,7 +199,7 @@ void ipm_constr::propagate_hessian(ipm_data &d) const {
         if (outer.size()) { // skip empty hess
             for (auto &inner : outer) {
                 if (inner.size() != 0) {
-                    inner.noalias() += d.jac_[outer_idx].transpose() * d.diag_scaling.asDiagonal() * d.jac_[inner_idx];
+                    inner.noalias() += d.jac_[outer_idx].transpose() * d.as<ipm_data>().diag_scaling.asDiagonal() * d.jac_[inner_idx];
                     if (inner.hasNaN()) {
                         fmt::print("NaN in hess[{}][{}]\n", outer_idx, inner_idx);
                     }

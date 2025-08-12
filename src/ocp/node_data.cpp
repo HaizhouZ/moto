@@ -71,13 +71,6 @@ void node_data::update_approximation(update_mode config) {
             dense_->jac_[field].setZero();
             dense_->jac_modification_[field].setZero();
         }
-        for (auto &a : dense_->active_ineqs_) {
-            a.clear();
-        }
-
-        for (auto &a : dense_->active_ineq_approx_) {
-            a.dim = 0;
-        }
 
         if (config >= update_mode::eval_hess)
             for (auto &hess_l_0 : dense_->hessian_) {

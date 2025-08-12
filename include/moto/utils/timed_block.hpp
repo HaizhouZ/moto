@@ -28,6 +28,7 @@ template <string_literals label>
 struct timing_storage {
     using duration_t = std::chrono::high_resolution_clock::duration;
     duration_t durations{0};
+    unsigned long long elapsed_cycles ;
     size_t count = 0;
     /**
      * @brief get the timing storage object for manipulation
@@ -43,9 +44,10 @@ struct timing_storage {
      *
      */
     ~timing_storage() {
-        auto avg = durations / (count != 0 ? count : 1);
+        count = count == 0 ? 1 : count;
+        auto avg = durations / count;
         auto per = std::chrono::duration_cast<std::chrono::microseconds>(avg).count();
-        fmt::print("{}: {} us\n", label.value, per);
+        fmt::print("{}: {} us, count {}\n", label.value, per, count);
     }
 };
 
