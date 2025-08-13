@@ -19,6 +19,9 @@ struct ns_node_data : public data_base {
     size_t ns, nc, ncstr;
     size_t nis, nic; // number of active inequality constraints
     size_t nz;
+    sparse_mat &F_x, &F_u;
+    sparse_mat &s_y, &s_x, &c_x, &c_u;
+    vector& F_0;
 
     movable_ptr<nullspace_data> nsp_;
 

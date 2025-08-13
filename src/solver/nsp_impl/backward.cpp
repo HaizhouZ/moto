@@ -10,9 +10,6 @@ extern void print_debug(ns_node_data *cur);
 void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
     auto &d = *cur;
     auto &nsp = *d.nsp_;
-    auto &F_x = d.dense_->dynamics_data_.proj_f_x_;
-    auto &F_u = d.dense_->dynamics_data_.proj_f_u_;
-    auto &f = d.dense_->dynamics_data_.proj_f_res;
     // check positiveness
     // bool qyy_invertible = isPositiveDefinite(d.Q_yy);
     d.Q_yy.array() /= 2;
@@ -26,17 +23,17 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
     }
     // nsp.U.noalias() = d.Q_uu + nsp.F_u.transpose() * d.Q_yy * nsp.F_u;
     nsp.U.noalias() = d.Q_uu;
-    F_u.inner_product(d.Q_yy, nsp.U);
+    d.F_u.inner_product(d.Q_yy, nsp.U);
     // compute bar{u}_0
-    nsp.Q_yy_F_0_k.noalias() = d.Q_yy * f - d.Q_y.transpose();
+    nsp.Q_yy_F_0_k.noalias() = d.Q_yy * d.F_0 - d.Q_y.transpose();
     // nsp.u_0_p_k.noalias() = d.Q_u.transpose() - nsp.F_u.transpose() * (d.Q_y.transpose() - d.Q_yy * nsp.F_0_k);
     // nsp.u_0_p_k.noalias() = d.Q_u.transpose() + nsp.F_u.transpose() * (d.Q_yy * nsp.F_0_k - d.Q_y.transpose());
-    F_u.T_times(nsp.Q_yy_F_0_k, nsp.u_0_p_k);
+    d.F_u.T_times(nsp.Q_yy_F_0_k, nsp.u_0_p_k);
     // nsp.Q_yy_F_0_K.noalias() = d.Q_yy * nsp.F_0_K;
-    F_x.right_times(d.Q_yy, nsp.Q_yy_F_0_K);
+    d.F_x.right_times(d.Q_yy, nsp.Q_yy_F_0_K);
     // nsp.u_0_p_K.noalias() = d.Q_ux - nsp.F_u.transpose() * (d.Q_yx - nsp.Q_yy_F_0_K);
     // nsp.u_0_p_K.noalias() = d.Q_ux + nsp.F_u.transpose() * (nsp.Q_yy_F_0_K - d.Q_yx);
-    F_u.T_times(nsp.Q_yy_F_0_K, nsp.u_0_p_K);
+    d.F_u.T_times(nsp.Q_yy_F_0_K, nsp.u_0_p_K);
     // fmt::print("u_0_p_k: \n{}\n", nsp.u_0_p_k.transpose());
     // fmt::print("u_0_p_K: \n{}\n", nsp.u_0_p_K.transpose());
     // fmt::print("u_y_K: \n{}\n", nsp.u_y_K.transpose());
@@ -72,10 +69,10 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
     }
     // d.Q_x.noalias() += -d.Q_y * nsp.F_0_K + nsp.F_0_k.transpose() * nsp.Q_yy_F_0_K +
     //                    nsp.z_u_k.transpose() * d.d_u.K;
-    F_x.right_times<false>(d.Q_y, d.Q_x);
-    d.Q_x.noalias() += f.transpose() * nsp.Q_yy_F_0_K + nsp.z_u_k.transpose() * d.d_u.K;
+    d.F_x.right_times<false>(d.Q_y, d.Q_x);
+    d.Q_x.noalias() += d.F_0.transpose() * nsp.Q_yy_F_0_K + nsp.z_u_k.transpose() * d.d_u.K;
     // d.Q_xx.noalias() += nsp.F_0_K.transpose() * nsp.Q_yy_F_0_K + nsp.z_u_K.transpose() * d.d_u.K;
-    F_x.T_times(nsp.Q_yy_F_0_K, d.Q_xx);
+    d.F_x.T_times(nsp.Q_yy_F_0_K, d.Q_xx);
     d.Q_xx.noalias() += nsp.z_u_K.transpose() * d.d_u.K;
     if (d.rank_status_ != rank_status::unconstrained) {
         d.Q_x.noalias() -= nsp.u_y_k.transpose() * nsp.u_0_p_K;
@@ -100,12 +97,11 @@ void riccati_recursion_correction(ns_node_data *cur, ns_node_data *prev) {
     // nsp.z_u_k.noalias() = d.Q_u.transpose() - nsp.F_u.transpose() * d.Q_y.transpose();
     nsp.z_u_k.noalias() = d.Q_u.transpose();
     auto &F_u = d.dense_->dynamics_data_.proj_f_u_;
-    F_u.T_times<false>(d.Q_y, nsp.z_u_k);
+    d.F_u.T_times<false>(d.Q_y, nsp.z_u_k);
     // compute Q_x correcton
     // d.Q_x.noalias() = -d.Q_y * nsp.F_0_K + nsp.z_u_k.transpose() * d.d_u.K;
     d.Q_x.noalias() = nsp.z_u_k.transpose() * d.d_u.K;
-    auto &F_x = d.dense_->dynamics_data_.proj_f_x_;
-    F_x.right_times<false>(d.Q_y, d.Q_x);
+    d.F_x.right_times<false>(d.Q_y, d.Q_x);
     if (prev != nullptr) [[likely]] {
         auto &d_pre = *prev;
         auto &perm = utils::permutation_from_y_to_x(prev->dense_->prob_, cur->dense_->prob_);

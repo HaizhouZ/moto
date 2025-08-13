@@ -14,19 +14,20 @@ struct merit_data {
     merit_data(ocp *prob);
 
     ocp *prob_;
-    static constexpr auto stored_constr_fields = std::array{__eq_x, __eq_xu};
     struct approx_data {
         vector v_; // value
         /// outer index is field, inner index is dynamics index
         array_type<sparse_mat, primal_fields> jac_;
     };
-    array_type<approx_data, stored_constr_fields> approx_;
+    array_type<approx_data, constr_fields> approx_;
+    constexpr static auto stored_constr_fields = constr_fields;
     struct dynamics_data {
-        vector v_; // value
         sparse_mat proj_f_x_, proj_f_u_;
-        array_type<sparse_mat, primal_fields> jac_; // jacobian
-        vector proj_f_res;
+        vector proj_f_res_;
     };
+    auto &proj_f_x() { return dynamics_data_.proj_f_x_; }
+    auto &proj_f_u() { return dynamics_data_.proj_f_u_; }
+    auto &proj_f_res() { return dynamics_data_.proj_f_res_; }
     dynamics_data dynamics_data_;
     /// dual variables of constratins, indexed by field
     array_type<vector, constr_fields> dual_;

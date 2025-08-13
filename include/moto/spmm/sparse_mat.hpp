@@ -14,6 +14,7 @@ struct sparse_mat {
     std::vector<panel_mat<sparsity::diag>> diag_panels_;
     std::vector<panel_mat<sparsity::eye>> eye_panels_;
     sparse_mat() = default;
+    void resize(size_t rows, size_t cols);
     matrix_ref insert(size_t r_st, size_t c_st, size_t r, size_t c, sparsity sp);
     void inner_product(const matrix &m, matrix &out);
     template <bool add = true, typename rhs_type, typename out_type>

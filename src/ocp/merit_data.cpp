@@ -14,16 +14,19 @@ merit_data::merit_data(ocp *prob) : prob_(prob) {
         if (in_field(i, merit_data::stored_constr_fields)) {
             approx_[i].v_.resize(dim);
             approx_[i].v_.setZero();
+            for (auto f : primal_fields) {
+                approx_[i].jac_[f].resize(dim, prob_->dim(f));
+            }
         }
         // dual variables
         dual_[i].resize(prob_->dim(i));
         dual_[i].setZero();
     }
     // dynamics data
-    dynamics_data_.v_.resize(prob_->dim(__dyn));
-    dynamics_data_.v_.setZero();
-    dynamics_data_.proj_f_res.resize(prob_->dim(__dyn));
-    dynamics_data_.proj_f_res.setZero();
+    dynamics_data_.proj_f_res_.resize(prob_->dim(__dyn));
+    dynamics_data_.proj_f_res_.setZero();
+    dynamics_data_.proj_f_x_.resize(prob_->dim(__dyn), prob_->dim(__x));
+    dynamics_data_.proj_f_u_.resize(prob_->dim(__dyn), prob_->dim(__u));
     // complementarity
     for (auto f : ineq_constr_fields) {
         comp_[f].resize(prob_->dim(f));

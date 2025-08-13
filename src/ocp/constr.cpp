@@ -123,11 +123,7 @@ void generic_constr::jacobian_impl(func_approx_data &data) const {
     // update multiplier - jacobian product
     for (size_t i = 0; i < in_args_.size(); i++) {
         if (d.merit_jac_[i].size() != 0) { // skip if no jacobian for this input
-            if (d.stored_) {
-                d.merit_jac_[i].noalias() += d.multiplier_.transpose() * d.jac_[i];
-            } else {
-                d.merit_jac_[i].noalias() += d.multiplier_.transpose() * d.jac_data_[i];
-            }
+            d.merit_jac_[i].noalias() += d.multiplier_.transpose() * d.jac_[i];
             // fmt::print("{}\t{}:i\t{:.3}\n", i, name(), d.in_args_[i].transpose());
             // fmt::print("{}\t{}:jac\n{:.3}\n", i, name(), d.jac_[i]);
         }

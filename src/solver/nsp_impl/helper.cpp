@@ -18,9 +18,9 @@ void kkt_diagnosis(ns_node_data *cur) {
 
 void print_debug(ns_node_data *cur) {
     cur->sym_->print();
-    fmt::println("F_u: \n{}", cur->dense_->dynamics_data_.proj_f_u_.dense());
-    fmt::println("F_0_k: \n{}", cur->dense_->dynamics_data_.proj_f_res.transpose());
-    fmt::println("F_0_K: \n{}", cur->dense_->dynamics_data_.proj_f_x_.dense());
+    fmt::println("F_u: \n{}", cur->F_u.dense());
+    fmt::println("F_0_k: \n{}", cur->F_0.transpose());
+    fmt::println("F_0_K: \n{}", cur->F_x.dense());
     fmt::println("u_y_k: \n{}", cur->nsp_->u_y_k.transpose());
     fmt::println("u_y_K: \n{}", cur->nsp_->u_y_K);
     fmt::println("s_c_stacked: \n{}", cur->nsp_->s_c_stacked);

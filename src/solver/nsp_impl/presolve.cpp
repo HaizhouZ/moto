@@ -39,17 +39,16 @@ void ns_factorization(ns_node_data *cur) {
     nsp.s_c_stacked.conservativeResize(d.ncstr, Eigen::NoChange);
     nsp.s_c_stacked.setZero();
     d.d_lbd_s_c.conservativeResize(d.ncstr);
-    auto &s_y = d.dense_->approx_[__eq_x].jac_[__y];
-    auto &c_u = d.dense_->approx_[__eq_xu].jac_[__u];
+
     if (d.ncstr) {
         if (constr_s) {
-            s_y.times<false>(d.dense_->dynamics_data_.proj_f_u_, nsp.s_u);
+            d.s_y.times<false>(d.F_u, nsp.s_u);
             // nsp.s_u.noalias() = -nsp.s_y * nsp.F_u;
             // solve pseudo inverse
             nsp.s_c_stacked.topRows(constr_s) = nsp.s_u;
         }
         if (constr_c) {
-            c_u.dump_into(nsp.s_c_stacked.bottomRows(d.nc));
+            d.c_u.dump_into(nsp.s_c_stacked.bottomRows(d.nc));
             // nsp.s_c_stacked.bottomRows(d.nc) = _approx[__eq_xu].jac_[__u];
         }
         nsp.lu_eq_.compute(nsp.s_c_stacked);
@@ -82,10 +81,9 @@ void ns_factorization(ns_node_data *cur) {
             // nsp.s_0_p_k.noalias() =
             //     _approx[__eq_x].v_ - nsp.s_y * nsp.F_0_k;
             nsp.s_0_p_k.noalias() = _approx[__eq_x].v_;
-            auto &s_x = d.dense_->approx_[__eq_x].jac_[__x];
-            s_x.dump_into(nsp.s_0_p_K);
-            s_y.times<false>(d.dense_->dynamics_data_.proj_f_x_, nsp.s_0_p_K);
-            s_y.times<false>(d.dense_->dynamics_data_.proj_f_res, nsp.s_0_p_k);
+            d.s_x.dump_into(nsp.s_0_p_K);
+            d.s_y.times<false>(d.F_x, nsp.s_0_p_K);
+            d.s_y.times<false>(d.F_0, nsp.s_0_p_k);
             // nsp.s_0_p_K.noalias() =
             //     _approx[__eq_x].jac_[__x] - nsp.s_y * nsp.F_0_K;
             nsp.s_c_stacked_0_k.head(constr_s) = nsp.s_0_p_k;
@@ -94,8 +92,7 @@ void ns_factorization(ns_node_data *cur) {
         if (constr_c) {
             nsp.s_c_stacked_0_k.tail(d.nc) = _approx[__eq_xu].v_;
             // nsp.s_c_stacked_0_K.bottomRows(d.nc) = _approx[__eq_xu].jac_[__x];
-            auto &c_x = d.dense_->approx_[__eq_xu].jac_[__x];
-            c_x.dump_into(nsp.s_c_stacked_0_K.bottomRows(d.nc));
+            d.c_x.dump_into(nsp.s_c_stacked_0_K.bottomRows(d.nc));
         }
         if (d.rank_status_ != rank_status::unconstrained) {
             // pre compute

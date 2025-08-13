@@ -9,7 +9,14 @@ ns_node_data::ns_node_data(sym_data *s, merit_data *dense)
       ns(dense->approx_[__eq_x].v_.size()),
       nc(dense->approx_[__eq_xu].v_.size()), ncstr(ns + nc), d_u(nu, nx),
       d_y(nx, nx), d_lbd_f(nx), d_lbd_s_c_pre_solve(nu), d_lbd_s_c(ncstr),
-      nsp_(new nullspace_data()) {
+      nsp_(new nullspace_data()),
+      F_x(dense->proj_f_x()),
+      F_u(dense->proj_f_u()),
+      s_y(dense->approx_[__eq_x].jac_[__y]),
+      s_x(dense->approx_[__eq_x].jac_[__x]),
+      c_x(dense->approx_[__eq_xu].jac_[__x]),
+      c_u(dense->approx_[__eq_xu].jac_[__u]),
+      F_0(dense->proj_f_res()) {
     if (nu < ncstr) {
         nz = 0;
         // throw std::runtime_error("system over-constrained, i.e., nu < ncstr");

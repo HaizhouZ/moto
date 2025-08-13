@@ -26,8 +26,6 @@ func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, const generic_
 vector_ref get_value_ref(const generic_func &f, merit_data &raw) {
     if (f.field() == __cost) {
         return vector_ref(mapped_vector(&raw.cost_, 1));
-    } else if (f.field() == __dyn) {
-        return raw.dynamics_data_.v_.segment(raw.prob_->get_expr_start(f), f.dim());
     } else if (in_field(f.field(), merit_data::stored_constr_fields)) {
         return raw.approx_[f.field()].v_.segment(raw.prob_->get_expr_start(f), f.dim());
     } else {
@@ -40,11 +38,7 @@ func_approx_data::func_approx_data(sym_data &primal,
                                    merit_data &raw,
                                    shared_data &shared,
                                    const generic_func &f)
-    : func_arg_map(primal, shared, f),
-      stored_(in_field(f.field(), merit_data::stored_constr_fields) || f.field() == __cost || f.field() == __dyn),
-      v_data_(stored_ ? vector() : vector::Zero(f.dim())),
-      v_(stored_ ? get_value_ref(f, raw) : vector_ref(v_data_)),
-      merit_data_(&raw) {
+    : func_arg_map(primal, shared, f), v_(get_value_ref(f, raw)), merit_data_(&raw) {
     auto &in_args = f.in_args();
     size_t f_st = raw.prob_->get_expr_start(f);
     // for non-cost
@@ -64,18 +58,6 @@ func_approx_data::func_approx_data(sym_data &primal,
         if (f.field() != __cost) {
             static matrix empty;
             jac_.assign(in_args_.size(), empty);
-            if (!stored_) { // use local data
-                auto &in_args = func_.in_args();
-                jac_data_.reserve(in_args.size());
-                for (size_t i : range(in_args.size())) {
-                    if (in_args[i]->field() < field::num_prim) {
-                        jac_data_.emplace_back(func_.dim(), in_args[i]->dim()).setZero();
-                        new (&jac_[i]) matrix_ref(jac_data_.back());
-                    } else {
-                        jac_data_.emplace_back();
-                    }
-                }
-            }
         } else {
             jac_.reserve(merit_jac_.size());
             jac_.assign(merit_jac_.begin(), merit_jac_.end());

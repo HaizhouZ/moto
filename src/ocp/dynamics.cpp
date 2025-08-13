@@ -12,7 +12,8 @@ struct dense_dynamics : public generic_dynamics {
         // sparse_mat proj_f_u_;
         using aligned_map_t = matrix::AlignedMapType;
         Eigen::PartialPivLU<matrix> lu_; ///< LU decomposition for dense dynamics
-        merit_data::dynamics_data *dense_;
+        merit_data::approx_data *dense_;
+        merit_data::dynamics_data *dyn_dense_;
         aligned_map_t f_x, f_y;               ///< Jacobian of f_y
         std::vector<aligned_map_t> f_u;       ///< Jacobian of other fields
         aligned_map_t proj_f_x_;              ///< Jacobian of x
@@ -21,7 +22,8 @@ struct dense_dynamics : public generic_dynamics {
             : generic_dynamics::approx_data(std::move(rhs)),
               f_x(nullptr, 0, 0), f_y(nullptr, 0, 0), proj_f_x_(nullptr, 0, 0) {
             auto &prob = *merit_data_->prob_;
-            dense_ = &merit_data_->dynamics_data_;
+            dense_ = &merit_data_->approx_[__dyn];
+            dyn_dense_ = &merit_data_->dynamics_data_;
             size_t f_st = prob.get_expr_start(func_);
             size_t arg_idx = 0;
             auto &in_args = func_.in_args();
@@ -34,7 +36,7 @@ struct dense_dynamics : public generic_dynamics {
             auto jac_x = dense_->jac_[__x].insert(f_st, prob.get_expr_start(first_x_arg), func_.dim(), func_.arg_dim(__x), sparsity::dense);
             new (&f_x) aligned_map_t(jac_x.data(), jac_x.rows(), jac_x.cols());
             // set up projected f_x
-            auto f_x = dense_->proj_f_x_.insert(f_st, prob.get_expr_start(first_x_arg), func_.dim(), func_.arg_dim(__x), sparsity::dense);
+            auto f_x = dyn_dense_->proj_f_x_.insert(f_st, prob.get_expr_start(first_x_arg), func_.dim(), func_.arg_dim(__x), sparsity::dense);
             new (&proj_f_x_) aligned_map_t(f_x.data(), f_x.rows(), f_x.cols());
             f_u.reserve(func_.arg_num(__u));
             for (auto &arg : in_args) {
@@ -44,7 +46,7 @@ struct dense_dynamics : public generic_dynamics {
                     new (&jac_[arg_idx]) matrix_ref(m);
                     if (f == __u) {
                         f_u.push_back(aligned_map_t(m.data(), m.rows(), m.cols()));
-                        auto p = dense_->proj_f_u_.insert(f_st, prob.get_expr_start(arg), func_.dim(), arg->dim(), sparsity::dense);
+                        auto p = dyn_dense_->proj_f_u_.insert(f_st, prob.get_expr_start(arg), func_.dim(), arg->dim(), sparsity::dense);
                         proj_f_u_.push_back(aligned_map_t(p.data(), p.rows(), p.cols()));
                     }
                 } else if (f == __y) {

@@ -39,8 +39,7 @@ void finalize_dual_newton_step(ns_node_data *cur) {
             d.dual_step[__eq_x] = d.d_lbd_s_c.head(d.ns);
             cur_idx += d.ns;
             // d.d_lbd_f.noalias() -= nsp.s_y.transpose() * d.dual_step[__eq_x];
-            auto &s_y = d.dense_->approx_[__eq_x].jac_[__y];
-            s_y.T_times<false>(d.dual_step[__eq_x], d.d_lbd_f);
+            d.s_y.T_times<false>(d.dual_step[__eq_x], d.d_lbd_f);
         }
         if (d.nc > 0) {
             d.dual_step[__eq_xu] = d.d_lbd_s_c.segment(cur_idx, d.nc);
@@ -87,7 +86,7 @@ void compute_kkt_residual(ns_node_data *cur) {
     // fmt::println("KKT residuals:");
     auto dense = d.dense_;
     // fmt::println("Q_y: {}", d.Q_y);
-    auto &f_u = dense->dynamics_data_.jac_[__u];
+    auto &f_u = dense->approx_[__dyn].jac_[__u];
     // dense->res_stat_[__u].noalias() = d.Q_uu_bak * d.prim_step[__u] + d.Q_ux * d.prim_step[__x] + d.Q_u_bak.transpose() + d.dense_->approx_[__dyn].jac_[__u].transpose() * d.dual_step[__dyn];
     dense->res_stat_[__u].noalias() = d.Q_uu_bak * d.prim_step[__u] + d.Q_ux * d.prim_step[__x] + d.Q_u_bak.transpose();
     f_u.T_times(d.dual_step[__dyn], dense->res_stat_[__u]);
@@ -101,13 +100,13 @@ void compute_kkt_residual(ns_node_data *cur) {
     }
     // dense->res_stat_[__y].noalias() = d.Q_yy_bak * d.prim_step[__y] + d.Q_yx * d.prim_step[__x] + d.Q_y_bak.transpose() + d.dense_->approx_[__dyn].jac_[__y].transpose() * d.dual_step[__dyn];
     dense->res_stat_[__y].noalias() = d.Q_yy_bak * d.prim_step[__y] + d.Q_yx * d.prim_step[__x] + d.Q_y_bak.transpose();
-    auto &f_y = dense->dynamics_data_.jac_[__y];
+    auto &f_y = dense->approx_[__dyn].jac_[__y];
     f_y.T_times(d.dual_step[__dyn], dense->res_stat_[__y]);
     if (d.ns) {
         // dense->res_stat_[__y].noalias() += d.dense_->approx_[__eq_x].jac_[__y].transpose() * d.dual_step[__eq_x];
         d.dense_->approx_[__eq_x].jac_[__y].T_times(d.dual_step[__eq_x], dense->res_stat_[__y]);
     }
-    auto &f_x = dense->dynamics_data_.jac_[__x];
+    auto &f_x = dense->approx_[__dyn].jac_[__x];
     // dense->res_stat_[__x].noalias() = d.Q_xx_bak * d.prim_step[__x] + d.Q_x_bak.transpose() + d.dense_->approx_[__dyn].jac_[__x].transpose() * d.dual_step[__dyn];
     dense->res_stat_[__x].noalias() = d.Q_xx_bak * d.prim_step[__x] + d.Q_x_bak.transpose();
     f_x.T_times(d.dual_step[__dyn], dense->res_stat_[__x]);
