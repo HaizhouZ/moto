@@ -104,11 +104,11 @@ struct func_approx_data : public func_arg_map {
     bool stored_ = false; ///< true if the data is stored in the merit_data
     vector v_data_;       ///< value data
     /// jacobian data, by default index correspond to @ref func_arg_map::in_args_
-    std::vector<matrix_rm> jac_data_;
+    std::vector<matrix> jac_data_;
     merit_data *merit_data_ = nullptr; ///< reference to the merit data
     ///////////////////////////////////////////////////
-    vector_ref v_;                ///< value ref
-    std::vector<matrix_rm_ref> jac_; ///< jacobian references
+    vector_ref v_;            ///< value ref
+    std::vector<matrix_ref> jac_; ///< jacobian references
     /// jacobian for cost, index corresponds to @ref func_arg_map::in_args_
     std::vector<row_vector_ref> merit_jac_;
     /// hessian for cost. index corresponds to @ref func_arg_map::in_args_
@@ -123,7 +123,8 @@ struct func_approx_data : public func_arg_map {
      */
     func_approx_data(sym_data &primal, merit_data &raw, shared_data &shared, const generic_func &f);
     /// @brief setup hessian from raw approx storage
-    void setup_hessian(merit_data &raw);
+    void setup_hessian();
+    virtual void setup_jacobian();
     /// @brief get the jacobian reference
     auto jac(const sym &in) const { return jac_[sym_uid_idx_.at(in.uid())]; }
     auto jac(size_t i) const { return jac_.at(i); }

@@ -1,3 +1,4 @@
+#include <moto/ocp/dynamics.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
 #include <moto/utils/field_conversion.hpp>
@@ -21,11 +22,19 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
         print_debug(cur);
         throw std::runtime_error("Q_yy has NaN");
     }
-    nsp.U.noalias() = d.Q_uu + nsp.F_u.transpose() * d.Q_yy * nsp.F_u;
+    // nsp.U.noalias() = d.Q_uu + nsp.F_u.transpose() * d.Q_yy * nsp.F_u;
+    nsp.U.noalias() = d.Q_uu;
+    d.dense_->dynamics_data_.proj_f_u_.inner_product(d.Q_yy, nsp.U);
     // compute bar{u}_0
-    nsp.u_0_p_k.noalias() = d.Q_u.transpose() - nsp.F_u.transpose() * (d.Q_y.transpose() - d.Q_yy * nsp.F_0_k);
-    nsp.Q_yy_F_0_K.noalias() = d.Q_yy * nsp.F_0_K;
-    nsp.u_0_p_K.noalias() = d.Q_ux - nsp.F_u.transpose() * (d.Q_yx - nsp.Q_yy_F_0_K);
+    nsp.Q_yy_F_0_k.noalias() = d.Q_yy * d.dense_->dynamics_data_.proj_f_res - d.Q_y.transpose();
+    // nsp.u_0_p_k.noalias() = d.Q_u.transpose() - nsp.F_u.transpose() * (d.Q_y.transpose() - d.Q_yy * nsp.F_0_k);
+    // nsp.u_0_p_k.noalias() = d.Q_u.transpose() + nsp.F_u.transpose() * (d.Q_yy * nsp.F_0_k - d.Q_y.transpose());
+    d.dense_->dynamics_data_.proj_f_u_.apply_this_transposition_on_the_left(nsp.Q_yy_F_0_k, nsp.u_0_p_k);
+    // nsp.Q_yy_F_0_K.noalias() = d.Q_yy * nsp.F_0_K;
+    d.dense_->dynamics_data_.proj_f_x_.apply_this_on_the_right(d.Q_yy, nsp.Q_yy_F_0_K);
+    d.dense_->dynamics_data_.proj_f_u_.apply_this_transposition_on_the_left(nsp.Q_yy_F_0_K, nsp.u_0_p_K);
+    // nsp.u_0_p_K.noalias() = d.Q_ux - nsp.F_u.transpose() * (d.Q_yx - nsp.Q_yy_F_0_K);
+    // nsp.u_0_p_K.noalias() = d.Q_ux + nsp.F_u.transpose() * (nsp.Q_yy_F_0_K - d.Q_yx);
     // fmt::print("u_0_p_k: \n{}\n", nsp.u_0_p_k.transpose());
     // fmt::print("u_0_p_K: \n{}\n", nsp.u_0_p_K.transpose());
     // fmt::print("u_y_K: \n{}\n", nsp.u_y_K.transpose());
@@ -61,7 +70,8 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
     }
     d.Q_x.noalias() += -d.Q_y * nsp.F_0_K + nsp.F_0_k.transpose() * nsp.Q_yy_F_0_K +
                        nsp.z_u_k.transpose() * d.d_u.K;
-    d.Q_xx.noalias() += nsp.F_0_K.transpose() * nsp.Q_yy_F_0_K + nsp.z_u_K.transpose() * d.d_u.K;
+    // d.Q_xx.noalias() += nsp.F_0_K.transpose() * nsp.Q_yy_F_0_K + nsp.z_u_K.transpose() * d.d_u.K;
+    d.dense_->dynamics_data_.proj_f_x_.apply_this_transposition_on_the_left(nsp.Q_yy_F_0_K, d.Q_xx);
     if (d.rank_status_ != rank_status::unconstrained) {
         d.Q_x.noalias() -= nsp.u_y_k.transpose() * nsp.u_0_p_K;
         d.Q_xx.noalias() -= nsp.u_y_K.transpose() * nsp.u_0_p_K;

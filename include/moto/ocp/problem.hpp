@@ -33,7 +33,6 @@ class ocp {
 
   public:
     CONST_PROPERTY(uid); ///< getter for uid
-    template <typename T = expr>
     const auto &exprs(size_t f) const { return expr_.at(f); }                  ///< getter for expr_
     const auto &pos(const expr &ex) const { return pos_by_uid_.at(ex.uid()); } ///< getter for pos_by_uid_
     size_t dim(size_t f) const { return dim_.at(f); }                          ///< getter for dim_

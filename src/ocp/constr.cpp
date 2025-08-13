@@ -1,4 +1,5 @@
 #include <moto/ocp/constr.hpp>
+#include <moto/ocp/dynamics.hpp>
 #include <moto/ocp/problem.hpp>
 
 namespace moto {
@@ -27,6 +28,34 @@ void generic_constr::approx_data::map_merit_jac_from_raw(decltype(merit_data::ja
         }
     }
 }
+
+void generic_constr::approx_data::setup_jacobian() {
+    assert(in_field(func_.field(), merit_data::stored_constr_fields) && "field not in stored constr fields");
+    auto prob_ = merit_data_->prob_;
+    auto &dynamics_exprs_ = prob_->exprs(__dyn);
+    size_t constr_idx = prob_->pos(func_);
+    size_t f_st = prob_->get_expr_start(func_);
+    size_t arg_idx = 0;
+    for (const sym &arg : func_.in_args()) {
+        field_t f = arg.field();
+        if (in_field(f, state_fields)) {
+            for (size_t dyn_idx = 0; dyn_idx < dynamics_exprs_.size(); dyn_idx++) {
+                generic_dynamics &dyn = dynamics_exprs_[dyn_idx];
+                if (dyn.has_arg(arg)) { // has common argument
+                    auto d = merit_data_->approx_[func_.field()].state_jac_[f].insert(
+                        f_st, prob_->get_expr_start(arg), func_.dim(), arg.dim(), sparsity::dense);
+                    new (&jac_[arg_idx]) matrix_ref(d);
+                }
+            }
+        } else if (in_field(f, nonstate_fields)) {
+            auto d = merit_data_->approx_[func_.field()].non_state_jac_[f].insert(
+                f_st, prob_->get_expr_start(arg), func_.dim(), arg.dim(), sparsity::dense);
+            new (&jac_[arg_idx]) matrix_ref(d);
+        }
+        arg_idx++;
+    }
+}
+
 void generic_constr::finalize_impl() {
     if (field_ == __undefined) {
         bool has_[3] = {false, false, false}; // x, u, y

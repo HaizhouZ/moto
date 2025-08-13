@@ -7,8 +7,8 @@
 namespace moto {
 enum field_t : size_t {
     __x = 0,
-    __u,
     __y,
+    __u,
     __p,          // non-decision parameters
     __dyn,        // dynamic model
     __eq_x,       // "state equality constraints"
@@ -26,8 +26,11 @@ enum field_t : size_t {
     __undefined,
 };
 
-constexpr auto primal_fields = std::array{__x, __u, __y};
+constexpr auto state_fields = std::array{__x, __y};
+constexpr auto nonstate_fields = std::array{__u};
+constexpr auto primal_fields = std::array{__x, __y, __u};
 constexpr auto hard_constr_fields = std::array{__dyn, __eq_x, __eq_xu};
+constexpr auto hard_constr_fields_non_dyn = std::array{__eq_x, __eq_xu};
 constexpr auto ineq_constr_fields = std::array{__ineq_x, __ineq_xu};
 constexpr auto soft_constr_fields = std::array{__eq_x_soft, __eq_xu_soft};
 

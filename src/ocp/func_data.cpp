@@ -2,6 +2,9 @@
 #include <moto/ocp/impl/func_data.hpp>
 #include <moto/ocp/problem.hpp>
 
+#include <moto/ocp/dynamics.hpp>
+#include <moto/ocp/problem.hpp>
+
 namespace moto {
 void sym::finalize_impl() {
     if (field_ == __x && !bool(dual_)) {
@@ -19,16 +22,28 @@ func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, const generic_
         in_args_.push_back(primal[arg]);
     }
 }
+
+vector_ref get_value_ref(const generic_func &f, merit_data &raw) {
+    if (f.field() == __cost) {
+        return vector_ref(mapped_vector(&raw.cost_, 1));
+    } else if (f.field() == __dyn) {
+        return raw.dynamics_data_[f.uid()].v_;
+    } else if (in_field(f.field(), merit_data::stored_constr_fields)) {
+        return raw.approx_[f.field()].v_.segment(raw.prob_->get_expr_start(f), f.dim());
+    } else {
+        throw std::runtime_error(fmt::format("Function {} in field {} with uid {} does not have stored value",
+                                             f.name(), f.field(), f.uid()));
+    }
+}
+
 func_approx_data::func_approx_data(sym_data &primal,
                                    merit_data &raw,
                                    shared_data &shared,
                                    const generic_func &f)
     : func_arg_map(primal, shared, f),
-      stored_(in_field(f.field(), merit_data::stored_constr_fields) || f.field() == __cost),
+      stored_(in_field(f.field(), merit_data::stored_constr_fields) || f.field() == __cost || f.field() == __dyn),
       v_data_(stored_ ? vector() : vector::Zero(f.dim())),
-      v_(stored_ ? (f.field() == __cost ? vector_ref(mapped_vector(&raw.cost_, 1))
-                                        : raw.approx_[f.field()].v_.segment(raw.prob_->get_expr_start(f), f.dim()))
-                 : vector_ref(v_data_)),
+      v_(stored_ ? get_value_ref(f, raw) : vector_ref(v_data_)),
       merit_data_(&raw) {
     auto &in_args = f.in_args();
     size_t f_st = raw.prob_->get_expr_start(f);
@@ -47,39 +62,38 @@ func_approx_data::func_approx_data(sym_data &primal,
         }
         // bind approx jacobian
         if (f.field() != __cost) {
-            if (!stored_)
+            static matrix empty;
+            jac_.assign(in_args_.size(), empty);
+            if (!stored_) { // use local data
+                auto &in_args = func_.in_args();
                 jac_data_.reserve(in_args.size());
-            jac_.reserve(in_args.size());
-            for (size_t i : range(in_args.size())) {
-                if (in_args[i]->field() < field::num_prim) {
-                    if (!stored_) {
-                        jac_data_.emplace_back(f.dim(), in_args[i]->dim());
-                        jac_data_.back().setZero();
-                    }
-                    if (stored_) {
-                        jac_.emplace_back(raw.approx_[f.field()].jac_[in_args[i]->field()].block(
-                            f_st, raw.prob_->get_expr_start(in_args[i]),
-                            f.dim(), in_args[i]->dim()));
+                for (size_t i : range(in_args.size())) {
+                    if (in_args[i]->field() < field::num_prim) {
+                        jac_data_.emplace_back(func_.dim(), in_args[i]->dim()).setZero();
+                        new (&jac_[i]) matrix_ref(jac_data_.back());
                     } else {
-                        jac_.emplace_back(jac_data_.back());
-                    }
-                } else { // useless
-                    static matrix_rm empty;
-                    if (!stored_)
                         jac_data_.emplace_back();
-                    jac_.push_back(empty);
+                    }
                 }
-            }
+            } else
+                setup_jacobian();
         } else {
             jac_.reserve(merit_jac_.size());
             jac_.assign(merit_jac_.begin(), merit_jac_.end());
         }
     }
-    setup_hessian(raw);
+    setup_hessian();
 }
-void func_approx_data::setup_hessian(merit_data &raw) {
+
+void func_approx_data::setup_jacobian() {
+    throw std::runtime_error("func_approx_data::setup_jacobian not implemented");
+}
+
+void func_approx_data::setup_hessian() {
     auto &f = func_;
     auto &in_args = f.in_args();
+    assert(merit_data_ != nullptr && "merit_data_ should not be null");
+    auto &raw = *merit_data_;
     if (f.order() >= approx_order::second || in_field(f.field(), ineq_soft_constr_fields)) {
         size_t field_1, field_2;
         auto *hessian = f.field() == __cost ? &raw.hessian_ : &raw.hessian_modification_;

@@ -31,6 +31,10 @@ class generic_func : public expr {
     gen_info gen_;
     approx_order order_ = approx_order::first;
     var_list in_args_;
+    array_type<size_t, primal_fields> arg_dim_{};
+    std::vector<size_t> arg_d_pos_;
+    array_type<std::set<size_t>, primal_fields> arg_uid_; ///< argument index for x, u, y
+
     std::unordered_map<size_t, size_t> sym_uid_idx_;
 
     friend class func_codegen;
@@ -73,14 +77,34 @@ class generic_func : public expr {
     PROPERTY(in_args)
     const auto &in_args(size_t i) const { return in_args_[i]; }
 
+    auto arg_dim(field_t field) const {
+        assert(in_field(field, primal_fields) && "field out of range");
+        return arg_dim_[field];
+    } ///< get the dimension of the argument for a given field
+
+    bool has_arg(const sym &s) const {
+        assert(in_field(s.field(), primal_fields) && "field out of range");
+        return arg_uid_[s.field()].contains(s.uid());
+    } ///< check if the function has argument for a given field
+
+    size_t arg_st(const sym &s) const {
+        assert(has_arg(s) && "argument not found");
+        return arg_d_pos_[sym_uid_idx_.at(s.uid())];
+    } ///< get the start index of the argument for a given field
+
     template <typename T>
         requires std::is_same_v<var, std::remove_cvref_t<T>> ||
                  std::is_same_v<shared_expr, std::remove_cvref_t<T>> ||
                  std::is_same_v<sym, std::remove_cvref_t<T>>
     void add_argument(T &&in) {
-        in_args_.emplace_back(std::forward<T>(in));
-        add_dep(in_args_.back());
-        sym_uid_idx_[in_args_.back()->uid()] = sym_uid_idx_.size();
+        auto &s = in_args_.emplace_back(std::forward<T>(in));
+        add_dep(s);
+        auto f = s.field();
+        if (in_field(f, primal_fields)) {
+            arg_d_pos_.emplace_back(arg_dim_[f]);
+            arg_dim_[f] += s->dim();
+        }
+        sym_uid_idx_[s->uid()] = sym_uid_idx_.size();
     }
     void add_arguments(const var_inarg_list &args) {
         for (sym &in : args) {

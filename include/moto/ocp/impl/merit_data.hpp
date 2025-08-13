@@ -3,9 +3,11 @@
 
 #include <moto/core/array.hpp>
 #include <moto/core/fields.hpp>
-
+#include <moto/spmm/sparse_mat.hpp>
 namespace moto {
 class ocp;
+struct generic_dynamics;
+struct dynamics_data_base;
 /**
  * @brief dense raw approximation data
  * deserialized data storage of all function fields
@@ -14,14 +16,22 @@ struct merit_data {
     merit_data(ocp *prob);
 
     ocp *prob_;
-    struct raw_approx {
-        vector v_;                              ///< dense value
-        array<matrix_rm, field::num_prim> jac_; ///< dense jacobian
+    static constexpr auto stored_constr_fields = std::array{__eq_x, __eq_xu};
+    struct approx_data {
+        vector v_; // value
+        /// outer index is field, inner index is dynamics index
+        array_type<sparse_mat, state_fields> state_jac_;
+        array_type<sparse_mat, nonstate_fields> non_state_jac_;
     };
-    /// field approximation stored in here
-    static constexpr auto stored_constr_fields = constr_fields;
-    /// raw approximation data of constraints, indexed by field
-    array_type<raw_approx, stored_constr_fields> approx_;
+    array_type<approx_data, stored_constr_fields> approx_;
+    struct dynamics_data {
+        vector v_; // value
+        struct sparse_mat_vstack : public sparse_mat {
+            std::vector<sparse_mat> mats_;
+        } proj_f_x_, proj_f_u_;
+        vector proj_f_res;
+    };
+    dynamics_data dynamics_data_;
     /// dual variables of constratins, indexed by field
     array_type<vector, constr_fields> dual_;
     /// complementarity of each inequality fields
