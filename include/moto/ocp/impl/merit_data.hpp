@@ -20,15 +20,14 @@ struct merit_data {
     struct approx_data {
         vector v_; // value
         /// outer index is field, inner index is dynamics index
-        array_type<sparse_mat, state_fields> state_jac_;
-        array_type<sparse_mat, nonstate_fields> non_state_jac_;
+        array_type<sparse_mat, primal_fields> jac_;
     };
     array_type<approx_data, stored_constr_fields> approx_;
     struct dynamics_data {
         vector v_; // value
         struct sparse_mat_vstack : public sparse_mat {
             std::vector<sparse_mat> mats_;
-        } proj_f_x_, proj_f_u_;
+        } proj_f_x_, proj_f_u_, f_x_, f_y_, f_u_;
         vector proj_f_res;
     };
     dynamics_data dynamics_data_;

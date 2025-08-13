@@ -67,28 +67,40 @@ void product(const lhs_type &lhs, const rhs_type &rhs, out_type &out) {
     }
 }
 
-template <typename rhs_type, typename out_type, bool add>
+template <bool add, typename rhs_type, typename out_type>
 void sparse_mat::times(const rhs_type &rhs, out_type &out) {
+    assert(rhs.rows() == cols_ && "rhs matrix size mismatch");
+    assert(rhs.cols() == out.cols() && "rhs matrix size mismatch");
+    assert(rows_ == out.rows() && "out matrix size mismatch");
     product<false, false, add>(*this, rhs, out);
 }
 
-template <typename rhs_type, typename out_type, bool add>
+template <bool add, typename rhs_type, typename out_type>
 void sparse_mat::T_times(const rhs_type &rhs, out_type &out) {
+    assert(rhs.rows() == rows_ && "rhs matrix size mismatch");
+    assert(rhs.cols() == out.cols() && "rhs matrix size mismatch");
+    assert(cols_ == out.rows() && "out matrix size mismatch");
     product<true, false, add>(*this, rhs, out);
 }
-template <typename lhs_type, typename out_type, bool add>
+template <bool add, typename lhs_type, typename out_type>
 void sparse_mat::right_times(const lhs_type &lhs, out_type &out) {
+    assert(lhs.rows() == out.rows() && "lhs matrix size mismatch");
+    assert(lhs.cols() == rows_ && "lhs matrix size mismatch");
+    assert(out.cols() == cols_ && "out matrix size mismatch");
     product<false, false, add>(lhs, *this, out);
 }
 
-template <typename lhs_type, typename out_type, bool add>
+template <bool add, typename lhs_type, typename out_type>
 void sparse_mat::right_T_times(const lhs_type &lhs, out_type &out) {
+    assert(lhs.rows() == rows_ && "lhs matrix size mismatch");
+    assert(lhs.cols() == out.rows() && "lhs matrix size mismatch");
+    assert(out.cols() == cols_ && "out matrix size mismatch");
     product<true, false, add>(lhs, *this, out);
 }
 
 #define EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, lhs_type, rhs_type)                            \
-    template void sparse_mat::func<lhs_type, rhs_type, true>(const lhs_type &rhs, rhs_type &out); \
-    template void sparse_mat::func<lhs_type, rhs_type, false>(const lhs_type &rhs, rhs_type &out);
+    template void sparse_mat::func<true, lhs_type, rhs_type>(const lhs_type &rhs, rhs_type &out); \
+    template void sparse_mat::func<false, lhs_type, rhs_type>(const lhs_type &rhs, rhs_type &out);
 
 #define EXPLICIT_SP_MEMFUNC_INSTANTIATE(func)                       \
     EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, sparse_mat, matrix); \

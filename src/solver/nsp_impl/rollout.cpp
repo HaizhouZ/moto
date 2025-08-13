@@ -85,20 +85,33 @@ void compute_kkt_residual(ns_node_data *cur) {
     // fmt::println("KKT residuals:");
     auto dense = d.dense_;
     // fmt::println("Q_y: {}", d.Q_y);
-    dense->res_stat_[__u].noalias() = d.Q_uu_bak * d.prim_step[__u] + d.Q_ux * d.prim_step[__x] + d.Q_u_bak.transpose() + d.dense_->approx_[__dyn].jac_[__u].transpose() * d.dual_step[__dyn];
+    auto &f_u = dense->dynamics_data_.f_u_;
+    // dense->res_stat_[__u].noalias() = d.Q_uu_bak * d.prim_step[__u] + d.Q_ux * d.prim_step[__x] + d.Q_u_bak.transpose() + d.dense_->approx_[__dyn].jac_[__u].transpose() * d.dual_step[__dyn];
+    dense->res_stat_[__u].noalias() = d.Q_uu_bak * d.prim_step[__u] + d.Q_ux * d.prim_step[__x] + d.Q_u_bak.transpose();
+    f_u.T_times(d.dual_step[__dyn], dense->res_stat_[__u]);
     if (d.nc) {
-        dense->res_stat_[__u].noalias() += d.dense_->approx_[__eq_xu].jac_[__u].transpose() * d.dual_step[__eq_xu];
+        // dense->res_stat_[__u].noalias() += d.dense_->approx_[__eq_xu].jac_[__u].transpose() * d.dual_step[__eq_xu];
+        d.dense_->approx_[__eq_xu].jac_[__u].T_times(d.dual_step[__eq_xu], dense->res_stat_[__u]);
     }
     if (d.dual_step[__ineq_xu].size() > 0) {
-        dense->res_stat_[__u].noalias() += d.dense_->approx_[__ineq_xu].jac_[__u].transpose() * d.dual_step[__ineq_xu];
+        // dense->res_stat_[__u].noalias() += d.dense_->approx_[__ineq_xu].jac_[__u].transpose() * d.dual_step[__ineq_xu];
+        d.dense_->approx_[__ineq_xu].jac_[__u].T_times(d.dual_step[__ineq_xu], dense->res_stat_[__u]);
     }
-    dense->res_stat_[__y].noalias() = d.Q_yy_bak * d.prim_step[__y] + d.Q_yx * d.prim_step[__x] + d.Q_y_bak.transpose() + d.dense_->approx_[__dyn].jac_[__y].transpose() * d.dual_step[__dyn];
+    // dense->res_stat_[__y].noalias() = d.Q_yy_bak * d.prim_step[__y] + d.Q_yx * d.prim_step[__x] + d.Q_y_bak.transpose() + d.dense_->approx_[__dyn].jac_[__y].transpose() * d.dual_step[__dyn];
+    dense->res_stat_[__y].noalias() = d.Q_yy_bak * d.prim_step[__y] + d.Q_yx * d.prim_step[__x] + d.Q_y_bak.transpose();
+    auto &f_y = dense->dynamics_data_.f_y_;
+    f_y.T_times(d.dual_step[__dyn], dense->res_stat_[__y]);
     if (d.ns) {
-        dense->res_stat_[__y].noalias() += d.dense_->approx_[__eq_x].jac_[__y].transpose() * d.dual_step[__eq_x];
+        // dense->res_stat_[__y].noalias() += d.dense_->approx_[__eq_x].jac_[__y].transpose() * d.dual_step[__eq_x];
+        d.dense_->approx_[__eq_x].jac_[__y].T_times(d.dual_step[__eq_x], dense->res_stat_[__y]);
     }
-    dense->res_stat_[__x].noalias() = d.Q_xx_bak * d.prim_step[__x] + d.Q_x_bak.transpose() + d.dense_->approx_[__dyn].jac_[__x].transpose() * d.dual_step[__dyn];
+    auto &f_x = dense->dynamics_data_.f_x_;
+    // dense->res_stat_[__x].noalias() = d.Q_xx_bak * d.prim_step[__x] + d.Q_x_bak.transpose() + d.dense_->approx_[__dyn].jac_[__x].transpose() * d.dual_step[__dyn];
+    dense->res_stat_[__x].noalias() = d.Q_xx_bak * d.prim_step[__x] + d.Q_x_bak.transpose();
+    f_x.T_times(d.dual_step[__dyn], dense->res_stat_[__x]);
     if (d.nc) {
-        dense->res_stat_[__x].noalias() += d.dense_->approx_[__eq_xu].jac_[__x].transpose() * d.dual_step[__eq_xu];
+        // dense->res_stat_[__x].noalias() += d.dense_->approx_[__eq_xu].jac_[__x].transpose() * d.dual_step[__eq_xu];
+        d.dense_->approx_[__eq_xu].jac_[__x].T_times(d.dual_step[__eq_xu], dense->res_stat_[__x]);
     }
     // if (d.ns) {
     //     dense->res_stat_[__x].noalias() += d.dense_->approx_[__eq_x].jac_[__x].transpose() * d.dual_step[__eq_x];

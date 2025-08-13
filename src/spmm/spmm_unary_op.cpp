@@ -103,15 +103,27 @@ void sparse_mat::inner_product(const matrix &m, matrix &out) {
     }
 }
 
-void sparse_mat::dump_into(matrix_ref out) const {
-    for (const auto &panel : dense_panels_) {
-        out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_) += panel.data_;
-    }
-    for (const auto &panel : diag_panels_) {
-        out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_).diagonal().array() += panel.data_.array();
-    }
-    for (const auto &panel : eye_panels_) {
-        out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_).diagonal().array() += 1.0;
+void sparse_mat::dump_into(matrix_ref out, bool add) const {
+    if (add) {
+        for (const auto &panel : dense_panels_) {
+            out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_) += panel.data_;
+        }
+        for (const auto &panel : diag_panels_) {
+            out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_).diagonal().array() += panel.data_.array();
+        }
+        for (const auto &panel : eye_panels_) {
+            out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_).diagonal().array() += 1.0;
+        }
+    } else {
+        for (const auto &panel : dense_panels_) {
+            out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_) -= panel.data_;
+        }
+        for (const auto &panel : diag_panels_) {
+            out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_).diagonal().array() -= panel.data_.array();
+        }
+        for (const auto &panel : eye_panels_) {
+            out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_).diagonal().array() -= 1.0;
+        }
     }
 }
 
@@ -121,4 +133,4 @@ matrix sparse_mat::dense() const {
     dump_into(out);
     return out;
 }
-}
+} // namespace moto

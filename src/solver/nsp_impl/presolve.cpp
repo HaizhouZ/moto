@@ -19,12 +19,18 @@ void ns_factorization(ns_node_data *cur) {
     // partial value derivative
     cur->merge_jacobian_modification();
     // d.Q_x.noalias() += -nsp.F_0_k.transpose() * d.Q_yx;
+    nsp.Q_yy_F_0_K = -d.Q_yx;
+    nsp.u_0_p_k = d.Q_u.transpose();
+    nsp.u_0_p_K = d.Q_ux;
+
     // if (nsp.F_0_K.array().isNaN().any() || d.Q_xx.array().isNaN().any()) {
     //     fmt::print("F_0_K:{}\n", nsp.F_0_K);
     //     fmt::print("Q_xx:{}\n", d.Q_xx);
     //     throw std::runtime_error("NaN detected in F_0_K or Q_xx");
     // }
     // d.Q_xx.noalias() += -(d.Q_yx.transpose() * nsp.F_0_K + nsp.F_0_K.transpose() * d.Q_yx);
+    auto &F_x = d.dense_->dynamics_data_.proj_f_x_;
+    F_x.right_T_times<false>(d.Q_yx, d.Q_xx);
     // nullspace computation
     d.rank_status_ = rank_status::unconstrained;
 
@@ -36,15 +42,14 @@ void ns_factorization(ns_node_data *cur) {
     nsp.s_c_stacked.conservativeResize(d.ncstr, Eigen::NoChange);
     nsp.s_c_stacked.setZero();
     d.d_lbd_s_c.conservativeResize(d.ncstr);
-    auto &s_y = d.dense_->approx_[__eq_x].state_jac_[__y];
-    auto &c_u = d.dense_->approx_[__eq_xu].non_state_jac_[__u];
+    auto &s_y = d.dense_->approx_[__eq_x].jac_[__y];
+    auto &c_u = d.dense_->approx_[__eq_xu].jac_[__u];
     if (d.ncstr) {
         if (constr_s) {
-            s_y.apply_this_on_the_left(d.dense_->dynamics_data_.proj_f_u_, nsp.s_u);
+            s_y.times<false>(d.dense_->dynamics_data_.proj_f_u_, nsp.s_u);
             // nsp.s_u.noalias() = -nsp.s_y * nsp.F_u;
             // solve pseudo inverse
-            nsp.s_c_stacked.topRows(constr_s) = -nsp.s_u;
-            // nsp.s_c_stacked.topRows(constr_s) = nsp.s_u;
+            nsp.s_c_stacked.topRows(constr_s) = nsp.s_u;
         }
         if (constr_c) {
             c_u.dump_into(nsp.s_c_stacked.bottomRows(d.nc));
@@ -79,21 +84,20 @@ void ns_factorization(ns_node_data *cur) {
         if (constr_s) {
             // nsp.s_0_p_k.noalias() =
             //     _approx[__eq_x].v_ - nsp.s_y * nsp.F_0_k;
-            auto &s_x = d.dense_->approx_[__eq_x].state_jac_[__x];
-            s_x.dump_into(nsp.s_c_stacked_0_K.topRows(constr_s));
-            s_y.apply_this_on_the_left(d.dense_->dynamics_data_.proj_f_x_, nsp.s_0_p_K);
-            s_y.apply_this_on_the_left(d.dense_->dynamics_data_.proj_f_res, nsp.s_0_p_k);
+            nsp.s_0_p_k.noalias() = _approx[__eq_x].v_;
+            auto &s_x = d.dense_->approx_[__eq_x].jac_[__x];
+            s_x.dump_into(nsp.s_0_p_K);
+            s_y.times<false>(d.dense_->dynamics_data_.proj_f_x_, nsp.s_0_p_K);
+            s_y.times<false>(d.dense_->dynamics_data_.proj_f_res, nsp.s_0_p_k);
             // nsp.s_0_p_K.noalias() =
             //     _approx[__eq_x].jac_[__x] - nsp.s_y * nsp.F_0_K;
-            // nsp.s_c_stacked_0_k.head(constr_s) = nsp.s_0_p_k;
-            // nsp.s_c_stacked_0_K.topRows(constr_s) = nsp.s_0_p_K;
-            nsp.s_c_stacked_0_k.head(constr_s) = _approx[__eq_x].v_ - nsp.s_0_p_k;
-            nsp.s_c_stacked_0_K.topRows(constr_s) -= nsp.s_0_p_K;
+            nsp.s_c_stacked_0_k.head(constr_s) = nsp.s_0_p_k;
+            nsp.s_c_stacked_0_K.topRows(constr_s) = nsp.s_0_p_K;
         }
         if (constr_c) {
             nsp.s_c_stacked_0_k.tail(d.nc) = _approx[__eq_xu].v_;
             // nsp.s_c_stacked_0_K.bottomRows(d.nc) = _approx[__eq_xu].jac_[__x];
-            auto &c_x = d.dense_->approx_[__eq_xu].state_jac_[__x];
+            auto &c_x = d.dense_->approx_[__eq_xu].jac_[__x];
             c_x.dump_into(nsp.s_c_stacked_0_K.bottomRows(d.nc));
         }
         if (d.rank_status_ != rank_status::unconstrained) {
