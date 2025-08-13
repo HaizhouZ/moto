@@ -6,6 +6,7 @@
 #include <moto/spmm/sparse_mat.hpp>
 namespace moto {
 class ocp;
+struct generic_dynamics;
 /**
  * @brief dense raw approximation data
  * deserialized data storage of all function fields

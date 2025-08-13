@@ -36,8 +36,8 @@ struct dense_dynamics : public generic_dynamics {
             auto jac_x = dense_->jac_[__x].insert(f_st, prob.get_expr_start(first_x_arg), func_.dim(), func_.arg_dim(__x), sparsity::dense);
             new (&f_x) aligned_map_t(jac_x.data(), jac_x.rows(), jac_x.cols());
             // set up projected f_x
-            auto f_x = dyn_dense_->proj_f_x_.insert(f_st, prob.get_expr_start(first_x_arg), func_.dim(), func_.arg_dim(__x), sparsity::dense);
-            new (&proj_f_x_) aligned_map_t(f_x.data(), f_x.rows(), f_x.cols());
+            auto p_x = dyn_dense_->proj_f_x_.insert(f_st, prob.get_expr_start(first_x_arg), func_.dim(), func_.arg_dim(__x), sparsity::dense);
+            new (&proj_f_x_) aligned_map_t(p_x.data(), p_x.rows(), p_x.cols());
             f_u.reserve(func_.arg_num(__u));
             for (auto &arg : in_args) {
                 auto f = arg->field();

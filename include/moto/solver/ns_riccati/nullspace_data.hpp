@@ -31,8 +31,8 @@ struct nullspace_data {
     matrix s_0_p_K;        ///< same as @ref s_0_p_k
     // vector F_0_k;          ///< \f$s_yf\f$
     // matrix F_0_K;          ///< \f$s_yf_x\f$
-    vector Q_yy_F_0_k;
-    matrix Q_yy_F_0_K;
+    vector Q_yy_F_0;
+    matrix Q_yy_F_x;
     vector s_c_stacked_0_k;              ///< \f$[s;c]\f$
     matrix s_c_stacked_0_K;           ///< \f$[s_x;c_x]\f$
     vector u_y_k;                        ///< \f$u_y\f$ psuedo u

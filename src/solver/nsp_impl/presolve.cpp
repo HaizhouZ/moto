@@ -16,7 +16,7 @@ void ns_factorization(ns_node_data *cur) {
     // partial value derivative
     cur->merge_jacobian_modification();
     // d.Q_x.noalias() += -nsp.F_0_k.transpose() * d.Q_yx;
-    nsp.Q_yy_F_0_K = -d.Q_yx;
+    nsp.Q_yy_F_x = -d.Q_yx;
     nsp.u_0_p_k = d.Q_u.transpose();
     nsp.u_0_p_K = d.Q_ux;
 
@@ -26,8 +26,7 @@ void ns_factorization(ns_node_data *cur) {
     //     throw std::runtime_error("NaN detected in F_0_K or Q_xx");
     // }
     // d.Q_xx.noalias() += -(d.Q_yx.transpose() * nsp.F_0_K + nsp.F_0_K.transpose() * d.Q_yx);
-    auto &F_x = d.dense_->dynamics_data_.proj_f_x_;
-    F_x.right_T_times<false>(d.Q_yx, d.Q_xx);
+    d.F_x.right_T_times<false>(d.Q_yx, d.Q_xx);
     // nullspace computation
     d.rank_status_ = rank_status::unconstrained;
 
@@ -81,11 +80,12 @@ void ns_factorization(ns_node_data *cur) {
             // nsp.s_0_p_k.noalias() =
             //     _approx[__eq_x].v_ - nsp.s_y * nsp.F_0_k;
             nsp.s_0_p_k.noalias() = _approx[__eq_x].v_;
-            d.s_x.dump_into(nsp.s_0_p_K);
-            d.s_y.times<false>(d.F_x, nsp.s_0_p_K);
             d.s_y.times<false>(d.F_0, nsp.s_0_p_k);
             // nsp.s_0_p_K.noalias() =
             //     _approx[__eq_x].jac_[__x] - nsp.s_y * nsp.F_0_K;
+            d.s_x.dump_into(nsp.s_0_p_K);
+            d.s_y.times<false>(d.F_x, nsp.s_0_p_K);
+            
             nsp.s_c_stacked_0_k.head(constr_s) = nsp.s_0_p_k;
             nsp.s_c_stacked_0_K.topRows(constr_s) = nsp.s_0_p_K;
         }

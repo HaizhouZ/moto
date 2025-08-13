@@ -125,8 +125,12 @@ void ns_sqp::update(size_t n_iter) {
                 setting_per_thread[i].copy_from(settings);
             }
         };
+
         // timed_block_labeled("all",
-        graph_.for_each_parallel(solver::ns_riccati::ns_factorization);
+        graph_.for_each_parallel([](data *d) {
+            d->update_projected_dynamics();
+            solver::ns_riccati::ns_factorization(d);
+        });
         graph_.apply_backward(solver::ns_riccati::riccati_recursion, true);
         graph_.for_each_parallel(solver::ns_riccati::compute_primal_sensitivity);
         graph_.apply_forward(solver::ns_riccati::fwd_linear_rollout, true);

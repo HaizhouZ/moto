@@ -1,5 +1,4 @@
 #include <moto/ocp/constr.hpp>
-#include <moto/ocp/dynamics.hpp>
 #include <moto/ocp/problem.hpp>
 
 namespace moto {
@@ -15,7 +14,7 @@ generic_constr::approx_data::approx_data(vector_ref multiplier,
     if (f.order() >= approx_order::second) { // for hessian from vjp autodiff codegen
         in_args_.push_back(multiplier_);
     }
-    if (in_field(func_.field(), merit_data::stored_constr_fields)) {
+    if (in_field(func_.field(), merit_data::stored_constr_fields) && func_.field() != __dyn) {
         auto prob_ = merit_data_->prob_;
         auto &dynamics_exprs_ = prob_->exprs(__dyn);
         size_t constr_idx = prob_->pos(func_);
@@ -25,7 +24,7 @@ generic_constr::approx_data::approx_data(vector_ref multiplier,
             field_t f = arg.field();
             if (f < field::num_prim) {
                 for (size_t dyn_idx = 0; dyn_idx < dynamics_exprs_.size(); dyn_idx++) {
-                    generic_dynamics &dyn = dynamics_exprs_[dyn_idx];
+                    generic_func &dyn = dynamics_exprs_[dyn_idx];
                     if (dyn.has_arg(arg)) { // has common argument
                         auto d = merit_data_->approx_[func_.field()].jac_[f].insert(
                             f_st, prob_->get_expr_start(arg), func_.dim(), arg.dim(), sparsity::dense);

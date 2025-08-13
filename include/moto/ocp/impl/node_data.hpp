@@ -85,6 +85,8 @@ struct node_data {
         }
     }
 
+    void update_projected_dynamics();
+
     template <typename Callback>
     void for_each_constr(Callback &&f) {
         for_each<constr_fields>(std::forward<Callback>(f));

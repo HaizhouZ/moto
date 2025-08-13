@@ -1,5 +1,7 @@
+#include <moto/ocp/dynamics.hpp>
 #include <moto/ocp/impl/custom_func.hpp>
 #include <moto/ocp/impl/data_mgr.hpp>
+
 namespace moto {
 sym_data::sym_data(ocp *prob) : prob_(prob) {
     prob->wait_until_ready();
@@ -78,11 +80,11 @@ void node_data::update_approximation(update_mode config) {
                     hess_l_1.setZero();
                 }
             }
-            for (auto &hess_l_0 : dense_->hessian_modification_) {
-                for (auto &hess_l_1 : hess_l_0) {
-                    hess_l_1.setZero();
-                }
+        for (auto &hess_l_0 : dense_->hessian_modification_) {
+            for (auto &hess_l_1 : hess_l_0) {
+                hess_l_1.setZero();
             }
+        }
     }
     for (const generic_custom_func &f : prob_->exprs(__pre_comp)) {
         f.custom_call((*shared_)[f]); ///< @todo pass update mode
@@ -112,6 +114,15 @@ void node_data::update_approximation(update_mode config) {
         dense_->merit_ += dense_->cost_;
     }
 }
+
+void node_data::update_projected_dynamics() {
+    size_t idx = 0;
+    for (generic_dynamics &f : prob_->exprs(__dyn)) {
+        auto &d = *sparse_[__dyn][idx++];
+        f.compute_project_derivatives(d);
+    }
+}
+
 void node_data::print_residuals() const {
     for (auto f : merit_data::stored_constr_fields) {
         fmt::println("Field {}: dim {} residual {}", field::name(f), dense_->approx_[f].v_.size(),
