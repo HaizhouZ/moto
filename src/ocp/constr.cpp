@@ -15,6 +15,27 @@ generic_constr::approx_data::approx_data(vector_ref multiplier,
     if (f.order() >= approx_order::second) { // for hessian from vjp autodiff codegen
         in_args_.push_back(multiplier_);
     }
+    if (in_field(func_.field(), merit_data::stored_constr_fields)) {
+        auto prob_ = merit_data_->prob_;
+        auto &dynamics_exprs_ = prob_->exprs(__dyn);
+        size_t constr_idx = prob_->pos(func_);
+        size_t f_st = prob_->get_expr_start(func_);
+        size_t arg_idx = 0;
+        for (const sym &arg : func_.in_args()) {
+            field_t f = arg.field();
+            if (f < field::num_prim) {
+                for (size_t dyn_idx = 0; dyn_idx < dynamics_exprs_.size(); dyn_idx++) {
+                    generic_dynamics &dyn = dynamics_exprs_[dyn_idx];
+                    if (dyn.has_arg(arg)) { // has common argument
+                        auto d = merit_data_->approx_[func_.field()].jac_[f].insert(
+                            f_st, prob_->get_expr_start(arg), func_.dim(), arg.dim(), sparsity::dense);
+                        new (&jac_[arg_idx]) matrix_ref(d);
+                    }
+                }
+            }
+            arg_idx++;
+        }
+    }
 }
 void generic_constr::approx_data::map_merit_jac_from_raw(decltype(merit_data::jac_) &raw, std::vector<row_vector_ref> &jac) {
     auto &in_args = func_.in_args();
@@ -26,33 +47,6 @@ void generic_constr::approx_data::map_merit_jac_from_raw(decltype(merit_data::ja
             static row_vector empty;
             jac.push_back(empty);
         }
-    }
-}
-
-void generic_constr::approx_data::setup_jacobian() {
-    assert(in_field(func_.field(), merit_data::stored_constr_fields) && "field not in stored constr fields");
-    auto prob_ = merit_data_->prob_;
-    auto &dynamics_exprs_ = prob_->exprs(__dyn);
-    size_t constr_idx = prob_->pos(func_);
-    size_t f_st = prob_->get_expr_start(func_);
-    size_t arg_idx = 0;
-    for (const sym &arg : func_.in_args()) {
-        field_t f = arg.field();
-        if (in_field(f, state_fields)) {
-            for (size_t dyn_idx = 0; dyn_idx < dynamics_exprs_.size(); dyn_idx++) {
-                generic_dynamics &dyn = dynamics_exprs_[dyn_idx];
-                if (dyn.has_arg(arg)) { // has common argument
-                    auto d = merit_data_->approx_[func_.field()].state_jac_[f].insert(
-                        f_st, prob_->get_expr_start(arg), func_.dim(), arg.dim(), sparsity::dense);
-                    new (&jac_[arg_idx]) matrix_ref(d);
-                }
-            }
-        } else if (in_field(f, nonstate_fields)) {
-            auto d = merit_data_->approx_[func_.field()].non_state_jac_[f].insert(
-                f_st, prob_->get_expr_start(arg), func_.dim(), arg.dim(), sparsity::dense);
-            new (&jac_[arg_idx]) matrix_ref(d);
-        }
-        arg_idx++;
     }
 }
 

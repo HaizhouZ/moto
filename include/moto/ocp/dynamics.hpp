@@ -10,8 +10,6 @@ struct dynamics_data_base {
     size_t dim_x;      ///< dimension of x
     size_t dim_u;      ///< dimension of u
     vector proj_f_res; ///< projection of f_res
-    virtual sparse_mat &proj_f_x() = 0;
-    virtual sparse_mat &proj_f_u() = 0;
 };
 
 // generic dense dynamics

@@ -14,8 +14,6 @@ namespace ns_riccati {
  *
  */
 struct nullspace_data {
-    // jacobian
-    matrix &s_y; ///< state constraint derivative w.r.t. y
     // nullspace
     matrix U;              ///< projected u hessian
     matrix U_z;            ///< nullspace u hessian
@@ -43,7 +41,6 @@ struct nullspace_data {
     Eigen::LLT<matrix> llt_ns_;          ///< LLT solver of the projected hessian
     Eigen::PartialPivLU<matrix> lu_dyn_; ///< LU solver of the dynamics derivative \f$f_y\f$
     size_t rank{0};                      ///< rank of the equality constraints, 0 if unconstrained, ncstr if fully constrained
-    nullspace_data(matrix &_s_y) : s_y(_s_y) {}
 };
 } // namespace ns_riccati
 } // namespace solver

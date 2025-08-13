@@ -124,7 +124,6 @@ struct func_approx_data : public func_arg_map {
     func_approx_data(sym_data &primal, merit_data &raw, shared_data &shared, const generic_func &f);
     /// @brief setup hessian from raw approx storage
     void setup_hessian();
-    virtual void setup_jacobian();
     /// @brief get the jacobian reference
     auto jac(const sym &in) const { return jac_[sym_uid_idx_.at(in.uid())]; }
     auto jac(size_t i) const { return jac_.at(i); }

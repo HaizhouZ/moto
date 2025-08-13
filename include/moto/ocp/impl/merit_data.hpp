@@ -6,8 +6,6 @@
 #include <moto/spmm/sparse_mat.hpp>
 namespace moto {
 class ocp;
-struct generic_dynamics;
-struct dynamics_data_base;
 /**
  * @brief dense raw approximation data
  * deserialized data storage of all function fields
@@ -25,9 +23,8 @@ struct merit_data {
     array_type<approx_data, stored_constr_fields> approx_;
     struct dynamics_data {
         vector v_; // value
-        struct sparse_mat_vstack : public sparse_mat {
-            std::vector<sparse_mat> mats_;
-        } proj_f_x_, proj_f_u_, f_x_, f_y_, f_u_;
+        sparse_mat proj_f_x_, proj_f_u_;
+        array_type<sparse_mat, primal_fields> jac_; // jacobian
         vector proj_f_res;
     };
     dynamics_data dynamics_data_;

@@ -2,9 +2,6 @@
 #include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
 
-#include <moto/ocp/dynamics.hpp>
-#include <moto/ocp/problem.hpp>
-
 namespace moto {
 namespace solver {
 namespace ns_riccati {

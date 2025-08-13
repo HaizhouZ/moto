@@ -27,7 +27,7 @@ vector_ref get_value_ref(const generic_func &f, merit_data &raw) {
     if (f.field() == __cost) {
         return vector_ref(mapped_vector(&raw.cost_, 1));
     } else if (f.field() == __dyn) {
-        return raw.dynamics_data_[f.uid()].v_;
+        return raw.dynamics_data_.v_.segment(raw.prob_->get_expr_start(f), f.dim());
     } else if (in_field(f.field(), merit_data::stored_constr_fields)) {
         return raw.approx_[f.field()].v_.segment(raw.prob_->get_expr_start(f), f.dim());
     } else {
@@ -75,18 +75,13 @@ func_approx_data::func_approx_data(sym_data &primal,
                         jac_data_.emplace_back();
                     }
                 }
-            } else
-                setup_jacobian();
+            }
         } else {
             jac_.reserve(merit_jac_.size());
             jac_.assign(merit_jac_.begin(), merit_jac_.end());
         }
     }
     setup_hessian();
-}
-
-void func_approx_data::setup_jacobian() {
-    throw std::runtime_error("func_approx_data::setup_jacobian not implemented");
 }
 
 void func_approx_data::setup_hessian() {
