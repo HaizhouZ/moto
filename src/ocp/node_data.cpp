@@ -98,6 +98,11 @@ void node_data::update_approximation(update_mode config) {
                           !no_jac && _f.order() >= approx_order::first,
                           !no_hess && _f.order() >= approx_order::second);
     });
+    for(auto f : merit_data::stored_constr_fields) {
+        for (auto p : primal_fields) {
+            dense_->approx_[f].jac_[f].right_T_times(dense_->dual_[f], dense_->jac_[f]);
+        }
+    }
     if (update_cost) {
         inf_prim_res_ = 0.;
         for (const auto &field_data : dense_->approx_) {

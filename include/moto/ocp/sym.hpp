@@ -94,8 +94,16 @@ class sym : public expr, public cs::SX {
         auto [x, y] = states(name, dim, default_val);
         return x;
     }
+    const var &next() const {
+        assert(field_ == __x && "next() can only be used with __x state to get its dual in __y");
+        return dual_;
+    }
     var &next() {
         assert(field_ == __x && "next() can only be used with __x state to get its dual in __y");
+        return dual_;
+    }
+    const var &prev() const {
+        assert(field_ == __y && "dual() can only be used with __y state to get its dual in __x");
         return dual_;
     }
     var &prev() {

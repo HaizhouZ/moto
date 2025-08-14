@@ -120,13 +120,13 @@ void generic_constr::jacobian_impl(func_approx_data &data) const {
     auto &d = static_cast<approx_data &>(data);
     jacobian(data);
     // update multiplier - jacobian product
-    for (size_t i = 0; i < in_args_.size(); i++) {
-        if (d.merit_jac_[i].size() != 0) { // skip if no jacobian for this input
-            d.merit_jac_[i].noalias() += d.multiplier_.transpose() * d.jac_[i];
-            // fmt::print("{}\t{}:i\t{:.3}\n", i, name(), d.in_args_[i].transpose());
-            // fmt::print("{}\t{}:jac\n{:.3}\n", i, name(), d.jac_[i]);
-        }
-    }
+    // for (size_t i = 0; i < in_args_.size(); i++) {
+    //     if (d.merit_jac_[i].size() != 0) { // skip if no jacobian for this input
+    //         d.merit_jac_[i].noalias() += d.multiplier_.transpose() * d.jac_[i];
+    //         // fmt::print("{}\t{}:i\t{:.3}\n", i, name(), d.in_args_[i].transpose());
+    //         // fmt::print("{}\t{}:jac\n{:.3}\n", i, name(), d.jac_[i]);
+    //     }
+    // }
 }
 constr::constr(const std::string &name, approx_order order, size_t dim, field_t field)
     : func(generic_constr(name, order, dim, field)) {

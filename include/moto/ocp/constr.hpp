@@ -7,7 +7,8 @@
 #include <moto/utils/optional_boolean.hpp>
 
 namespace moto {
-class generic_constr;
+class generic_constr; ///< forward declaration
+
 struct constr : public func {
     using func::func; ///< inherit base constructor
     constr(const std::string &name, approx_order order, size_t dim = dim_tbd, field_t field = __undefined);

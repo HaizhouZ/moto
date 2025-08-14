@@ -7,9 +7,15 @@
 namespace moto {
 
 /// @brief generic dynamics
-struct generic_dynamics : public generic_constr {
+class generic_dynamics : public generic_constr {
+  public:
     using base = generic_constr;
     struct approx_data : public base::approx_data {
+        using aligned_map_t = matrix::AlignedMapType;
+        using aligned_vector_map_t = vector::AlignedMapType;
+#define NULL_INIT_MAP(name) name(nullptr, 0, 0)
+        merit_data::approx_data *approx_;
+        merit_data::dynamics_data *dyn_proj_;
         vector_ref proj_f_res_; ///< projection of f_res
         approx_data(base::approx_data &&rhs);
     };
