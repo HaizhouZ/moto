@@ -4,6 +4,8 @@
 
 #include <magic_enum/magic_enum_utility.hpp>
 
+#include <moto/spmm/impl/binary_op_helper.hpp>
+
 namespace moto {
 
 template <sparsity Sp, typename Callback>
@@ -35,7 +37,7 @@ void product(const lhs_type &lhs, const rhs_type &rhs, out_type &out) {
             auto lhs_res = lhs_expr.run();
             cache_lhs.resize(lhs_res);
             constexpr auto config = eval_config{.add_to = add};
-            lhs_res.template eval_then_add_to(out, cache_lhs.data_);
+            lhs_res.template eval_then_add_to<config>(out, cache_lhs.data_);
         }
     };
     if constexpr (l_is_sp_mat && r_is_sp_mat) {
@@ -69,6 +71,7 @@ void product(const lhs_type &lhs, const rhs_type &rhs, out_type &out) {
 
 template <bool add, typename rhs_type, typename out_type>
 void sparse_mat::times(const rhs_type &rhs, out_type &out) {
+    assert((spmm::is_consistent<rhs_type, out_type>::value(spmm::times)) && "inconsistent dimensions for times");
     assert(rhs.rows() == cols_ && "rhs matrix size mismatch");
     assert(rhs.cols() == out.cols() && "rhs matrix size mismatch");
     assert(rows_ == out.rows() && "out matrix size mismatch");
@@ -77,6 +80,7 @@ void sparse_mat::times(const rhs_type &rhs, out_type &out) {
 
 template <bool add, typename rhs_type, typename out_type>
 void sparse_mat::T_times(const rhs_type &rhs, out_type &out) {
+    assert((spmm::is_consistent<rhs_type, out_type>::value(spmm::T_times)) && "inconsistent dimensions for T_times");
     assert(rhs.rows() == rows_ && "rhs matrix size mismatch");
     assert(rhs.cols() == out.cols() && "rhs matrix size mismatch");
     assert(cols_ == out.rows() && "out matrix size mismatch");
@@ -84,6 +88,7 @@ void sparse_mat::T_times(const rhs_type &rhs, out_type &out) {
 }
 template <bool add, typename lhs_type, typename out_type>
 void sparse_mat::right_times(const lhs_type &lhs, out_type &out) {
+    assert((spmm::is_consistent<lhs_type, out_type>::value(spmm::right_times)) && "inconsistent dimensions for right_times");
     assert(lhs.rows() == out.rows() && "lhs matrix size mismatch");
     assert(lhs.cols() == rows_ && "lhs matrix size mismatch");
     assert(out.cols() == cols_ && "out matrix size mismatch");
@@ -92,6 +97,7 @@ void sparse_mat::right_times(const lhs_type &lhs, out_type &out) {
 
 template <bool add, typename lhs_type, typename out_type>
 void sparse_mat::right_T_times(const lhs_type &lhs, out_type &out) {
+    assert((spmm::is_consistent<lhs_type, out_type>::value(spmm::right_T_times)) && "inconsistent dimensions for right_T_times");
     assert(lhs.rows() == rows_ && "lhs matrix size mismatch");
     assert(lhs.cols() == out.rows() && "lhs matrix size mismatch");
     assert(out.cols() == cols_ && "out matrix size mismatch");

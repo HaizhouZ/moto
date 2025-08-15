@@ -1,8 +1,9 @@
 #ifndef MOTO_UTILS_TIMED_BLOCK_HPP
 #define MOTO_UTILS_TIMED_BLOCK_HPP
 
-#include <chrono>
 #include <fmt/core.h>
+#include <algorithm>
+#include <x86intrin.h> // For __rdtsc() on GCC/Clang and MSVC
 
 namespace moto {
 namespace utils {
@@ -18,7 +19,14 @@ struct string_literals {
     }
     char value[N];
 };
+// Function to read the Time Stamp Counter (TSC) with serialization
+inline unsigned long long rdtscp() {
+    unsigned int aux;
+    return __rdtscp(&aux);
+}
 
+// Function to get the TSC frequency in cycles per second (Hz)
+unsigned long long get_tsc_frequency();
 /**
  * @brief timing_storage class to store timing information of labeled code blocks
  *
@@ -26,10 +34,9 @@ struct string_literals {
  */
 template <string_literals label>
 struct timing_storage {
-    using duration_t = std::chrono::high_resolution_clock::duration;
-    duration_t durations{0};
-    unsigned long long elapsed_cycles ;
-    size_t count = 0;
+    double durations = 0.0;
+    unsigned long long elapsed_cycles;
+    size_t count_ = 0;
     /**
      * @brief get the timing storage object for manipulation
      *
@@ -39,15 +46,16 @@ struct timing_storage {
         static timing_storage<label> storage;
         return storage;
     }
+    static size_t& count() { return get().count_; }
     /**
      * @brief Destroy the timing storage object, meanwhile print the average time
      *
      */
     ~timing_storage() {
-        count = count == 0 ? 1 : count;
-        auto avg = durations / count;
-        auto per = std::chrono::duration_cast<std::chrono::microseconds>(avg).count();
-        fmt::print("{}: {} us, count {}\n", label.value, per, count);
+        count_ = count_ == 0 ? 1 : count_;
+        durations = elapsed_cycles / static_cast<double>(get_tsc_frequency()) * 1e6; // convert to microseconds
+        auto avg = durations / count_;
+        fmt::print("{}: {} us, count {}\n", label.value, avg, count_);
     }
 };
 
@@ -65,16 +73,12 @@ struct timing_storage {
 /// define this to enable the timed_block, timed_block({code}) or timed_block_labeled(label, {code})
 #define timed_block_impl(label, ...)                                     \
     {                                                                    \
-        static std::chrono::high_resolution_clock::time_point start;     \
-        static std::chrono::high_resolution_clock::time_point end;       \
         static auto &timing = moto::utils::timing_storage<label>::get(); \
-                                                                         \
-        start = std::chrono::high_resolution_clock::now();               \
+        timing.count_++;                                                  \
+        auto start = moto::utils::rdtscp();                              \
         __VA_ARGS__;                                                     \
-        end = std::chrono::high_resolution_clock::now();                 \
-                                                                         \
-        timing.durations += end - start;                                 \
-        timing.count++;                                                  \
+        auto end = moto::utils::rdtscp();                                \
+        timing.elapsed_cycles += end - start;                            \
     }
 #define timed_block(...) timed_block_impl(#__VA_ARGS__, __VA_ARGS__)
 #define timed_block_labeled(label, ...) timed_block_impl(label, __VA_ARGS__)

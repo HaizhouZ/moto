@@ -268,7 +268,7 @@ void ns_sqp::update(size_t n_iter) {
         // print statistics
         print_stats(i_iter, info, has_ineq);
         // });
-        moto::utils::timing_storage<"all">::get().count = n_iter;
+        moto::utils::timing_storage<"all">::count() = n_iter;
     }
 }
 ns_sqp::kkt_info ns_sqp::compute_kkt_info() {

@@ -67,8 +67,8 @@ struct sp_expr : public expr_type, public panel_mat<is_diag_type<expr_type>::val
                 sym_block.diagonal() = out_block.diagonal();
             }
         } else {
-            auto add_to_ = [&, this](auto &&out_block, auto &&sym_block) {
-                if constexpr (config.sym_res) {
+            if constexpr (config.sym_res) {
+                auto add_to_ = [&, this](auto &&out_block, auto &&sym_block) {
                     bool sym_alias = (this->col_st_ <= this->row_st_ && this->col_ed_ >= this->row_st_) ||
                                      (this->col_st_ <= this->row_ed_ && this->col_ed_ >= this->row_ed_) ||
                                      (this->row_st_ <= this->col_st_ && this->row_ed_ >= this->col_st_) ||
@@ -92,7 +92,19 @@ struct sp_expr : public expr_type, public panel_mat<is_diag_type<expr_type>::val
                             sym_block.noalias() += cache.transpose();
                         }
                     }
+                };
+                if (this->cols_ == dst.cols() && this->rows_ == dst.rows())
+                    add_to_(dst, dst);
+                else if (this->cols_ == dst.cols()) {
+                    add_to_(dst.middleRows(out_row_st, this->rows_), dst.middleCols(out_row_st, this->rows_));
+                } else if (this->rows_ == dst.rows()) {
+                    add_to_(dst.middleCols(out_col_st, this->cols_), dst.middleRows(out_col_st, this->cols_));
                 } else {
+                    add_to_(dst.block(out_row_st, out_col_st, this->rows_, this->cols_),
+                            dst.block(out_col_st, out_row_st, this->cols_, this->rows_));
+                }
+            } else {
+                auto add_to_ = [&, this](auto &&out_block) {
                     // std::cout << "No symmetry, adding to output block\n";
                     if constexpr (config.overwrite) {
                         if constexpr (config.add_to)
@@ -105,17 +117,16 @@ struct sp_expr : public expr_type, public panel_mat<is_diag_type<expr_type>::val
                         else
                             out_block.noalias() -= static_cast<const expr_type &>(*this);
                     }
+                };
+                if (this->cols_ == dst.cols() && this->rows_ == dst.rows())
+                    add_to_(dst);
+                else if (this->cols_ == dst.cols()) {
+                    add_to_(dst.middleRows(out_row_st, this->rows_));
+                } else if (this->rows_ == dst.rows()) {
+                    add_to_(dst.middleCols(out_col_st, this->cols_));
+                } else {
+                    add_to_(dst.block(out_row_st, out_col_st, this->rows_, this->cols_));
                 }
-            };
-            if (this->cols_ == dst.cols() && this->rows_ == dst.rows())
-                add_to_(dst, dst);
-            else if (this->cols_ == dst.cols()) {
-                add_to_(dst.middleRows(out_row_st, this->rows_), dst.middleCols(out_row_st, this->rows_));
-            } else if (this->rows_ == dst.rows()) {
-                add_to_(dst.middleCols(out_col_st, this->cols_), dst.middleRows(out_col_st, this->cols_));
-            } else {
-                add_to_(dst.block(out_row_st, out_col_st, this->rows_, this->cols_),
-                        dst.block(out_col_st, out_row_st, this->cols_, this->rows_));
             }
         }
     }
