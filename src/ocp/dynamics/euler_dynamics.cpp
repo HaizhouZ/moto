@@ -112,6 +112,12 @@ explicit_euler_impl::approx_data::approx_data(generic_dynamics::approx_data &&rh
     size_t f_st = problem()->get_expr_start(func_);
     auto &dyn = static_cast<const explicit_euler_impl &>(func_);
     array_type<size_t, primal_fields> arg_st{};
+    const var &first_x = dyn.first_ord_var_.dim_ ? dyn.first_ord_var_.pos_x_[0] : dyn.sec_ord_var_.pos_x_[0];
+    const var &first_y = dyn.first_ord_var_.dim_ ? dyn.first_ord_var_.pos_y_[0] : dyn.sec_ord_var_.pos_y_[0];
+    const var &first_u = dyn.first_ord_var_.dim_ ? dyn.first_ord_var_.vel_u_[0] : dyn.sec_ord_var_.acc_u_[0];
+    arg_st[__x] = problem()->get_expr_start(first_x);
+    arg_st[__y] = problem()->get_expr_start(first_y);
+    arg_st[__u] = problem()->get_expr_start(first_u);
     size_t dim = func_.dim();
     assert(dim == func_.arg_dim(__x) && dim == func_.arg_dim(__y) &&
            "function dimension must match the dimensions of x and y");
@@ -122,30 +128,22 @@ explicit_euler_impl::approx_data::approx_data(generic_dynamics::approx_data &&rh
     {
         approx_->jac_[__x].insert(f_st, arg_st[__x], dim, dim, sparsity::diag).setConstant(-1.0);
         auto off_diag = approx_->jac_[__x].insert(f_st, arg_st[__x] + dim_2nd, dim_2nd, dim_2nd, sparsity::diag);
-        new (&f_x_off_diag_) aligned_vector_map_t(off_diag.data(), off_diag.rows(), off_diag.cols());
+        setup_map(f_x_off_diag_, off_diag);
+        dyn_proj_->proj_f_x_.insert(f_st, arg_st[__x], dim, dim, sparsity::diag).setConstant(-1.0);
+        auto proj_off_diag = dyn_proj_->proj_f_x_.insert(f_st, arg_st[__x] + dim_2nd, f_x_off_diag_.rows(), f_x_off_diag_.cols(), sparsity::diag);
+        setup_map(proj_f_x_off_diag_, proj_off_diag);
     }
     {
         auto f_u = approx_->jac_[__u].insert(f_st + dim_2nd, arg_st[__u], dim_1st + dim_2nd, dim_1st + dim_2nd, sparsity::diag);
-        new (&f_u_) aligned_vector_map_t(f_u.data(), f_u.rows(), f_u.cols());
+        setup_map(f_u_, f_u);
+        auto proj_f_u = dyn_proj_->proj_f_u_.insert(f_st + dim_2nd, arg_st[__u], f_u_.rows(), f_u_.cols(), sparsity::diag);
+        setup_map(proj_f_u_, proj_f_u);
     }
     if (dyn.has_timestep_) {
         auto f_dt = approx_->jac_[__u].insert(f_st, problem()->get_expr_start(dyn.timestep_var_), func_.dim(), 1, sparsity::dense);
-        new (&f_dt_) aligned_vector_map_t(f_dt.data(), f_dt.rows(), f_dt.cols());
-    }
-
-    // set projected dynamics derivatives
-    {
-        auto m_diag = dyn_proj_->proj_f_x_.insert(f_st, arg_st[__x], dim, dim, sparsity::diag).setConstant(-1.0);
-        auto off_diag = dyn_proj_->proj_f_x_.insert(f_st, arg_st[__x] + dim_2nd, f_x_off_diag_.rows(), f_x_off_diag_.cols(), sparsity::diag);
-        new (&proj_f_x_off_diag_) aligned_vector_map_t(off_diag.data(), off_diag.rows(), off_diag.cols());
-    }
-    {
-        auto f_u = dyn_proj_->proj_f_u_.insert(f_st + dim_2nd, arg_st[__u], f_u_.rows(), f_u_.cols(), sparsity::diag);
-        new (&proj_f_u_) aligned_vector_map_t(f_u.data(), f_u.rows(), f_u.cols());
-    }
-    if (dyn.has_timestep_) {
-        auto f_dt = dyn_proj_->proj_f_u_.insert(f_st, problem()->get_expr_start(dyn.timestep_var_), func_.dim(), 1, sparsity::dense);
-        new (&proj_f_dt_) aligned_vector_map_t(f_dt.data(), f_dt.rows(), f_dt.cols());
+        setup_map(f_dt_, f_dt);
+        auto proj_f_dt = dyn_proj_->proj_f_u_.insert(f_st, problem()->get_expr_start(dyn.timestep_var_), func_.dim(), 1, sparsity::dense);
+        setup_map(proj_f_dt_, proj_f_dt);
     }
 }
 } // namespace moto

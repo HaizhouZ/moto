@@ -31,14 +31,13 @@ void product(const lhs_type &lhs, const rhs_type &rhs, out_type &out) {
     constexpr auto l_is_sp_mat = std::is_same_v<std::decay_t<lhs_type>, sparse_mat>;
     constexpr auto r_is_sp_mat = std::is_same_v<std::decay_t<rhs_type>, sparse_mat>;
     auto product_impl = [&out]<typename L_, typename R_>(const L_ &lhs, const R_ &rhs) {
-        // thread_local spmm::buffer cache_lhs;
         constexpr decltype(spmm::buffer::null_) null_{};
-        // auto lhs_expr = binary_op<ltr, rtr, L_, R_>(lhs, rhs);
-        // if (lhs_expr.valid()) {
-            // auto lhs_res = lhs_expr.run();
+        auto lhs_expr = binary_op<ltr, rtr, L_, R_>(lhs, rhs);
+        if (lhs_expr.valid()) {
+            auto lhs_res = lhs_expr.run();
             constexpr auto config = eval_config{.add_to = add};
-            // lhs_res.template eval_then_add_to<config>(out, null_);
-        // }
+            lhs_res.template eval_then_add_to<config>(out, null_);
+        }
     };
     if constexpr (l_is_sp_mat && r_is_sp_mat) {
         constexpr size_t num = static_cast<size_t>(sparsity::num);

@@ -20,14 +20,14 @@ dense_dynamics::approx_data::approx_data(generic_constr::approx_data &&rhs)
     // setup f_y
     auto first_y_arg = *std::find_if(in_args.begin(), in_args.end(), [](const auto &arg) { return arg->field() == __y; });
     auto jac_y = approx_->jac_[__y].insert(f_st, prob.get_expr_start(first_y_arg), func_.dim(), func_.arg_dim(__y), sparsity::dense);
-    new (&f_y_) aligned_map_t(jac_y.data(), jac_y.rows(), jac_y.cols());
+    setup_map(f_y_, jac_y);
     // setup f_x
     auto first_x_arg = *std::find_if(in_args.begin(), in_args.end(), [](const auto &arg) { return arg->field() == __x; });
     auto jac_x = approx_->jac_[__x].insert(f_st, prob.get_expr_start(first_x_arg), func_.dim(), func_.arg_dim(__x), sparsity::dense);
-    new (&f_x_) aligned_map_t(jac_x.data(), jac_x.rows(), jac_x.cols());
+    setup_map(f_x_, jac_x);
     // set up projected f_x
     auto p_x = dyn_proj_->proj_f_x_.insert(f_st, prob.get_expr_start(first_x_arg), func_.dim(), func_.arg_dim(__x), sparsity::dense);
-    new (&proj_f_x_) aligned_map_t(p_x.data(), p_x.rows(), p_x.cols());
+    setup_map(proj_f_x_, p_x);
     // allocate f_u and proj_f_u_
     f_u_.reserve(func_.arg_num(__u));
     proj_f_u_.reserve(func_.arg_num(__u));

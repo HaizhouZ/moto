@@ -20,11 +20,6 @@ function(add_moto_test name)
 
     target_link_libraries(${test_name} PRIVATE ${PROJECT_NAME})
     target_link_libraries(${test_name} PRIVATE Catch2::Catch2WithMain)
-
-    set_source_files_properties(${test_file} PROPERTIES
-    COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O3>"
-    COMPILE_DEFINITIONS "$<$<CONFIG:Debug>:NDEBUG>"
-)
     
     add_test(NAME ${test_name} COMMAND ${test_name} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endfunction()

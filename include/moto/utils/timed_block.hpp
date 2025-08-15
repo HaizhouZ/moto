@@ -29,7 +29,7 @@ inline unsigned long long rdtscp() {
 unsigned long long get_tsc_frequency();
 /**
  * @brief timing_storage class to store timing information of labeled code blocks
- *
+ * @note the overhead of timing (calling @ref rdtscp) is 25-75 cycles
  * @tparam label
  */
 template <string_literals label>
