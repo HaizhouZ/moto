@@ -19,8 +19,13 @@ TEST_CASE("dynamics") {
     var dt = sym::inputs("dt", 1);
     dyn.add_dt(dt);
 
+    explicit_euler dyn2(explicit_euler_impl("test_dynamics2"));
+    dyn2.create_2nd_ord_vars("robot2", 18); // todo: for dynamics, check if symbols conflict
+    dyn2.add_dt(dt);
+
     auto prob = ocp::create();
     prob->add(dyn);
+    prob->add(dyn2);
     size_t N_trials = 100;
     while (N_trials--) {
         auto s_data = sym_data(prob.get());
@@ -50,7 +55,7 @@ TEST_CASE("dynamics") {
             assert(merit_jac[f].isApprox(dual.transpose() * jac[f]) && "Merit jacobian does not match the expected value");
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        size_t n_trials = 100;
+        size_t n_trials = 1;
 
         timed_block_labeled(
             "sparse",
@@ -65,7 +70,7 @@ TEST_CASE("dynamics") {
         timed_block_labeled(
             "dense",
             auto n = n_trials;
-            while (n--) {
+            while (n--) {                
                 for (auto f : primal_fields) {
                     // auto f = __x;
                     auto &jac_sp = m_data.approx_[__dyn].jac_[f];
