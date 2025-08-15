@@ -55,7 +55,7 @@ struct timing_storage {
         count_ = count_ == 0 ? 1 : count_;
         durations = elapsed_cycles / static_cast<double>(get_tsc_frequency()) * 1e6; // convert to microseconds
         auto avg = durations / count_;
-        fmt::print("{}: {} us, count {}\n", label.value, avg, count_);
+        fmt::print("{}: {} us, count {} cycles {}\n", label.value, avg, count_, elapsed_cycles);
     }
 };
 

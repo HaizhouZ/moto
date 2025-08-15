@@ -30,7 +30,8 @@ struct buffer : public panel_mat<sparsity::dense> {
             mem_ = ::operator new(sizeof(scalar_t) * required_size, std::align_val_t(64));
             size_ = required_size;
         }
-        new (&data_) matrix::AlignedMapType(reinterpret_cast<scalar_t *>(mem_), r, c);
+        if (r != data_.rows() || c != data_.cols())
+            new (&data_) matrix::AlignedMapType(reinterpret_cast<scalar_t *>(mem_), r, c);
     }
     ~buffer() {
         if (mem_ != nullptr)

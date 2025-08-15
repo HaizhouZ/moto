@@ -59,10 +59,11 @@ include(cmake/subObjectHelpers.cmake)
 file(GLOB_RECURSE SRC_FILES src/*.cpp)# src/core/*.cpp src/ocp/*.cpp src/utils/*.cpp src/solver/*.cpp)
 add_library(${PROJECT_NAME} SHARED ${SRC_FILES})
 target_add_deps(${PROJECT_NAME})
-# set_source_files_properties(src/utils/codegen.cpp PROPERTIES
-#     COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O3>"
-#     COMPILE_DEFINITIONS "$<$<CONFIG:Debug>:NDEBUG>"
-# )
+file(GLOB_RECURSE RELEASE_FILE_LIST src/utils/codegen.cpp src/spmm/*.cpp)
+set_source_files_properties(${RELEASE_FILE_LIST} PROPERTIES
+    COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O3>"
+    COMPILE_DEFINITIONS "$<$<CONFIG:Debug>:NDEBUG>"
+)
 # target_link_options(${PROJECT_NAME} PUBLIC -fsanitize=address)
 
 include(cmake/installHelpers.cmake)
