@@ -45,9 +45,9 @@ class generic_func : public expr {
     void set_from_casadi(const var_inarg_list &in_args, const cs::SX &out);
 
     virtual void finalize_impl() override;
-    virtual void value_impl(func_approx_data &data) const { value(data); }
-    virtual void jacobian_impl(func_approx_data &data) const { jacobian(data); }
-    virtual void hessian_impl(func_approx_data &data) const { hessian(data); }
+    virtual void value_impl(func_approx_data &data) const;
+    virtual void jacobian_impl(func_approx_data &data) const;
+    virtual void hessian_impl(func_approx_data &data) const;
     virtual void load_external_impl(const std::string &path = "gen");
 
     generic_func(const generic_func &) = default;

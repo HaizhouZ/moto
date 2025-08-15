@@ -60,6 +60,9 @@ class explicit_euler_impl : public generic_dynamics {
     void value_impl(func_approx_data &data) const override;
     void jacobian_impl(func_approx_data &data) const override;
 
+    explicit_euler_impl(const std::string &name)
+        : generic_dynamics(name, approx_order::first, dim_tbd, __dyn) {}
+
     void compute_project_derivatives(func_approx_data &data) const override;
 };
 
@@ -84,6 +87,8 @@ struct explicit_euler : public func {
     }
     void add_dt(scalar_t dt) { (*this)->dt_ = dt; }             ///< set time step
     void add_dt(const var &dt) { (*this)->timestep_var_ = dt; } ///< set time variable
+
+    using func::func;
 };
 
 } // namespace moto

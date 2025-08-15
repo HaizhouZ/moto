@@ -26,6 +26,29 @@ void generic_func::compute_approx(func_approx_data &data,
     if (eval_hess)
         hessian_impl(data);
 }
+
+void generic_func::value_impl(func_approx_data &data) const {
+    try {
+        value(data);
+    } catch (const std::bad_function_call &ex) {
+        fmt::println("Function {} has no value implementation, please implement it or load from shared library", name());
+    }
+}
+void generic_func::jacobian_impl(func_approx_data &data) const {
+    try {
+        jacobian(data);
+    } catch (const std::bad_function_call &ex) {
+        fmt::println("Function {} has no jacobian implementation, please implement it or load from shared library", name());
+    }
+}
+void generic_func::hessian_impl(func_approx_data &data) const {
+    try {
+        hessian(data);
+    } catch (const std::bad_function_call &ex) {
+        fmt::println("Function {} has no hessian implementation, please implement it or load from shared library", name());
+    }
+}
+
 void generic_func::load_external_impl(const std::string &path) {
     auto funcs = load_approx(name_, true, order_ >= approx_order::first, order_ >= approx_order::second);
     value = [eval = std::move(funcs[0])](func_approx_data &d) {
@@ -132,20 +155,6 @@ void generic_func::finalize_impl() {
     if (!gen_.out_.is_empty()) {
         func_codegen::get().make_codegen_task(this);
     } else {
-        bool value_missing = order_ >= approx_order::zero && !value;
-        bool jacobian_missing = order_ >= approx_order::first && !jacobian;
-        bool hessian_missing = order_ >= approx_order::second && !hessian;
-        if (value_missing || jacobian_missing || hessian_missing) {
-            std::vector<std::string> missing;
-            missing.reserve(3);
-            if (value_missing)
-                missing.push_back("value");
-            if (jacobian_missing)
-                missing.push_back("jacobian");
-            if (hessian_missing)
-                missing.push_back("hessian");
-            throw std::runtime_error(fmt::format("generic_func {} has no codegen set for [{}]", name_, fmt::join(missing, ",")));
-        }
         set_ready_status(true); ///< set the ready status
     }
 }

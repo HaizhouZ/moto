@@ -24,7 +24,6 @@ function(add_moto_test name)
     add_test(NAME ${test_name} COMMAND ${test_name} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endfunction()
 
-# add_moto_test(external_function)
-# add_moto_test(symbolic_comp)
 add_moto_test(expr_ownership)
 add_moto_test(constr_cast)
+add_moto_test(dynamics)

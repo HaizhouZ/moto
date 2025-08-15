@@ -14,6 +14,7 @@ class generic_dynamics : public generic_constr {
         using aligned_map_t = matrix::AlignedMapType;
         using aligned_vector_map_t = vector::AlignedMapType;
 #define NULL_INIT_MAP(name) name(nullptr, 0, 0)
+#define NULL_INIT_VECMAP(name) name(nullptr, 0)
         merit_data::approx_data *approx_;
         merit_data::dynamics_data *dyn_proj_;
         vector_ref proj_f_res_; ///< projection of f_res
