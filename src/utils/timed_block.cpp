@@ -1,6 +1,7 @@
 #include <moto/utils/timed_block.hpp>
 #include <chrono>
 #include <thread>
+#include <iostream>
 namespace moto {
 namespace utils {
 
@@ -35,6 +36,7 @@ unsigned long long get_tsc_frequency() {
 
         // Calculate the frequency
         frequency = static_cast<unsigned long long>(static_cast<double>(elapsed_cycles) / duration_in_seconds);
+        std::cout << "Calibrated TSC frequency: " << frequency / 1e6 << " MHz" << std::endl;
     }
     return frequency;
 }

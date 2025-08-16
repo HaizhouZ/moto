@@ -18,7 +18,7 @@ struct buffer : public panel_mat<sparsity::dense> {
     buffer() : data_(nullptr, 0, 0), mem_(nullptr), panel_mat<sparsity::dense>(0, 0, 0, 0, false) {}
     template <typename T>
         requires(std::is_base_of_v<panel_mat_base, std::remove_cvref_t<T>>)
-    void resize(T &p) {
+    void resize(const T &p) {
         copy_dim(p);
         resize(p.rows_, p.cols_);
     }

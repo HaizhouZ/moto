@@ -17,9 +17,13 @@ function(add_moto_test name)
 
     add_executable(${test_name} ${test_file})
     target_include_directories(${test_name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-
     target_link_libraries(${test_name} PRIVATE ${PROJECT_NAME})
     target_link_libraries(${test_name} PRIVATE Catch2::Catch2WithMain)
+
+    set_source_files_properties(${test_file} PROPERTIES
+        COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O3>"
+        COMPILE_DEFINITIONS "$<$<CONFIG:Debug>:NDEBUG>"
+    )
     
     add_test(NAME ${test_name} COMMAND ${test_name} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endfunction()
@@ -28,3 +32,4 @@ add_moto_test(expr_ownership)
 add_moto_test(constr_cast)
 add_moto_test(dynamics)
 add_moto_test(field_conversion)
+add_moto_test(spmm)

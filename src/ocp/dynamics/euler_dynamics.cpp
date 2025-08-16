@@ -86,7 +86,7 @@ void explicit_euler::impl::jacobian_impl(func_approx_data &data) const {
                 size_t dim = r->dim();
                 d.f_dt_.segment(idx, dim) = -d[v];
                 d.f_dt_.segment(idx + dim, dim) = -d[a];
-                idx += r->dim();
+                idx += r->dim() * 2;
             }
         }
     }
@@ -124,19 +124,19 @@ explicit_euler::impl::approx_data::approx_data(generic_dynamics::approx_data &&r
     size_t dim_1st = dyn.first_ord_var_.dim_;
     size_t dim_2nd = dyn.sec_ord_var_.dim_;
     // setup jacobian
-    approx_->jac_[__y].insert(f_st, arg_st[__y], dim, dim, sparsity::eye);
+    approx_->jac_[__y].insert<sparsity::eye>(f_st, arg_st[__y], dim);
     {
-        approx_->jac_[__x].insert(f_st, arg_st[__x], dim, dim, sparsity::diag).setConstant(-1.0);
-        auto off_diag = approx_->jac_[__x].insert(f_st, arg_st[__x] + dim_2nd, dim_2nd, dim_2nd, sparsity::diag);
+        approx_->jac_[__x].insert<sparsity::diag>(f_st, arg_st[__x], dim).setConstant(-1.0);
+        auto off_diag = approx_->jac_[__x].insert<sparsity::diag>(f_st, arg_st[__x] + dim_2nd, dim_2nd);
         setup_map(f_x_off_diag_, off_diag);
-        dyn_proj_->proj_f_x_.insert(f_st, arg_st[__x], dim, dim, sparsity::diag).setConstant(-1.0);
-        auto proj_off_diag = dyn_proj_->proj_f_x_.insert(f_st, arg_st[__x] + dim_2nd, f_x_off_diag_.rows(), f_x_off_diag_.cols(), sparsity::diag);
+        dyn_proj_->proj_f_x_.insert<sparsity::diag>(f_st, arg_st[__x], dim).setConstant(-1.0);
+        auto proj_off_diag = dyn_proj_->proj_f_x_.insert<sparsity::diag>(f_st, arg_st[__x] + dim_2nd, f_x_off_diag_.rows());
         setup_map(proj_f_x_off_diag_, proj_off_diag);
     }
     {
-        auto f_u = approx_->jac_[__u].insert(f_st + dim_2nd, arg_st[__u], dim_1st + dim_2nd, dim_1st + dim_2nd, sparsity::diag);
+        auto f_u = approx_->jac_[__u].insert<sparsity::diag>(f_st + dim_2nd, arg_st[__u], dim_1st + dim_2nd);
         setup_map(f_u_, f_u);
-        auto proj_f_u = dyn_proj_->proj_f_u_.insert(f_st + dim_2nd, arg_st[__u], f_u_.rows(), f_u_.cols(), sparsity::diag);
+        auto proj_f_u = dyn_proj_->proj_f_u_.insert<sparsity::diag>(f_st + dim_2nd, arg_st[__u], f_u_.rows());
         setup_map(proj_f_u_, proj_f_u);
     }
     if (dyn.has_timestep_) {

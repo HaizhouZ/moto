@@ -4,7 +4,7 @@
 #include <moto/spmm/panel_mat.hpp>
 
 namespace moto {
-
+namespace spmm {
 template <typename expr_type>
 struct is_sp_expr {
     static constexpr bool value = false;
@@ -28,7 +28,7 @@ struct is_diag_type<Eigen::DiagonalWrapper<expr_type>> {
 struct eval_config {
     bool sym_res = false;
     bool same_sides = false;
-    bool dst_panel = false;
+    bool no_offset = false;
     bool overwrite = false;
     bool add_to = true;
 };
@@ -53,8 +53,8 @@ struct sp_expr : public expr_type, public panel_mat<is_diag_type<expr_type>::val
     void eval_then_add_to(mat_type &dst, cache_type &cache) const {
         size_t out_row_st = row_st_;
         size_t out_col_st = col_st_;
-        if constexpr (config.dst_panel) {
-            out_row_st = out_col_st = 0; // panel_mat_base does not have row_st_ and col_st_
+        if constexpr (config.no_offset) {
+            out_row_st = out_col_st = 0;
             assert(dst.rows() == rows_ && dst.cols() == cols_ && "output matrix size mismatch");
         } else
             assert(dst.rows() >= row_ed_ && dst.cols() >= col_ed_ && "output matrix size mismatch");
@@ -338,17 +338,17 @@ struct binary_op {
 };
 
 template <typename lhs_type, typename rhs_type>
-using spmm_lt_rn = binary_op<true, false, lhs_type, rhs_type>;
+using product_lt_rn = binary_op<true, false, lhs_type, rhs_type>;
 
 template <typename lhs_type, typename rhs_type>
-using spmm_ln_rn = binary_op<false, false, lhs_type, rhs_type>;
+using product_ln_rn = binary_op<false, false, lhs_type, rhs_type>;
 
 template <typename lhs_type, typename rhs_type>
-using spmm_lt_rt = binary_op<true, true, lhs_type, rhs_type>;
+using product_lt_rt = binary_op<true, true, lhs_type, rhs_type>;
 
 template <typename lhs_type, typename rhs_type>
-using spmm_ln_rt = binary_op<false, true, lhs_type, rhs_type>;
-
+using product_ln_rt = binary_op<false, true, lhs_type, rhs_type>;
+} // namespace spmm
 } // namespace moto
 
 #endif

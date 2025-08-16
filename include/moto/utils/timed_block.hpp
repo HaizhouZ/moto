@@ -1,8 +1,8 @@
 #ifndef MOTO_UTILS_TIMED_BLOCK_HPP
 #define MOTO_UTILS_TIMED_BLOCK_HPP
 
-#include <fmt/core.h>
 #include <algorithm>
+#include <fmt/core.h>
 #include <x86intrin.h> // For __rdtsc() on GCC/Clang and MSVC
 
 namespace moto {
@@ -35,7 +35,7 @@ unsigned long long get_tsc_frequency();
 template <string_literals label>
 struct timing_storage {
     double durations = 0.0;
-    unsigned long long elapsed_cycles;
+    double elapsed_cycles;
     size_t count_ = 0;
     /**
      * @brief get the timing storage object for manipulation
@@ -46,7 +46,7 @@ struct timing_storage {
         static timing_storage<label> storage;
         return storage;
     }
-    static size_t& count() { return get().count_; }
+    static size_t &count() { return get().count_; }
     /**
      * @brief Destroy the timing storage object, meanwhile print the average time
      *
@@ -74,11 +74,11 @@ struct timing_storage {
 #define timed_block_impl(label, ...)                                     \
     {                                                                    \
         static auto &timing = moto::utils::timing_storage<label>::get(); \
-        timing.count_++;                                                  \
+        timing.count_++;                                                 \
         auto start = moto::utils::rdtscp();                              \
         __VA_ARGS__;                                                     \
         auto end = moto::utils::rdtscp();                                \
-        timing.elapsed_cycles += end - start;                            \
+        timing.elapsed_cycles += std::max<int>(end - start, 0);               \
     }
 #define timed_block(...) timed_block_impl(#__VA_ARGS__, __VA_ARGS__)
 #define timed_block_labeled(label, ...) timed_block_impl(label, __VA_ARGS__)

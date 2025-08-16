@@ -16,6 +16,11 @@ struct sparse_mat {
     sparse_mat() = default;
     void resize(size_t rows, size_t cols);
     matrix_ref insert(size_t r_st, size_t c_st, size_t r, size_t c, sparsity sp);
+    template <sparsity Sp>
+        requires(Sp == sparsity::diag || Sp == sparsity::eye)
+    matrix_ref insert(size_t r_st, size_t c_st, size_t dim) {
+        return insert(r_st, c_st, dim, dim, Sp);
+    }
     void inner_product(const matrix &m, matrix &out);
     template <bool add = true, typename rhs_type, typename out_type>
     void times(const rhs_type &rhs, out_type &out);
