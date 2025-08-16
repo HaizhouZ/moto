@@ -2,7 +2,7 @@
 #include <moto/ocp/problem.hpp>
 
 namespace moto {
-void explicit_euler_impl::finalize_impl() {
+void explicit_euler::impl::finalize_impl() {
     add_arguments(first_ord_var_.pos_x_);
     add_arguments(first_ord_var_.pos_y_);
     add_arguments(first_ord_var_.vel_u_);
@@ -24,7 +24,7 @@ void explicit_euler_impl::finalize_impl() {
 
     generic_dynamics::finalize_impl();
 }
-void explicit_euler_impl::value_impl(func_approx_data &data) const {
+void explicit_euler::impl::value_impl(func_approx_data &data) const {
     if (has_1st_ord_) {
         size_t idx = 0;
         for (size_t i = 0; i < first_ord_var_.pos_x_.size(); i++) {
@@ -59,7 +59,7 @@ void explicit_euler_impl::value_impl(func_approx_data &data) const {
         }
     }
 }
-void explicit_euler_impl::jacobian_impl(func_approx_data &data) const {
+void explicit_euler::impl::jacobian_impl(func_approx_data &data) const {
     auto &d = data.as<approx_data>();
     scalar_t dt = has_timestep_ ? d[timestep_var_](0) : dt_;
     d.f_u_.setConstant(-dt);
@@ -91,7 +91,7 @@ void explicit_euler_impl::jacobian_impl(func_approx_data &data) const {
         }
     }
 }
-void explicit_euler_impl::compute_project_derivatives(func_approx_data &data) const {
+void explicit_euler::impl::compute_project_derivatives(func_approx_data &data) const {
     auto &d = data.as<approx_data>();
     scalar_t dt = has_timestep_ ? d[timestep_var_](0) : dt_;
     d.proj_f_x_off_diag_.setConstant(-dt);
@@ -100,7 +100,7 @@ void explicit_euler_impl::compute_project_derivatives(func_approx_data &data) co
         d.proj_f_dt_ = d.f_dt_;
     }
 }
-explicit_euler_impl::approx_data::approx_data(generic_dynamics::approx_data &&rhs)
+explicit_euler::impl::approx_data::approx_data(generic_dynamics::approx_data &&rhs)
     : generic_dynamics::approx_data(std::move(rhs)),
       NULL_INIT_VECMAP(f_u_),
       NULL_INIT_VECMAP(f_x_off_diag_),
@@ -110,7 +110,7 @@ explicit_euler_impl::approx_data::approx_data(generic_dynamics::approx_data &&rh
       NULL_INIT_VECMAP(proj_f_dt_) {
     // create sparse pattern
     size_t f_st = problem()->get_expr_start(func_);
-    auto &dyn = static_cast<const explicit_euler_impl &>(func_);
+    auto &dyn = static_cast<const explicit_euler::impl &>(func_);
     array_type<size_t, primal_fields> arg_st{};
     const var &first_x = dyn.first_ord_var_.dim_ ? dyn.first_ord_var_.pos_x_[0] : dyn.sec_ord_var_.pos_x_[0];
     const var &first_y = dyn.first_ord_var_.dim_ ? dyn.first_ord_var_.pos_y_[0] : dyn.sec_ord_var_.pos_y_[0];

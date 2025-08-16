@@ -3,13 +3,14 @@
 #include <filesystem>
 #include <iostream>
 #include <moto/ocp/dynamics/euler_dynamics.hpp>
+#include <moto/ocp/dynamics/dense_dynamics.hpp>
 #include <moto/ocp/problem.hpp>
 #define ENABLE_TIMED_BLOCK
 #include <moto/utils/timed_block.hpp>
 #include <thread>
 TEST_CASE("dynamics") {
     using namespace moto;
-    explicit_euler dyn(explicit_euler_impl("test_dynamics"));
+    explicit_euler dyn("test_dynamics");
     // dyn.create_2nd_ord_vars("robot", 3);
     // dyn.create_1st_ord_vars("foot", 6);
     // dyn.create_1st_ord_vars("hand", 6);
@@ -19,7 +20,7 @@ TEST_CASE("dynamics") {
     var dt = sym::inputs("dt", 1);
     dyn.add_dt(dt);
 
-    explicit_euler dyn2(explicit_euler_impl("test_dynamics2"));
+    explicit_euler dyn2("test_dynamics2");
     dyn2.create_2nd_ord_vars("robot2", 18); // todo: for dynamics, check if symbols conflict
     dyn2.add_dt(dt);
 
@@ -34,9 +35,9 @@ TEST_CASE("dynamics") {
         auto sh_data = shared_data(prob.get(), &s_data);
 
         auto d_ptr = dyn->create_approx_data(s_data, m_data, sh_data);
-        auto &d = d_ptr->as<explicit_euler_impl::approx_data>();
+        auto &d = d_ptr->as<explicit_euler::impl::approx_data>();
         auto d2_ptr = dyn2->create_approx_data(s_data, m_data, sh_data);
-        auto &d2 = d2_ptr->as<explicit_euler_impl::approx_data>();
+        auto &d2 = d2_ptr->as<explicit_euler::impl::approx_data>();
 
         s_data.value_[__x].setRandom();
         s_data.value_[__u].setRandom();
@@ -142,4 +143,22 @@ TEST_CASE("dynamics_order") {
             REQUIRE(exprs[idx]->uid() == args[idx]->uid()); // Expression UID does not match argument UID - order maybe wrong
         }
     }
+}
+
+TEST_CASE("dense_dyn") {
+    using namespace moto;
+    auto [x, y] = sym::states("x", 18);
+    auto u = sym::inputs("u", 12);
+    auto dyn_res = y - x;
+    var dt = sym::inputs("dt", 1);
+    dyn_res(cs::Slice(6,  std::numeric_limits<casadi_int>::max())) -= u * dt;
+    dense_dynamics dyn("test_dense_dyn", {x, y, u, dt}, dyn_res, approx_order::first);
+    auto prob = ocp::create();
+    prob->add(dyn);
+    auto s_data = sym_data(prob.get());
+    auto m_data = merit_data(prob.get());
+    auto sh_data = shared_data(prob.get(), &s_data);
+
+    auto d_ptr = dyn->create_approx_data(s_data, m_data, sh_data);
+    auto &d = d_ptr->as<dense_dynamics::impl::approx_data>();
 }

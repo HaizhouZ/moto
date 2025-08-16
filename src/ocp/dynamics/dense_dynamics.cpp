@@ -4,13 +4,17 @@
 
 namespace moto {
 
-dense_dynamics::approx_data::~approx_data() {
+dense_dynamics::dense_dynamics(const std::string &name, approx_order order, size_t dim) : func(impl(name, order, dim, __dyn)) {}
+dense_dynamics::dense_dynamics(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
+                               approx_order order) : func(impl(name, in_args, out, order, __dyn)) {}
+
+dense_dynamics::impl::approx_data::~approx_data() {
     if (lu_) {
         delete lu_.get();
     }
 }
 
-dense_dynamics::approx_data::approx_data(generic_constr::approx_data &&rhs)
+dense_dynamics::impl::approx_data::approx_data(generic_constr::approx_data &&rhs)
     : generic_dynamics::approx_data(std::move(rhs)),
       f_x_(nullptr, 0, 0), f_y_(nullptr, 0, 0), proj_f_x_(nullptr, 0, 0), lu_(new lu_t()) {
     auto &prob = *merit_data_->prob_;
@@ -52,8 +56,8 @@ dense_dynamics::approx_data::approx_data(generic_constr::approx_data &&rhs)
     }
 }
 
-void dense_dynamics::compute_project_derivatives(func_approx_data &data) const {
-    auto &d = data.as<dense_dynamics::approx_data>();
+void dense_dynamics::impl::compute_project_derivatives(func_approx_data &data) const {
+    auto &d = data.as<dense_dynamics::impl::approx_data>();
     d.lu_->compute(d.f_y_);             // LU decomposition of the dense Jacobian
     d.proj_f_x_ = d.lu_->solve(d.f_x_); // Solve for the projection of f_x
     for (size_t i = 0; i < d.f_u_.size(); ++i) {
