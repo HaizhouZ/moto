@@ -21,6 +21,9 @@ struct var : public shared_expr, public cs::SX {
     var &operator=(const var &) = default;     ///< copy assignment operator
     var &operator=(var &&) noexcept = default; ///< move assignment operator
 };
+inline bool operator==(const var &lhs, const var &rhs) {
+    return lhs.operator->() == rhs.operator->();
+} ///< equality operator
 /**
  * @brief pointer wrapper of symbolic expressions like primal variables or parameters
  */

@@ -26,7 +26,7 @@ TEST_CASE("dynamics") {
     auto prob = ocp::create();
     prob->add(dyn);
     prob->add(dyn2);
-    bool showed = false;
+    bool show = false;
     size_t N_trials = 100;
     while (N_trials--) {
         auto s_data = sym_data(prob.get());
@@ -50,8 +50,8 @@ TEST_CASE("dynamics") {
         auto merit_jac = m_data.jac_;
 
         // size_t n_trials = 1;
-        if (!showed) {
-            showed = true;
+        if (show) {
+            show = false;
             fmt::print("Function value: {}\n", d.v_.transpose());
             fmt::print("Function jacobian:\n");
             for (auto f : primal_fields) {
@@ -63,7 +63,7 @@ TEST_CASE("dynamics") {
             auto &jac_sp = m_data.approx_[__dyn].jac_[f];
             jac[f] = jac_sp.dense();
             jac_sp.right_T_times(dual, merit_jac[f]);
-            assert(merit_jac[f].isApprox(dual.transpose() * jac[f]) && "Merit jacobian does not match the expected value");
+            REQUIRE(merit_jac[f].isApprox(dual.transpose() * jac[f])); // Merit jacobian does not match the expected value
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         size_t n_trials = 100;
@@ -89,5 +89,57 @@ TEST_CASE("dynamics") {
                     // assert(merit_jac[f].isApprox(dual.transpose() * jac[f]) && "Merit jacobian does not match the expected value");
                 }
             });
+    }
+}
+
+TEST_CASE("dynamics_conflicts") {
+    using namespace moto;
+    auto [x, y] = sym::states("x", 2);
+    auto [x2, y2] = sym::states("x2", 2);
+
+    // test that the symbols conflict
+    constr d1("d1", approx_order::first, 2, __dyn);
+    d1->add_arguments({x, y});
+    constr d2("d2", approx_order::first, 2, __dyn);
+    d2->add_arguments({x2, y2});
+    d1->add_argument(x2);
+
+    bool conflict_detected = false;
+    auto prob = ocp::create();
+    try {
+        prob->add(d1);
+        prob->add(d2);
+    } catch (const std::exception &e) {
+        fmt::print("Caught expected exception: {}\n", e.what());
+        conflict_detected = true;
+    }
+    REQUIRE(conflict_detected); // Expected a conflict exception but none was thrown
+}
+
+TEST_CASE("dynamics_order") {
+    using namespace moto;
+    auto [x, y] = sym::states("x", 2);
+    auto [x2, y2] = sym::states("x2", 2);
+
+    // test that the symbols conflict
+    constr d1("d1", approx_order::first, 2, __dyn);
+    d1->add_arguments({x, y});
+    constr d2("d2", approx_order::first, 2, __dyn);
+    d2->add_arguments({x2, y2});
+    auto prob = ocp::create();
+    prob->add(x2);
+    REQUIRE(prob->num(__x) == 1); // Number of expressions in field __x should be 1
+    prob->add(d1);
+    prob->add(d2);
+    for (auto f : primal_fields) {
+        std::vector<shared_expr> args;
+        args.reserve(prob->num(f));
+        args.insert(args.end(), d1->in_args(f).begin(), d1->in_args(f).end());
+        args.insert(args.end(), d2->in_args(f).begin(), d2->in_args(f).end());
+        auto &exprs = prob->exprs(f);
+        REQUIRE(args.size() == exprs.size()); // Number of arguments does not match number of expressions
+        for (size_t idx = 0; idx < args.size(); ++idx) {
+            REQUIRE(exprs[idx]->uid() == args[idx]->uid()); // Expression UID does not match argument UID - order maybe wrong
+        }
     }
 }

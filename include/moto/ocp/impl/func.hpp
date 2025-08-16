@@ -31,6 +31,7 @@ class generic_func : public expr {
     gen_info gen_;
     approx_order order_ = approx_order::first;
     var_list in_args_;
+    array_type<var_list, primal_fields> arg_by_field_{};
     array_type<size_t, primal_fields> arg_dim_{};
     array_type<size_t, primal_fields> arg_num_{};
     std::vector<size_t> arg_d_pos_;
@@ -78,6 +79,11 @@ class generic_func : public expr {
     PROPERTY(in_args)
     const auto &in_args(size_t i) const { return in_args_[i]; }
 
+    const auto &in_args(field_t field) const {
+        assert(in_field(field, primal_fields) && "field out of range");
+        return arg_by_field_[field];
+    } ///< get the input arguments for a given field
+
     auto arg_num(field_t field) const {
         assert(in_field(field, primal_fields) && "field out of range");
         return arg_num_[field];
@@ -110,6 +116,7 @@ class generic_func : public expr {
             arg_d_pos_.emplace_back(arg_dim_[f]);
             arg_dim_[f] += s->dim();
             arg_num_[f]++;
+            arg_by_field_[f].emplace_back(s);
         }
         sym_uid_idx_[s->uid()] = sym_uid_idx_.size();
     }

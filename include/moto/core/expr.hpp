@@ -46,17 +46,19 @@ class shared_expr {
 
     expr *operator->() const { return ptr_.get(); }
 
-    bool operator==(const shared_expr &rhs) const {
-        return ptr_ == rhs.ptr_;
-    } ///< equality operator
-    template <typename U>
-        requires std::is_base_of_v<expr, std::remove_cvref_t<U>>
-    bool operator==(const U &rhs) const { return ptr_.get() == &rhs; }
-
     explicit operator bool() const { return static_cast<bool>(ptr_); } ///< conversion to bool operator
     size_t use_count() const { return ptr_.use_count(); }              ///< get the use count of the pointer
     virtual ~shared_expr();                                            ///< virtual destructor
 };
+inline bool operator==(const shared_expr &lhs, const shared_expr &rhs) {
+    return lhs.operator->() == rhs.operator->();
+} ///< equality operator
+template <typename U>
+    requires std::is_base_of_v<expr, std::remove_cvref_t<U>>
+inline bool operator==(const shared_expr &lhs, const U &rhs) {
+    return lhs.operator->() == static_cast<const expr *>(&rhs);
+} ///< equality operator for shared_expr and derived types
+
 /// @brief list of expressions, used for storing expressions in a vector
 struct expr_list : public std::vector<shared_expr> {
     using std::vector<shared_expr>::vector; ///< inherit constructors from std::vector

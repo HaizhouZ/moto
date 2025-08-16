@@ -66,7 +66,7 @@ void generic_constr::finalize_impl() {
                 _field = field_hint_.is_soft ? __eq_xu_soft : __eq_xu;
             else if (has_[__x] && has_[__y] && !field_hint_.is_soft) // we dont assume x can be converted to y
                 _field = __dyn;
-            else if (!has_[__u] && (has_[__x] ^ has_[__y]))
+            else if (!has_[__u] && (has_[__x] || has_[__y]))
                 _field = field_hint_.is_soft ? __eq_x_soft : __eq_x;
             else
                 throw std::runtime_error(fmt::format("unsupported eq generic_constr \"{}\" type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set _field or hints?",
@@ -74,7 +74,7 @@ void generic_constr::finalize_impl() {
         } else {
             if (has_[__u] && !has_[__y])
                 _field = __ineq_xu;
-            else if (!has_[__u] && (has_[__x] ^ has_[__y]))
+            else if (!has_[__u] && (has_[__x] || has_[__y]))
                 _field = __ineq_x;
             else
                 throw std::runtime_error(fmt::format("unsupported ineq generic_constr \"{}\" type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set _field or hints?",
@@ -85,7 +85,9 @@ void generic_constr::finalize_impl() {
         // do in_arg substitute
         try {
             for (sym &arg : in_args_) {
-                if (arg.field() == __x) {
+                // here is a bit tricky, we substitute __x to __y if only __x exists in the in_args
+                // but __y existing dont mean the constraint is solvable - probably it is not
+                if (arg.field() == __x && arg_dim(__y) == 0) {
                     fmt::print("substitution in generic_constr {} of type {}: inarg {} with {}\n",
                                name_, field::name(field_), arg.name(), arg.name() + "_nxt");
                     substitute(arg, arg.next());
