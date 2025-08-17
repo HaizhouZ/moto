@@ -5,6 +5,7 @@
 #include <moto/utils/movable_ptr.hpp>
 
 namespace moto {
+struct node_data;
 namespace solver {
 namespace ns_riccati {
 enum rank_status : int { unconstrained = 0,
@@ -21,9 +22,11 @@ struct ns_node_data : public data_base {
     size_t nz;
     sparse_mat &F_x, &F_u;
     sparse_mat &s_y, &s_x, &c_x, &c_u;
-    vector& F_0;
+    vector &F_0;
 
     movable_ptr<nullspace_data> nsp_;
+
+    node_data *full_data_;
 
     rank_status rank_status_;
     // sensitivity for sqp step
@@ -34,11 +37,14 @@ struct ns_node_data : public data_base {
     } d_u, d_y;
     // multiplier sensitivity
     vector d_lbd_f, d_lbd_s_c_pre_solve, d_lbd_s_c;
-    
-    ns_node_data(sym_data *, merit_data *);
+
+    ns_node_data(node_data *full_data);
     ns_node_data(const ns_node_data &rhs) = delete;
     ns_node_data(ns_node_data &&rhs) = default;
     ~ns_node_data();
+
+    void update_projected_dynamics();
+    void apply_jac_y_inverse_transpose(vector &v, vector &dst);
 };
 } // namespace ns_riccati
 } // namespace solver

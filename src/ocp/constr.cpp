@@ -105,13 +105,13 @@ void generic_constr::finalize_impl() {
 void generic_constr::value_impl(func_approx_data &data) const {
     base::value_impl(data);
     // compute contribution to merit function
-    auto &d = static_cast<approx_data &>(data);
-    scalar_t res = d.multiplier_.dot(d.v_);
+    // auto &d = static_cast<approx_data &>(data);
+    // scalar_t res = d.multiplier_.dot(d.v_);
     // fmt::print("\t{}:\tv:{}\n", name(), d.v_.transpose());
     // #pragma omp critical
     // {
     // fmt::print("pre {}\n", *d.merit_);
-    *d.merit_ += res;
+    // *d.merit_ += res;
     //     fmt::print("\t{}:\tv:{}\n", name(), d.multiplier_.dot(d.v_));
     //     fmt::print("after {}\n", *d.merit_);
     // }

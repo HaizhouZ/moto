@@ -14,9 +14,7 @@ using soft_constr_data_t = soft_constr::data_map_t;
 template <typename Callback>
 void for_each(node_data *data, Callback &&callback) {
     data->for_each<ineq_soft_constr_fields>(
-        [&](auto &f, auto &d) {
-            auto &sf = static_cast<const soft_constr &>(f);
-            auto &sd = static_cast<soft_constr_data_t &>(d);
+        [&](const soft_constr &sf, soft_constr_data_t &sd) {
             callback(sf, sd);
         });
 }

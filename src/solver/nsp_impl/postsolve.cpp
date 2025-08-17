@@ -19,11 +19,13 @@ void compute_primal_sensitivity(ns_node_data *cur) {
         d.d_u.k.noalias() = nsp.Z * nsp.u_z_k - nsp.u_y_k;
     }
     // compute k_y
-    // d.d_y.k.noalias() = -nsp.F_0_k - nsp.F_u * d.d_u.k;
-    // d.d_y.K.noalias() = -nsp.F_0_K - nsp.F_u * d.d_u.K;
+    // d.d_y.k.noalias() = -d.F_0 - d.F_u.dense() * d.d_u.k;
+    // d.d_y.K.noalias() = -d.F_x.dense() - d.F_u.dense() * d.d_u.K;
+    // d.d_y.K.noalias() = -d.F_x.dense();
     d.d_y.k = -d.F_0;
     d.F_u.times<false>(d.d_u.k, d.d_y.k);
-    d.F_x.dump_into(d.d_y.K, false);
+    d.d_y.K.setZero();
+    d.F_x.dump_into(d.d_y.K, spmm::dump_config{.add = false, .overwrite = true});
     d.F_u.times<false>(d.d_u.K, d.d_y.K);
 }
 void compute_primal_sensitivity_correction(ns_node_data *cur) {
@@ -44,6 +46,8 @@ void compute_primal_sensitivity_correction(ns_node_data *cur) {
 
     // k_y correction
     // d.d_y.k.noalias() = -nsp.F_u * d.d_u.k;
+    // d.d_y.k.noalias() = -d.F_u.dense() * d.d_u.k;
+    d.d_y.k.setZero();
     d.F_u.times<false>(d.d_u.k, d.d_y.k);
 }
 } // namespace ns_riccati

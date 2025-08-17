@@ -11,11 +11,11 @@ void ns_factorization(ns_node_data *cur) {
     auto &d = *cur;
     auto &nsp = *d.nsp_;
     auto &_approx = d.dense_->approx_;
-    /// @todo sparse F_y inverse
+    cur->update_projected_dynamics();
     // auto &F = _approx[__dyn].jac_;
     // partial value derivative
     cur->merge_jacobian_modification();
-    // d.Q_x.noalias() += -nsp.F_0_k.transpose() * d.Q_yx;
+    // d.Q_x.noalias() += -d.F_0.transpose() * d.Q_yx;
     nsp.Q_yy_F_x = -d.Q_yx;
     nsp.u_0_p_k = d.Q_u.transpose();
     nsp.u_0_p_K = d.Q_ux;
@@ -25,7 +25,7 @@ void ns_factorization(ns_node_data *cur) {
     //     fmt::print("Q_xx:{}\n", d.Q_xx);
     //     throw std::runtime_error("NaN detected in F_0_K or Q_xx");
     // }
-    // d.Q_xx.noalias() += -(d.Q_yx.transpose() * nsp.F_0_K + nsp.F_0_K.transpose() * d.Q_yx);
+    // d.Q_xx.noalias() += -(d.Q_yx.transpose() * d.F_x.dense() + d.F_x.dense().transpose() * d.Q_yx);
     d.F_x.right_T_times<false>(d.Q_yx, d.Q_xx);
     // nullspace computation
     d.rank_status_ = rank_status::unconstrained;
@@ -41,13 +41,14 @@ void ns_factorization(ns_node_data *cur) {
 
     if (d.ncstr) {
         if (constr_s) {
+            nsp.s_u.setZero();
             d.s_y.times<false>(d.F_u, nsp.s_u);
             // nsp.s_u.noalias() = -nsp.s_y * nsp.F_u;
             // solve pseudo inverse
             nsp.s_c_stacked.topRows(constr_s) = nsp.s_u;
         }
         if (constr_c) {
-            d.c_u.dump_into(nsp.s_c_stacked.bottomRows(d.nc));
+            d.c_u.dump_into(nsp.s_c_stacked.bottomRows(d.nc), spmm::dump_config{.overwrite = true});
             // nsp.s_c_stacked.bottomRows(d.nc) = _approx[__eq_xu].jac_[__u];
         }
         nsp.lu_eq_.compute(nsp.s_c_stacked);
@@ -83,16 +84,16 @@ void ns_factorization(ns_node_data *cur) {
             d.s_y.times<false>(d.F_0, nsp.s_0_p_k);
             // nsp.s_0_p_K.noalias() =
             //     _approx[__eq_x].jac_[__x] - nsp.s_y * nsp.F_0_K;
-            d.s_x.dump_into(nsp.s_0_p_K);
+            d.s_x.dump_into(nsp.s_0_p_K, spmm::dump_config{.overwrite = true});
             d.s_y.times<false>(d.F_x, nsp.s_0_p_K);
-            
+
             nsp.s_c_stacked_0_k.head(constr_s) = nsp.s_0_p_k;
             nsp.s_c_stacked_0_K.topRows(constr_s) = nsp.s_0_p_K;
         }
         if (constr_c) {
             nsp.s_c_stacked_0_k.tail(d.nc) = _approx[__eq_xu].v_;
             // nsp.s_c_stacked_0_K.bottomRows(d.nc) = _approx[__eq_xu].jac_[__x];
-            d.c_x.dump_into(nsp.s_c_stacked_0_K.bottomRows(d.nc));
+            d.c_x.dump_into(nsp.s_c_stacked_0_K.bottomRows(d.nc), spmm::dump_config{.overwrite = true});
         }
         if (d.rank_status_ != rank_status::unconstrained) {
             // pre compute

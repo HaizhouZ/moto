@@ -6,14 +6,16 @@
 namespace moto {
 namespace utils {
 template <typename T>
-struct func_traits;
+struct func_traits {
+    static constexpr size_t arg_num = size_t(-1); ///< number of arguments
+};
 
 // Primary template for function types R(Args...)
 template <typename R, typename... Args>
 struct func_traits<R(Args...)> {
     using return_type = R;
     using arg_types = std::tuple<Args...>;
-    static constexpr size_t arity = sizeof...(Args);
+    static constexpr size_t arg_num = sizeof...(Args);
     template <size_t i>
     using arg_type = std::tuple_element_t<i, arg_types>;
 };

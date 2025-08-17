@@ -4,7 +4,12 @@
 #include <moto/spmm/panel_mat.hpp>
 
 namespace moto {
-
+namespace spmm {
+struct dump_config {
+    bool add = true;
+    bool overwrite = false;
+};
+} // namespace spmm
 struct sparse_mat {
     size_t rows_ = 0;
     size_t cols_ = 0;
@@ -14,6 +19,9 @@ struct sparse_mat {
     std::vector<panel_mat<sparsity::diag>> diag_panels_;
     std::vector<panel_mat<sparsity::eye>> eye_panels_;
     sparse_mat() = default;
+    bool is_empty() const {
+        return dense_panels_.empty() && diag_panels_.empty() && eye_panels_.empty();
+    }
     void resize(size_t rows, size_t cols);
     matrix_ref insert(size_t r_st, size_t c_st, size_t r, size_t c, sparsity sp);
     template <sparsity Sp>
@@ -30,7 +38,8 @@ struct sparse_mat {
     void right_times(const lhs_type &lhs, out_type &out);
     template <bool add = true, typename lhs_type, typename out_type>
     void right_T_times(const lhs_type &lhs, out_type &out);
-    void dump_into(matrix_ref out, bool add = true) const;
+    using dump_config = spmm::dump_config;
+    void dump_into(matrix_ref out, dump_config cfg = dump_config()) const;
     matrix dense() const;
     template <typename rhs_type>
     sparse_mat &operator=(const rhs_type &rhs) {

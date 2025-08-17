@@ -21,18 +21,18 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
         print_debug(cur);
         throw std::runtime_error("Q_yy has NaN");
     }
-    // nsp.U.noalias() = d.Q_uu + nsp.F_u.transpose() * d.Q_yy * nsp.F_u;
+    // nsp.U.noalias() = d.Q_uu + d.F_u.dense().transpose() * d.Q_yy * d.F_u.dense();
     nsp.U.noalias() = d.Q_uu;
     d.F_u.inner_product(d.Q_yy, nsp.U);
     // compute bar{u}_0
     nsp.Q_yy_F_0.noalias() = d.Q_yy * d.F_0 - d.Q_y.transpose();
     // nsp.u_0_p_k.noalias() = d.Q_u.transpose() - nsp.F_u.transpose() * (d.Q_y.transpose() - d.Q_yy * nsp.F_0_k);
-    // nsp.u_0_p_k.noalias() = d.Q_u.transpose() + nsp.F_u.transpose() * (d.Q_yy * nsp.F_0_k - d.Q_y.transpose());
+    // nsp.u_0_p_k.noalias() = d.Q_u.transpose() + d.F_u.dense().transpose() * (d.Q_yy * d.F_0 - d.Q_y.transpose());
     d.F_u.T_times(nsp.Q_yy_F_0, nsp.u_0_p_k);
-    // nsp.Q_yy_F_x.noalias() = d.Q_yy * nsp.F_0_K;
+    // nsp.Q_yy_F_x.noalias() = d.Q_yy * d.F_x.dense();
     d.F_x.right_times(d.Q_yy, nsp.Q_yy_F_x);
     // nsp.u_0_p_K.noalias() = d.Q_ux - nsp.F_u.transpose() * (d.Q_yx - nsp.Q_yy_F_x);
-    // nsp.u_0_p_K.noalias() = d.Q_ux + nsp.F_u.transpose() * (nsp.Q_yy_F_x - d.Q_yx);
+    // nsp.u_0_p_K.noalias() = d.Q_ux + d.F_u.dense().transpose() * (nsp.Q_yy_F_x - d.Q_yx);
     d.F_u.T_times(nsp.Q_yy_F_x, nsp.u_0_p_K);
     // fmt::print("u_0_p_k: \n{}\n", nsp.u_0_p_k.transpose());
     // fmt::print("u_0_p_K: \n{}\n", nsp.u_0_p_K.transpose());
@@ -67,11 +67,11 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
             d.d_u.K.noalias() = nsp.Z * nsp.u_z_K - nsp.u_y_K;
         }
     }
-    // d.Q_x.noalias() += -d.Q_y * nsp.F_0_K + nsp.F_0_k.transpose() * nsp.Q_yy_F_x +
+    // d.Q_x.noalias() += -d.Q_y * d.F_x.dense() + d.F_0.transpose() * nsp.Q_yy_F_x +
     //                    nsp.z_u_k.transpose() * d.d_u.K;
     d.F_x.right_times<false>(d.Q_y, d.Q_x);
     d.Q_x.noalias() += d.F_0.transpose() * nsp.Q_yy_F_x + nsp.z_u_k.transpose() * d.d_u.K;
-    // d.Q_xx.noalias() += nsp.F_0_K.transpose() * nsp.Q_yy_F_x + nsp.z_u_K.transpose() * d.d_u.K;
+    // d.Q_xx.noalias() += d.F_x.dense().transpose() * nsp.Q_yy_F_x + nsp.z_u_K.transpose() * d.d_u.K;
     d.F_x.T_times(nsp.Q_yy_F_x, d.Q_xx);
     d.Q_xx.noalias() += nsp.z_u_K.transpose() * d.d_u.K;
     if (d.rank_status_ != rank_status::unconstrained) {
@@ -95,11 +95,15 @@ void riccati_recursion_correction(ns_node_data *cur, ns_node_data *prev) {
     auto &nsp = *d.nsp_;
     // compute z_u correction
     // nsp.z_u_k.noalias() = d.Q_u.transpose() - nsp.F_u.transpose() * d.Q_y.transpose();
-    nsp.z_u_k = d.Q_u.transpose();
-    d.F_u.T_times<false>(d.Q_y, nsp.z_u_k);
+    // nsp.z_u_k.noalias() = d.Q_u.transpose() - d.F_u.dense().transpose() * d.Q_y.transpose();
+    // row_vector tmp(d.F_u.cols());
+    // tmp.setZero();
+    nsp.z_u_k = d.Q_u.transpose();// + tmp.transpose();
+    d.F_u.right_times<false>(d.Q_y, nsp.z_u_k);
     // compute Q_x correcton
     // d.Q_x.noalias() = -d.Q_y * nsp.F_0_K + nsp.z_u_k.transpose() * d.d_u.K;
-    d.Q_x.noalias() = nsp.z_u_k.transpose() * d.d_u.K;
+    // d.Q_x.noalias() = -d.Q_y * d.F_x.dense() + nsp.z_u_k.transpose() * d.d_u.K;
+    // d.Q_x.noalias() = nsp.z_u_k.transpose() * d.d_u.K;
     d.F_x.right_times<false>(d.Q_y, d.Q_x);
     if (prev != nullptr) [[likely]] {
         auto &d_pre = *prev;

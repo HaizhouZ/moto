@@ -56,8 +56,13 @@ dense_dynamics::impl::approx_data::approx_data(generic_constr::approx_data &&rhs
     }
 }
 
+void dense_dynamics::impl::apply_jac_y_inverse_transpose(func_approx_data &data, vector_ref v, vector_ref dst) const {
+    auto &d = data.as<approx_data>();
+    dst.noalias() = d.lu_->transpose().solve(v);
+}
+
 void dense_dynamics::impl::compute_project_derivatives(func_approx_data &data) const {
-    auto &d = data.as<dense_dynamics::impl::approx_data>();
+    auto &d = data.as<approx_data>();
     d.lu_->compute(d.f_y_);             // LU decomposition of the dense Jacobian
     d.proj_f_x_ = d.lu_->solve(d.f_x_); // Solve for the projection of f_x
     for (size_t i = 0; i < d.f_u_.size(); ++i) {

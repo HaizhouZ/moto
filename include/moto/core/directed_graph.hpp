@@ -4,7 +4,6 @@
 #include <list>
 #include <moto/core/fwd.hpp>
 #include <moto/core/parallel_job.hpp>
-#include <moto/utils/func_traits.hpp>
 #include <moto/utils/movable_ptr.hpp>
 #include <ranges>
 #include <set>

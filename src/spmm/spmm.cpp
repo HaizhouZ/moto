@@ -38,8 +38,8 @@ matrix_ref sparse_mat::insert(size_t r_st, size_t c_st, size_t r, size_t c, spar
         throw std::runtime_error("Unknown sparsity type");
     }
 }
-void sparse_mat::dump_into(matrix_ref out, bool add) const {
-    if (add) {
+void sparse_mat::dump_into(matrix_ref out, dump_config cfg) const {
+    if (cfg.add) {
         for (const auto &panel : dense_panels_) {
             out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_) += panel.data_;
         }

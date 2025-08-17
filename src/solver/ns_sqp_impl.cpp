@@ -126,11 +126,8 @@ void ns_sqp::update(size_t n_iter) {
             }
         };
 
-        // timed_block_labeled("all",
-        graph_.for_each_parallel([](data *d) {
-            d->update_projected_dynamics();
-            solver::ns_riccati::ns_factorization(d);
-        });
+        timed_block_start("sqp_single_iter");
+        graph_.for_each_parallel(solver::ns_riccati::ns_factorization);
         graph_.apply_backward(solver::ns_riccati::riccati_recursion, true);
         graph_.for_each_parallel(solver::ns_riccati::compute_primal_sensitivity);
         graph_.apply_forward(solver::ns_riccati::fwd_linear_rollout, true);
@@ -187,7 +184,7 @@ void ns_sqp::update(size_t n_iter) {
             finalize_bound_and_set_to_max();
         }
         // iterative refinement if the step is too small
-        {
+        if (has_ineq) {
             kkt_info info;
             for (auto n : graph_.flatten_nodes()) {
                 for (auto f : primal_fields)
@@ -201,12 +198,6 @@ void ns_sqp::update(size_t n_iter) {
             size_t iter_refine_max = 5;
             size_t iter_refine = 0;
             while (iter_refine < iter_refine_max) {
-                row_vector accm_q_y_mod;
-                // graph_.apply_backward([&accm_q_y_mod](data *cur) {
-                //     accm_q_y_mod.resize(cur->Q_y_bak.size());
-                //     accm_q_y_mod += cur->dense().jac_modification_[__y];
-                //     cur->Q_y_bak = cur->Q_y - accm_q_y_mod; // accumulate the jacobian modification
-                // });
                 graph_.for_each_parallel(solver::ns_riccati::compute_kkt_residual);
                 scalar_t inf_res_stat_u = 0.;
                 scalar_t inf_res_stat_y = 0.;
@@ -226,7 +217,7 @@ void ns_sqp::update(size_t n_iter) {
                 });
                 fmt::print("  iterative refinement {}, res_stat_u: {:.3e}, res_stat_y: {:.3e}, res_stat_x: {:.3e}\n",
                            iter_refine, inf_res_stat_u, inf_res_stat_y, inf_res_stat_x);
-                if (inf_res_stat_u < 1e-10 && inf_res_stat_y < 1e-10 || !has_ineq) {
+                if (inf_res_stat_u < 1e-10 && inf_res_stat_y < 1e-10) {
                     break;
                 }
                 graph_.for_each_parallel(iterative_refinement_start);
@@ -268,7 +259,7 @@ void ns_sqp::update(size_t n_iter) {
         // print statistics
         print_stats(i_iter, info, has_ineq);
         // });
-        moto::utils::timing_storage<"all">::count() = n_iter;
+        timed_block_end("sqp_single_iter");
     }
 }
 ns_sqp::kkt_info ns_sqp::compute_kkt_info() {

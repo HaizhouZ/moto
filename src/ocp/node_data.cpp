@@ -1,4 +1,3 @@
-#include <moto/ocp/dynamics.hpp>
 #include <moto/ocp/impl/custom_func.hpp>
 #include <moto/ocp/impl/data_mgr.hpp>
 
@@ -98,9 +97,14 @@ void node_data::update_approximation(update_mode config) {
                           !no_jac && _f.order() >= approx_order::first,
                           !no_hess && _f.order() >= approx_order::second);
     });
-    for(auto f : merit_data::stored_constr_fields) {
+    for (auto f : merit_data::stored_constr_fields) {
+        if (prob_->dim(f) == 0)
+            continue; // skip empty jacobian
+        dense_->merit_ += dense_->approx_[f].v_.dot(dense_->dual_[f]);
         for (auto p : primal_fields) {
-            dense_->approx_[f].jac_[f].right_T_times(dense_->dual_[f], dense_->jac_[f]);
+            if (dense_->approx_[f].jac_[p].is_empty())
+                continue; // skip empty jacobian
+            dense_->approx_[f].jac_[p].right_T_times(dense_->dual_[f], dense_->jac_[p]);
         }
     }
     if (update_cost) {
@@ -120,20 +124,13 @@ void node_data::update_approximation(update_mode config) {
     }
 }
 
-void node_data::update_projected_dynamics() {
-    size_t idx = 0;
-    for (generic_dynamics &f : prob_->exprs(__dyn)) {
-        auto &d = *sparse_[__dyn][idx++];
-        f.compute_project_derivatives(d);
-    }
-}
-
 void node_data::print_residuals() const {
     for (auto f : merit_data::stored_constr_fields) {
         fmt::println("Field {}: dim {} residual {}", field::name(f), dense_->approx_[f].v_.size(),
                      dense_->approx_[f].v_.transpose());
     }
 }
+
 namespace impl {
 void data_mgr::create_data_batch(const ocp_ptr_t &prob, size_t N) {
     data_.try_emplace(prob->uid());

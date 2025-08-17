@@ -22,6 +22,7 @@ class generic_dynamics : public generic_constr {
     };
     using base::base;
     virtual void compute_project_derivatives(func_approx_data &data) const = 0;
+    virtual void apply_jac_y_inverse_transpose(func_approx_data &data, vector_ref v, vector_ref dst) const { dst = v; };
     template <typename T, typename src_type>
     static void setup_map(T &v, src_type &src) {
         new (&v) std::remove_cvref_t<T>(src.data(), src.rows(), src.cols());

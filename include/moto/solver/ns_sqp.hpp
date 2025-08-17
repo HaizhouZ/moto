@@ -16,7 +16,7 @@ struct ns_sqp {
     using ns_node_data = solver::ns_riccati::ns_node_data;
     struct data : public node_data, ns_node_data {
         data(const ocp_ptr_t &prob)
-            : node_data(prob), ns_node_data(&sym_val(), &dense()) {}
+            : node_data(prob), ns_node_data((node_data *)this) {}
         data(data &&rhs) = default;
         static void update_approx(data *d) {
             d->update_approximation();
@@ -25,10 +25,10 @@ struct ns_sqp {
     void update(size_t n_iter);
     void forward();
     struct kkt_info {
-        scalar_t objective = 0.;    // objective value
-        scalar_t inf_prim_res = 0.; // primal residual (constraint violation)
-        scalar_t inf_dual_res = 0.; // dual residual (stationary condition)
-        scalar_t inf_comp_res = 0.; // (inequality) complementarity residual
+        scalar_t objective = 0.;     // objective value
+        scalar_t inf_prim_res = 0.;  // primal residual (constraint violation)
+        scalar_t inf_dual_res = 0.;  // dual residual (stationary condition)
+        scalar_t inf_comp_res = 0.;  // (inequality) complementarity residual
         scalar_t inf_prim_step = 0.; // infinity norm of the step
         scalar_t inf_dual_step = 0.; // infinity norm of the step
     };
@@ -45,7 +45,7 @@ struct ns_sqp {
     directed_graph<node_type> graph_;
 
   private:
-    void print_stats(int i_iter, const kkt_info& info, bool has_ineq);
+    void print_stats(int i_iter, const kkt_info &info, bool has_ineq);
     kkt_info compute_kkt_info();
 };
 

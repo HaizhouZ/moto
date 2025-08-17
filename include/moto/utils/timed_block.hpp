@@ -28,64 +28,69 @@ inline unsigned long long rdtscp() {
 // Function to get the TSC frequency in cycles per second (Hz)
 unsigned long long get_tsc_frequency();
 /**
- * @brief timing_storage class to store timing information of labeled code blocks
+ * @brief perf_timer class to store timing information of labeled code blocks
  * @note the overhead of timing (calling @ref rdtscp) is 25-75 cycles
  * @tparam label
  */
 template <string_literals label>
-struct timing_storage {
+class perf_timer {
     double durations = 0.0;
     double elapsed_cycles;
     size_t count_ = 0;
+    unsigned long long st_, ed_;
+
+  public:
     /**
      * @brief get the timing storage object for manipulation
      *
      * @return auto& the storage
      */
     static auto &get() {
-        static timing_storage<label> storage;
+        static perf_timer<label> storage;
         return storage;
     }
     static size_t &count() { return get().count_; }
-    /**
-     * @brief Destroy the timing storage object, meanwhile print the average time
+    static void start(size_t n = 1) {
+#ifdef ENABLE_TIMED_BLOCK
+        count() += n;
+        get().st_ = rdtscp();
+#endif // ENABLE_TIMED_BLOCK
+    }
+    static void end() {
+#ifdef ENABLE_TIMED_BLOCK
+        auto &t = perf_timer<label>::get();
+        t.ed_ = rdtscp();
+        t.elapsed_cycles += t.ed_ - t.st_;
+#endif // ENABLE_TIMED_BLOCK
+    }
+    /**nt the average time
      *
      */
-    ~timing_storage() {
+    ~perf_timer() {
+#ifdef ENABLE_TIMED_BLOCK
         count_ = count_ == 0 ? 1 : count_;
         durations = elapsed_cycles / static_cast<double>(get_tsc_frequency()) * 1e6; // convert to microseconds
         auto avg = durations / count_;
         fmt::print("{}: {} us, count {} cycles {}\n", label.value, avg, count_, elapsed_cycles);
+#endif // ENABLE_TIMED_BLOCK
     }
 };
 
-/// @def timed_block
-/// [code blocks], will use the code block as labels
-
-/// @def timed_block_labeled
-/// [label, code blocks]
-
 /// @def ENABLE_TIMED_BLOCK
 /// define this to enable the timed_block, timed_block({code}) or timed_block_labeled(label, {code})
 
-#ifdef ENABLE_TIMED_BLOCK
-/// @def ENABLE_TIMED_BLOCK
-/// define this to enable the timed_block, timed_block({code}) or timed_block_labeled(label, {code})
-#define timed_block_impl(label, ...)                                     \
-    {                                                                    \
-        static auto &timing = moto::utils::timing_storage<label>::get(); \
-        timing.count_++;                                                 \
-        auto start = moto::utils::rdtscp();                              \
-        __VA_ARGS__;                                                     \
-        auto end = moto::utils::rdtscp();                                \
-        timing.elapsed_cycles += std::max<int>(end - start, 0);               \
+/// @brief start the timer, timed_block_start(label, n)
+#define timed_block_start(label, ...) moto::utils::perf_timer<label>::start(__VA_ARGS__);
+#define timed_block_end(label, ...) moto::utils::perf_timer<label>::end();
+/// @brief start the timer, timed_block_labeled(label, n, {code})
+#define timed_block_labeled_n(label, n, ...) \
+    {                                        \
+        timed_block_start(label);            \
+        __VA_ARGS__                          \
+        timed_block_end(label);              \
     }
-#define timed_block(...) timed_block_impl(#__VA_ARGS__, __VA_ARGS__)
-#define timed_block_labeled(label, ...) timed_block_impl(label, __VA_ARGS__)
-#else
-#define timed_block(...) __VA_ARGS__
-#define timed_block_labeled(label, ...) __VA_ARGS__
-#endif
+/// @brief start the timer, timed_block_labeled(label, {code}), increment the count by 1
+#define timed_block_labeled(label, ...) timed_block_labeled_n(label, 1, __VA_ARGS__)
 
 } // namespace utils
 } // namespace moto

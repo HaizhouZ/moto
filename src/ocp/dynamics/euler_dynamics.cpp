@@ -3,18 +3,22 @@
 
 namespace moto {
 void explicit_euler::impl::finalize_impl() {
+    add_arguments(sec_ord_var_.pos_x_);
+    add_arguments(sec_ord_var_.pos_y_);
+    add_arguments(sec_ord_var_.vel_x_);
+    add_arguments(sec_ord_var_.vel_y_);
+    add_arguments(sec_ord_var_.acc_u_);
     add_arguments(first_ord_var_.pos_x_);
     add_arguments(first_ord_var_.pos_y_);
     add_arguments(first_ord_var_.vel_u_);
-    add_arguments(sec_ord_var_.pos_x_);
-    add_arguments(sec_ord_var_.vel_x_);
-    add_arguments(sec_ord_var_.pos_y_);
-    add_arguments(sec_ord_var_.vel_y_);
-    add_arguments(sec_ord_var_.acc_u_);
 
     has_1st_ord_ = !first_ord_var_.pos_x_.empty();
     has_2nd_ord_ = !sec_ord_var_.pos_x_.empty();
     has_timestep_ = bool(timestep_var_);
+
+    if (!has_timestep_ && dt_ == 0.0) {
+        throw std::runtime_error(fmt::format("Euler dynamics {} has zero time step, cannot finalize", name_));
+    }
 
     dim_ = first_ord_var_.dim_ + sec_ord_var_.dim_ * 2;
 
@@ -23,6 +27,11 @@ void explicit_euler::impl::finalize_impl() {
     }
 
     generic_dynamics::finalize_impl();
+
+    if (!(dim_ == arg_dim(__x) && dim_ == arg_dim(__y))) {
+        throw std::runtime_error(fmt::format("Euler dynamics {} has dimension mismatch: expected {}, got x: {} y : {}",
+                                             name_, dim_, arg_dim(__x), arg_dim(__y)));
+    }
 }
 void explicit_euler::impl::value_impl(func_approx_data &data) const {
     if (has_1st_ord_) {
@@ -96,6 +105,7 @@ void explicit_euler::impl::compute_project_derivatives(func_approx_data &data) c
     scalar_t dt = has_timestep_ ? d[timestep_var_](0) : dt_;
     d.proj_f_x_off_diag_.setConstant(-dt);
     d.proj_f_u_.setConstant(-dt);
+    d.proj_f_res_ = d.v_;
     if (has_timestep_) {
         d.proj_f_dt_ = d.f_dt_;
     }
@@ -112,12 +122,9 @@ explicit_euler::impl::approx_data::approx_data(generic_dynamics::approx_data &&r
     size_t f_st = problem()->get_expr_start(func_);
     auto &dyn = static_cast<const explicit_euler::impl &>(func_);
     array_type<size_t, primal_fields> arg_st{};
-    const var &first_x = dyn.first_ord_var_.dim_ ? dyn.first_ord_var_.pos_x_[0] : dyn.sec_ord_var_.pos_x_[0];
-    const var &first_y = dyn.first_ord_var_.dim_ ? dyn.first_ord_var_.pos_y_[0] : dyn.sec_ord_var_.pos_y_[0];
-    const var &first_u = dyn.first_ord_var_.dim_ ? dyn.first_ord_var_.vel_u_[0] : dyn.sec_ord_var_.acc_u_[0];
-    arg_st[__x] = problem()->get_expr_start(first_x);
-    arg_st[__y] = problem()->get_expr_start(first_y);
-    arg_st[__u] = problem()->get_expr_start(first_u);
+    arg_st[__x] = problem()->get_expr_start(func_.in_args(__x)[0]);
+    arg_st[__y] = problem()->get_expr_start(func_.in_args(__y)[0]);
+    arg_st[__u] = problem()->get_expr_start(func_.in_args(__u)[0]);
     size_t dim = func_.dim();
     assert(dim == func_.arg_dim(__x) && dim == func_.arg_dim(__y) &&
            "function dimension must match the dimensions of x and y");

@@ -1,22 +1,37 @@
+#include <moto/ocp/impl/node_data.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
+
+#include <moto/ocp/dynamics.hpp>
 
 namespace moto {
 namespace solver {
 namespace ns_riccati {
-ns_node_data::ns_node_data(sym_data *s, merit_data *dense)
-    : solver::data_base(s, dense),
-      ns(dense->approx_[__eq_x].v_.size()),
-      nc(dense->approx_[__eq_xu].v_.size()), ncstr(ns + nc), d_u(nu, nx),
+void ns_node_data::update_projected_dynamics() {
+    full_data_->for_each(__dyn, [](const generic_dynamics &dyn, func_approx_data &data) {
+        dyn.compute_project_derivatives(data);
+    });
+}
+void ns_node_data::apply_jac_y_inverse_transpose(vector &v, vector &dst) {
+    full_data_->for_each(__dyn, [&v, &dst](const generic_dynamics &dyn, func_approx_data &data) {
+        dyn.apply_jac_y_inverse_transpose(data, v, dst);
+    });
+}
+
+ns_node_data::ns_node_data(node_data *full_data)
+    : solver::data_base(&full_data->sym_val(), &full_data->dense()),
+      full_data_(full_data),
+      ns(dense_->approx_[__eq_x].v_.size()),
+      nc(dense_->approx_[__eq_xu].v_.size()), ncstr(ns + nc), d_u(nu, nx),
       d_y(nx, nx), d_lbd_f(nx), d_lbd_s_c_pre_solve(nu), d_lbd_s_c(ncstr),
       nsp_(new nullspace_data()),
-      F_x(dense->proj_f_x()),
-      F_u(dense->proj_f_u()),
-      s_y(dense->approx_[__eq_x].jac_[__y]),
-      s_x(dense->approx_[__eq_x].jac_[__x]),
-      c_x(dense->approx_[__eq_xu].jac_[__x]),
-      c_u(dense->approx_[__eq_xu].jac_[__u]),
-      F_0(dense->proj_f_res()) {
+      F_x(dense_->proj_f_x()),
+      F_u(dense_->proj_f_u()),
+      s_y(dense_->approx_[__eq_x].jac_[__y]),
+      s_x(dense_->approx_[__eq_x].jac_[__x]),
+      c_x(dense_->approx_[__eq_xu].jac_[__x]),
+      c_u(dense_->approx_[__eq_xu].jac_[__u]),
+      F_0(dense_->proj_f_res()) {
     if (nu < ncstr) {
         nz = 0;
         // throw std::runtime_error("system over-constrained, i.e., nu < ncstr");
@@ -38,6 +53,7 @@ ns_node_data::ns_node_data(sym_data *s, merit_data *dense)
     nsp_->s_c_stacked.resize(ncstr, nu);
     nsp_->s_c_stacked_0_k.resize(ncstr);
     nsp_->s_c_stacked_0_K.resize(ncstr, nx);
+    d_y.K.setZero();
 }
 ns_node_data::~ns_node_data() {
     if (nsp_)

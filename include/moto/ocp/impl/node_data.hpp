@@ -3,6 +3,7 @@
 
 #include <moto/ocp/impl/func.hpp>
 #include <moto/ocp/problem.hpp>
+#include <moto/utils/func_traits.hpp>
 
 namespace moto {
 struct node_data;
@@ -71,21 +72,28 @@ struct node_data {
      */
     void update_approximation(update_mode config = update_mode::eval_all);
 
-    template <std::array fields, typename Callback>
-        requires std::is_invocable_r_v<void, Callback, const generic_func &, func_approx_data &> &&
-                 std::is_same_v<std::tuple_element_t<0, decltype(fields)>, field_t>
-    void for_each(Callback &&callback) {
-        for (const auto &field : fields) {
-            size_t idx = 0;
-            auto &s = this->sparse_[field];
-            for (const generic_func &f : prob_->exprs(field)) {
-                callback(f, *s[idx]);
-                idx++;
-            }
+    template <typename Callback>
+    void for_each(field_t field, Callback &&callback) {
+        using func_info = utils::func_traits<Callback>;
+        static_assert(func_info::arg_num == 2 && "wrong number of arguments for callback");
+        using func_type = std::decay_t<typename func_info::arg_type<0>>;
+        using approx_type = std::decay_t<typename func_info::arg_type<1>>;
+        static_assert(std::is_base_of_v<generic_func, func_type> && std::is_base_of_v<func_approx_data, approx_type>,
+                      "Callback must accept a (derived) generic_func and (derived) func_approx_data");
+        size_t idx = 0;
+        auto &s = this->sparse_[field];
+        for (const func_type &f : prob_->exprs(field)) {
+            callback(f, s[idx]->as<approx_type>());
+            idx++;
         }
     }
 
-    void update_projected_dynamics();
+    template <std::array fields, typename Callback>
+    void for_each(Callback &&callback) {
+        for (const field_t &field : fields) {
+            for_each(field, std::forward<Callback>(callback));
+        }
+    }
 
     template <typename Callback>
     void for_each_constr(Callback &&f) {

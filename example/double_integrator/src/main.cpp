@@ -7,8 +7,78 @@
 
 using namespace moto;
 
+// void consistency_check() {
+//     struct test_data {
+//         doubleIntegratorDyn dyn;
+//         sym_data_ptr_t s_data;
+//         merit_data_ptr_t m_data;
+//         shared_data_ptr_t s_shared;
+//         ocp_ptr_t prob;
+//         func_approx_data_ptr_t data;
+//         matrix D, innerproduct;
+//         test_data(bool dense) : dyn(dense), D(6, 6), innerproduct(6, 6) {
+//             innerproduct.setZero();
+//             prob = ocp::create();
+//             prob->add(dyn);
+//             s_data.reset(new sym_data(prob.get()));
+//             m_data.reset(new merit_data(prob.get()));
+//             s_shared.reset(new shared_data(prob.get(), s_data.get()));
+//             data = dyn.dyn->create_approx_data(*s_data, *m_data, *s_shared);
+//             m_data->dual_[__dyn].setConstant(33);
+//         }
+//         void set_random() {
+//             s_data->get(dyn.r).setRandom();
+//             s_data->get(dyn.v).setRandom();
+//             s_data->get(dyn.a).setRandom();
+//             s_data->get(dyn.r_next).setRandom();
+//             s_data->get(dyn.v_next).setRandom();
+//             // m_data->dual_[__dyn].setRandom();
+//             D.setRandom();
+//             D = D * D.transpose(); // make it positive definite
+//         }
+//         void copy(const test_data &other) {
+//             s_data->get(dyn.r) = other.s_data->get(other.dyn.r);
+//             s_data->get(dyn.v) = other.s_data->get(other.dyn.v);
+//             s_data->get(dyn.a) = other.s_data->get(other.dyn.a);
+//             s_data->get(dyn.r_next) = other.s_data->get(other.dyn.r_next);
+//             s_data->get(dyn.v_next) = other.s_data->get(other.dyn.v_next);
+//             D = other.D;
+//         }
+//         void run() {
+//             dyn.dyn->compute_approx(*data, true, true);
+//             dyn.dyn.as<generic_dynamics>().compute_project_derivatives(*data);
+//             dyn.dyn.as<generic_dynamics>().apply_jac_y_inverse_transpose(*data, data->v_, m_data->dual_[__dyn]);
+//             // innerproduct.setZero();
+//             for (auto f : primal_fields) {
+//                 m_data->approx_[__dyn].jac_[f].right_T_times(m_data->dual_[__dyn], m_data->jac_[f]);
+//             }
+//             m_data->proj_f_u().inner_product(D, innerproduct);
+//         }
+//     } dense(true), sparse(false);
+//     size_t n = 10000;
+//     while (n--) {
+//         dense.set_random();
+//         sparse.copy(dense);
+//         dense.run();
+//         sparse.run();
+
+//         assert(dense.m_data->approx_[__dyn].v_.isApprox(sparse.m_data->approx_[__dyn].v_));
+//         for (auto f : primal_fields) {
+//             assert(dense.m_data->approx_[__dyn].jac_[f].dense().isApprox(sparse.m_data->approx_[__dyn].jac_[f].dense()));
+//             assert(dense.m_data->jac_[f].isApprox(sparse.m_data->jac_[f]));
+//         }
+//         assert(dense.m_data->proj_f_x().dense().isApprox(sparse.m_data->proj_f_x().dense()));
+//         assert(dense.m_data->proj_f_u().dense().isApprox(sparse.m_data->proj_f_u().dense()));
+//         assert(dense.m_data->proj_f_res().isApprox(sparse.m_data->proj_f_res()));
+//         assert(dense.m_data->dual_[__dyn].isApprox(sparse.m_data->dual_[__dyn]));
+//         assert(dense.innerproduct.isApprox(sparse.innerproduct));
+//     }
+// }
+
 int main() {
-    doubleIntegratorDyn dyn;
+    // consistency_check();
+    // return 0;
+    doubleIntegratorDyn dyn(false);
     doubleIntegratorCosts costs;
     auto prob = ocp::create();
     prob->add(dyn);
@@ -39,14 +109,9 @@ int main() {
         cur->value(dyn.r_next) = next->value(dyn.r);
     });
 
-    size_t n_iter = 1;
+    size_t n_iter = 100;
 
-    auto start_time = std::chrono::high_resolution_clock::now();
     sqp.update(n_iter);
-    auto end_time = std::chrono::high_resolution_clock::now();
-
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
-    fmt::print("Update took {} us\n", duration / n_iter);
     // per step timing
     // for (size_t i = 0; i < sqp.timings.size(); i++) {
     //     fmt::print("Timing[{}]: {}us\n", i, sqp.timings[i] / n_iter);

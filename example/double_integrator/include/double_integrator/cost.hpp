@@ -14,15 +14,15 @@ struct doubleIntegratorCosts {
     vector d_v = vector::Constant(3, 0.1); ///< derivatives of the cost wrt r and v
     cost state_cost(var &r, var &v) {
         auto c = cost("dI_state_cost");
-        c->value = [=](func_approx_data &data) {
+        c->value = [=, this](func_approx_data &data) {
             data.v_.noalias() += 0.5 * d_r.transpose() * data[r].cwiseAbs2();
             data.v_.noalias() += 0.5 * d_v.transpose() * data[v].cwiseAbs2();
         };
-        c->jacobian = [=](func_approx_data &data) { // make sure use +=
+        c->jacobian = [=, this](func_approx_data &data) { // make sure use +=
             data.jac_[0].noalias() += data[0].transpose() * d_r.asDiagonal();
             data.jac_[1].noalias() += data[1].transpose() * d_v.asDiagonal();
         };
-        c->hessian = [=](func_approx_data &data) {
+        c->hessian = [=, this](func_approx_data &data) {
             data.merit_hess_[0][0].diagonal() += d_r;
             data.merit_hess_[1][1].diagonal() += d_v;
         };
@@ -33,13 +33,13 @@ struct doubleIntegratorCosts {
     vector d_a = vector::Constant(3, 1e-3);
     cost input_cost(var &a) {
         auto c = cost("dI_input_cost");
-        c->value = [=](func_approx_data &data) {
+        c->value = [=, this](func_approx_data &data) {
             data.v_.noalias() += 0.5 * d_a.transpose() * data[a].cwiseAbs2();
         };
-        c->jacobian = [=](func_approx_data &data) {
+        c->jacobian = [=, this](func_approx_data &data) {
             data.jac_[0].noalias() += data[0].transpose() * d_a.asDiagonal();
         };
-        c->hessian = [=](func_approx_data &data) {
+        c->hessian = [=, this](func_approx_data &data) {
             data.merit_hess_[0][0].diagonal() += d_a;
         };
         c->add_arguments({a});
