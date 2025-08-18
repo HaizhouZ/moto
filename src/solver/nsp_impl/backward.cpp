@@ -103,7 +103,7 @@ void riccati_recursion_correction(ns_node_data *cur, ns_node_data *prev) {
     // compute Q_x correcton
     // d.Q_x.noalias() = -d.Q_y * nsp.F_0_K + nsp.z_u_k.transpose() * d.d_u.K;
     // d.Q_x.noalias() = -d.Q_y * d.F_x.dense() + nsp.z_u_k.transpose() * d.d_u.K;
-    // d.Q_x.noalias() = nsp.z_u_k.transpose() * d.d_u.K;
+    d.Q_x.noalias() = nsp.z_u_k.transpose() * d.d_u.K;
     d.F_x.right_times<false>(d.Q_y, d.Q_x);
     if (prev != nullptr) [[likely]] {
         auto &d_pre = *prev;

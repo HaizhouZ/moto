@@ -1,8 +1,8 @@
 #ifndef DYNAMICS_HPP
 #define DYNAMICS_HPP
 
-#include <moto/core/expr.hpp>
 #include <moto/ocp/cost.hpp>
+#include <moto/ocp/dynamics/dense_dynamics.hpp>
 #include <moto/solver/ipm/ipm_constr.hpp>
 
 namespace biped_srbd {
@@ -39,10 +39,12 @@ struct srbd_dynamics {
     }
 
     expr_list euler() {
-        return {constr("euler_pos", {r_n, r, v_n}, r_n - (r + v_n * dt), approx_order::first, __dyn),
-                constr("euler_pos_l", {r_l_n, r_l, v_l}, r_l_n - (r_l + v_l * dt), approx_order::first, __dyn),
-                constr("euler_pos_r", {r_r_n, r_r, v_r}, r_r_n - (r_r + v_r * dt), approx_order::first, __dyn),
-                constr("euler_vel", {v_n, v, f_l, f_r}, m * (v_n - v) - (f_l + f_r + cs::SX({0, 0, -9.81})) * dt, approx_order::first, __dyn)};
+        auto args = var_inarg_list{r, r_n, v, v_n, r_l, r_l_n, r_r, r_r_n, v_l, v_r, f_l, f_r};
+        auto out = cs::SX::vertcat({r_n - (r + v_n * dt),
+                                    r_l_n - (r_l + v_l * dt),
+                                    r_r_n - (r_r + v_r * dt),
+                                    m * (v_n - v) - (f_l + f_r + cs::SX({0, 0, -9.81})) * dt});
+        return {dense_dynamics("srbd_euler", args, out, approx_order::first)};
     }
     expr_list friction_cone(scalar_t mu = 0.5) {
         auto make_fric_cone = [mu](const sym &f) {
