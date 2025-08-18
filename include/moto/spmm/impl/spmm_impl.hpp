@@ -59,9 +59,18 @@ struct sp_expr : public expr_type, public panel_mat<is_diag_type<expr_type>::val
         } else
             assert(dst.rows() >= row_ed_ && dst.cols() >= col_ed_ && "output matrix size mismatch");
         if constexpr (is_diag_type<expr_type>::value) {
-            throw std::runtime_error("Not implemented");
             auto out_block = dst.block(out_row_st, out_col_st, this->rows_, this->cols_);
-            out_block.diagonal() += static_cast<const expr_type &>(*this).diagonal();
+            if constexpr (config.overwrite) {
+                if constexpr (config.add_to)
+                    out_block.diagonal() = static_cast<const expr_type &>(*this).diagonal();
+                else
+                    out_block.diagonal() = -static_cast<const expr_type &>(*this).diagonal();
+            } else {
+                if constexpr (config.add_to)
+                    out_block.diagonal() += static_cast<const expr_type &>(*this).diagonal();
+                else
+                    out_block.diagonal() -= static_cast<const expr_type &>(*this).diagonal();
+            }
             if constexpr (config.sym_res && !config.same_sides) {
                 auto sym_block = dst.block(out_col_st, out_row_st, this->cols_, this->rows_);
                 sym_block.diagonal() = out_block.diagonal();
@@ -168,10 +177,17 @@ struct sp_expr<non_op> : public panel_mat<sparsity::eye> {
     void eval_then_add_to(mat_type &dst, cache_type &cache) const {
         assert(dst.rows() >= row_ed_ && dst.cols() >= col_ed_ && "output matrix size mismatch");
         auto out_block = dst.block(row_st_, col_st_, this->rows_, this->cols_);
-        if constexpr (config.overwrite)
-            out_block.diagonal().setConstant(1.0);
-        else
-            out_block.diagonal().array() += 1.0; // add ones to the diagonal
+        if constexpr (config.overwrite) {
+            if constexpr (config.add_to)
+                out_block.diagonal().setConstant(1.0);
+            else
+                out_block.diagonal().setConstant(-1.0);
+        } else {
+            if constexpr (config.add_to)
+                out_block.diagonal().array() += 1.0;
+            else
+                out_block.diagonal().array() -= 1.0;
+        }
     }
 };
 

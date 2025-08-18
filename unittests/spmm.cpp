@@ -15,13 +15,20 @@
 
 namespace moto {
 
-auto generate_random_sparse_mat() {
+auto generate_random_sparse_mat(size_t rows_ = 999, size_t cols_ = 999) -> sparse_mat {
     std::mt19937 rng0(std::random_device{}());
     std::uniform_int_distribution<size_t> rows_dist(10, 80);
     std::uniform_int_distribution<size_t> cols_dist(10, 80);
     std::uniform_int_distribution<size_t> panels_dist(1, 6);
     size_t rows = rows_dist(rng0), cols = cols_dist(rng0), num_panels = panels_dist(rng0);
+    if (rows_ != 999) {
+        rows = rows_;
+    }
+    if (cols_ != 999) {
+        cols = cols_;
+    }
     sparse_mat sm;
+    sm.resize(rows, cols);
     std::mt19937 rng(std::random_device{}());
     std::discrete_distribution<int> sp_dist({1, 10, 10});
     std::uniform_int_distribution<int> sz_dist(1, std::min(rows, cols) / 2 + 1);
@@ -104,21 +111,34 @@ other_t make_other(std::string_view name, sparse_mat &sm) {
     constexpr size_t row_ = row_fixed ? out_type::RowsAtCompileTime : 0;
     constexpr bool col_fixed = out_type::ColsAtCompileTime != Eigen::Dynamic;
     constexpr size_t col_ = col_fixed ? out_type::ColsAtCompileTime : 0;
-
     std::mt19937 rng(std::random_device{}());
-    std::uniform_int_distribution<size_t> dist(1, 30);
+    std::uniform_int_distribution<size_t> dist(10, 80);
     size_t outer_dim = dist(rng);
     size_t inner_dim = _inner_dim(name, sm);
-    if (name == "times") {
-        return other_t::Random(inner_dim, col_fixed ? col_ : outer_dim);
-    } else if (name == "T_times") {
-        return other_t::Random(inner_dim, col_fixed ? col_ : outer_dim);
-    } else if (name == "right_times") {
-        return other_t::Random(row_fixed ? row_ : outer_dim, inner_dim);
-    } else if (name == "right_T_times") {
-        return other_t::Random(inner_dim, row_fixed ? row_ : outer_dim);
+    if constexpr (std::is_same_v<other_t, sparse_mat>) {
+        if (name == "times") {
+            return generate_random_sparse_mat(inner_dim, col_fixed ? col_ : outer_dim);
+        } else if (name == "T_times") {
+            return generate_random_sparse_mat(inner_dim, col_fixed ? col_ : outer_dim);
+        } else if (name == "right_times") {
+            return generate_random_sparse_mat(row_fixed ? row_ : outer_dim, inner_dim);
+        } else if (name == "right_T_times") {
+            return generate_random_sparse_mat(inner_dim, row_fixed ? row_ : outer_dim);
+        } else {
+            throw std::runtime_error("Unknown operation: " + std::string(name));
+        }
     } else {
-        throw std::runtime_error("Unknown operation: " + std::string(name));
+        if (name == "times") {
+            return other_t::Random(inner_dim, col_fixed ? col_ : outer_dim);
+        } else if (name == "T_times") {
+            return other_t::Random(inner_dim, col_fixed ? col_ : outer_dim);
+        } else if (name == "right_times") {
+            return other_t::Random(row_fixed ? row_ : outer_dim, inner_dim);
+        } else if (name == "right_T_times") {
+            return other_t::Random(inner_dim, row_fixed ? row_ : outer_dim);
+        } else {
+            throw std::runtime_error("Unknown operation: " + std::string(name));
+        }
     }
 }
 
@@ -128,27 +148,33 @@ template <spmm::binary_op_type op, bool add, typename D_type, typename out_type,
 void test_binary(std::string_view name,
                  void (sparse_mat::*func)(const D_type &, out_type &),
                  callback &&ground_truth) {
-    if constexpr (!spmm::is_consistent<D_type, out_type>::value(op))
-        return;
 
     scalar_t max_err = 0;
     scalar_t sum_err = 0;
     size_t ntrials = 100;
+    if constexpr (!spmm::is_consistent<D_type, out_type>::value(op))
+        return;
     for (int test_idx = 0; test_idx < ntrials; ++test_idx) {
         auto sm = generate_random_sparse_mat();
-        size_t inner_dim = _inner_dim(name, sm);
         auto dense = sm.dense();
         auto V = make_other<D_type, out_type>(name, sm);
+        if (name == "times") {
+            assert(V.rows() == sm.cols() && "V must have rows equal to sm.cols() for times operation");
+        }
         auto [out_rows, out_cols] = out_dim(name, sm, V);
         out_type B = out_type::Zero(out_rows, out_cols);
         out_type B_dense = out_type::Zero(out_rows, out_cols);
         (sm.*func)(V, B);
-        B_dense.noalias() = ground_truth(V, dense, std::bool_constant<add>{});
+        if constexpr (std::is_same_v<D_type, sparse_mat>) {
+            B_dense.noalias() = ground_truth(V.dense(), dense, std::bool_constant<add>{});
+        } else {
+            B_dense.noalias() = ground_truth(V, dense, std::bool_constant<add>{});
+        }
         max_err = std::max(max_err, (B - B_dense).cwiseAbs().maxCoeff());
         sum_err = std::max(sum_err, (B - B_dense).cwiseAbs().sum());
     }
-    REQUIRE(max_err <= 1e-12);
-    REQUIRE(sum_err <= 1e-12);
+    assert(max_err <= 1e-12);
+    assert(sum_err <= 1e-12);
     std::cout << "Random sparse_mat [" << name << ", " << add << "] accuracy check:\n";
     std::cout << "Max abs diff: " << max_err << std::endl;
     std::cout << "Sum abs diff: " << sum_err << std::endl;
@@ -242,6 +268,7 @@ void test_binary(std::string_view name,
 
 #define TEST_BINARY(func, ground_truth)                           \
     TEST_BINARY_IMPL(func, matrix, matrix, ground_truth);         \
+    TEST_BINARY_IMPL(func, sparse_mat, matrix, ground_truth);     \
     TEST_BINARY_IMPL(func, matrix, vector, ground_truth);         \
     TEST_BINARY_IMPL(func, row_vector, row_vector, ground_truth); \
     TEST_BINARY_IMPL(func, row_vector, vector, ground_truth);     \
