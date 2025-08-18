@@ -53,7 +53,9 @@ void ocp::maintain_order(expr &ex) {
             for (const generic_func &dyn : dyns) {
                 for (const expr &arg : dyn.in_args(f)) {
                     auto it = std::find(exprs.begin(), exprs.end(), arg);
-                    assert(it != exprs.end() && "argument not found in expr_");
+                    if (it == exprs.end())
+                        throw std::runtime_error(fmt::format("order maintenance failure: Dynamics {} arg {} uid {} not found in field {}",
+                                                             dyn.name(), arg.name(), arg.uid(), f));
                     tmp.emplace_back(std::move(*it));
                 }
             }

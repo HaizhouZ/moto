@@ -30,16 +30,17 @@ void ns_factorization(ns_node_data *cur) {
     // nullspace computation
     d.rank_status_ = rank_status::unconstrained;
 
-    d.nis = 0;
-    d.nic = 0;
-    size_t constr_s = d.ns + d.nis;
-    size_t constr_c = d.nc + d.nic;
-    d.ncstr = constr_s + constr_c;
-    nsp.s_c_stacked.conservativeResize(d.ncstr, Eigen::NoChange);
-    nsp.s_c_stacked.setZero();
-    d.d_lbd_s_c.conservativeResize(d.ncstr);
-
+    
     if (d.ncstr) {
+        d.nis = 0;
+        d.nic = 0;
+        size_t constr_s = d.ns + d.nis;
+        size_t constr_c = d.nc + d.nic;
+        d.ncstr = constr_s + constr_c;
+        nsp.s_c_stacked.conservativeResize(d.ncstr, Eigen::NoChange);
+        nsp.s_c_stacked.setZero();
+        d.d_lbd_s_c.conservativeResize(d.ncstr);
+
         if (constr_s) {
             nsp.s_u.setZero();
             d.s_y.times<false>(d.F_u, nsp.s_u);
@@ -59,8 +60,7 @@ void ns_factorization(ns_node_data *cur) {
         if (rank == 0)
             d.rank_status_ = rank_status::unconstrained;
         else {
-            if (rank == d.ncstr) {
-                fmt::print("constrained node detected, rank: {}\n", rank);
+            if (rank == d.nu) {
                 d.rank_status_ = rank_status::fully_constrained;
             } else {
                 nsp.Z = nsp.lu_eq_.kernel();
@@ -72,19 +72,20 @@ void ns_factorization(ns_node_data *cur) {
             }
         }
         // precompute
-        nsp.s_0_p_k.conservativeResize(constr_s);
-        nsp.s_0_p_K.conservativeResize(constr_s, Eigen::NoChange);
         nsp.s_c_stacked_0_k.conservativeResize(d.ncstr);
         nsp.s_c_stacked_0_K.conservativeResize(d.ncstr, Eigen::NoChange);
         nsp.s_c_stacked_0_K.setZero();
         if (constr_s) {
             // nsp.s_0_p_k.noalias() =
             //     _approx[__eq_x].v_ - nsp.s_y * nsp.F_0_k;
+            nsp.s_0_p_k.conservativeResize(constr_s);
             nsp.s_0_p_k.noalias() = _approx[__eq_x].v_;
             d.s_y.times<false>(d.F_0, nsp.s_0_p_k);
             // nsp.s_0_p_K.noalias() =
             //     _approx[__eq_x].jac_[__x] - nsp.s_y * nsp.F_0_K;
-            d.s_x.dump_into(nsp.s_0_p_K, spmm::dump_config{.overwrite = true});
+            nsp.s_0_p_K.conservativeResize(constr_s, Eigen::NoChange);
+            nsp.s_0_p_K.setZero();
+            d.s_x.dump_into(nsp.s_0_p_K);
             d.s_y.times<false>(d.F_x, nsp.s_0_p_K);
 
             nsp.s_c_stacked_0_k.head(constr_s) = nsp.s_0_p_k;
@@ -93,7 +94,7 @@ void ns_factorization(ns_node_data *cur) {
         if (constr_c) {
             nsp.s_c_stacked_0_k.tail(d.nc) = _approx[__eq_xu].v_;
             // nsp.s_c_stacked_0_K.bottomRows(d.nc) = _approx[__eq_xu].jac_[__x];
-            d.c_x.dump_into(nsp.s_c_stacked_0_K.bottomRows(d.nc), spmm::dump_config{.overwrite = true});
+            d.c_x.dump_into(nsp.s_c_stacked_0_K.bottomRows(d.nc));
         }
         if (d.rank_status_ != rank_status::unconstrained) {
             // pre compute

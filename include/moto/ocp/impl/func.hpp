@@ -34,7 +34,6 @@ class generic_func : public expr {
     array_type<var_list, primal_fields> arg_by_field_{};
     array_type<size_t, primal_fields> arg_dim_{};
     array_type<size_t, primal_fields> arg_num_{};
-    std::vector<size_t> arg_d_pos_;
     array_type<std::set<size_t>, primal_fields> arg_uid_; ///< argument index for x, u, y
 
     std::unordered_map<size_t, size_t> sym_uid_idx_;
@@ -99,11 +98,6 @@ class generic_func : public expr {
         return arg_uid_[s.field()].contains(s.uid());
     } ///< check if the function has argument for a given field
 
-    size_t arg_st(const sym &s) const {
-        assert(has_arg(s) && "argument not found");
-        return arg_d_pos_[sym_uid_idx_.at(s.uid())];
-    } ///< get the start index of the argument for a given field
-
     template <typename T>
         requires std::is_same_v<var, std::remove_cvref_t<T>> ||
                  std::is_same_v<shared_expr, std::remove_cvref_t<T>> ||
@@ -113,10 +107,10 @@ class generic_func : public expr {
         add_dep(s);
         auto f = s->field();
         if (in_field(f, primal_fields)) {
-            arg_d_pos_.emplace_back(arg_dim_[f]);
             arg_dim_[f] += s->dim();
             arg_num_[f]++;
             arg_by_field_[f].emplace_back(s);
+            arg_uid_[f].insert(s->uid());
         }
         sym_uid_idx_[s->uid()] = sym_uid_idx_.size();
     }

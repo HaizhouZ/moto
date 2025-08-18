@@ -31,21 +31,21 @@ void generic_func::value_impl(func_approx_data &data) const {
     try {
         value(data);
     } catch (const std::bad_function_call &ex) {
-        fmt::println("Function {} has no value implementation, please implement it or load from shared library", name());
+        throw std::runtime_error(fmt::format("Function {} has no value implementation, please implement it or load from shared library", name()));
     }
 }
 void generic_func::jacobian_impl(func_approx_data &data) const {
     try {
         jacobian(data);
     } catch (const std::bad_function_call &ex) {
-        fmt::println("Function {} has no jacobian implementation, please implement it or load from shared library", name());
+        throw std::runtime_error(fmt::format("Function {} has no jacobian implementation, please implement it or load from shared library", name()));
     }
 }
 void generic_func::hessian_impl(func_approx_data &data) const {
     try {
         hessian(data);
     } catch (const std::bad_function_call &ex) {
-        fmt::println("Function {} has no hessian implementation, please implement it or load from shared library", name());
+        throw std::runtime_error(fmt::format("Function {} has no hessian implementation, please implement it or load from shared library", name()));
     }
 }
 
@@ -70,8 +70,43 @@ void generic_func::substitute(const sym &arg, const sym &rhs) {
     nh.key() = rhs.uid();
     auto it = sym_uid_idx_.insert(std::move(nh)); // update the uid index
     assert(it.inserted && "substitute failed");
-    in_args_.at(it.position->second) = rhs; // update the in_args_ to point to the new sym
-    dep_.at(it.position->second) = rhs;     // update the dep_ to point to the new sym
+    size_t in_arg_pos = it.position->second;
+    in_args_.at(in_arg_pos) = rhs;           // update the in_args_ to point to the new sym
+    dep_.at(in_arg_pos) = rhs;               // update the dep_ to point to the new sym
+    arg_dim_[arg.field()] -= arg.dim();      // update the dimension of the field
+    arg_dim_[rhs.field()] += rhs.dim();      // update the dimension of the field
+    arg_num_[arg.field()] -= 1;              // update the number of arguments in the field
+    arg_num_[rhs.field()] += 1;              // update the number of arguments in the field
+    arg_uid_[arg.field()].erase(arg.uid());  // remove the uid from the set
+    arg_uid_[rhs.field()].insert(rhs.uid()); // add the uid to the set
+    std::remove(arg_by_field_[arg.field()].begin(),
+                arg_by_field_[arg.field()].end(), arg);
+
+    // find in in_args_ after in_arg_pos the first arg with the same field as rhs
+    auto first_after = std::find_if(in_args_.begin() + in_arg_pos + 1, in_args_.end(),
+                                    [&rhs](const sym &s) { return s.field() == rhs.field(); });
+    if (first_after == in_args_.end()) {
+        arg_by_field_[rhs.field()].emplace_back(rhs); // add rhs to the arg
+    } else {
+        auto insert_it = std::find(arg_by_field_[rhs.field()].begin(),
+                                   arg_by_field_[rhs.field()].end(), *first_after);
+        arg_by_field_[rhs.field()].insert(insert_it, rhs); // insert rhs before the first arg with the same field
+    }
+
+    std::vector<std::reference_wrapper<const var>> inargs_same_field;
+    for (const var &s : in_args_) {
+        if (s->field() == rhs.field()) {
+            inargs_same_field.emplace_back(s);
+        }
+    }
+    if (inargs_same_field.size() != arg_by_field_[rhs.field()].size())
+        throw std::runtime_error(fmt::format("func {} substitute failed: in_args_ and arg_by_field_ size mismatch after substitution",
+                                             name_));
+    if (!std::equal(
+            inargs_same_field.begin(), inargs_same_field.end(),
+            arg_by_field_[rhs.field()].begin(), arg_by_field_[rhs.field()].end()))
+        throw std::runtime_error(fmt::format("func {} substitute failed: in_args_ and arg_by_field_ content mismatch after substitution",
+                                             name_));
 }
 void generic_func::set_from_casadi(const var_inarg_list &in_args, const cs::SX &out) {
     add_arguments(in_args);

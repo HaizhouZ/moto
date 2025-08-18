@@ -39,25 +39,49 @@ matrix_ref sparse_mat::insert(size_t r_st, size_t c_st, size_t r, size_t c, spar
     }
 }
 void sparse_mat::dump_into(matrix_ref out, dump_config cfg) const {
-    if (cfg.add) {
-        for (const auto &panel : dense_panels_) {
-            out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_) += panel.data_;
-        }
-        for (const auto &panel : diag_panels_) {
-            out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_).diagonal().array() += panel.data_.array();
-        }
-        for (const auto &panel : eye_panels_) {
-            out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_).diagonal().array() += 1.0;
+    if (cfg.overwrite) {
+        if (cfg.add) {
+            for (const auto &panel : dense_panels_) {
+                out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_) = panel.data_;
+            }
+            for (const auto &panel : diag_panels_) {
+                out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_).diagonal().array() = panel.data_.array();
+            }
+            for (const auto &panel : eye_panels_) {
+                out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_).diagonal().array() = 1.0;
+            }
+        } else {
+            for (const auto &panel : dense_panels_) {
+                out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_) = -panel.data_;
+            }
+            for (const auto &panel : diag_panels_) {
+                out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_).diagonal().array() = -panel.data_.array();
+            }
+            for (const auto &panel : eye_panels_) {
+                out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_).diagonal().array() = -1.0;
+            }
         }
     } else {
-        for (const auto &panel : dense_panels_) {
-            out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_) -= panel.data_;
-        }
-        for (const auto &panel : diag_panels_) {
-            out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_).diagonal().array() -= panel.data_.array();
-        }
-        for (const auto &panel : eye_panels_) {
-            out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_).diagonal().array() -= 1.0;
+        if (cfg.add) {
+            for (const auto &panel : dense_panels_) {
+                out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_) += panel.data_;
+            }
+            for (const auto &panel : diag_panels_) {
+                out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_).diagonal().array() += panel.data_.array();
+            }
+            for (const auto &panel : eye_panels_) {
+                out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_).diagonal().array() += 1.0;
+            }
+        } else {
+            for (const auto &panel : dense_panels_) {
+                out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_) -= panel.data_;
+            }
+            for (const auto &panel : diag_panels_) {
+                out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_).diagonal().array() -= panel.data_.array();
+            }
+            for (const auto &panel : eye_panels_) {
+                out.block(panel.row_st_, panel.col_st_, panel.rows_, panel.cols_).diagonal().array() -= 1.0;
+            }
         }
     }
 }

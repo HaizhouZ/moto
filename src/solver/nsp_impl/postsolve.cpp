@@ -25,7 +25,7 @@ void compute_primal_sensitivity(ns_node_data *cur) {
     d.d_y.k = -d.F_0;
     d.F_u.times<false>(d.d_u.k, d.d_y.k);
     d.d_y.K.setZero();
-    d.F_x.dump_into(d.d_y.K, spmm::dump_config{.add = false, .overwrite = true});
+    d.F_x.dump_into(d.d_y.K, spmm::dump_config{.add = false});
     d.F_u.times<false>(d.d_u.K, d.d_y.K);
 }
 void compute_primal_sensitivity_correction(ns_node_data *cur) {
