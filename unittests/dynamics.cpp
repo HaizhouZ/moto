@@ -8,27 +8,38 @@
 #define ENABLE_TIMED_BLOCK
 #include <moto/utils/timed_block.hpp>
 #include <thread>
+
+#include <Eigen/LU>
+
 TEST_CASE("dynamics") {
     using namespace moto;
     euler dyn("test_dynamics");
-    // dyn.create_2nd_ord_vars("robot", 3);
-    // dyn.create_1st_ord_vars("foot", 6);
-    // dyn.create_1st_ord_vars("hand", 6);
-    // dyn.create_2nd_ord_vars("obj", 3);
-    dyn.create_2nd_ord_vars("robot", 18);
+    // dyn.create_2nd_ord_lin("robot", 3);
+    // dyn.create_1st_ord_lin("foot", 6);
+    // dyn.create_1st_ord_lin("hand", 6);
+    // dyn.create_2nd_ord_lin("obj", 3);
+    dyn.create_2nd_ord_lin("r", 15, false);
+    // dyn.create_2nd_ord_lin("rob", 9, false);
+    dyn.create_2nd_ord_ang("ang1", true);
+    // dyn.create_2nd_ord_ang("ang2", true);
+    // dyn.create_2nd_ord_ang("ang3", false);
     // dyn.add_dt(0.1);
     var dt = sym::inputs("dt", 1);
     dyn.add_dt(dt);
 
     euler dyn2("test_dynamics2");
-    dyn2.create_2nd_ord_vars("robot2", 18); // todo: for dynamics, check if symbols conflict
+    dyn2.create_2nd_ord_lin("robot2", 3); // todo: for dynamics, check if symbols conflict
     dyn2.add_dt(dt);
 
     auto prob = ocp::create();
     prob->add(dyn);
     prob->add(dyn2);
-    bool show = false;
-    size_t N_trials = 100;
+    generic_func& f = dyn;
+    for(sym& arg : f.in_args()) {
+        fmt::print("arg: {} dim: {} field: {}\n", arg.name(), arg.dim(), arg.field());
+    }
+    bool show = true;
+    size_t N_trials = 1;
     while (N_trials--) {
         auto s_data = sym_data(prob.get());
         auto m_data = merit_data(prob.get());
@@ -47,9 +58,15 @@ TEST_CASE("dynamics") {
         dyn->compute_approx(d, true, true, false);
         dyn2->compute_approx(d2, true, true, false);
 
+        dyn->compute_project_derivatives(d);
+        dyn2->compute_project_derivatives(d2);
+
         array_type<matrix, primal_fields> jac;
         auto merit_jac = m_data.jac_;
 
+        auto &f_y = m_data.approx_[__dyn].jac_[__y];
+        auto &f_x = m_data.approx_[__dyn].jac_[__x];
+        auto &f_u = m_data.approx_[__dyn].jac_[__u];
         // size_t n_trials = 1;
         if (show) {
             show = false;
@@ -59,7 +76,15 @@ TEST_CASE("dynamics") {
                 auto &jac_sp = m_data.approx_[__dyn].jac_[f];
                 fmt::print("{}:\n{}\n", f, jac[f] = jac_sp.dense());
             }
+            fmt::print("proj_f_x (sparse):\n{}\n", m_data.proj_f_x().dense());
+            fmt::print("f_y.dense().lu().solve(f_x.dense()) (dense):\n{}\n", f_y.dense().lu().solve(f_x.dense()));
+            fmt::print("proj_f_u (sparse):\n{}\n", m_data.proj_f_u().dense());
+            fmt::print("f_y.dense().lu().solve(f_u.dense()) (dense):\n{}\n", f_y.dense().lu().solve(f_u.dense()));
         }
+
+        REQUIRE(m_data.proj_f_x().dense().isApprox(f_y.dense().lu().solve(f_x.dense()))); // Projection of f_x does not match expected value
+        REQUIRE(m_data.proj_f_u().dense().isApprox(f_y.dense().lu().solve(f_u.dense()))); // Projection of f_u does not match expected value
+
         for (auto f : primal_fields) {
             auto &jac_sp = m_data.approx_[__dyn].jac_[f];
             jac[f] = jac_sp.dense();
@@ -166,18 +191,19 @@ TEST_CASE("dense_dyn") {
 TEST_CASE("inner_product") {
     using namespace moto;
     euler dyn("test_dynamics");
-    // dyn.create_2nd_ord_vars("robot", 3);
-    // dyn.create_1st_ord_vars("foot", 6);
-    // dyn.create_1st_ord_vars("hand", 6);
-    // dyn.create_2nd_ord_vars("obj", 3);
-    dyn.create_2nd_ord_vars("robot", 18);
-    dyn.create_2nd_ord_vars("robot2", 18); // todo: for dynamics, check if symbols conflict
+    // dyn.create_2nd_ord_lin("robot", 3);
+    // dyn.create_1st_ord_lin("foot", 6);
+    // dyn.create_1st_ord_lin("hand", 6);
+    // dyn.create_2nd_ord_lin("obj", 3);
+    dyn.create_2nd_ord_lin("robot", 15, true);
+    dyn.create_2nd_ord_ang("ang1", true);
+    // dyn.create_2nd_ord_lin("robot2", 18); // todo: for dynamics, check if symbols conflict
     var dt = sym::inputs("dt", 1);
     // scalar_t dt = 0.1;
     dyn.add_dt(dt);
 
     euler dyn2("test_dynamics2");
-    // dyn2.create_2nd_ord_vars("robot2", 18); // todo: for dynamics, check if symbols conflict
+    // dyn2.create_2nd_ord_lin("robot2", 18); // todo: for dynamics, check if symbols conflict
     // dyn2.add_dt(dt);
 
     auto prob = ocp::create();

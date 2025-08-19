@@ -18,6 +18,7 @@ struct optional_bool {
     optional_bool(bool v) : value(v ? True : False) {}
     optional_bool(val_type v = Unset) : value(v) {}
     operator bool() const { return value == True; }
+    bool is_set() const { return value != Unset; } ///< check if the value is set
     bool operator==(const optional_bool &rhs) const {
         return value == rhs.value;
     }
