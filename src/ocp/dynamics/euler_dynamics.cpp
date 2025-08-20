@@ -41,6 +41,7 @@ struct dynamics_with_dt {
     virtual void f_dt(func_approx_data &data, vector_ref f_dt_, scalar_t dt) const = 0;
     virtual void add_proj_f_dt(func_approx_data &data, scalar_t dt) const {}
     virtual void calc_proj_jac(func_approx_data &data, scalar_t dt) const {}
+    virtual void add_proj_f_res(func_approx_data &data, scalar_t dt) const {}
     size_t get_dim() const { return dim_; }; ///< get dimension of the state
 };
 
@@ -110,6 +111,11 @@ class euler_impl : public generic_dynamics {
             auto &d = data.as<approx_data>();
             d.proj_f_dt_.segment(pos_idx_, dim_pos()).noalias() -= d.f_ang_y_off_diag_[local_idx] * d.proj_f_dt_.segment(vel_idx_, dim_vel());
         }
+        void add_proj_f_res(func_approx_data &data, scalar_t dt) const override {
+            assert(semi_implicit && "semi-implicit dynamics only");
+            auto &d = data.as<approx_data>();
+            d.proj_f_res_.segment(pos_idx_, dim_pos()).noalias() -= d.f_ang_y_off_diag_[local_idx] * d.proj_f_res_.segment(vel_idx_, dim_vel());
+        }
         void set_transform(func_approx_data &data, approx_data::quat_transform_map_t &H_local, scalar_t dt) const {
             Eigen::Quaternion<scalar_t> q(data[quat_y_].data());
             // using transposed_map_t = Eigen::Matrix<scalar_t, 3, 4, Eigen::AutoAlign | Eigen::RowMajor>::MapType;
@@ -165,6 +171,11 @@ class euler_impl : public generic_dynamics {
             assert(semi_implicit && "semi-implicit dynamics only");
             auto &d = data.as<approx_data>();
             d.proj_f_dt_.segment(pos_idx_, dim_pos()).noalias() -= dt * d.proj_f_dt_.segment(vel_idx_, dim_vel()); ///< semi-implicit euler
+        }
+        void add_proj_f_res(func_approx_data &data, scalar_t dt) const override {
+            assert(semi_implicit && "semi-implicit dynamics only");
+            auto &d = data.as<approx_data>();
+            d.proj_f_res_.segment(pos_idx_, dim_pos()).noalias() -= dt * d.proj_f_res_.segment(vel_idx_, dim_vel()); ///< semi-implicit euler
         }
     };
     list_of_dyn sec_ord_lin_si_; ///< second order variables semi-implicit
@@ -327,12 +338,12 @@ void euler_impl::jacobian_impl(func_approx_data &data) const {
 void euler_impl::compute_project_derivatives(func_approx_data &data) const {
     auto &d = data.as<approx_data>();
     scalar_t dt = get_dt(data);
+    d.proj_f_res_ = d.v_;
     if (sec_ord_lin_si_.dim_pos_)
         d.proj_f_x_lin_off_diag_.head(sec_ord_lin_si_.dim_pos_).setConstant(dt);
     if (sec_ord_lin_.dim_pos_)
         d.proj_f_x_lin_off_diag_.tail(sec_ord_lin_.dim_pos_).setConstant(-dt);
     d.proj_f_u_.setConstant(-dt);
-    // d.proj_f_res_ = d.v_;
     /// @todo ang and semi-impliciit res
     if (sec_ord_lin_si_.dim_pos_)
         d.proj_f_u_lin_si_off_diag_.setConstant(dt * dt);
@@ -346,7 +357,8 @@ void euler_impl::compute_project_derivatives(func_approx_data &data) const {
         // correct semi-implicit dynamics
         for (auto *fs : {&sec_ord_lin_si_, &sec_ord_ang_si_})
             for (auto &f : *fs) {
-                f->add_proj_f_dt(data, dt); ///< add projection of f_dt
+                f->add_proj_f_dt(data, dt);  ///< add projection of f_dt
+                f->add_proj_f_res(data, dt); ///< add projection of f_res
             }
     }
 }
