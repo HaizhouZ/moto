@@ -47,7 +47,7 @@ struct sp_expr : public expr_type, public panel_mat<is_diag_type<expr_type>::val
     using base::row_ed_;
     using base::row_st_;
     using base::rows_;
-
+    using exprType = expr_type;
     using expr_type::cols;
     using expr_type::rows;
 
@@ -92,17 +92,17 @@ struct sp_expr : public expr_type, public panel_mat<is_diag_type<expr_type>::val
                         //           << ", col_ed_ = " << col_ed_
                         //           << ", row_ed_ = " << row_ed_ << std::endl;
                         out_block.noalias() += static_cast<const expr_type &>(*this);
-                        sym_block.noalias() = out_block.transpose();
-                    } else {                               // aliasing
-                        if constexpr (config.same_sides) { // no need to copy
-                                                           //     std::cout << "Aliasing detected, but same sides no need to copy\n";
-                            out_block.noalias() += static_cast<const expr_type &>(*this);
-                        } else { // need to copy
-                            // std::cout << "Aliasing detected, need to copy cache\n";
-                            cache.noalias() = static_cast<const expr_type &>(*this);
-                            out_block.noalias() += cache;
-                            sym_block.noalias() += cache.transpose();
-                        }
+                        // sym_block.noalias() = out_block.transpose();
+                    } else { // aliasing
+                             // if constexpr (config.same_sides) { // no need to copy
+                             //     std::cout << "Aliasing detected, but same sides no need to copy\n";
+                        out_block.noalias() += static_cast<const expr_type &>(*this);
+                        // } else { // need to copy
+                        // std::cout << "Aliasing detected, need to copy cache\n";
+                        // cache.noalias() = static_cast<const expr_type &>(*this);
+                        // out_block.noalias() += cache;
+                        // sym_block.noalias() += cache.transpose();
+                        // }
                     }
                 };
                 if (this->cols_ == dst.cols() && this->rows_ == dst.rows())
@@ -194,6 +194,9 @@ struct sp_expr<non_op> : public panel_mat<sparsity::eye> {
     }
 };
 
+template <typename d_type>
+using const_map_t = d_type::PlainObject::ConstAlignedMapType;
+
 template <typename T, bool is_rhs, bool _transposed, bool all>
 struct operand {
     static constexpr bool transposed = _transposed;
@@ -254,7 +257,7 @@ struct operand {
         //         throw std::runtime_error("Cannot get all data from operand with non-zero starting point or non-full dimension");
         // }
         if constexpr (is_panel && !is_eigen_expr) {
-            using dense_map_t = decltype(val.data_)::ConstAlignedMapType;
+            using dense_map_t = const_map_t<decltype(val.data_)>;
             if constexpr (sp_type == sparsity::dense) {
                 if constexpr (all) {
                     return dense_map_t(val.data_.data(), val.rows_, val.cols_);
@@ -281,7 +284,7 @@ struct operand {
                     return val.diagonal().segment(st, dim);
             } else {
                 if constexpr (all) {
-                    using dense_map_t = decltype(val)::ConstAlignedMapType;
+                    using dense_map_t = const_map_t<decltype(val)>;
                     return dense_map_t(val.data(), val.rows(), val.cols());
                 } else if constexpr (col_block) {
                     return val.middleCols(st, dim); // select the relevant columns from rhs expression

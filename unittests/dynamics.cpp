@@ -189,17 +189,22 @@ TEST_CASE("dense_dyn") {
     auto &d = d_ptr->as<dense_dynamics::impl::approx_data>();
 }
 
+void __attribute__ ((noinline)) dense_inner_product(const moto::matrix& rhs, moto::matrix& D, moto::matrix& out) {
+    out.noalias() = rhs.transpose() * D * rhs;
+}
+
 TEST_CASE("inner_product") {
     using namespace moto;
     euler dyn("test_dynamics");
     // dyn.create_2nd_ord_lin("robot", 3);
     // dyn.create_1st_ord_lin("foot", 6);
-    // dyn.create_1st_ord_lin("hand", 6);
-    dyn.create_2nd_ord_lin("obj", 3);
-    dyn.create_2nd_ord_lin("obj2", 3);
-    dyn.create_2nd_ord_lin("robot", 7, true);
-    dyn.create_2nd_ord_ang("ang1", true);
-    dyn.create_2nd_ord_ang("ang2", true);
+    // dyn.create_1st_ord_lin("hand", 12);
+    // dyn.create_2nd_ord_lin("obj", 3, true);
+    // dyn.create_2nd_ord_lin("obj2", 3, true);
+    dyn.create_2nd_ord_lin("robot", 19, true);
+    // dyn.create_2nd_ord_ang("ang1", true);
+    // dyn.create_2nd_ord_ang("ang2", true);
+    // dyn.create_2nd_ord_ang("robang", true);
     // dyn.create_2nd_ord_lin("robot2", 18); // todo: for dynamics, check if symbols conflict
     var dt = sym::inputs("dt", 1);
     // scalar_t dt = 0.1;
@@ -217,52 +222,72 @@ TEST_CASE("inner_product") {
     bool show = true;
     size_t N_trials = 100;
     while (N_trials--) {
-        auto s_data = sym_data(prob.get());
-        auto m_data = merit_data(prob.get());
-        auto sh_data = shared_data(prob.get(), &s_data);
+        size_t n_trials = 100;
 
-        auto d_ptr = dyn->create_approx_data(s_data, m_data, sh_data);
-        auto &d = *d_ptr;
-        // auto d2_ptr = dyn2->create_approx_data(s_data, m_data, sh_data);
-        // auto &d2 = d2_ptr->as<euler::impl::approx_data>();
+        std::vector<sym_data> s_data;
+        s_data.reserve(n_trials);
+        for (size_t i = n_trials; i--;)
+            s_data.emplace_back(prob.get());
+        std::vector<merit_data> m_data;
+        m_data.reserve(n_trials);
+        for (size_t i = n_trials; i--;)
+            m_data.emplace_back(prob.get());
+        std::vector<shared_data> sh_data;
+        sh_data.reserve(n_trials);
+        for (size_t i = n_trials; i--;)
+            sh_data.emplace_back(prob.get(), &s_data[i]);
 
-        s_data.value_[__x].setRandom();
-        s_data.value_[__u].setRandom();
-        s_data.value_[__y].setRandom();
-        auto &hess = m_data.hessian_[__y][__y].setRandom();
-        hess = hess * hess.transpose();
+        for (size_t i = n_trials; i--;) {
+            auto d_ptr = dyn->create_approx_data(s_data[i], m_data[i], sh_data[i]);
+            auto &d = *d_ptr;
+            // auto d2_ptr = dyn2->create_approx_data(s_data, m_data, sh_data);
+            // auto &d2 = d2_ptr->as<euler::impl::approx_data>();
+
+            s_data[i].value_[__x].setRandom();
+            s_data[i].value_[__u].setRandom();
+            s_data[i].value_[__y].setRandom();
+            auto &hess = m_data[i].hessian_[__y][__y].setRandom();
+            hess = hess * hess.transpose();
+
+            dyn->compute_approx(d, true, true, false);
+            dyn->compute_project_derivatives(d);
+            if (show) {
+                show = false;
+                // fmt::println("f_u dense:\n{}", m_data.approx_[__dyn].jac_[__u].dense());
+                fmt::println("f_u dense:\n{}", m_data[i].proj_f_u().dense());
+            }
+        }
         matrix U(prob->dim(__u), prob->dim(__u));
         matrix cache(prob->dim(__y), prob->dim(__u));
         U.setZero();
 
-        dyn->compute_approx(d, true, true, false);
         // dyn2->compute_approx(d2, true, true, false);
-        dyn->compute_project_derivatives(d);
         // dyn2->compute_project_derivatives(d2);
-        auto dense = m_data.proj_f_u().dense();
+        std::vector<matrix> dense_f_u;
+        for (size_t i = n_trials; i--;) {
+            dense_f_u.push_back(m_data[i].proj_f_u().dense());
+        }
+        // auto dense = m_data.proj_f_u().dense();
         // REQUIRE(dense.rows() == prob->dim(__y));
         // REQUIRE(dense.cols() == prob->dim(__u)); // Dense matrix dimensions do not match expected values
-        if (show) {
-            show = false;
-            // fmt::println("f_u dense:\n{}", m_data.approx_[__dyn].jac_[__u].dense());
-            fmt::println("f_u dense:\n{}", m_data.proj_f_u().dense());
-        }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        size_t n_trials = 100;
 
         timed_block_labeled(
             "dense_inner_product",
             auto n = n_trials;
             while (n--) {
-                U.noalias() = dense.transpose() * hess * dense;
+                auto &hess = m_data[n].hessian_[__y][__y];
+                // U.noalias() = dense_f_u[n].transpose() * hess * dense_f_u[n];
+                dense_inner_product(dense_f_u[n], hess, U);
             });
         timed_block_labeled(
             "sparse_inner_product",
             auto n = n_trials;
             while (n--) {
                 // auto f = __x;
-                auto &jac_sp = m_data.proj_f_u();
+                auto &jac_sp = m_data[n].proj_f_u();
+                auto &hess = m_data[n].hessian_[__y][__y];
                 jac_sp.inner_product(hess, U);
             });
     }
