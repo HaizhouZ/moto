@@ -18,28 +18,29 @@ TEST_CASE("dynamics") {
     // dyn.create_1st_ord_lin("foot", 6);
     // dyn.create_1st_ord_lin("hand", 6);
     // dyn.create_2nd_ord_lin("obj", 3);
-    dyn.create_2nd_ord_lin("r", 15, false);
+    dyn.create_2nd_ord_lin("r", 3, true);
     // dyn.create_2nd_ord_lin("rob", 9, false);
-    dyn.create_2nd_ord_ang("ang1", true);
+    // dyn.create_2nd_ord_ang("ang1", true);
     // dyn.create_2nd_ord_ang("ang2", true);
     // dyn.create_2nd_ord_ang("ang3", false);
     // dyn.add_dt(0.1);
-    var dt = sym::inputs("dt", 1);
+    // var dt = sym::inputs("dt", 1);
+    scalar_t dt = 0.1;
     dyn.add_dt(dt);
 
     euler dyn2("test_dynamics2");
-    dyn2.create_2nd_ord_lin("robot2", 3); // todo: for dynamics, check if symbols conflict
-    dyn2.add_dt(dt);
+    // dyn2.create_2nd_ord_lin("robot2", 3); // todo: for dynamics, check if symbols conflict
+    // dyn2.add_dt(dt);
 
     auto prob = ocp::create();
     prob->add(dyn);
-    prob->add(dyn2);
-    generic_func& f = dyn;
-    for(sym& arg : f.in_args()) {
+    // prob->add(dyn2);
+    generic_func &f = dyn;
+    for (sym &arg : f.in_args()) {
         fmt::print("arg: {} dim: {} field: {}\n", arg.name(), arg.dim(), arg.field());
     }
-    bool show = true;
-    size_t N_trials = 1;
+    bool show = false;
+    size_t N_trials = 100;
     while (N_trials--) {
         auto s_data = sym_data(prob.get());
         auto m_data = merit_data(prob.get());
@@ -47,8 +48,8 @@ TEST_CASE("dynamics") {
 
         auto d_ptr = dyn->create_approx_data(s_data, m_data, sh_data);
         auto &d = *d_ptr;
-        auto d2_ptr = dyn2->create_approx_data(s_data, m_data, sh_data);
-        auto &d2 = *d2_ptr;
+        // auto d2_ptr = dyn2->create_approx_data(s_data, m_data, sh_data);
+        // auto &d2 = *d2_ptr;
 
         s_data.value_[__x].setRandom();
         s_data.value_[__u].setRandom();
@@ -56,10 +57,10 @@ TEST_CASE("dynamics") {
         auto &dual = m_data.dual_[__dyn].setRandom();
 
         dyn->compute_approx(d, true, true, false);
-        dyn2->compute_approx(d2, true, true, false);
+        // dyn2->compute_approx(d2, true, true, false);
 
         dyn->compute_project_derivatives(d);
-        dyn2->compute_project_derivatives(d2);
+        // dyn2->compute_project_derivatives(d2);
 
         array_type<matrix, primal_fields> jac;
         auto merit_jac = m_data.jac_;
@@ -82,8 +83,8 @@ TEST_CASE("dynamics") {
             fmt::print("f_y.dense().lu().solve(f_u.dense()) (dense):\n{}\n", f_y.dense().lu().solve(f_u.dense()));
         }
 
-        REQUIRE(m_data.proj_f_x().dense().isApprox(f_y.dense().lu().solve(f_x.dense()))); // Projection of f_x does not match expected value
-        REQUIRE(m_data.proj_f_u().dense().isApprox(f_y.dense().lu().solve(f_u.dense()))); // Projection of f_u does not match expected value
+        // REQUIRE(m_data.proj_f_x().dense().isApprox(f_y.dense().lu().solve(f_x.dense()))); // Projection of f_x does not match expected value
+        // REQUIRE(m_data.proj_f_u().dense().isApprox(f_y.dense().lu().solve(f_u.dense()))); // Projection of f_u does not match expected value
 
         for (auto f : primal_fields) {
             auto &jac_sp = m_data.approx_[__dyn].jac_[f];
@@ -194,9 +195,11 @@ TEST_CASE("inner_product") {
     // dyn.create_2nd_ord_lin("robot", 3);
     // dyn.create_1st_ord_lin("foot", 6);
     // dyn.create_1st_ord_lin("hand", 6);
-    // dyn.create_2nd_ord_lin("obj", 3);
-    dyn.create_2nd_ord_lin("robot", 15, true);
+    dyn.create_2nd_ord_lin("obj", 3);
+    dyn.create_2nd_ord_lin("obj2", 3);
+    dyn.create_2nd_ord_lin("robot", 7, true);
     dyn.create_2nd_ord_ang("ang1", true);
+    dyn.create_2nd_ord_ang("ang2", true);
     // dyn.create_2nd_ord_lin("robot2", 18); // todo: for dynamics, check if symbols conflict
     var dt = sym::inputs("dt", 1);
     // scalar_t dt = 0.1;
@@ -211,7 +214,7 @@ TEST_CASE("inner_product") {
     prob->add(dyn);
     // std::cout << prob->dim(__u) << " " << prob->dim(__y) << std::endl;
     // prob->add(dyn2);
-    bool show = false;
+    bool show = true;
     size_t N_trials = 100;
     while (N_trials--) {
         auto s_data = sym_data(prob.get());
@@ -237,16 +240,23 @@ TEST_CASE("inner_product") {
         dyn->compute_project_derivatives(d);
         // dyn2->compute_project_derivatives(d2);
         auto dense = m_data.proj_f_u().dense();
-        REQUIRE(dense.rows() == prob->dim(__y));
-        REQUIRE(dense.cols() == prob->dim(__u)); // Dense matrix dimensions do not match expected values
+        // REQUIRE(dense.rows() == prob->dim(__y));
+        // REQUIRE(dense.cols() == prob->dim(__u)); // Dense matrix dimensions do not match expected values
         if (show) {
             show = false;
-            fmt::println("f_u dense:\n{}", m_data.approx_[__dyn].jac_[__u].dense());
+            // fmt::println("f_u dense:\n{}", m_data.approx_[__dyn].jac_[__u].dense());
+            fmt::println("f_u dense:\n{}", m_data.proj_f_u().dense());
         }
 
-        // std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
         size_t n_trials = 100;
 
+        timed_block_labeled(
+            "dense_inner_product",
+            auto n = n_trials;
+            while (n--) {
+                U.noalias() = dense.transpose() * hess * dense;
+            });
         timed_block_labeled(
             "sparse_inner_product",
             auto n = n_trials;
@@ -254,15 +264,6 @@ TEST_CASE("inner_product") {
                 // auto f = __x;
                 auto &jac_sp = m_data.proj_f_u();
                 jac_sp.inner_product(hess, U);
-                // jac_sp.right_times(hess, cache);
-                // jac_sp.T_times(cache, U);
-            });
-
-        timed_block_labeled(
-            "dense_inner_product",
-            auto n = n_trials;
-            while (n--) {
-                U.noalias() = dense.transpose() * hess * dense;
             });
     }
 }

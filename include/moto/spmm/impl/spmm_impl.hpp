@@ -48,6 +48,9 @@ struct sp_expr : public expr_type, public panel_mat<is_diag_type<expr_type>::val
     using base::row_st_;
     using base::rows_;
 
+    using expr_type::cols;
+    using expr_type::rows;
+
     template <eval_config config = eval_config(), typename mat_type, typename cache_type>
         requires(!std::is_base_of_v<panel_mat_base, mat_type> && !std::is_base_of_v<panel_mat_base, cache_type>)
     void eval_then_add_to(mat_type &dst, cache_type &cache) const {
@@ -191,7 +194,7 @@ struct sp_expr<non_op> : public panel_mat<sparsity::eye> {
     }
 };
 
-template <typename T, bool is_rhs, bool _transposed>
+template <typename T, bool is_rhs, bool _transposed, bool all>
 struct operand {
     static constexpr bool transposed = _transposed;
     static constexpr bool is_panel = std::is_base_of_v<panel_mat_base, T>;
@@ -246,15 +249,25 @@ struct operand {
     }
     decltype(auto) get_impl() const {
         constexpr bool col_block = is_rhs == transposed; // true if we are dealing with a column block
+        // if constexpr (all) {
+        //     if (st != 0 || dim != inner_dim)
+        //         throw std::runtime_error("Cannot get all data from operand with non-zero starting point or non-full dimension");
+        // }
         if constexpr (is_panel && !is_eigen_expr) {
+            using dense_map_t = decltype(val.data_)::ConstAlignedMapType;
             if constexpr (sp_type == sparsity::dense) {
-                if constexpr (col_block) {
+                if constexpr (all) {
+                    return dense_map_t(val.data_.data(), val.rows_, val.cols_);
+                } else if constexpr (col_block) {
                     return val.data_.middleCols(st, dim); // select the relevant columns from rhs expression
                 } else {
                     return val.data_.middleRows(st, dim); // select the relevant rows from lhs expression
                 }
             } else if constexpr (sp_type == sparsity::diag) {
-                return val.data_.segment(st, dim);
+                if constexpr (all)
+                    return dense_map_t(val.data_.data(), val.data_.rows(), val.data_.cols());
+                else
+                    return val.data_.segment(st, dim);
             } else if constexpr (sp_type == sparsity::eye) {
                 return non_op{dim};
             }
@@ -262,9 +275,15 @@ struct operand {
             if constexpr (is_eye) {
                 return non_op{dim};
             } else if constexpr (is_diag) {
-                return val.diagonal().segment(st, dim);
+                if constexpr (all)
+                    return val.diagonal();
+                else
+                    return val.diagonal().segment(st, dim);
             } else {
-                if constexpr (col_block) {
+                if constexpr (all) {
+                    using dense_map_t = decltype(val)::ConstAlignedMapType;
+                    return dense_map_t(val.data(), val.rows(), val.cols());
+                } else if constexpr (col_block) {
                     return val.middleCols(st, dim); // select the relevant columns from rhs expression
                 } else {
                     return val.middleRows(st, dim); // select the relevant rows from rhs expression
@@ -314,15 +333,15 @@ struct operand {
     }
 };
 
-template <bool lhs_transposed, bool rhs_transposed, typename lhs_type, typename rhs_type>
+template <bool lhs_transposed, bool rhs_transposed, bool lhs_all, bool rhs_all, typename lhs_type, typename rhs_type>
 struct binary_op {
     int rows_;
     int cols_;
     int row_st_;
     int col_st_;
 
-    operand<lhs_type, false, lhs_transposed> lhs_; // panel matrix
-    operand<rhs_type, true, rhs_transposed> rhs_;  // right-hand side expression
+    operand<lhs_type, false, lhs_transposed, lhs_all> lhs_; // panel matrix
+    operand<rhs_type, true, rhs_transposed, rhs_all> rhs_;  // right-hand side expression
 
     binary_op(const lhs_type &lhs, const rhs_type &rhs) : lhs_(lhs), rhs_(rhs) {
         int inner_idx_st = std::max<int>(lhs_.inner_st, rhs_.inner_st);                  // intersection of rows - starting point
@@ -349,21 +368,22 @@ struct binary_op {
             assert(ret.dim == rows_ && ret.dim == cols_ && "resulting expression size mismatch");
         } else
             assert(ret.rows() == rows_ && ret.cols() == cols_ && "resulting expression size mismatch");
+
         return sp_expr{std::move(ret), std::make_pair(row_st_, col_st_)};
     }
 };
 
 template <typename lhs_type, typename rhs_type>
-using product_lt_rn = binary_op<true, false, lhs_type, rhs_type>;
+using product_lt_rn = binary_op<true, false, false, false, lhs_type, rhs_type>;
 
 template <typename lhs_type, typename rhs_type>
-using product_ln_rn = binary_op<false, false, lhs_type, rhs_type>;
+using product_ln_rn = binary_op<false, false, false, false, lhs_type, rhs_type>;
 
 template <typename lhs_type, typename rhs_type>
-using product_lt_rt = binary_op<true, true, lhs_type, rhs_type>;
+using product_lt_rt = binary_op<true, true, false, false, lhs_type, rhs_type>;
 
 template <typename lhs_type, typename rhs_type>
-using product_ln_rt = binary_op<false, true, lhs_type, rhs_type>;
+using product_ln_rt = binary_op<false, true, false, false, lhs_type, rhs_type>;
 } // namespace spmm
 } // namespace moto
 

@@ -1,11 +1,11 @@
 #ifndef MOTO_SPMM_IMPL_BINARY_OP_HPP
 #define MOTO_SPMM_IMPL_BINARY_OP_HPP
 
-#include <moto/spmm/sparse_mat.hpp>
 #include <magic_enum/magic_enum_utility.hpp>
 #include <moto/spmm/impl/buffer.hpp>
 #include <moto/spmm/impl/spmm_impl.hpp>
 #include <moto/spmm/impl/spmm_unary_op.hpp>
+#include <moto/spmm/sparse_mat.hpp>
 
 namespace moto {
 
@@ -17,7 +17,9 @@ void product(const lhs_type &lhs, const rhs_type &rhs, out_type &out) {
     constexpr auto r_is_sp_mat = std::is_same_v<std::decay_t<rhs_type>, sparse_mat>;
     auto product_impl = [&out]<typename L_, typename R_>(const L_ &lhs, const R_ &rhs) {
         constexpr decltype(spmm::buffer::null_) null_{};
-        auto lhs_expr = binary_op<ltr, rtr, L_, R_>(lhs, rhs);
+        constexpr bool l_all = l_is_sp_mat && !r_is_sp_mat;
+        constexpr bool r_all = r_is_sp_mat && !l_is_sp_mat;
+        auto lhs_expr = binary_op<ltr, rtr, l_all, r_all, L_, R_>(lhs, rhs);
         if (lhs_expr.valid()) {
             auto lhs_res = lhs_expr.run();
             constexpr auto config = eval_config{.add_to = add};
@@ -59,14 +61,16 @@ void product(const lhs_type &lhs, const rhs_type &rhs, out_type &out) {
     template void sparse_mat::func<true, lhs_type, rhs_type>(const lhs_type &rhs, rhs_type &out); \
     template void sparse_mat::func<false, lhs_type, rhs_type>(const lhs_type &rhs, rhs_type &out);
 
-#define EXPLICIT_SP_MEMFUNC_INSTANTIATE(func)                           \
-    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, sparse_mat, matrix);     \
-    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, sparse_mat, vector);     \
-    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix, matrix);         \
-    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix, vector);         \
-    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, row_vector, row_vector); \
-    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, row_vector, vector);     \
-    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, vector, row_vector);     \
+#define EXPLICIT_SP_MEMFUNC_INSTANTIATE(func)                                   \
+    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, sparse_mat, matrix);             \
+    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, sparse_mat, vector);             \
+    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix, matrix);                 \
+    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix, matrix::AlignedMapType); \
+    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix::AlignedMapType, matrix); \
+    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix, vector);                 \
+    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, row_vector, row_vector);         \
+    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, row_vector, vector);             \
+    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, vector, row_vector);             \
     EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, vector, vector);
 } // namespace moto
 

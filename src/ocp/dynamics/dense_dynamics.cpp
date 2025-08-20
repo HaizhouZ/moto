@@ -16,7 +16,7 @@ dense_dynamics::impl::approx_data::~approx_data() {
 
 dense_dynamics::impl::approx_data::approx_data(generic_constr::approx_data &&rhs)
     : generic_dynamics::approx_data(std::move(rhs)),
-      f_x_(nullptr, 0, 0), f_y_(nullptr, 0, 0), proj_f_x_(nullptr, 0, 0), lu_(new lu_t()) {
+      f_x_(nullptr, 0, 0), f_y_(nullptr, 0, 0), proj_f_x_(nullptr, 0, 0), NULL_INIT_MAP(f_u_all_), NULL_INIT_MAP(proj_f_u_all_), lu_(new lu_t()) {
     auto &prob = *merit_data_->prob_;
     size_t f_st = prob.get_expr_start(func_);
     size_t arg_idx = 0;
@@ -32,19 +32,27 @@ dense_dynamics::impl::approx_data::approx_data(generic_constr::approx_data &&rhs
     // set up projected f_x
     auto p_x = dyn_proj_->proj_f_x_.insert(f_st, prob.get_expr_start(first_x_arg), func_.dim(), func_.arg_dim(__x), sparsity::dense);
     setup_map(proj_f_x_, p_x);
+    // setup f_u_all
+    auto &first_u_arg = func_.in_args(__u)[0];
+    auto jac_u = approx_->jac_[__u].insert(f_st, prob.get_expr_start(first_u_arg), func_.dim(), func_.arg_dim(__u), sparsity::dense);
+    setup_map(f_u_all_, jac_u);
+    auto p_u = dyn_proj_->proj_f_u_.insert(f_st, prob.get_expr_start(first_u_arg), func_.dim(), func_.arg_dim(__u), sparsity::dense);
+    setup_map(proj_f_u_all_, p_u);
     // allocate f_u and proj_f_u_
     f_u_.reserve(func_.arg_num(__u));
     proj_f_u_.reserve(func_.arg_num(__u));
     for (auto &arg : in_args) {
         auto f = arg->field();
         if (f < field::num_prim && f != __y && f != __x) {
-            auto m = approx_->jac_[f].insert(f_st, prob.get_expr_start(arg), func_.dim(), arg->dim(), sparsity::dense);
-            new (&jac_[arg_idx]) matrix_ref(m);
-            if (f == __u) {
-                f_u_.push_back(aligned_map_t(m.data(), m.rows(), m.cols()));
-                auto p = dyn_proj_->proj_f_u_.insert(f_st, prob.get_expr_start(arg), func_.dim(), arg->dim(), sparsity::dense);
-                proj_f_u_.push_back(aligned_map_t(p.data(), p.rows(), p.cols()));
-            }
+            // auto m = approx_->jac_[f].insert(f_st, prob.get_expr_start(arg), func_.dim(), arg->dim(), sparsity::dense);
+            // new (&jac_[arg_idx]) matrix_ref(m);
+            auto cols = f_u_all_.middleCols(prob.get_expr_start(arg), arg->dim());
+            new (&jac_[arg_idx]) matrix_ref(cols);
+            // if (f == __u) {
+            //     // f_u_.push_back(aligned_map_t(m.data(), m.rows(), m.cols()));
+            //     auto p = dyn_proj_->proj_f_u_.insert(f_st, prob.get_expr_start(arg), func_.dim(), arg->dim(), sparsity::dense);
+            //     proj_f_u_.push_back(aligned_map_t(p.data(), p.rows(), p.cols()));
+            // }
         } else if (f == __y) {
             auto cols = f_y_.middleCols(prob.get_expr_start(arg), arg->dim());
             new (&jac_[arg_idx]) matrix_ref(cols);
@@ -65,9 +73,10 @@ void dense_dynamics::impl::compute_project_derivatives(func_approx_data &data) c
     auto &d = data.as<approx_data>();
     d.lu_->compute(d.f_y_);             // LU decomposition of the dense Jacobian
     d.proj_f_x_ = d.lu_->solve(d.f_x_); // Solve for the projection of f_x
-    for (size_t i = 0; i < d.f_u_.size(); ++i) {
-        d.proj_f_u_[i] = d.lu_->solve(d.f_u_[i]); // Solve for the projection of f_u
-    }
+    // for (size_t i = 0; i < d.f_u_.size(); ++i) {
+    //     d.proj_f_u_[i] = d.lu_->solve(d.f_u_[i]); // Solve for the projection of f_u
+    // }
+    d.proj_f_u_all_.noalias() = d.lu_->solve(d.f_u_all_); // Solve for the projection of f_u_all
     d.proj_f_res_.noalias() = d.lu_->solve(d.approx_->v_); // Solve for the projection of f_res
 }
 

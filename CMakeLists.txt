@@ -39,7 +39,7 @@ set(INCLUDE_DIRS
     $<INSTALL_INTERFACE:include>
 )
 set(MOTO_COMPILE_OPTS -march=native -fPIC -Wno-interference-size)
-set(MOTO_COMPILE_DEFS)
+set(MOTO_COMPILE_DEFS MOTO_USE_OMP)
 set(MOTO_COMPILE_FEATURES cxx_std_20)
 list(APPEND MOTO_DEP_LIBS
     # OpenBLAS::OpenBLAS 
@@ -60,10 +60,10 @@ file(GLOB_RECURSE SRC_FILES src/*.cpp)# src/core/*.cpp src/ocp/*.cpp src/utils/*
 add_library(${PROJECT_NAME} SHARED ${SRC_FILES})
 target_add_deps(${PROJECT_NAME})
 file(GLOB_RECURSE RELEASE_FILE_LIST src/utils/codegen.cpp src/spmm/*.cpp)
-set_source_files_properties(${RELEASE_FILE_LIST} PROPERTIES
-    COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O3>"
-    COMPILE_DEFINITIONS "$<$<CONFIG:Debug>:NDEBUG>"
-)
+# set_source_files_properties(${RELEASE_FILE_LIST} PROPERTIES
+#     COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O3>"
+#     COMPILE_DEFINITIONS "$<$<CONFIG:Debug>:NDEBUG>"
+# )
 # target_link_options(${PROJECT_NAME} PUBLIC -fsanitize=address)
 
 include(cmake/installHelpers.cmake)

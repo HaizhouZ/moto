@@ -18,11 +18,11 @@ struct dense_dynamics : public func {
             // sparse_mat proj_f_x_;
             // sparse_mat proj_f_u_;
             using lu_t = Eigen::PartialPivLU<matrix>;
-            movable_ptr<lu_t> lu_;                ///< LU decomposition for dense dynamics
-            aligned_map_t f_x_, f_y_;             ///< Jacobian of f_y
-            std::vector<aligned_map_t> f_u_;      ///< Jacobian of other fields
-            aligned_map_t proj_f_x_;              ///< Jacobian of x
-            std::vector<aligned_map_t> proj_f_u_; ///< projection of f_u
+            movable_ptr<lu_t> lu_;                             ///< LU decomposition for dense dynamics
+            aligned_map_t f_x_, f_y_, f_u_all_, proj_f_u_all_; ///< Jacobian of f_y
+            std::vector<aligned_map_t> f_u_;                   ///< Jacobian of other fields
+            aligned_map_t proj_f_x_;                           ///< Jacobian of x
+            std::vector<aligned_map_t> proj_f_u_;              ///< projection of f_u
             approx_data(generic_constr::approx_data &&rhs);
             ~approx_data();
         };
@@ -44,7 +44,7 @@ struct dense_dynamics : public func {
     dense_dynamics(const std::string &name, approx_order order, size_t dim = dim_tbd);
     dense_dynamics(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
                    approx_order order = approx_order::first);
-                   
+
     impl *operator->() const {
         return static_cast<impl *>(func::operator->());
     } ///< convert to impl type

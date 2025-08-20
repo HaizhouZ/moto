@@ -21,7 +21,8 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
         print_debug(cur);
         throw std::runtime_error("Q_yy has NaN");
     }
-    // nsp.U.noalias() = d.Q_uu + d.F_u.dense().transpose() * d.Q_yy * d.F_u.dense();
+    // matrix::AlignedMapType F_u(d.F_u.dense_panels_[0].mat().data(), d.F_u.rows(), d.F_u.cols());
+    // nsp.U.noalias() = d.Q_uu + F_u.transpose() * d.Q_yy * F_u;
     nsp.U.noalias() = d.Q_uu;
     d.F_u.inner_product(d.Q_yy, nsp.U);
     // compute bar{u}_0
@@ -29,9 +30,8 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
     // nsp.u_0_p_k.noalias() = d.Q_u.transpose() - nsp.F_u.transpose() * (d.Q_y.transpose() - d.Q_yy * nsp.F_0_k);
     // nsp.u_0_p_k.noalias() = d.Q_u.transpose() + d.F_u.dense().transpose() * (d.Q_yy * d.F_0 - d.Q_y.transpose());
     d.F_u.T_times(nsp.Q_yy_F_0, nsp.u_0_p_k);
-    // nsp.Q_yy_F_x.noalias() = d.Q_yy * d.F_x.dense();
+    // nsp.Q_yy_F_x.noalias() = d.Q_yy * F_x;
     d.F_x.right_times(d.Q_yy, nsp.Q_yy_F_x);
-    // nsp.u_0_p_K.noalias() = d.Q_ux - nsp.F_u.transpose() * (d.Q_yx - nsp.Q_yy_F_x);
     // nsp.u_0_p_K.noalias() = d.Q_ux + d.F_u.dense().transpose() * (nsp.Q_yy_F_x - d.Q_yx);
     d.F_u.T_times(nsp.Q_yy_F_x, nsp.u_0_p_K);
     // fmt::print("u_0_p_k: \n{}\n", nsp.u_0_p_k.transpose());
@@ -98,7 +98,7 @@ void riccati_recursion_correction(ns_node_data *cur, ns_node_data *prev) {
     // nsp.z_u_k.noalias() = d.Q_u.transpose() - d.F_u.dense().transpose() * d.Q_y.transpose();
     // row_vector tmp(d.F_u.cols());
     // tmp.setZero();
-    nsp.z_u_k = d.Q_u.transpose();// + tmp.transpose();
+    nsp.z_u_k = d.Q_u.transpose(); // + tmp.transpose();
     d.F_u.right_times<false>(d.Q_y, nsp.z_u_k);
     // compute Q_x correcton
     // d.Q_x.noalias() = -d.Q_y * nsp.F_0_K + nsp.z_u_k.transpose() * d.d_u.K;

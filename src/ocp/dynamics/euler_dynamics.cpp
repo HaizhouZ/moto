@@ -374,7 +374,7 @@ euler_impl::approx_data::approx_data(generic_dynamics::approx_data &&rhs)
     size_t dim_pos_sec_lin = dyn.sec_ord_lin_.dim_pos_ + dyn.sec_ord_lin_si_.dim_pos_;
     size_t dim_quat_sec_ang = dyn.sec_ord_ang_.dim_pos_ + dyn.sec_ord_ang_si_.dim_pos_;
     size_t dim_pos_sec_all = dim_pos_sec_lin + dim_quat_sec_ang;
-    size_t dim_vel_sec_all = dim_pos_sec_lin + std::max<int>((int)dim_quat_sec_ang - 1, 0);
+    size_t dim_vel_sec_all = dim_pos_sec_lin + std::max<int>((int)dim_quat_sec_ang * 3 / 4, 0);
 
     approx_->jac_[__y].insert<sparsity::eye>(f_st, arg_st[__y], dim);
     if (dyn.sec_ord_lin_si_.dim_pos_ > 0) {
@@ -415,6 +415,7 @@ euler_impl::approx_data::approx_data(generic_dynamics::approx_data &&rhs)
                 proj_f_ang_u_off_diag_.emplace_back(proj_f_ang_u.data(), 4, 3);
                 ang_st += ang->dim_pos();
                 col_offset += ang->dim_vel();
+                u_col_offset += ang->dim_vel();
             }
         }
         {

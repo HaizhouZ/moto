@@ -1,10 +1,9 @@
 #ifndef MOTO_SPMM_IMPL_SPMM_UNARY_OP_HPP
 #define MOTO_SPMM_IMPL_SPMM_UNARY_OP_HPP
 
+#include <moto/spmm/sparse_mat.hpp>
+
 namespace moto {
-    
-enum sparsity;
-struct sparse_mat;
 
 namespace spmm {
 template <sparsity Sp, typename Callback>
