@@ -16,21 +16,14 @@ generic_constr::approx_data::approx_data(vector_ref multiplier,
     }
     if (in_field(func_.field(), merit_data::stored_constr_fields) && func_.field() != __dyn) {
         auto prob_ = merit_data_->prob_;
-        auto &dynamics_exprs_ = prob_->exprs(__dyn);
-        size_t constr_idx = prob_->pos(func_);
         size_t f_st = prob_->get_expr_start(func_);
         size_t arg_idx = 0;
         for (const sym &arg : func_.in_args()) {
             field_t f = arg.field();
             if (f < field::num_prim) {
-                for (size_t dyn_idx = 0; dyn_idx < dynamics_exprs_.size(); dyn_idx++) {
-                    generic_func &dyn = dynamics_exprs_[dyn_idx];
-                    if (dyn.has_arg(arg)) { // has common argument
-                        auto d = merit_data_->approx_[func_.field()].jac_[f].insert(
-                            f_st, prob_->get_expr_start(arg), func_.dim(), arg.dim(), sparsity::dense);
-                        new (&jac_[arg_idx]) matrix_ref(d);
-                    }
-                }
+                auto d = merit_data_->approx_[func_.field()].jac_[f].insert(
+                    f_st, prob_->get_expr_start(arg), func_.dim(), arg.dim(), sparsity::dense);
+                new (&jac_[arg_idx]) matrix_ref(d);
             }
             arg_idx++;
         }

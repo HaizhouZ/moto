@@ -127,10 +127,19 @@ void ns_sqp::update(size_t n_iter) {
         };
 
         timed_block_start("sqp_single_iter");
+        // timed_block_start("ns factorization");
         graph_.for_each_parallel(solver::ns_riccati::ns_factorization);
+        // timed_block_end("ns factorization");
+
+        // timed_block_start("riccati_recursion");
         graph_.apply_backward(solver::ns_riccati::riccati_recursion, true);
+        // timed_block_end("riccati_recursion");
+        // timed_block_start("post solve");
         graph_.for_each_parallel(solver::ns_riccati::compute_primal_sensitivity);
+        // timed_block_end("post solve");
+        // timed_block_start("fwd_linear_rollout");
         graph_.apply_forward(solver::ns_riccati::fwd_linear_rollout, true);
+        // timed_block_end("fwd_linear_rollout");
 
         bool finalize_dual = true;
         bool update_res_stat = true;
@@ -164,7 +173,9 @@ void ns_sqp::update(size_t n_iter) {
             graph_.for_each_parallel(solver::ineq_soft::first_order_correction_start);
             /// @todo compute the residuals
             // solve the problem again with updated mu
+            // timed_block_start("riccati_recursion_correction");
             graph_.apply_backward(solver::ns_riccati::riccati_recursion_correction, true);
+            // timed_block_end("riccati_recursion_correction");
             graph_.for_each_parallel(solver::ns_riccati::compute_primal_sensitivity_correction);
             graph_.apply_forward(solver::ns_riccati::fwd_linear_rollout_correction, true);
             graph_.for_each_parallel([n_iter](data *d) {
@@ -184,7 +195,7 @@ void ns_sqp::update(size_t n_iter) {
             finalize_bound_and_set_to_max();
         }
         // iterative refinement if the step is too small
-        if (0) {
+        if (has_ineq) {
             kkt_info info;
             for (auto n : graph_.flatten_nodes()) {
                 for (auto f : primal_fields)

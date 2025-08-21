@@ -27,7 +27,7 @@ class generic_dynamics : public generic_constr {
     static void setup_map(T &v, src_type &src) {
         new (&v) std::remove_cvref_t<T>(src.data(), src.rows(), src.cols());
     }
-};
+}; 
 
 } // namespace moto
 

@@ -64,7 +64,7 @@ void ns_factorization(ns_node_data *cur) {
                 d.rank_status_ = rank_status::fully_constrained;
             } else {
                 nsp.Z = nsp.lu_eq_.kernel();
-                // fmt::print("nullspace :\n {}\n", nsp.Z);
+                // fmt::print("nullspace :\n {}\n", nsp.Z.cols());
                 d.rank_status_ = rank_status::constrained;
                 nsp.U_z.conservativeResize(nsp.Z.cols(), nsp.Z.cols());
                 nsp.u_z_k.conservativeResize(nsp.Z.cols());

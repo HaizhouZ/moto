@@ -2,6 +2,9 @@
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
 #include <moto/utils/field_conversion.hpp>
 
+// #define ENABLE_TIMED_BLOCK
+#include <moto/utils/timed_block.hpp>
+
 namespace moto {
 namespace solver {
 namespace ns_riccati {
@@ -12,9 +15,11 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
     auto &nsp = *d.nsp_;
     // check positiveness
     // bool qyy_invertible = isPositiveDefinite(d.Q_yy);
+    timed_block_start("Q_yy symmetrize");
     d.Q_yy.array() /= 2;
     /// @todo: temporary
     d.Q_yy = d.Q_yy + d.Q_yy.transpose().eval();
+    timed_block_end("Q_yy symmetrize");
     // d.Q_yy.diagonal().array() += 1e-6; // ensure positive definiteness
     if (d.Q_yy.hasNaN()) {
         fmt::print("Q_yy: \n {}\n", d.Q_yy);
@@ -23,6 +28,7 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
     }
     // matrix::AlignedMapType F_u(d.F_u.dense_panels_[0].mat().data(), d.F_u.rows(), d.F_u.cols());
     // nsp.U.noalias() = d.Q_uu + F_u.transpose() * d.Q_yy * F_u;
+    timed_block_start("compute_U");
     nsp.U.noalias() = d.Q_uu;
     d.F_u.inner_product(d.Q_yy, nsp.U);
     // compute bar{u}_0
@@ -34,6 +40,7 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
     d.F_x.right_times(d.Q_yy, nsp.Q_yy_F_x);
     // nsp.u_0_p_K.noalias() = d.Q_ux + d.F_u.dense().transpose() * (nsp.Q_yy_F_x - d.Q_yx);
     d.F_u.T_times(nsp.Q_yy_F_x, nsp.u_0_p_K);
+    timed_block_end("compute_U");
     // fmt::print("u_0_p_k: \n{}\n", nsp.u_0_p_k.transpose());
     // fmt::print("u_0_p_K: \n{}\n", nsp.u_0_p_K.transpose());
     // fmt::print("u_y_K: \n{}\n", nsp.u_y_K.transpose());
@@ -54,6 +61,7 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
             nsp.llt_ns_.solveInPlace(d.d_u.K);
     } else {
         // generic_constr rank > 0
+        timed_block_start("compute_z_u");
         nsp.z_u_k.noalias() = nsp.u_0_p_k - nsp.U * nsp.u_y_k;
         nsp.z_u_K.noalias() = nsp.u_0_p_K - nsp.U * nsp.u_y_K;
         if (d.rank_status_ == rank_status::fully_constrained) {
@@ -62,11 +70,13 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
             // solve nullspace system
             nsp.U_z.noalias() = nsp.Z.transpose() * nsp.U * nsp.Z;
             nsp.u_z_K.noalias() = -nsp.Z.transpose() * nsp.z_u_K;
+            timed_block_end("compute_z_u");
             nsp.llt_ns_.compute(nsp.U_z);
             nsp.llt_ns_.solveInPlace(nsp.u_z_K);
             d.d_u.K.noalias() = nsp.Z * nsp.u_z_K - nsp.u_y_K;
         }
     }
+    timed_block_start("update_value_function");
     // d.Q_x.noalias() += -d.Q_y * d.F_x.dense() + d.F_0.transpose() * nsp.Q_yy_F_x +
     //                    nsp.z_u_k.transpose() * d.d_u.K;
     d.F_x.right_times<false>(d.Q_y, d.Q_x);
@@ -88,6 +98,7 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
         d_pre.Q_y.noalias() += d.Q_x;
         d_pre.Q_yy.noalias() += d.Q_xx;
     }
+    timed_block_end("update_value_function");
 }
 // only Q_() changed
 void riccati_recursion_correction(ns_node_data *cur, ns_node_data *prev) {

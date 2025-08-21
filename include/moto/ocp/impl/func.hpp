@@ -27,6 +27,9 @@ class generic_func : public expr {
   protected:
     struct gen_info {
         cs::SX out_;
+        bool eval_debug = false;
+        bool jac_debug = false;
+        bool hess_debug = false;
     };
     gen_info gen_;
     approx_order order_ = approx_order::first;
@@ -125,6 +128,12 @@ class generic_func : public expr {
                                                       shared_data &shared) const;
     void compute_approx(func_approx_data &data,
                         bool eval_val, bool eval_jac = false, bool eval_hess = false) const;
+
+    void codegen_use_debug(bool eval_debug = false, bool jac_debug = false, bool hess_debug = false) {
+        gen_.eval_debug = eval_debug;
+        gen_.jac_debug = jac_debug;
+        gen_.hess_debug = hess_debug;
+    }
 
     void load_external(const std::string &path = "gen") {
         load_external_impl(path);

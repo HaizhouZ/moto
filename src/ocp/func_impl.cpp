@@ -206,6 +206,13 @@ void func_codegen::make_codegen_task(generic_func *f) {
     t.verbose = false;
     t.force_recompile = false;
     t.keep_generated_src = true;
+    constexpr std::string_view debug_compile_flag = "-g -O0 -march=native";
+    if (f->gen_.eval_debug)
+        t.eval_compile_flag = debug_compile_flag;
+    if (f->gen_.jac_debug)
+        t.jac_compile_flag = debug_compile_flag;
+    if (f->gen_.hess_debug)
+        t.hess_compile_flag = debug_compile_flag;
     auto workers = utils::cs_codegen::generate_and_compile(std::move(t));
     decltype(workers) workers_set_ready_status;
     std::shared_ptr<std::atomic<size_t>> n_jobs = std::make_shared<std::atomic<size_t>>(workers.jobs.size());
