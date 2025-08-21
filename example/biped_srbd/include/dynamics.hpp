@@ -47,7 +47,7 @@ struct srbd_dynamics {
             f_r = sym::inputs("f_r", 3);
             dim_ = 12;
             set_from_casadi(var_inarg_list{r, r_n, r_l, r_l_n, r_r, r_r_n, v, v_n, v_l, v_r, f_l, f_r},
-                            cs::SX::vertcat({r_n - (r + v * dt),
+                            cs::SX::vertcat({r_n - (r + v_n * dt),
                                              r_l_n - (r_l + v_l * dt),
                                              r_r_n - (r_r + v_r * dt),
                                              m * (v_n - v) - (f_l + f_r + cs::SX({0, 0, -9.81})) * dt}));
@@ -68,16 +68,24 @@ struct srbd_dynamics {
                                                                         dyn.arg_dim(__x));
                 x_diag.setConstant(-1.0).bottomRows(3).setConstant(-dyn.m);
                 dyn_proj_->proj_f_x_.insert<sparsity::diag>(f_st, prob->get_expr_start(dyn.r),
-                                                            dyn.arg_dim(__x)) = x_diag;
-                approx_->jac_[__x].insert<sparsity::diag>(f_st, prob->get_expr_start(dyn.v), dyn.v->dim()).setConstant(-dyn.dt);
-                dyn_proj_->proj_f_x_.insert<sparsity::diag>(f_st, prob->get_expr_start(dyn.v), dyn.v->dim()).setConstant(-dyn.dt);
+                                                            dyn.arg_dim(__x)) = x_diag; // wrong
+                // offdiag
+                approx_->jac_[__y].insert<sparsity::diag>(f_st, prob->get_expr_start(dyn.v_n), dyn.v_n->dim()).setConstant(dyn.dt);
+                dyn_proj_->proj_f_x_.insert<sparsity::diag>(f_st, prob->get_expr_start(dyn.v), dyn.v->dim()).setConstant(dyn.dt);
                 approx_->jac_[__u].insert<sparsity::diag>(f_st + 3, prob->get_expr_start(dyn.v_l), 9).setConstant(-dyn.dt);
                 approx_->jac_[__u].insert<sparsity::diag>(f_st + 9, prob->get_expr_start(dyn.f_r), 3).setConstant(-dyn.dt);
                 dyn_proj_->proj_f_u_.insert<sparsity::diag>(f_st + 3, prob->get_expr_start(dyn.v_l), 9).setConstant(-dyn.dt);
                 dyn_proj_->proj_f_u_.insert<sparsity::diag>(f_st + 9, prob->get_expr_start(dyn.f_r), 3).setConstant(-dyn.dt);
+                // dyn_proj_->proj_f_u_.insert<sparsity::diag>(f_st, prob->get_expr_start(dyn.v_l), 6).setConstant(-dyn.dt);
+                dyn_proj_->proj_f_u_.insert<sparsity::diag>(f_st, prob->get_expr_start(dyn.f_l), 3).setConstant(dyn.dt * dyn.dt);
+                dyn_proj_->proj_f_u_.insert<sparsity::diag>(f_st, prob->get_expr_start(dyn.f_r), 3).setConstant(dyn.dt * dyn.dt);
+                // dyn_proj_->proj_f_u_.insert<sparsity::diag>(f_st + 3, prob->get_expr_start(dyn.v_l), 9).setConstant(-dyn.dt);
+                // dyn_proj_->proj_f_u_.insert<sparsity::diag>(f_st + 9, prob->get_expr_start(dyn.f_r), 3).setConstant(-dyn.dt);
                 // fmt::print("sparse dyn jac x: \n{}\n", approx_->jac_[__x].dense());
                 // fmt::print("sparse dyn jac u: \n{}\n", approx_->jac_[__u].dense());
                 // fmt::print("sparse dyn jac y: \n{}\n", approx_->jac_[__y].dense());
+                // fmt::print("sparse dyn proj x: \n{}\n", dyn_proj_->proj_f_x_.dense());
+                // fmt::print("sparse dyn proj u: \n{}\n", dyn_proj_->proj_f_u_.dense());
                 // throw std::runtime_error("sparse dyn not implemented");
             }
         };
