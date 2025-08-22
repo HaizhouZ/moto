@@ -1,5 +1,6 @@
 #include <moto/core/external_function.hpp>
 #include <moto/ocp/cost.hpp>
+#include <moto/utils/codegen.hpp>
 
 namespace moto {
 void generic_cost::finalize_impl() {
@@ -21,6 +22,22 @@ void generic_cost::finalize_impl() {
             }
         }
     }
+    if (finalize_hint_.gauss_newton) {
+        if (gen_.task_) {
+            gen_.task_->gn_hessian = true;
+        } else {
+            hessian = [](func_approx_data &d) {
+                // Gauss-Newton approximation: H ≈ J^T * J
+                for (size_t i = 0; i < d.merit_hess_.size(); i++) {
+                    for (size_t j = 0; j < d.merit_hess_[i].size(); j++) {
+                        if (d.merit_hess_[i][j].size() > 0) {
+                            d.merit_hess_[i][j] = d.jac_[i].transpose() * d.jac_[j];
+                        }
+                    }
+                }
+            };
+        }
+    }
     // fmt::print("field_hint for cost {} is {}\n", name_, finalize_hint_.substitute_x_to_y);
     // finalize the base class
     generic_func::finalize_impl();
@@ -40,4 +57,10 @@ cost &cost::as_terminal() {
     (*this)->finalize_hint_.substitute_x_to_y = true;
     return (*this);
 }
+
+cost &cost::set_gauss_newton() {
+    (*this)->finalize_hint_.gauss_newton = true;
+    return (*this);
+}
+
 } // namespace moto

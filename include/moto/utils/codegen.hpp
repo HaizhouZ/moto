@@ -52,6 +52,7 @@ struct task {
     bool check_jac_ad = false; // check if jacobian is correct by comparing with ad
     bool append_value = false;
     bool append_jac = false;
+    bool gn_hessian = false; // use gauss-newton hessian if true
     bool keep_generated_src = false; // keep generated files
     std::string eval_compile_flag = "-O3 -DNDEBUG -march=native";
     std::string jac_compile_flag = "-O3 -DNDEBUG -march=native";

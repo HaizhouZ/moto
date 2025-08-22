@@ -199,12 +199,14 @@ TEST_CASE("inner_product") {
     // dyn.create_2nd_ord_lin("robot", 3);
     // dyn.create_1st_ord_lin("foot", 6);
     // dyn.create_1st_ord_lin("hand", 12);
-    // dyn.create_2nd_ord_lin("obj", 3, true);
-    // dyn.create_2nd_ord_lin("obj2", 3, true);
-    dyn.create_2nd_ord_lin("robot", 19, true);
-    // dyn.create_2nd_ord_ang("ang1", true);
-    // dyn.create_2nd_ord_ang("ang2", true);
-    // dyn.create_2nd_ord_ang("robang", true);
+    dyn.create_2nd_ord_lin("obj", 3, true);
+    dyn.create_2nd_ord_lin("obj2", 3, true);
+    dyn.create_2nd_ord_lin("obj3", 3, true);
+    dyn.create_2nd_ord_lin("robot", 15, true);
+    dyn.create_2nd_ord_ang("ang1", true);
+    dyn.create_2nd_ord_ang("ang2", true);
+    dyn.create_2nd_ord_ang("ang3", true);
+    dyn.create_2nd_ord_ang("robang", true);
     // dyn.create_2nd_ord_lin("robot2", 18); // todo: for dynamics, check if symbols conflict
     var dt = sym::inputs("dt", 1);
     // scalar_t dt = 0.1;

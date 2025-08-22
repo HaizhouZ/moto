@@ -16,7 +16,7 @@ unsigned long long get_tsc_frequency() {
         auto start_time = std::chrono::high_resolution_clock::now();
 
         // Get the start TSC value with a serializing instruction
-        unsigned long long start_tsc = moto::utils::rdtscp();
+        unsigned long long start_tsc = moto::utils::rdtsc();
 
         // Wait for a short, but measurable duration (e.g., 50 milliseconds)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -25,7 +25,7 @@ unsigned long long get_tsc_frequency() {
         auto end_time = std::chrono::high_resolution_clock::now();
 
         // Get the end TSC value with a serializing instruction
-        unsigned long long end_tsc = moto::utils::rdtscp();
+        unsigned long long end_tsc = moto::utils::rdtsc();
 
         // Calculate the duration in seconds
         auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time).count();

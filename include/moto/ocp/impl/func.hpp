@@ -3,10 +3,16 @@
 
 #include <moto/core/workspace_data.hpp>
 #include <moto/ocp/impl/func_data.hpp>
+#include <moto/utils/movable_ptr.hpp>
 
 namespace moto {
 class func_codegen;
 class generic_func;
+namespace utils {
+namespace cs_codegen {
+struct task;
+}
+} // namespace utils
 struct func : public shared_expr {
     using base = shared_expr;
     using base::base;
@@ -26,10 +32,11 @@ class generic_func : public expr {
     // --- All members from impl are now protected in func ---
   protected:
     struct gen_info {
-        cs::SX out_;
-        bool eval_debug = false;
-        bool jac_debug = false;
-        bool hess_debug = false;
+        using task_type = utils::cs_codegen::task;
+        movable_ptr<task_type> task_ = nullptr;
+        gen_info() = default;
+        gen_info(const gen_info &rhs);
+        ~gen_info();
     };
     gen_info gen_;
     approx_order order_ = approx_order::first;
@@ -129,11 +136,7 @@ class generic_func : public expr {
     void compute_approx(func_approx_data &data,
                         bool eval_val, bool eval_jac = false, bool eval_hess = false) const;
 
-    void codegen_use_debug(bool eval_debug = false, bool jac_debug = false, bool hess_debug = false) {
-        gen_.eval_debug = eval_debug;
-        gen_.jac_debug = jac_debug;
-        gen_.hess_debug = hess_debug;
-    }
+    auto *get_codegen_task() { return gen_.task_.get(); }
 
     void load_external(const std::string &path = "gen") {
         load_external_impl(path);

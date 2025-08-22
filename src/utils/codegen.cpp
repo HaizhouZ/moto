@@ -373,7 +373,7 @@ void task::finalize(job_list &jobs_) {
         gen_jacobian = true;
     if (!ext_hess.empty())
         gen_hessian = true;
-    bool merit_jac_for_hess = false;
+    bool merit_jac_for_hess = false; /// true if we need to use jacobian to compute vjp->hessian
 
     assert(sx_output.columns() == 1);
 
@@ -427,6 +427,19 @@ void task::finalize(job_list &jobs_) {
                                 verbose, cs::SX()));
         }
     }
+
+    if (gn_hessian) {
+        for (size_t i : range(sx_inputs.size())) {
+            for (size_t j : range(i, sx_inputs.size())) {
+                sym &s = sx_inputs[i];
+                sym &t = sx_inputs[j];
+                if (excluded.contains(s.uid()) or excluded.contains(t.uid()))
+                    continue;
+                external_hess[{s.uid(), t.uid()}] = jacs_copy[i].T() * jacs_copy[j];
+            }
+        }
+    }
+
     // generate hessian
     std::vector<std::vector<cs::SX>> hess;
     if (gen_hessian) {

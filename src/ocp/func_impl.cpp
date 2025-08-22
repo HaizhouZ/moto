@@ -63,8 +63,8 @@ void generic_func::load_external_impl(const std::string &path) {
     };
 }
 void generic_func::substitute(const sym &arg, const sym &rhs) {
-    if (!gen_.out_.is_empty()) {
-        gen_.out_ = cs::SX::substitute(gen_.out_, arg, rhs);
+    if (gen_.task_) {
+        gen_.task_->sx_output = cs::SX::substitute(gen_.task_->sx_output, arg, rhs);
     }
     auto nh = sym_uid_idx_.extract(arg.uid());
     nh.key() = rhs.uid();
@@ -110,7 +110,12 @@ void generic_func::substitute(const sym &arg, const sym &rhs) {
 }
 void generic_func::set_from_casadi(const var_inarg_list &in_args, const cs::SX &out) {
     add_arguments(in_args);
-    gen_.out_ = out;
+    if (gen_.task_)
+        throw std::runtime_error(fmt::format("func {} already has an expression set", name_));
+    else {
+        gen_.task_ = new gen_info::task_type();
+        gen_.task_->sx_output = out;
+    }
 }
 
 /**
@@ -187,17 +192,29 @@ void generic_func::finalize_impl() {
     if (order_ != approx_order::none && dim_ == dim_tbd) {
         throw std::runtime_error(fmt::format("generic_func {} has no dimension set", name_));
     }
-    if (!gen_.out_.is_empty()) {
+    if (!gen_.task_->sx_output.is_empty()) {
         func_codegen::get().make_codegen_task(this);
     } else {
         set_ready_status(true); ///< set the ready status
     }
 }
+
+generic_func::gen_info::gen_info(const gen_info &rhs) {
+    if (rhs.task_) {
+        task_ = new task_type(*rhs.task_);
+    }
+}
+generic_func::gen_info::~gen_info() {
+    if (task_) {
+        delete task_.get();
+        task_ = nullptr;
+    }
+}
+
 void func_codegen::make_codegen_task(generic_func *f) {
-    utils::cs_codegen::task t;
+    utils::cs_codegen::task &t = *f->gen_.task_;
     t.func_name = f->name_;
     t.sx_inputs = f->in_args_;
-    t.sx_output = f->gen_.out_;
     t.gen_eval = f->order_ >= approx_order::zero;
     t.gen_jacobian = f->order_ >= approx_order::first;
     t.gen_hessian = f->order_ >= approx_order::second;
@@ -206,13 +223,7 @@ void func_codegen::make_codegen_task(generic_func *f) {
     t.verbose = false;
     t.force_recompile = false;
     t.keep_generated_src = true;
-    constexpr std::string_view debug_compile_flag = "-g -O0 -march=native";
-    if (f->gen_.eval_debug)
-        t.eval_compile_flag = debug_compile_flag;
-    if (f->gen_.jac_debug)
-        t.jac_compile_flag = debug_compile_flag;
-    if (f->gen_.hess_debug)
-        t.hess_compile_flag = debug_compile_flag;
+    // constexpr std::string_view debug_compile_flag = "-g -O0 -march=native";
     auto workers = utils::cs_codegen::generate_and_compile(std::move(t));
     decltype(workers) workers_set_ready_status;
     std::shared_ptr<std::atomic<size_t>> n_jobs = std::make_shared<std::atomic<size_t>>(workers.jobs.size());

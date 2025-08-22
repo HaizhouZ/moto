@@ -20,9 +20,8 @@ struct string_literals {
     char value[N];
 };
 // Function to read the Time Stamp Counter (TSC) with serialization
-inline unsigned long long rdtscp() {
-    unsigned int aux;
-    return __rdtscp(&aux);
+inline unsigned long long rdtsc() {
+    return __rdtsc();
 }
 
 // Function to get the TSC frequency in cycles per second (Hz)
@@ -53,14 +52,14 @@ class perf_timer {
     static void start(size_t n = 1) {
 #ifdef ENABLE_TIMED_BLOCK
         count() += n;
-        get().st_ = rdtscp();
+        get().st_ = rdtsc();
 #endif // ENABLE_TIMED_BLOCK
     }
     static void end() {
 #ifdef ENABLE_TIMED_BLOCK
         auto &t = perf_timer<label>::get();
-        t.ed_ = rdtscp();
-        t.elapsed_cycles += t.ed_ - t.st_;
+        t.ed_ = rdtsc();
+        t.elapsed_cycles += std::max((int)t.ed_ - (int)t.st_, 0);
 #endif // ENABLE_TIMED_BLOCK
     }
     /**nt the average time
