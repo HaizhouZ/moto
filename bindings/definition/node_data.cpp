@@ -14,7 +14,7 @@ void register_submodule_node_data(nb::module_ &m) {
         .def("clone", &ocp::clone, "Clone the OCP problem")
         .def("dim", [](ocp &self, field_t field) { return self.dim(field); }, nb::arg("field"), "Get the dimension of the field")
         //    .def("exprs", [](ocp &self, field_t field) { return expr_inarg_list(self.exprs<shared_expr>(field)); }, nb::arg("field"), "Get the expressions in the field")
-        .def("exprs", [](ocp &self, field_t field) -> auto & { return static_cast<const std::vector<shared_expr> &>(self.exprs<shared_expr>(field)); }, nb::arg("field"), "Get the expressions in the field", nb::rv_policy::reference_internal)
+        .def("exprs", [](ocp &self, field_t field) -> auto & { return static_cast<const std::vector<shared_expr> &>(self.exprs(field)); }, nb::arg("field"), "Get the expressions in the field", nb::rv_policy::reference_internal)
         .def_prop_ro("uid", &ocp::uid, "Get the unique identifier of the OCP problem");
 
     m.def("print_problem", &utils::print_problem);
@@ -75,8 +75,7 @@ void register_submodule_node_data(nb::module_ &m) {
         .def("__setitem__", [](func_approx_data &self, const py_var_wrapper &s, vector_ref d) { self[s] = d; })
         .def(nb::init<sym_data &, merit_data &, shared_data &, const func &>(), nb::arg("primal"), nb::arg("raw"), nb::arg("shared"), nb::arg("f"),
              "Constructor for func_approx_data with sym_data, merit_data and shared_data")
-        .def("setup_hessian", &func_approx_data::setup_hessian, nb::arg("raw"),
-             "Setup hessian from raw approximation data")
+        .def("setup_hessian", &func_approx_data::setup_hessian, "Setup hessian from raw approximation data")
         .def_rw("v", &func_approx_data::v_, "Value vector reference")
         // .def_rw("jac", &func_approx_data::jac_, "Jacobian matrix references indexed by input arguments")
         // .def_rw("hess", &func_approx_data::hess_, "Hessian matrix references for merit, 2-D indexed by input arguments")

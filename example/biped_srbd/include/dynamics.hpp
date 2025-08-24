@@ -112,7 +112,7 @@ struct srbd_dynamics {
             f_l = sym::inputs("f_l", 3);
             f_r = sym::inputs("f_r", 3);
         } else {
-            // auto dyn = moto::euler("srbd_euler");
+            // auto dyn = moto::euler_integrator("srbd_euler");
             // std::tie(r, r_n, v, v_n, a) = dyn.create_2nd_ord_lin("r", 3, false);
             // std::tie(r_l, r_l_n, v_l) = dyn.create_1st_ord_lin("r_l", 3);
             // std::tie(r_r, r_r_n, v_r) = dyn.create_1st_ord_lin("r_r", 3);

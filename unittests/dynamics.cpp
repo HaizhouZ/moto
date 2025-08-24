@@ -13,7 +13,7 @@
 
 TEST_CASE("dynamics") {
     using namespace moto;
-    euler dyn("test_dynamics");
+    euler_integrator dyn("test_dynamics");
     // dyn.create_2nd_ord_lin("robot", 3);
     // dyn.create_1st_ord_lin("foot", 6);
     // dyn.create_1st_ord_lin("hand", 6);
@@ -28,7 +28,7 @@ TEST_CASE("dynamics") {
     scalar_t dt = 0.1;
     dyn.add_dt(dt);
 
-    euler dyn2("test_dynamics2");
+    euler_integrator dyn2("test_dynamics2");
     // dyn2.create_2nd_ord_lin("robot2", 3); // todo: for dynamics, check if symbols conflict
     // dyn2.add_dt(dt);
 
@@ -195,7 +195,7 @@ void __attribute__ ((noinline)) dense_inner_product(const moto::matrix& rhs, mot
 
 TEST_CASE("inner_product") {
     using namespace moto;
-    euler dyn("test_dynamics");
+    euler_integrator dyn("test_dynamics");
     // dyn.create_2nd_ord_lin("robot", 3);
     // dyn.create_1st_ord_lin("foot", 6);
     // dyn.create_1st_ord_lin("hand", 12);
@@ -212,7 +212,7 @@ TEST_CASE("inner_product") {
     // scalar_t dt = 0.1;
     dyn.add_dt(dt);
 
-    euler dyn2("test_dynamics2");
+    euler_integrator dyn2("test_dynamics2");
     // dyn2.create_2nd_ord_lin("robot2", 18); // todo: for dynamics, check if symbols conflict
     // dyn2.add_dt(dt);
 

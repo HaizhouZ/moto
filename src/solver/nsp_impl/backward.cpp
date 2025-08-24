@@ -2,7 +2,7 @@
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
 #include <moto/utils/field_conversion.hpp>
 
-// #define ENABLE_TIMED_BLOCK
+#define ENABLE_TIMED_BLOCK
 #include <moto/utils/timed_block.hpp>
 
 namespace moto {
@@ -26,19 +26,20 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
         print_debug(cur);
         throw std::runtime_error("Q_yy has NaN");
     }
+    timed_block_start("compute_U");
     // matrix::AlignedMapType F_u(d.F_u.dense_panels_[0].mat().data(), d.F_u.rows(), d.F_u.cols());
     // nsp.U.noalias() = d.Q_uu + F_u.transpose() * d.Q_yy * F_u;
-    timed_block_start("compute_U");
     nsp.U.noalias() = d.Q_uu;
     d.F_u.inner_product(d.Q_yy, nsp.U);
     // compute bar{u}_0
+    // matrix::AlignedMapType F_x(d.F_x.dense_panels_[0].mat().data(), d.F_x.rows(), d.F_x.cols());
     nsp.Q_yy_F_0.noalias() = d.Q_yy * d.F_0 - d.Q_y.transpose();
     // nsp.u_0_p_k.noalias() = d.Q_u.transpose() - nsp.F_u.transpose() * (d.Q_y.transpose() - d.Q_yy * nsp.F_0_k);
-    // nsp.u_0_p_k.noalias() = d.Q_u.transpose() + d.F_u.dense().transpose() * (d.Q_yy * d.F_0 - d.Q_y.transpose());
+    // nsp.u_0_p_k.noalias() = d.Q_u.transpose() + F_u.transpose() * (d.Q_yy * d.F_0 - d.Q_y.transpose());
     d.F_u.T_times(nsp.Q_yy_F_0, nsp.u_0_p_k);
     // nsp.Q_yy_F_x.noalias() = d.Q_yy * F_x;
     d.F_x.right_times(d.Q_yy, nsp.Q_yy_F_x);
-    // nsp.u_0_p_K.noalias() = d.Q_ux + d.F_u.dense().transpose() * (nsp.Q_yy_F_x - d.Q_yx);
+    // nsp.u_0_p_K.noalias() = d.Q_ux + F_u.transpose() * (nsp.Q_yy_F_x - d.Q_yx);
     d.F_u.T_times(nsp.Q_yy_F_x, nsp.u_0_p_K);
     timed_block_end("compute_U");
     // fmt::print("u_0_p_k: \n{}\n", nsp.u_0_p_k.transpose());
@@ -46,6 +47,7 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
     // fmt::print("u_y_K: \n{}\n", nsp.u_y_K.transpose());
     // compute z_u
     if (d.rank_status_ == rank_status::unconstrained) {
+        timed_block_start("solve_nullspace");
         nsp.z_u_k.noalias() = nsp.u_0_p_k;
         nsp.z_u_K.noalias() = nsp.u_0_p_K;
         d.d_u.K.noalias() = -nsp.z_u_K;
@@ -59,6 +61,7 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
             throw std::runtime_error("U is not positive definite");
         } else
             nsp.llt_ns_.solveInPlace(d.d_u.K);
+        timed_block_end("solve_nullspace");
     } else {
         // generic_constr rank > 0
         timed_block_start("compute_z_u");
@@ -71,17 +74,19 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
             nsp.U_z.noalias() = nsp.Z.transpose() * nsp.U * nsp.Z;
             nsp.u_z_K.noalias() = -nsp.Z.transpose() * nsp.z_u_K;
             timed_block_end("compute_z_u");
+            timed_block_start("solve_nullspace");
             nsp.llt_ns_.compute(nsp.U_z);
             nsp.llt_ns_.solveInPlace(nsp.u_z_K);
             d.d_u.K.noalias() = nsp.Z * nsp.u_z_K - nsp.u_y_K;
+            timed_block_end("solve_nullspace");
         }
     }
     timed_block_start("update_value_function");
-    // d.Q_x.noalias() += -d.Q_y * d.F_x.dense() + d.F_0.transpose() * nsp.Q_yy_F_x +
+    // d.Q_x.noalias() += -d.Q_y * F_x + d.F_0.transpose() * nsp.Q_yy_F_x +
     //                    nsp.z_u_k.transpose() * d.d_u.K;
     d.F_x.right_times<false>(d.Q_y, d.Q_x);
     d.Q_x.noalias() += d.F_0.transpose() * nsp.Q_yy_F_x + nsp.z_u_k.transpose() * d.d_u.K;
-    // d.Q_xx.noalias() += d.F_x.dense().transpose() * nsp.Q_yy_F_x + nsp.z_u_K.transpose() * d.d_u.K;
+    // d.Q_xx.noalias() += F_x.transpose() * nsp.Q_yy_F_x + nsp.z_u_K.transpose() * d.d_u.K;
     d.F_x.T_times(nsp.Q_yy_F_x, d.Q_xx);
     d.Q_xx.noalias() += nsp.z_u_K.transpose() * d.d_u.K;
     if (d.rank_status_ != rank_status::unconstrained) {

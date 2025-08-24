@@ -10,8 +10,7 @@ generic_constr::approx_data::approx_data(vector_ref multiplier,
                                          func_approx_data &&d)
     : func_approx_data(std::move(d)), merit_(&raw.merit_),
       multiplier_(multiplier) {
-    auto &f = func_;
-    if (f.order() >= approx_order::second) { // for hessian from vjp autodiff codegen
+    if (func_.order() >= approx_order::second) { // for hessian from vjp autodiff codegen
         in_args_.push_back(multiplier_);
     }
     if (in_field(func_.field(), merit_data::stored_constr_fields) && func_.field() != __dyn) {
@@ -77,11 +76,12 @@ void generic_constr::finalize_impl() {
     if (in_field(field_, std::array{__eq_x, __ineq_x, __eq_x_soft})) {
         // do in_arg substitute
         try {
+            bool pure_x = arg_dim(__y) == 0;
             for (sym &arg : in_args_) {
                 // here is a bit tricky, we substitute __x to __y if only __x exists in the in_args
                 // but __y existing dont mean the constraint is solvable - probably it is not
-                if (arg.field() == __x && arg_dim(__y) == 0) {
-                    fmt::print("substitution in generic_constr {} of type {}: inarg {} with {}\n",
+                if (arg.field() == __x && pure_x) {
+                    fmt::print("warning: substitution in generic_constr {} of type {}: inarg {} with {}\n",
                                name_, field::name(field_), arg.name(), arg.name() + "_nxt");
                     substitute(arg, arg.next());
                 }

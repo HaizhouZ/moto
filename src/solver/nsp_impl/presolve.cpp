@@ -20,8 +20,9 @@ void ns_factorization(ns_node_data *cur) {
     nsp.u_0_p_k = d.Q_u.transpose();
     nsp.u_0_p_K = d.Q_ux;
 
-    // if (nsp.F_0_K.array().isNaN().any() || d.Q_xx.array().isNaN().any()) {
-    //     fmt::print("F_0_K:{}\n", nsp.F_0_K);
+    // if (d.F_x.dense().array().isNaN().any() || d.Q_xx.array().isNaN().any()) {
+    //     fmt::print("F_0_K:{}\n", d.dense_->approx_[__dyn].jac_[__x].dense());
+    //     fmt::print("F_0_K:{}\n", d.dense_->approx_[__dyn].jac_[__y].dense());
     //     fmt::print("Q_xx:{}\n", d.Q_xx);
     //     throw std::runtime_error("NaN detected in F_0_K or Q_xx");
     // }
@@ -62,6 +63,7 @@ void ns_factorization(ns_node_data *cur) {
         else {
             if (rank == d.nu) {
                 d.rank_status_ = rank_status::fully_constrained;
+                fmt::print("warning: fully constrained node detected\n");
             } else {
                 nsp.Z = nsp.lu_eq_.kernel();
                 // fmt::print("nullspace :\n {}\n", nsp.Z.cols());

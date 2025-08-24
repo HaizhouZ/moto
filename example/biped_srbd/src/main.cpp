@@ -7,7 +7,7 @@
 
 int main() {
     using namespace moto;
-    biped_srbd::srbd_dynamics dyn(false);
+    biped_srbd::srbd_dynamics dyn(true);
     std::cout << "Hello, Biped SRBD!" << std::endl;
     auto prob = moto::ocp::create();
     prob->add(dyn.euler());

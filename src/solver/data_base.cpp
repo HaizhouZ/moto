@@ -11,22 +11,17 @@ data_base::data_base(sym_data *s, merit_data *dense)
       Q_y(dense->jac_[__y]), Q_xx(dense->hessian_[__x][__x]),
       Q_ux(dense->hessian_[__u][__x]), Q_uu(dense->hessian_[__u][__u]),
       Q_yx(dense->hessian_[__y][__x]), Q_yy(dense->hessian_[__y][__y]) {
-    prim_step[__x].resize(nx);
-    prim_step[__x].setZero();
-    prim_step[__u].resize(nu);
-    prim_step[__y].resize(ny);
-    prim_corr[__x].resize(nx);
-    prim_corr[__x].setZero();
-    prim_corr[__u].resize(nu);
-    prim_corr[__y].resize(ny);
-    Q_y_corr = nullptr;
+    for (auto f : primal_fields) {
+        prim_step[f].resize(dense->jac_[f].size());
+        prim_step[f].setZero();
+        prim_corr[f].resize(dense->jac_[f].size());
+        prim_corr[f].setZero();
+    }
     // set rollout data for constraints
     for (auto f : constr_fields) {
         dual_step[f].resize(dense->approx_[f].v_.size());
+        dual_step[f].setZero();
     }
-    // dual_step[__dyn].resize(nx);
-    // dual_step[__eq_x].resize(ns);
-    // dual_step[__eq_xu].resize(nc);
 }
 void data_base::merge_jacobian_modification() {
     Q_u_bak = Q_u; // backup

@@ -56,16 +56,7 @@ class sym : public expr, public cs::SX {
      * @param dim dimension of the symbolic variable
      * @param type type of the symbolic variable, must be one of the symbolic fields
      */
-    sym(const std::string &name, size_t dim, field_t type,
-        default_val_t default_val = default_val_none_t())
-        : expr(name, dim, type), cs::SX(cs::SX::sym(name, dim)) {
-        assert(size_t(type) <= field::num_sym || type == __usr_var);
-        if (std::holds_alternative<vector>(default_val)) {
-            default_value_ = std::move(std::get<vector>(default_val));
-        } else if (std::holds_alternative<scalar_t>(default_val)) {
-            default_value_ = vector::Constant(dim, std::get<scalar_t>(default_val));
-        } /// leave empty
-    }
+    sym(const std::string &name, size_t dim, field_t type, default_val_t default_val = default_val_none_t());
 
     sym(sym &&rhs) = default;            ///< move constructor
     sym &operator=(sym &&rhs) = default; ///< move assignment operator
@@ -76,6 +67,8 @@ class sym : public expr, public cs::SX {
     using expr::operator bool;
 
     PROPERTY(default_value) ///< default value of the symbolic variable
+
+    void set_default_value(const default_val_t &default_val); ///< set the default value of the symbolic variable
 
     /// @brief make a symbolic input
     static var inputs(const std::string &name, size_t dim, default_val_t default_val = default_val_none_t()) {

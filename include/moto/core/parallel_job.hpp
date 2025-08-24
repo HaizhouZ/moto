@@ -69,16 +69,16 @@ inline void sequential_for(size_t start, size_t stop, callback_t &&callback, siz
     size_t n_threads = n_jobs;
     size_t chunk_size = (stop - start + n_threads - 1) / n_threads;
     // try {
-// #ifdef MOTO_USE_OMP
-//     omp_set_num_threads(n_threads);
-// #pragma omp parallel for ordered schedule(static, 1)
-// #endif
+#ifdef MOTO_USE_OMP
+    omp_set_num_threads(n_threads);
+#pragma omp parallel for ordered schedule(static, 1)
+#endif
     for (size_t j = 0; j < n_threads; j++) {
         size_t begin = j * chunk_size;
         size_t end = std::min(begin + chunk_size, stop); // Ensure bounds are within _nodes size
-// #ifdef MOTO_USE_OMP
-// #pragma omp ordered
-// #endif
+#ifdef MOTO_USE_OMP
+#pragma omp ordered
+#endif
         for (size_t i = begin; i < end; ++i) {
             callback(i);
         }

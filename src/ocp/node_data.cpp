@@ -4,24 +4,24 @@
 namespace moto {
 sym_data::sym_data(ocp *prob) : prob_(prob) {
     prob->wait_until_ready();
+    auto set_default_val = [this](const sym &s) {
+        if (s.default_value().size() > 0) {
+            auto v = this->prob_->extract(this->value_.at(s.field()), s);
+            if (s.default_value().size() != s.dim())
+                throw std::runtime_error(fmt::format("default value size mismatch for sym {} in field {}, expected {}, got {}",
+                                                     s.name(), field::name(s.field()), s.dim(), s.default_value().size()));
+            v = s.default_value();
+        }
+    };
     for (size_t i = 0; i < field::num_sym; i++) {
         value_[i].resize(prob_->dim(i));
         value_[i].setZero();
-        auto &syms = prob_->exprs(static_cast<field_t>(i));
-        for (const sym &s : syms) {
-            auto v = prob_->extract(value_[i], s);
-            if (s.default_value().size() > 0) {
-                assert(s.default_value().size() == s.dim() && "default value size mismatch");
-                v = s.default_value();
-            }
+        for (const sym &s : prob_->exprs(static_cast<field_t>(i))) {
+            set_default_val(s);
         }
     }
     for (const sym &s : prob_->exprs(__usr_var)) {
-        auto &v = usr_value_[s.uid()] = vector::Zero(s.dim());
-        if (s.default_value().size() > 0) {
-            assert(s.default_value().size() == s.dim() && "default value size mismatch for usr_var");
-            v = s.default_value();
-        }
+        set_default_val(s);
     }
 }
 
@@ -101,11 +101,12 @@ void node_data::update_approximation(update_mode config) {
         if (prob_->dim(f) == 0)
             continue; // skip empty jacobian
         dense_->merit_ += dense_->approx_[f].v_.dot(dense_->dual_[f]);
-        for (auto p : primal_fields) {
-            if (dense_->approx_[f].jac_[p].is_empty())
-                continue; // skip empty jacobian
-            dense_->approx_[f].jac_[p].right_T_times(dense_->dual_[f], dense_->jac_[p]);
-        }
+        if (config >= update_mode::eval_jac)
+            for (auto p : primal_fields) {
+                if (dense_->approx_[f].jac_[p].is_empty())
+                    continue; // skip empty jacobian
+                dense_->approx_[f].jac_[p].right_T_times(dense_->dual_[f], dense_->jac_[p]);
+            }
     }
     if (update_cost) {
         inf_prim_res_ = 0.;

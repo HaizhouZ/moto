@@ -127,13 +127,13 @@ void ns_sqp::update(size_t n_iter) {
         };
 
         timed_block_start("sqp_single_iter");
-        // timed_block_start("ns factorization");
+        timed_block_start("ns factorization");
         graph_.for_each_parallel(solver::ns_riccati::ns_factorization);
-        // timed_block_end("ns factorization");
+        timed_block_end("ns factorization");
 
-        // timed_block_start("riccati_recursion");
+        timed_block_start("riccati_recursion");
         graph_.apply_backward(solver::ns_riccati::riccati_recursion, true);
-        // timed_block_end("riccati_recursion");
+        timed_block_end("riccati_recursion");
         // timed_block_start("post solve");
         graph_.for_each_parallel(solver::ns_riccati::compute_primal_sensitivity);
         // timed_block_end("post solve");
@@ -226,8 +226,8 @@ void ns_sqp::update(size_t n_iter) {
                     // }
                     step++;
                 });
-                fmt::print("  iterative refinement {}, res_stat_u: {:.3e}, res_stat_y: {:.3e}, res_stat_x: {:.3e}\n",
-                           iter_refine, inf_res_stat_u, inf_res_stat_y, inf_res_stat_x);
+                // fmt::print("  iterative refinement {}, res_stat_u: {:.3e}, res_stat_y: {:.3e}, res_stat_x: {:.3e}\n",
+                //            iter_refine, inf_res_stat_u, inf_res_stat_y, inf_res_stat_x);
                 if (inf_res_stat_u < 1e-10 && inf_res_stat_y < 1e-10) {
                     break;
                 }
@@ -260,7 +260,9 @@ void ns_sqp::update(size_t n_iter) {
             // graph_.apply_forward(solver::ns_riccati::compute_kkt_residual);
             // settings.mu_method = solver::ipm_config::quality_function_based;
         }
+        timed_block_start("update_approx");
         graph_.for_each_parallel(data::update_approx);
+        timed_block_end("update_approx");
         // if (i_iter + 1 == n_iter) {
         //     graph_.apply_forward([](data *d) {
         //         d->merge_jacobian_modification();

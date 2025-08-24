@@ -45,7 +45,7 @@ class generic_constr : public generic_func {
      */
     struct approx_data : public func_approx_data {
         solver::linesearch_config *ls_cfg = nullptr; ///< line search configuration, can be nullptr
-        double *merit_;                              ///< pointer to the merit value
+        scalar_t *merit_;                              ///< pointer to the merit value
         vector_ref multiplier_;                      ///< multiplier vector reference
         /**
          * @brief construct a new generic_constr data object by moving from another sparse approximation map

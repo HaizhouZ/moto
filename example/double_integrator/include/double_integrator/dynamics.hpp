@@ -52,7 +52,7 @@ class doubleIntegratorDyn : public expr_list {
             d->add_arguments({r, r_next, v, v_next, a});
             return d;
         } else {
-            auto d = euler("doubleIntegratorDynamics_pos");
+            auto d = euler_integrator("doubleIntegratorDynamics_pos");
             std::tie(r, r_next, v, v_next, a) = d.create_2nd_ord_lin("dInt", 3);
             d.add_dt(0.01);
             return d;

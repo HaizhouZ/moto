@@ -15,7 +15,7 @@ struct dynamics_with_dt {
 
     size_t dim_ = 0;
     size_t dim_pos_ = 0;
-    size_t dim_vel_ = 0;
+    size_t dim_v_ = 0;
     size_t dim_input_ = 0;
 
     size_t local_idx = 0; ///< local index in angular dynamics
@@ -25,16 +25,16 @@ struct dynamics_with_dt {
         for (const auto &v : pos_)
             dim_pos_ += v->dim();
         for (const auto &v : vel_)
-            dim_vel_ += v->dim();
+            dim_v_ += v->dim();
         for (const auto &v : input_)
             dim_input_ += v->dim();
         dim_pos_ /= 2; // each position variable has a next position
-        dim_vel_ /= 2; // each velocity variable has a next velocity
-        dim_ = dim_pos_ + dim_vel_;
+        dim_v_ /= 2;   // each velocity variable has a next velocity
+        dim_ = dim_pos_ + dim_v_;
     }
 
     size_t dim_pos() const { return dim_pos_; }     ///< get dimension of position variables
-    size_t dim_vel() const { return dim_vel_; }     ///< get dimension of velocity variables
+    size_t dim_v() const { return dim_v_; }         ///< get dimension of velocity variables
     size_t dim_input() const { return dim_input_; } ///< get dimension of acceleration variables
 
     virtual void value(func_approx_data &data, scalar_t dt) const = 0; ///< compute value at time step
@@ -95,7 +95,7 @@ class euler_impl : public generic_dynamics {
                 set_transform(data, d.f_ang_x_off_diag_[local_idx], dt);
                 data.v_.segment(pos_idx_, dim_pos()) = data[quat_y_] - data[quat_x_] + d.f_ang_x_off_diag_[local_idx] * data[w_x_];
             }
-            data.v_.segment(vel_idx_, dim_vel()) = data[w_y_] - data[w_x_] - data[a_u_] * dt;
+            data.v_.segment(vel_idx_, dim_v()) = data[w_y_] - data[w_x_] - data[a_u_] * dt;
         }
         void f_dt(func_approx_data &data, vector_ref f_dt_, scalar_t dt) const override {
             auto &d = data.as<approx_data>();
@@ -104,17 +104,17 @@ class euler_impl : public generic_dynamics {
             } else {
                 f_dt_.segment(pos_idx_, dim_pos()) = d.f_ang_x_off_diag_[local_idx] * data[w_x_] / dt;
             }
-            f_dt_.segment(vel_idx_, dim_vel()) = -data[a_u_];
+            f_dt_.segment(vel_idx_, dim_v()) = -data[a_u_];
         } ///< compute f_dt for this dynamics
         void add_proj_f_dt(func_approx_data &data, scalar_t dt) const override {
             assert(semi_implicit && "semi-implicit dynamics only");
             auto &d = data.as<approx_data>();
-            d.proj_f_dt_.segment(pos_idx_, dim_pos()).noalias() -= d.f_ang_y_off_diag_[local_idx] * d.proj_f_dt_.segment(vel_idx_, dim_vel());
+            d.proj_f_dt_.segment(pos_idx_, dim_pos()).noalias() -= d.f_ang_y_off_diag_[local_idx] * d.proj_f_dt_.segment(vel_idx_, dim_v());
         }
         void add_proj_f_res(func_approx_data &data, scalar_t dt) const override {
             assert(semi_implicit && "semi-implicit dynamics only");
             auto &d = data.as<approx_data>();
-            d.proj_f_res_.segment(pos_idx_, dim_pos()).noalias() -= d.f_ang_y_off_diag_[local_idx] * d.proj_f_res_.segment(vel_idx_, dim_vel());
+            d.proj_f_res_.segment(pos_idx_, dim_pos()).noalias() -= d.f_ang_y_off_diag_[local_idx] * d.proj_f_res_.segment(vel_idx_, dim_v());
         }
         void set_transform(func_approx_data &data, approx_data::quat_transform_map_t &H_local, scalar_t dt) const {
             Eigen::Quaternion<scalar_t> q(data[quat_y_].data());
@@ -151,31 +151,31 @@ class euler_impl : public generic_dynamics {
         sec_ord_lin(const var &r, const var &rn, const var &v, const var &vn, const var &a)
             : pos_x_(r), pos_y_(rn), vel_x_(v), vel_y_(vn), acc_u_(a),
               dynamics_with_dt({r, rn}, {v, vn}, {a}) {
-            assert(dim_pos() == dim_vel() && "position and velocity dimensions must match");
+            assert(dim_pos() == dim_v() && "position and velocity dimensions must match");
         }
         void value(func_approx_data &data, scalar_t dt) const override {
             if constexpr (semi_implicit)
                 data.v_.segment(pos_idx_, dim_pos()).noalias() = data[pos_y_] - data[pos_x_] - data[vel_y_] * dt;
             else
                 data.v_.segment(pos_idx_, dim_pos()).noalias() = data[pos_y_] - data[pos_x_] - data[vel_x_] * dt;
-            data.v_.segment(vel_idx_, dim_vel()).noalias() = data[vel_y_] - data[vel_x_] - data[acc_u_] * dt;
+            data.v_.segment(vel_idx_, dim_v()).noalias() = data[vel_y_] - data[vel_x_] - data[acc_u_] * dt;
         }
         void f_dt(func_approx_data &data, vector_ref f_dt_, scalar_t dt) const override {
             if constexpr (semi_implicit)
                 f_dt_.segment(pos_idx_, dim_pos()) = -data[vel_y_];
             else
                 f_dt_.segment(pos_idx_, dim_pos()) = -data[vel_x_];
-            f_dt_.segment(vel_idx_, dim_vel()) = -data[acc_u_];
+            f_dt_.segment(vel_idx_, dim_v()) = -data[acc_u_];
         } ///< compute f_dt for this dynamics
         void add_proj_f_dt(func_approx_data &data, scalar_t dt) const override {
             assert(semi_implicit && "semi-implicit dynamics only");
             auto &d = data.as<approx_data>();
-            d.proj_f_dt_.segment(pos_idx_, dim_pos()).noalias() -= dt * d.proj_f_dt_.segment(vel_idx_, dim_vel()); ///< semi-implicit euler
+            d.proj_f_dt_.segment(pos_idx_, dim_pos()).noalias() -= dt * d.proj_f_dt_.segment(vel_idx_, dim_v()); ///< semi-implicit euler
         }
         void add_proj_f_res(func_approx_data &data, scalar_t dt) const override {
             assert(semi_implicit && "semi-implicit dynamics only");
             auto &d = data.as<approx_data>();
-            d.proj_f_res_.segment(pos_idx_, dim_pos()).noalias() -= dt * d.proj_f_res_.segment(vel_idx_, dim_vel()); ///< semi-implicit euler
+            d.proj_f_res_.segment(pos_idx_, dim_pos()).noalias() -= dt * d.proj_f_res_.segment(vel_idx_, dim_v()); ///< semi-implicit euler
         }
     };
     list_of_dyn sec_ord_lin_si_; ///< second order variables semi-implicit
@@ -201,7 +201,7 @@ class euler_impl : public generic_dynamics {
     std::vector<dynamics_with_dt *> all_dyn_; ///< all dynamics variables for iteration
 
     virtual void finalize_impl() override;
-    friend struct euler; ///< allow euler to access private members
+    friend struct euler_integrator; ///< allow euler to access private members
 
   public:
     func_approx_data_ptr_t create_approx_data(sym_data &primal,
@@ -220,10 +220,10 @@ class euler_impl : public generic_dynamics {
 
 #define IMPL static_cast<euler_impl *>((*this).operator->())
 
-packed_retval<var, 5> euler::create_2nd_ord_ang(const std::string &name, bool semi_implicit) {
-    auto [q, qn] = sym::states(name, 4);
-    auto [w, wn] = sym::states(name + "_ang_vel", 3);
-    auto a = sym::inputs(name + "_ang_acc", 3);
+packed_retval<var, 5> euler_integrator::create_2nd_ord_ang(const std::string &name, bool semi_implicit) {
+    auto [q, qn] = sym::states(name + "_quat", 4);
+    auto [w, wn] = sym::states(name + "_w_local", 3);
+    auto a = sym::inputs(name + "_dw_local", 3);
     auto &dst_lst = semi_implicit ? IMPL->sec_ord_ang_si_ : IMPL->sec_ord_ang_;
     auto &new_ = semi_implicit ? dst_lst.emplace_back(new euler_impl::sec_ord_ang<true>(q, qn, w, wn, a))
                                : dst_lst.emplace_back(new euler_impl::sec_ord_ang<false>(q, qn, w, wn, a));
@@ -233,10 +233,10 @@ packed_retval<var, 5> euler::create_2nd_ord_ang(const std::string &name, bool se
     return {std::move(q), std::move(qn), std::move(w), std::move(wn), std::move(a)};
 }
 
-packed_retval<var, 5> euler::create_2nd_ord_lin(const std::string &name, size_t dim, bool semi_implicit) {
-    auto [r, rn] = sym::states(name, dim);
-    auto [v, vn] = sym::states(name + "_vel", dim);
-    auto a = sym::inputs(name + "_acc", dim);
+packed_retval<var, 5> euler_integrator::create_2nd_ord_lin(const std::string &name, size_t dim, bool semi_implicit) {
+    auto [r, rn] = sym::states(name + "_q", dim);
+    auto [v, vn] = sym::states(name + "_v", dim);
+    auto a = sym::inputs(name + "_a", dim);
     auto &dst_lst = semi_implicit ? IMPL->sec_ord_lin_si_ : IMPL->sec_ord_lin_;
     if (semi_implicit) {
         dst_lst.emplace_back(new euler_impl::sec_ord_lin<true>(r, rn, v, vn, a));
@@ -247,9 +247,9 @@ packed_retval<var, 5> euler::create_2nd_ord_lin(const std::string &name, size_t 
     return {std::move(r), std::move(rn), std::move(v), std::move(vn), std::move(a)};
 }
 
-packed_retval<var, 3> euler::create_1st_ord_lin(const std::string &name, size_t dim) {
-    auto [r, rn] = sym::states(name, dim);
-    auto v = sym::inputs(name + "_vel", dim);
+packed_retval<var, 3> euler_integrator::create_1st_ord_lin(const std::string &name, size_t dim) {
+    auto [r, rn] = sym::states(name + "_q", dim);
+    auto v = sym::inputs(name + "_v", dim);
     IMPL->fst_ord_lin_.emplace_back(new euler_impl::fst_ord_lin(r, rn, v));
     IMPL->n_dyn_++;
     return {std::move(r), std::move(rn), std::move(v)};
@@ -283,7 +283,7 @@ void euler_impl::finalize_impl() {
                 }
                 if (flag & vel) {
                     add_arguments(d->vel_);
-                    inc_s_idx(d->vel_idx_, d->dim_vel());
+                    inc_s_idx(d->vel_idx_, d->dim_v());
                 }
                 if (flag & input) {
                     add_arguments(d->input_);
@@ -386,7 +386,7 @@ euler_impl::approx_data::approx_data(generic_dynamics::approx_data &&rhs)
     size_t dim_pos_sec_lin = dyn.sec_ord_lin_.dim_pos_ + dyn.sec_ord_lin_si_.dim_pos_;
     size_t dim_quat_sec_ang = dyn.sec_ord_ang_.dim_pos_ + dyn.sec_ord_ang_si_.dim_pos_;
     size_t dim_pos_sec_all = dim_pos_sec_lin + dim_quat_sec_ang;
-    size_t dim_vel_sec_all = dim_pos_sec_lin + std::max<int>((int)dim_quat_sec_ang * 3 / 4, 0);
+    size_t dim_v_sec_all = dim_pos_sec_lin + std::max<int>((int)dim_quat_sec_ang * 3 / 4, 0);
 
     approx_->jac_[__y].insert<sparsity::eye>(f_st, arg_st[__y], dim);
     if (dyn.sec_ord_lin_si_.dim_pos_ > 0) {
@@ -426,8 +426,8 @@ euler_impl::approx_data::approx_data(generic_dynamics::approx_data &&rhs)
                 auto proj_f_ang_u = dyn_proj_->proj_f_u_.insert(ang_st, u_col_offset, 4, 3, sparsity::dense);
                 proj_f_ang_u_off_diag_.emplace_back(proj_f_ang_u.data(), 4, 3);
                 ang_st += ang->dim_pos();
-                col_offset += ang->dim_vel();
-                u_col_offset += ang->dim_vel();
+                col_offset += ang->dim_v();
+                u_col_offset += ang->dim_v();
             }
         }
         {
@@ -437,13 +437,13 @@ euler_impl::approx_data::approx_data(generic_dynamics::approx_data &&rhs)
                 auto proj_f_ang_x = dyn_proj_->proj_f_x_.insert(ang_st, arg_st[__x] + col_offset, 4, 3, sparsity::dense);
                 proj_f_ang_x_off_diag_.emplace_back(proj_f_ang_x.data(), 4, 3);
                 ang_st += ang->dim_pos();
-                col_offset += ang->dim_vel();
+                col_offset += ang->dim_v();
             }
         }
     }
     {
         size_t dim_pos_fst_lin = dyn.fst_ord_lin_.dim_pos_;
-        auto f_u = approx_->jac_[__u].insert<sparsity::diag>(f_st + dim_pos_sec_all, arg_st[__u], dim_vel_sec_all + dim_pos_fst_lin);
+        auto f_u = approx_->jac_[__u].insert<sparsity::diag>(f_st + dim_pos_sec_all, arg_st[__u], dim_v_sec_all + dim_pos_fst_lin);
         setup_map(f_u_, f_u);
         auto proj_f_u = dyn_proj_->proj_f_u_.insert<sparsity::diag>(f_st + dim_pos_sec_all, arg_st[__u], f_u_.rows());
         setup_map(proj_f_u_, proj_f_u);
@@ -456,18 +456,18 @@ euler_impl::approx_data::approx_data(generic_dynamics::approx_data &&rhs)
     }
 }
 
-void euler::add_dt(scalar_t dt) {
+void euler_integrator::add_dt(scalar_t dt) {
     if (dt <= 0.0)
         throw std::runtime_error("Time step must be positive");
     IMPL->dt_ = dt;
     IMPL->has_timestep_ = false;
 }
-void euler::add_dt(const var &dt) {
+void euler_integrator::add_dt(const var &dt) {
     IMPL->timestep_var_ = dt;
     IMPL->has_timestep_ = true;
 }
 
-euler::euler(const std::string &name)
+euler_integrator::euler_integrator(const std::string &name)
     : func(std::make_shared<euler_impl>(name)) {}
 
 } // namespace moto

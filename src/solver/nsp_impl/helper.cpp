@@ -21,6 +21,9 @@ void print_debug(ns_node_data *cur) {
     fmt::println("F_u: \n{}", cur->F_u.dense());
     fmt::println("F_0_k: \n{}", cur->F_0.transpose());
     fmt::println("F_0_K: \n{}", cur->F_x.dense());
+    fmt::println("F_x: \n{}", cur->dense_->approx_[__dyn].jac_[__x].dense());
+    fmt::println("F_y: \n{}", cur->dense_->approx_[__dyn].jac_[__y].dense());
+    fmt::println("F_u: \n{}", cur->dense_->approx_[__dyn].jac_[__u].dense());
     fmt::println("u_y_k: \n{}", cur->nsp_->u_y_k.transpose());
     fmt::println("u_y_K: \n{}", cur->nsp_->u_y_K);
     fmt::println("s_c_stacked: \n{}", cur->nsp_->s_c_stacked);

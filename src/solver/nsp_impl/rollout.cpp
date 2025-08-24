@@ -33,7 +33,7 @@ void finalize_dual_newton_step(ns_node_data *cur) {
             d.s_y.T_times<false>(d.dual_step[__eq_x], d.d_lbd_f);
         }
         if (d.nc > 0) {
-            d.dual_step[__eq_xu] = d.d_lbd_s_c.segment(cur_idx, d.nc);
+            d.dual_step[__eq_xu] = d.d_lbd_s_c.tail(d.nc);
         }
     }
     // d.dual_step[__dyn].noalias() =  nsp.lu_dyn_.transpose().solve(d.d_lbd_f);
@@ -77,7 +77,7 @@ void compute_kkt_residual(ns_node_data *cur) {
     auto dense = d.dense_;
     // fmt::println("Q_y: {}", d.Q_y);
     auto &f_u = dense->approx_[__dyn].jac_[__u];
-    dense->res_stat_[__u].noalias() = d.Q_uu_bak * d.prim_step[__u] + d.Q_ux * d.prim_step[__x] + d.Q_u_bak.transpose();
+    dense->res_stat_[__u].noalias() = d.Q_uu_bak * d.prim_step[__u] + d.Q_u_bak.transpose(); //d.d_lbd_f
     f_u.right_T_times(d.dual_step[__dyn], dense->res_stat_[__u]);
     // dense->res_stat_[__u].noalias() += d.dual_step[__dyn].transpose() * f_u.dense();
     if (d.nc) {
@@ -86,12 +86,15 @@ void compute_kkt_residual(ns_node_data *cur) {
     if (d.dual_step[__ineq_xu].size() > 0) {
         d.dense_->approx_[__ineq_xu].jac_[__u].right_T_times(d.dual_step[__ineq_xu], dense->res_stat_[__u]);
     }
-    dense->res_stat_[__y].noalias() = d.Q_yy_bak * d.prim_step[__y] + d.Q_yx * d.prim_step[__x] + d.Q_y_bak.transpose();
+    dense->res_stat_[__y].noalias() = d.Q_yy_bak * d.prim_step[__y] + d.Q_y_bak.transpose();
     auto &f_y = dense->approx_[__dyn].jac_[__y];
     f_y.right_T_times(d.dual_step[__dyn], dense->res_stat_[__y]);
     // dense->res_stat_[__y].noalias() += d.dual_step[__dyn].transpose() * f_y.dense();
     if (d.ns) {
         d.dense_->approx_[__eq_x].jac_[__y].right_T_times(d.dual_step[__eq_x], dense->res_stat_[__y]);
+    }
+    if (d.dual_step[__ineq_x].size() > 0) {
+        d.dense_->approx_[__ineq_x].jac_[__y].right_T_times(d.dual_step[__ineq_x], dense->res_stat_[__y]);
     }
     auto &f_x = dense->approx_[__dyn].jac_[__x];
     dense->res_stat_[__x].noalias() = d.Q_xx_bak * d.prim_step[__x] + d.Q_x_bak.transpose();
@@ -99,6 +102,9 @@ void compute_kkt_residual(ns_node_data *cur) {
     // dense->res_stat_[__x].noalias() += d.dual_step[__dyn].transpose() * f_x.dense();
     if (d.nc) {
         d.dense_->approx_[__eq_xu].jac_[__x].right_T_times(d.dual_step[__eq_xu], dense->res_stat_[__x]);
+    }
+    if (d.dual_step[__ineq_xu].size() > 0) {
+        d.dense_->approx_[__ineq_xu].jac_[__x].right_T_times(d.dual_step[__ineq_xu], dense->res_stat_[__x]);
     }
 }
 } // namespace ns_riccati

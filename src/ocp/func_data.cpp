@@ -3,6 +3,23 @@
 #include <moto/ocp/problem.hpp>
 
 namespace moto {
+sym::sym(const std::string &name, size_t dim, field_t type, default_val_t default_val)
+    : expr(name, dim, type), cs::SX(cs::SX::sym(name, dim)) {
+    if (!(size_t(type) <= field::num_sym || type == __usr_var))
+        throw std::runtime_error(fmt::format("Invalid field {} for symbolic variable {}", type, name));
+    set_default_value(default_val);
+}
+void sym::set_default_value(const default_val_t &default_val) {
+    if (std::holds_alternative<vector>(default_val)) {
+        auto &v = std::get<vector>(default_val);
+        if (v.size() != dim())
+            throw std::runtime_error(fmt::format("default value size mismatch for sym {} in field {}, expected {}, got {}",
+                                                 name(), field::name(field()), dim(), v.size()));
+        default_value_ = std::move(v);
+    } else if (std::holds_alternative<scalar_t>(default_val)) {
+        default_value_ = vector::Constant(dim(), std::get<scalar_t>(default_val));
+    } /// leave empty
+}
 void sym::finalize_impl() {
     if (field_ == __x && !bool(dual_)) {
         throw std::runtime_error("dual pointer should not be null when field == __x");

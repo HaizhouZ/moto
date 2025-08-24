@@ -192,7 +192,7 @@ void generic_func::finalize_impl() {
     if (order_ != approx_order::none && dim_ == dim_tbd) {
         throw std::runtime_error(fmt::format("generic_func {} has no dimension set", name_));
     }
-    if (!gen_.task_->sx_output.is_empty()) {
+    if (gen_.task_ && !gen_.task_->sx_output.is_empty()) {
         func_codegen::get().make_codegen_task(this);
     } else {
         set_ready_status(true); ///< set the ready status

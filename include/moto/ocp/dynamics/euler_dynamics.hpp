@@ -9,7 +9,7 @@ template <typename T, size_t N>
 using packed_retval = decltype(std::tuple_cat(std::array<T, N>()));
 
 struct euler_impl; ///< forward declaration
-struct euler : public func {
+struct euler_integrator : public func {
 
     generic_dynamics *operator->() const {
         return static_cast<generic_dynamics *>(func::operator->());
@@ -24,7 +24,7 @@ struct euler : public func {
     void add_dt(scalar_t dt);   ///< set time step
     void add_dt(const var &dt); ///< set time variable
 
-    euler(const std::string &name);
+    euler_integrator(const std::string &name);
 
     using func::func;
 };

@@ -14,6 +14,22 @@ void job_list::wait_until_finished() {
     }
 }
 
+auto mat_type() {
+    if constexpr (std::is_same_v<scalar_t, double>) {
+        return "MatrixXd";
+    } else {
+        return "MatrixXf";
+    }
+}
+
+auto vec_type() {
+    if constexpr (std::is_same_v<scalar_t, double>) {
+        return "VectorXd";
+    } else {
+        return "VectorXf";
+    }
+}
+
 namespace impl {
 job_list jobs_{};
 std::mutex mutex_{};
@@ -102,14 +118,14 @@ std::string process_generated_code(
         if (!func_found) {
             if (line.find("static int casadi_f0") != std::string::npos) {
                 processed_code << "CASADI_SYMBOL_EXPORT void " << func_name << "(\n"
-                               << "  std::vector<Eigen::Ref<Eigen::VectorXd>>& inputs,\n";
+                               << "  std::vector<Eigen::Ref<Eigen::" << vec_type() << ">>& inputs,\n";
                 if (vec_out) {
-                    processed_code << "  Eigen::Ref<Eigen::VectorXd> outputs) {\n";
+                    processed_code << "  Eigen::Ref<Eigen::" << vec_type() << "> outputs) {\n";
                 } else {
                     if (is_hessian) {
-                        processed_code << "  std::vector<std::vector<Eigen::Ref<Eigen::MatrixXd>>>& outputs) {\n";
+                        processed_code << "  std::vector<std::vector<Eigen::Ref<Eigen::" << mat_type() << ">>>& outputs) {\n";
                     } else {
-                        processed_code << "  std::vector<Eigen::Ref<Eigen::MatrixXd>>& outputs) {\n";
+                        processed_code << "  std::vector<Eigen::Ref<Eigen::" << mat_type() << ">>& outputs) {\n";
                     }
                 }
                 func_found = true;
@@ -237,7 +253,10 @@ void run(
     auto filtered_outputs = casadi_func(sx_inputs_cs);
 
     // Step 2: Generate raw C code
-    cs::CodeGenerator cgen(func_name + "_raw.c");
+    std::string casadi_real_t = std::is_same_v<scalar_t, double> ? "double" : "float";
+    cs::Dict opts;
+    opts["casadi_real"] = casadi_real_t;
+    cs::CodeGenerator cgen(func_name + "_raw.c", opts);
     cgen.add(casadi_func);
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -435,7 +454,7 @@ void task::finalize(job_list &jobs_) {
                 sym &t = sx_inputs[j];
                 if (excluded.contains(s.uid()) or excluded.contains(t.uid()))
                     continue;
-                external_hess[{s.uid(), t.uid()}] = jacs_copy[i].T() * jacs_copy[j];
+                external_hess[{s.uid(), t.uid()}] = cs::SX::mtimes(jacs_copy[i].T(), jacs_copy[j]); // + cs::SX::diag(cs::SX::ones(jacs_copy[i].columns())) * 100;
             }
         }
     }

@@ -41,13 +41,15 @@ dense_dynamics::impl::approx_data::approx_data(generic_constr::approx_data &&rhs
     // allocate f_u and proj_f_u_
     f_u_.reserve(func_.arg_num(__u));
     proj_f_u_.reserve(func_.arg_num(__u));
+    size_t u_col_offset = 0;
     for (auto &arg : in_args) {
         auto f = arg->field();
         if (f < field::num_prim && f != __y && f != __x) {
             // auto m = approx_->jac_[f].insert(f_st, prob.get_expr_start(arg), func_.dim(), arg->dim(), sparsity::dense);
             // new (&jac_[arg_idx]) matrix_ref(m);
-            auto cols = f_u_all_.middleCols(prob.get_expr_start(arg), arg->dim());
+            auto cols = f_u_all_.middleCols(u_col_offset, arg->dim());
             new (&jac_[arg_idx]) matrix_ref(cols);
+            u_col_offset += arg->dim();
             // if (f == __u) {
             //     // f_u_.push_back(aligned_map_t(m.data(), m.rows(), m.cols()));
             //     auto p = dyn_proj_->proj_f_u_.insert(f_st, prob.get_expr_start(arg), func_.dim(), arg->dim(), sparsity::dense);
