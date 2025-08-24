@@ -25,6 +25,14 @@ sym_data::sym_data(ocp *prob) : prob_(prob) {
     }
 }
 
+void sym_data::integrate(field_t f, vector& dx, scalar_t alpha) {
+    assert(dx.size() == prob_->tdim(f) && "dx size mismatch");
+    for (const sym &s : prob_->exprs(f)) {
+        auto v = get(s);
+        s.integrate(v, prob_->extract_tangent(dx, s), v, alpha);
+    }
+}
+
 void sym_data::print() {
     auto p = prob_;
     for (auto f : concat_fields(primal_fields, std::array{__p, __usr_var})) {

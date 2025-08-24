@@ -25,8 +25,8 @@ merit_data::merit_data(ocp *prob) : prob_(prob) {
     // dynamics data
     dynamics_data_.proj_f_res_.resize(prob_->dim(__dyn));
     dynamics_data_.proj_f_res_.setZero();
-    dynamics_data_.proj_f_x_.resize(prob_->dim(__dyn), prob_->dim(__x));
-    dynamics_data_.proj_f_u_.resize(prob_->dim(__dyn), prob_->dim(__u));
+    dynamics_data_.proj_f_x_.resize(prob_->dim(__dyn), prob_->tdim(__x));
+    dynamics_data_.proj_f_u_.resize(prob_->dim(__dyn), prob_->tdim(__u));
     // complementarity
     for (auto f : ineq_constr_fields) {
         comp_[f].resize(prob_->dim(f));
@@ -37,17 +37,17 @@ merit_data::merit_data(ocp *prob) : prob_(prob) {
     // cost hessian(store only half)
     for (auto i : range(field::num_prim)) {
         for (auto j : range(i, field::num_prim)) {
-            hessian_[j][i].resize(prob_->dim(j), prob_->dim(i));
+            hessian_[j][i].resize(prob_->tdim(j), prob_->tdim(i));
             hessian_[j][i].setZero();
         }
-        jac_[i].resize(prob_->dim(i));
+        jac_[i].resize(prob_->tdim(i));
         jac_[i].setZero();
-        jac_modification_[i].resize(prob_->dim(i));
+        jac_modification_[i].resize(prob_->tdim(i));
         jac_modification_[i].setZero();
     }
     hessian_modification_ = hessian_; // same size
     for (auto f : primal_fields) {
-        res_stat_[f].resize(prob_->dim(f));
+        res_stat_[f].resize(prob_->tdim(f));
         res_stat_[f].setZero();
     }
 }

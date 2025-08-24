@@ -21,7 +21,7 @@ generic_constr::approx_data::approx_data(vector_ref multiplier,
             field_t f = arg.field();
             if (f < field::num_prim) {
                 auto d = merit_data_->approx_[func_.field()].jac_[f].insert(
-                    f_st, prob_->get_expr_start(arg), func_.dim(), arg.dim(), sparsity::dense);
+                    f_st, prob_->get_expr_start_tangent(arg), func_.dim(), arg.tdim(), sparsity::dense);
                 new (&jac_[arg_idx]) matrix_ref(d);
             }
             arg_idx++;
@@ -33,7 +33,7 @@ void generic_constr::approx_data::map_merit_jac_from_raw(decltype(merit_data::ja
     jac.clear();
     for (size_t i : range(in_args.size())) {
         if (in_args[i]->field() < field::num_prim) {
-            jac.push_back(raw[in_args[i]->field()].segment(problem()->get_expr_start(in_args[i]), in_args[i]->dim()));
+            jac.push_back(problem()->extract_tangent(raw[in_args[i]->field()], in_args[i]));
         } else { // useless
             static row_vector empty;
             jac.push_back(empty);

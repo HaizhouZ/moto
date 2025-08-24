@@ -75,6 +75,8 @@ void generic_func::substitute(const sym &arg, const sym &rhs) {
     dep_.at(in_arg_pos) = rhs;               // update the dep_ to point to the new sym
     arg_dim_[arg.field()] -= arg.dim();      // update the dimension of the field
     arg_dim_[rhs.field()] += rhs.dim();      // update the dimension of the field
+    arg_tdim_[arg.field()] -= arg.tdim();      // update the tangent dimension of the field
+    arg_tdim_[rhs.field()] += rhs.tdim();      // update the tangent dimension
     arg_num_[arg.field()] -= 1;              // update the number of arguments in the field
     arg_num_[rhs.field()] += 1;              // update the number of arguments in the field
     arg_uid_[arg.field()].erase(arg.uid());  // remove the uid from the set

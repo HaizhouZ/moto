@@ -16,9 +16,7 @@ namespace moto {
 class ocp {
   protected:
     ocp() { uid_.set_inc(); }; // default constructor
-    ocp(const ocp &rhs)
-        : expr_(rhs.expr_), d_idx_(rhs.d_idx_),
-          pos_by_uid_(rhs.pos_by_uid_), dim_(rhs.dim_) { uid_.set_inc(); }
+    ocp(const ocp &rhs) = default; // copy constructor
     bool add_impl(expr &);
     void maintain_order(expr &);
     static size_t max_uid; ///< uid used to index global expressions
@@ -27,10 +25,14 @@ class ocp {
     std::array<expr_list, field::num> expr_;
     /// data index of expr in serialized vector, by uid
     std::unordered_map<size_t, size_t> d_idx_;
+    /// data index of tagent space var of expr in serialized vector, by uid
+    std::unordered_map<size_t, size_t> d_idx_tangent_;
     /// position of expr in expr_ e.g., no. xxx, by uid
     std::unordered_map<size_t, size_t> pos_by_uid_;
     /// dimension of each field
     std::array<size_t, field::num> dim_{};
+    /// tangent space dimension of each field
+    std::array<size_t, field::num_prim> tdim_{};
 
   public:
     CONST_PROPERTY(uid);                                                       ///< getter for uid
@@ -38,6 +40,7 @@ class ocp {
     const auto &pos(const expr &ex) const { return pos_by_uid_.at(ex.uid()); } ///< getter for pos_by_uid_
     size_t dim(size_t f) const { return dim_.at(f); }                          ///< getter for dim_
     size_t num(size_t f) const { return expr_[f].size(); } ///< getter for num of exprs in field f
+    size_t tdim(size_t f) const { return tdim_.at(f); }                        ///< getter for tdim_
     void wait_until_ready() const;
 
     static auto create() { return std::shared_ptr<ocp>(new ocp()); }
@@ -52,8 +55,14 @@ class ocp {
     vector_ref extract(vector_ref data, const expr &ex) const {
         return data.segment(get_expr_start(ex), ex.dim());
     }
+    vector_ref extract_tangent(vector_ref data, const expr &ex) const {
+        return data.segment(get_expr_start_tangent(ex), ex.tdim());
+    }
     row_vector_ref extract_row(row_vector_ref data, const expr &ex) const {
         return data.segment(get_expr_start(ex), ex.dim());
+    }
+    row_vector_ref extract_row_tangent(row_vector_ref data, const expr &ex) const {
+        return data.segment(get_expr_start_tangent(ex), ex.tdim());
     }
     /**
      * @brief add expr to problem formulation
@@ -83,7 +92,15 @@ class ocp {
         try {
             return d_idx_.at(ex.uid());
         } catch (const std::exception &e) {
-            throw std::runtime_error(fmt::format("expr {} uid {} cannot be found", ex.name(), ex.dim()));
+            throw std::runtime_error(fmt::format("expr {} uid {} cannot be found", ex.name(), ex.uid()));
+        }
+    }
+
+    size_t get_expr_start_tangent(const expr &ex) const {
+        try {
+            return d_idx_tangent_.at(ex.uid());
+        } catch (const std::exception &e) {
+            throw std::runtime_error(fmt::format("expr {} uid {} cannot be found", ex.name(), ex.uid()));
         }
     }
 };

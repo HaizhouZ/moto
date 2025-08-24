@@ -9,7 +9,8 @@ void apply_affine_step(ns_node_data *cur, workspace_data *_cfg) {
     auto &cfg = _cfg->as<solver::linesearch_config>();
     auto &d = *cur;
     for (auto f : primal_fields) {
-        cur->sym_->value_[f].noalias() += cfg.alpha_primal * d.prim_step[f];
+        // cur->sym_->value_[f].noalias() += cfg.alpha_primal * d.prim_step[f];
+        cur->sym_->integrate(f, d.prim_step[f], cfg.alpha_primal);
         d.prim_step[f] *= cfg.alpha_primal;
     }
     for (auto f : hard_constr_fields) {

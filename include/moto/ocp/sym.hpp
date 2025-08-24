@@ -37,7 +37,6 @@ class sym : public expr, public cs::SX {
   protected:
     vector default_value_;
     var dual_;
-
     void finalize_impl() override;
     operator double() const = delete;     ///< disable implicit conversion to double
     operator casadi_int() const = delete; ///< disable implicit conversion to casadi_int
@@ -61,6 +60,8 @@ class sym : public expr, public cs::SX {
     sym(sym &&rhs) = default;            ///< move constructor
     sym &operator=(sym &&rhs) = default; ///< move assignment operator
 
+    std::function<void(vector_ref, vector_ref, vector_ref, scalar_t)> integrator_;
+
   public:
     using expr::dim;
     using expr::name; ///< name of the symbolic variable
@@ -69,6 +70,10 @@ class sym : public expr, public cs::SX {
     PROPERTY(default_value) ///< default value of the symbolic variable
 
     void set_default_value(const default_val_t &default_val); ///< set the default value of the symbolic variable
+
+    void integrate(vector_ref x, vector_ref dx, vector_ref out, scalar_t alpha = 1.0) const {
+        integrator_(x, dx, out, alpha);
+    } ///< integrate the variable by dx with step size alpha
 
     /// @brief make a symbolic input
     static var inputs(const std::string &name, size_t dim, default_val_t default_val = default_val_none_t()) {

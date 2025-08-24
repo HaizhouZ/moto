@@ -9,7 +9,7 @@ void initialize(node_data *cur) {
         sd.prim_step_.clear();
         for (const sym &arg : sf.in_args()) {
             if (arg.field() < field::num_prim) {
-                sd.prim_step_.push_back(cur->problem().extract(dynamic_cast<solver::data_base *>(cur)->prim_step[arg.field()], arg));
+                sd.prim_step_.push_back(cur->problem().extract_tangent(dynamic_cast<solver::data_base *>(cur)->prim_step[arg.field()], arg));
             }
             new (&sd.d_multiplier_) mapped_vector{cur->problem().extract(
                                                       dynamic_cast<solver::data_base *>(cur)->dual_step[sf.field()], sf).data(),

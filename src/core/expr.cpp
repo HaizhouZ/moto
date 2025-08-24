@@ -32,6 +32,7 @@ INIT_UID_(expr);
 expr::expr(const std::string &name, size_t dim, field_t field) {
     name_ = name;
     dim_ = dim;
+    tdim_ = dim; // by default tdim = dim, can be changed in derived classes
     field_ = field;
     async_ready_status_ = new impl::expr_async_ready_status(); ///< initialize async ready status
     uid_.set_inc();                                            ///< set a new uid

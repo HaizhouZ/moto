@@ -30,6 +30,12 @@ bool ocp::add_impl(expr &ex) {
         size_t n1 = n0 + ex.dim();
         d_idx_[_uid] = n0;
         n0 = n1;
+        if (ex.field() < field::num_prim) {
+            size_t &t0 = tdim_[ex.field()];
+            size_t t1 = t0 + ex.tdim();
+            d_idx_tangent_[_uid] = t0;
+            t0 = t1;
+        }
         pos_by_uid_.try_emplace(_uid, num(ex.field()));
         return true;
     }
@@ -37,10 +43,12 @@ bool ocp::add_impl(expr &ex) {
 }
 void ocp::maintain_order(expr &ex) {
     auto update_pos = [this](const expr_list &exprs) {
-        size_t cur = 0, idx = 0;
+        size_t cur = 0, idx = 0, tcur = 0;
         for (expr &ex : exprs) {
             d_idx_[ex.uid()] = cur;
+            d_idx_tangent_[ex.uid()] = tcur;
             cur += ex.dim();
+            tcur += ex.tdim();
             pos_by_uid_[ex.uid()] = idx++;
         }
     };

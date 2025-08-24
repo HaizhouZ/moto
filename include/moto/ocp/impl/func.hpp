@@ -43,6 +43,7 @@ class generic_func : public expr {
     var_list in_args_;
     array_type<var_list, primal_fields> arg_by_field_{};
     array_type<size_t, primal_fields> arg_dim_{};
+    array_type<size_t, primal_fields> arg_tdim_{};
     array_type<size_t, primal_fields> arg_num_{};
     array_type<std::set<size_t>, primal_fields> arg_uid_; ///< argument index for x, u, y
 
@@ -103,6 +104,11 @@ class generic_func : public expr {
         return arg_dim_[field];
     } ///< get the dimension of the argument for a given field
 
+    auto arg_tdim(field_t field) const {
+        assert(in_field(field, primal_fields) && "field out of range");
+        return arg_tdim_[field];
+    } ///< get the tangent dimension of the argument for a given field
+
     bool has_arg(const sym &s) const {
         assert(in_field(s.field(), primal_fields) && "field out of range");
         return arg_uid_[s.field()].contains(s.uid());
@@ -118,6 +124,7 @@ class generic_func : public expr {
         auto f = s->field();
         if (in_field(f, primal_fields)) {
             arg_dim_[f] += s->dim();
+            arg_tdim_[f] += s->tdim();
             arg_num_[f]++;
             arg_by_field_[f].emplace_back(s);
             arg_uid_[f].insert(s->uid());

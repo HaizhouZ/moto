@@ -7,6 +7,9 @@ sym::sym(const std::string &name, size_t dim, field_t type, default_val_t defaul
     : expr(name, dim, type), cs::SX(cs::SX::sym(name, dim)) {
     if (!(size_t(type) <= field::num_sym || type == __usr_var))
         throw std::runtime_error(fmt::format("Invalid field {} for symbolic variable {}", type, name));
+    integrator_ = [](vector_ref x, vector_ref dx, vector_ref out, scalar_t alpha) {
+        out = x + alpha * dx;
+    };
     set_default_value(default_val);
 }
 void sym::set_default_value(const default_val_t &default_val) {
@@ -61,8 +64,9 @@ func_approx_data::func_approx_data(sym_data &primal,
         merit_jac_.reserve(in_args_.size());
         for (size_t i : range(in_args_.size())) {
             if (in_args[i]->field() < field::num_prim) {
-                merit_jac_.push_back(raw.jac_[in_args[i]->field()].segment(
-                    raw.prob_->get_expr_start(in_args[i]), in_args[i]->dim()));
+                // merit_jac_.push_back(raw.jac_[in_args[i]->field()].segment(
+                //     raw.prob_->get_expr_start_tangent(in_args[i]), in_args[i]->tdim()));
+                merit_jac_.push_back(raw.prob_->extract_tangent(raw.jac_[in_args[i]->field()], in_args[i]));
             } else { // useless
                 static row_vector empty;
                 merit_jac_.push_back(empty);
@@ -101,9 +105,9 @@ void func_approx_data::setup_hessian() {
                         /// otherwise only keep h[i][j] (empty)
                         if (field_1 >= field_2) {
                             merit_hess_[i].push_back((*hessian)[field_1][field_2].block(
-                                raw.prob_->get_expr_start(in_args[i]),
-                                raw.prob_->get_expr_start(in_args[j]),
-                                in_args[i]->dim(), in_args[j]->dim()));
+                                raw.prob_->get_expr_start_tangent(in_args[i]),
+                                raw.prob_->get_expr_start_tangent(in_args[j]),
+                                in_args[i]->tdim(), in_args[j]->tdim()));
                             continue;
                         }
                     }

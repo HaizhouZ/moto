@@ -112,6 +112,7 @@ class expr : public std::enable_shared_from_this<expr> {
 
     std::string name_;
     size_t dim_ = 0;
+    size_t tdim_; ///< tangent space dimension, for manifolds
     impl::unique_id<expr> uid_;
     field_t field_ = __undefined;
     expr_list dep_; // now a direct member, not a pointer
@@ -135,6 +136,7 @@ class expr : public std::enable_shared_from_this<expr> {
     PROPERTY(uid);       ///< getter for uid
     PROPERTY(field);     ///< getter for field
     PROPERTY(finalized); ///< getter for finalized
+    PROPERTY(tdim)       ///< tangent space dimension of the symbolic variable
 
     auto &dep() { return dep_; } ///< get the dependencies of this expression
 

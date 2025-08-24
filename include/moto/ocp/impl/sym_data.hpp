@@ -20,7 +20,7 @@ struct sym_data {
     sym_data(ocp *prob);
     /// get the symbolic variable value of the sym
     vector_ref get(const sym &s);
-
+    void integrate(field_t f, vector& dx, scalar_t alpha = 1.0);
     auto operator[](const sym &s) { return get(s); }
 
     /// pointer to the problem, used to get dimensions of symbolic variables
