@@ -64,17 +64,20 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
     // compute z_u
     if (d.rank_status_ == rank_status::unconstrained) {
         timed_block_start("solve_nullspace");
-        nsp.z_K = -nsp.z_0_K;
+        // nsp.z_K = -nsp.z_0_K;
         nsp.llt_ns_.compute(nsp.Q_zz);
-        if (nsp.llt_ns_.info() != Eigen::Success) {
+        // if (nsp.llt_ns_.info() != Eigen::Success) {
+        if (!nsp.llt_ns_.valid()) {
             fmt::print("Q_uu: \n{}\n", d.Q_uu);
             fmt::print("Q_yy: \n{}\n", d.Q_yy);
             fmt::print("Q_zz: \n{}\n", nsp.Q_zz);
             kkt_diagnosis(cur);
             print_debug(cur);
             throw std::runtime_error("U is not positive definite");
-        } else
-            nsp.llt_ns_.solveInPlace(nsp.z_K);
+        } else {
+            nsp.llt_ns_.solve(nsp.z_0_K, nsp.z_K, -1.0);
+        }
+        // nsp.llt_ns_.solveInPlace(nsp.z_K);
         timed_block_end("solve_nullspace");
     } else {
         // generic_constr rank > 0
@@ -82,10 +85,11 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
             // fully constrained
         } else {
             // solve nullspace system
-            nsp.z_K = -nsp.z_0_K;
+            // nsp.z_K = -nsp.z_0_K;
             timed_block_start("solve_nullspace");
             nsp.llt_ns_.compute(nsp.Q_zz);
-            nsp.llt_ns_.solveInPlace(nsp.z_K);
+            // nsp.llt_ns_.solveInPlace(nsp.z_K);
+            nsp.llt_ns_.solve(nsp.z_0_K, nsp.z_K, -1.0);
             timed_block_end("solve_nullspace");
         }
     }

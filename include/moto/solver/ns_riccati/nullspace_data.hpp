@@ -5,6 +5,7 @@
 
 #include <Eigen/Cholesky>
 #include <Eigen/LU>
+#include <moto/utils/blasfeo_factorization.hpp>
 
 namespace moto {
 namespace solver {
@@ -41,7 +42,8 @@ struct nullspace_data {
     vector y_y_k;                    ///< \f$y_y\f$ pseudo y
     matrix y_y_K;                    ///< same as @ref y_y_k
     Eigen::FullPivLU<matrix> lu_eq_; ///< LU factorizer of the eq constraints
-    Eigen::LLT<matrix> llt_ns_;      ///< LLT solver of the projected hessian
+    // Eigen::LLT<matrix> llt_ns_;      ///< LLT solver of the projected hessian
+    utils::blasfeo_llt llt_ns_; ///< LLT solver of the projected hessian
     size_t rank{0};                  ///< rank of the equality constraints, 0 if unconstrained, ncstr if fully constrained
 };
 } // namespace ns_riccati

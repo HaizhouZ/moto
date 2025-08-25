@@ -17,6 +17,7 @@ add_project_dependency(pybind11 REQUIRED)
 add_project_dependency(re2 REQUIRED)
 add_project_dependency(nlohmann_json REQUIRED)
 add_project_dependency(OpenSSL REQUIRED)
+add_project_dependency(blasfeo REQUIRED)
 
 set(MOTO_COMPILE_OPTS -march=native -fPIC -Wno-interference-size)
 set(MOTO_COMPILE_DEFS MOTO_USE_OMP)
@@ -45,7 +46,7 @@ set(INCLUDE_DIRS
 
 list(APPEND MOTO_DEP_LIBS
     # OpenBLAS::OpenBLAS 
-    # "/usr/local/blasfeo/lib/libblasfeo.a"
+    "/usr/local/blasfeo/lib/libblasfeo.a"
     casadi::casadi
     Eigen3::Eigen
     magic_enum::magic_enum
