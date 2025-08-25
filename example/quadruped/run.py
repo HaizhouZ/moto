@@ -37,8 +37,8 @@ class pinCasadiModel(cpin.Model):
             self.q, self.qn = moto.states(name + "_q", self.nq)
             if q_nom is not None:
                 assert q_nom.shape == (self.nq,), "q_nom has wrong shape"
-                self.q.default_value = q_nom
-                self.qn.default_value = q_nom
+                self.q.default_value(q_nom)
+                self.qn.default_value(q_nom)
             self.v, self.vn = moto.states(name + "_v", self.nv)
             self.aj = moto.inputs(name + "_aj", self.nj)
             self.ab = (self.vn - self.v)[:6] / dt
@@ -234,7 +234,8 @@ class pinCasadiModel(cpin.Model):
 dt = moto.inputs("dt", 1, default_val=0.02)
 dt_nom = moto.params("dt_nom", 1, default_val=0.02)
 # dt = 0.02
-go2 = load("go2", display=True, verbose=True)
+display = False
+go2 = load("go2", display=display, verbose=True)
 q_d = np.copy(go2.q0)
 root_joint = pin.JointModelComposite()
 root_joint.addJoint(pin.JointModelTranslation())
@@ -243,17 +244,17 @@ model = pin.buildModelFromUrdf(go2.urdf, root_joint)
 
 foot_frames = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
 model = pinCasadiModel(model, dt=dt, q_nom=q_d, dense=True, foot_frames=foot_frames)
-fmodel = model.fmodel
-config = pin.randomConfiguration(fmodel)
-config[:3] = np.random.rand(3) * 0.1
-data = fmodel.createData()
-pin.computeJointJacobians(fmodel, data, config)
-pin.updateFramePlacements(fmodel, data)
-np.set_printoptions(precision=1, suppress=True, linewidth=200)
-# print(pin.getFrameJacobian(fmodel, data, model.foot_idx[0], pin.LOCAL_WORLD_ALIGNED))
-jq, jv = pin.dIntegrate(fmodel, config, np.random.random(fmodel.nv))
-print(jq.shape, jv.shape)
-exit(0)
+# fmodel = model.fmodel
+# config = pin.randomConfiguration(fmodel)
+# config[:3] = np.random.rand(3) * 0.1
+# data = fmodel.createData()
+# pin.computeJointJacobians(fmodel, data, config)
+# pin.updateFramePlacements(fmodel, data)
+# np.set_printoptions(precision=1, suppress=True, linewidth=200)
+# # print(pin.getFrameJacobian(fmodel, data, model.foot_idx[0], pin.LOCAL_WORLD_ALIGNED))
+# jq, jv = pin.dIntegrate(fmodel, config, np.random.random(fmodel.nv))
+# print(jq.shape, jv.shape)
+# exit(0)
 
 prob = moto.ocp.create()
 prob.add(model.dyn)
@@ -322,7 +323,7 @@ sqp.apply_forward(gait_setup)
 import time
 
 start = time.perf_counter()
-sqp.update(100)
+sqp.update(30)
 print(f"sqp.update(100) took {time.perf_counter() - start:.3f} seconds")
 
 q_res = []
@@ -344,17 +345,19 @@ def get_sym(node: moto.sqp.data_type):
 
 sqp.apply_forward(get_sym)
 
-import time
+if display:
 
-while True:
-    for i in range(len(q_res)):
-        start = time.perf_counter()
-        go2.display(q_res[i])
-        if i is not N_horizon:
-            dt_ = dt_res[i]
-            while time.perf_counter() - start < dt_:
-                pass
-    time.sleep(0.5)
+    import time
+
+    while True:
+        for i in range(len(q_res)):
+            start = time.perf_counter()
+            go2.display(q_res[i])
+            if i is not N_horizon:
+                dt_ = dt_res[i]
+                while time.perf_counter() - start < dt_:
+                    pass
+        time.sleep(0.5)
 
 # def print_sym(node: moto.sqp.data_type):
 #     node.sym.print()
