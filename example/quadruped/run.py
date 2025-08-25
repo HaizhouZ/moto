@@ -111,12 +111,13 @@ class pinCasadiModel(cpin.Model):
         ]
 
         self.active_foot = [moto.params(f"af_{f}", 1, default_val=1) for f in foot_frames]  # active foot indicator
-        self.k_f = moto.params("k_f", default_val=300)  # kinematics constraint gain
+        self.k_f = moto.params("k_f", default_val=0)  # kinematics constraint gain
         self.z_clip = moto.params("z_c", 1, default_val=0.05)  # minimum height for the foot to be considered in contact
         self.kin_constr = [self.make_foot_kin_constr(i) for i in range(len(foot_frames))]
 
         self.f_f = [moto.inputs(f"f_{f}", 3, default_val=np.array([0.0, 0.0, 10.0])) for f in foot_frames]
         self.F_f = [self.foot_jacs[i].T @ (self.active_foot[i] * self.f_f[i]) for i in range(len(foot_frames))]
+        self.zf_constr = [self.make_zero_force_constr(i, f) for i, f in enumerate(self.f_f)]
 
         self.rnea = cpin.rnea(self, self.data, self.q_stack, self.v_stack, self.a_stack)
         if self.is_floating_based:
@@ -158,6 +159,7 @@ class pinCasadiModel(cpin.Model):
         self.v_f = cs.hcat(
             [cpin.getFrameVelocity(self, self.data, f, pin.LOCAL_WORLD_ALIGNED).linear for f in self.foot_idx]
         )
+
         return moto.constr(
             f"kin_{self.foot_frames[i]}",
             self.pos_args + self.vel_args + [self.k_f, *self.active_foot, self.z_clip],
@@ -166,6 +168,9 @@ class pinCasadiModel(cpin.Model):
             cs.vcat([self.v_f[:2, i], self.k_f * self.z_f[i] + self.v_f[2, i]]) * self.active_foot[i],
             # cs.vcat([v_f[:2, i], z_f[i]]) * active_foot[i],
         )
+
+    def make_zero_force_constr(self, i, f: moto.sym):
+        return moto.constr(f"zero_f_{self.foot_frames[i]}", [f, self.active_foot[i]], f * (1 - self.active_foot[i]))
 
     def make_fric_cone(self, i, f: moto.sym):
         cone = cs.vcat(
@@ -260,10 +265,11 @@ prob = moto.ocp.create()
 prob.add(model.dyn)
 prob.add(model.fric)
 prob.add(model.kin_constr)
+prob.add(model.zf_constr)
 model.add_dt_constr_and_cost(prob, dt_nom)
 prob.add(model.get_state_cost())
 prob.add(model.get_input_cost())
-# prob.add(model.make_foot_lift_cost(lifted=True))
+prob.add(model.make_foot_lift_cost(lifted=True))
 
 prob_term = prob.clone()
 prob_term.add(model.get_state_cost(terminal=True))
@@ -274,7 +280,7 @@ print("--" * 15)
 
 N_horizon = 100
 
-sqp = moto.sqp(n_job=8)
+sqp = moto.sqp(n_job=10)
 g = sqp.graph
 n0 = g.set_head(g.add(sqp.create_node(prob)))
 n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
@@ -323,7 +329,7 @@ sqp.apply_forward(gait_setup)
 import time
 
 start = time.perf_counter()
-sqp.update(10)
+sqp.update(30)
 print(f"sqp.update(100) took {time.perf_counter() - start:.3f} seconds")
 
 q_res = []

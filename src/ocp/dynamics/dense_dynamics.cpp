@@ -23,20 +23,20 @@ dense_dynamics::impl::approx_data::approx_data(generic_constr::approx_data &&rhs
     auto &in_args = func_.in_args();
     // setup f_y
     auto &first_y_arg = func_.in_args(__y)[0];
-    auto jac_y = approx_->jac_[__y].insert(f_st, prob.get_expr_start(first_y_arg), func_.dim(), func_.arg_dim(__y), sparsity::dense);
+    auto jac_y = approx_->jac_[__y].insert(f_st, prob.get_expr_start_tangent(first_y_arg), func_.dim(), func_.arg_tdim(__y), sparsity::dense);
     setup_map(f_y_, jac_y);
     // setup f_x
     auto &first_x_arg = func_.in_args(__x)[0];
-    auto jac_x = approx_->jac_[__x].insert(f_st, prob.get_expr_start(first_x_arg), func_.dim(), func_.arg_dim(__x), sparsity::dense);
+    auto jac_x = approx_->jac_[__x].insert(f_st, prob.get_expr_start_tangent(first_x_arg), func_.dim(), func_.arg_tdim(__x), sparsity::dense);
     setup_map(f_x_, jac_x);
     // set up projected f_x
-    auto p_x = dyn_proj_->proj_f_x_.insert(f_st, prob.get_expr_start(first_x_arg), func_.dim(), func_.arg_dim(__x), sparsity::dense);
+    auto p_x = dyn_proj_->proj_f_x_.insert(f_st, prob.get_expr_start_tangent(first_x_arg), func_.dim(), func_.arg_tdim(__x), sparsity::dense);
     setup_map(proj_f_x_, p_x);
     // setup f_u_all
     auto &first_u_arg = func_.in_args(__u)[0];
-    auto jac_u = approx_->jac_[__u].insert(f_st, prob.get_expr_start(first_u_arg), func_.dim(), func_.arg_dim(__u), sparsity::dense);
+    auto jac_u = approx_->jac_[__u].insert(f_st, prob.get_expr_start_tangent(first_u_arg), func_.dim(), func_.arg_tdim(__u), sparsity::dense);
     setup_map(f_u_all_, jac_u);
-    auto p_u = dyn_proj_->proj_f_u_.insert(f_st, prob.get_expr_start(first_u_arg), func_.dim(), func_.arg_dim(__u), sparsity::dense);
+    auto p_u = dyn_proj_->proj_f_u_.insert(f_st, prob.get_expr_start_tangent(first_u_arg), func_.dim(), func_.arg_tdim(__u), sparsity::dense);
     setup_map(proj_f_u_all_, p_u);
     // allocate f_u and proj_f_u_
     f_u_.reserve(func_.arg_num(__u));
@@ -47,19 +47,19 @@ dense_dynamics::impl::approx_data::approx_data(generic_constr::approx_data &&rhs
         if (f < field::num_prim && f != __y && f != __x) {
             // auto m = approx_->jac_[f].insert(f_st, prob.get_expr_start(arg), func_.dim(), arg->dim(), sparsity::dense);
             // new (&jac_[arg_idx]) matrix_ref(m);
-            auto cols = f_u_all_.middleCols(u_col_offset, arg->dim());
+            auto cols = f_u_all_.middleCols(u_col_offset, arg->tdim());
             new (&jac_[arg_idx]) matrix_ref(cols);
-            u_col_offset += arg->dim();
+            u_col_offset += arg->tdim();
             // if (f == __u) {
             //     // f_u_.push_back(aligned_map_t(m.data(), m.rows(), m.cols()));
             //     auto p = dyn_proj_->proj_f_u_.insert(f_st, prob.get_expr_start(arg), func_.dim(), arg->dim(), sparsity::dense);
             //     proj_f_u_.push_back(aligned_map_t(p.data(), p.rows(), p.cols()));
             // }
         } else if (f == __y) {
-            auto cols = f_y_.middleCols(prob.get_expr_start(arg), arg->dim());
+            auto cols = f_y_.middleCols(prob.get_expr_start_tangent(arg), arg->tdim());
             new (&jac_[arg_idx]) matrix_ref(cols);
         } else if (f == __x) {
-            auto cols = f_x_.middleCols(prob.get_expr_start(arg), arg->dim());
+            auto cols = f_x_.middleCols(prob.get_expr_start_tangent(arg), arg->tdim());
             new (&jac_[arg_idx]) matrix_ref(cols);
         }
         arg_idx++;

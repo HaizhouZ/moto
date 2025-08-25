@@ -1,6 +1,7 @@
 #include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
 #include <moto/utils/field_conversion.hpp>
+#include <Eigen/Eigenvalues>
 
 namespace moto {
 namespace solver {
@@ -20,10 +21,24 @@ void finalize_dual_newton_step(ns_node_data *cur) {
     // update hard constraint multipliers
     if (d.ncstr > 0 && d.rank_status_ != rank_status::unconstrained) {
         // LU.solve([rhs])
-        d.d_lbd_s_c_pre_solve.noalias() = -nsp.u_0_p_k - nsp.u_0_p_K * d.prim_step[__x] - nsp.U * d.prim_step[__u];
+        d.d_lbd_s_c_pre_solve.noalias() = -d.Q_u.transpose() - d.Q_ux * d.prim_step[__x] - d.Q_uu * d.prim_step[__u];
+        d.F_u.T_times<false>(d.d_lbd_f, d.d_lbd_s_c_pre_solve);
         // solve for hard constraint multiplers
-        d.d_lbd_s_c.noalias() = nsp.lu_eq_.transpose().solve(d.d_lbd_s_c_pre_solve);
+        // fmt::print("Q_y: \n{}\n", d.Q_y);
+        // fmt::print("Q_zz: \n{}\n", nsp.Q_zz);
+        // fmt::print("Q_zz eigenvalues: {}\n", nsp.Q_zz.eigenvalues().transpose());
+        // fmt::print("\n");
+        // fmt::print("Q_u: \n{}\n", d.Q_u);
+        // fmt::print("Q_yy: \n{}\n", d.Q_yy);
+        // // fmt::print("Z_u: \n{}\n", nsp.Z_u);
+        // // fmt::print("Z_y: \n{}\n", nsp.Z_y);
+        // fmt::print("Z_k: \n{}\n", nsp.z_K);
+        // // fmt::print("y_y_K: \n{}\n", nsp.y_y_K);
+        // fmt::print("y_0_p_k: \n{}\n", nsp.y_0_p_k.transpose());
+        // fmt::print("y_0_p_K: \n{}\n", nsp.y_0_p_K);
+        // fmt::print("d_lbd_f: \n{}\n", d.d_lbd_f.transpose());
         // fmt::print("d_lbd_s_c_pre_solve: \n{}\n", d.d_lbd_s_c_pre_solve.transpose());
+        d.d_lbd_s_c.noalias() = nsp.lu_eq_.transpose().solve(d.d_lbd_s_c_pre_solve);
         size_t cur_idx = 0;
         if (d.ns > 0) {
             // append last term in dynamics multipler computation
@@ -64,9 +79,8 @@ void finalize_newton_step_correction(ns_node_data *cur) {
     for (auto f : primal_fields) {
         d.prim_step[f] += d.prim_corr[f];
     }
-    /// correct bar{u}_0 (first order term)
-    nsp.u_0_p_k += nsp.z_u_k;
     /// update Q_y with correction
+    d.Q_u += d.dense_->jac_modification_[__u];
     d.Q_y += d.dense_->jac_modification_[__y];
 }
 void compute_kkt_residual(ns_node_data *cur) {
@@ -77,7 +91,7 @@ void compute_kkt_residual(ns_node_data *cur) {
     auto dense = d.dense_;
     // fmt::println("Q_y: {}", d.Q_y);
     auto &f_u = dense->approx_[__dyn].jac_[__u];
-    dense->res_stat_[__u].noalias() = d.Q_uu_bak * d.prim_step[__u] + d.Q_u_bak.transpose(); //d.d_lbd_f
+    dense->res_stat_[__u].noalias() = d.Q_uu_bak * d.prim_step[__u] + d.Q_u_bak.transpose(); // d.d_lbd_f
     f_u.right_T_times(d.dual_step[__dyn], dense->res_stat_[__u]);
     // dense->res_stat_[__u].noalias() += d.dual_step[__dyn].transpose() * f_u.dense();
     if (d.nc) {

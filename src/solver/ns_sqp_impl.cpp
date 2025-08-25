@@ -134,12 +134,12 @@ void ns_sqp::update(size_t n_iter) {
         timed_block_start("riccati_recursion");
         graph_.apply_backward(solver::ns_riccati::riccati_recursion, true);
         timed_block_end("riccati_recursion");
-        // timed_block_start("post solve");
+        timed_block_start("post solve");
         graph_.for_each_parallel(solver::ns_riccati::compute_primal_sensitivity);
-        // timed_block_end("post solve");
-        // timed_block_start("fwd_linear_rollout");
+        timed_block_end("post solve");
+        timed_block_start("fwd_linear_rollout");
         graph_.apply_forward(solver::ns_riccati::fwd_linear_rollout, true);
-        // timed_block_end("fwd_linear_rollout");
+        timed_block_end("fwd_linear_rollout");
 
         bool finalize_dual = true;
         bool update_res_stat = true;
@@ -149,12 +149,15 @@ void ns_sqp::update(size_t n_iter) {
             finalize_dual = false;   // do not finalize dual step
             update_res_stat = false; // do not update stationary residual
         }
+        timed_block_start("finalize_newton_step");
         graph_.for_each_parallel([finalize_dual, &setting_per_thread](size_t tid, data *d) {
             solver::ns_riccati::finalize_newton_step(d, finalize_dual);
             solver::ineq_soft::finalize_newton_step(d, false);
             // decide line search bounds (e.g., fraction-to-bounds)
             solver::ineq_soft::calculate_line_search_bounds(d, &setting_per_thread[tid]);
         });
+        timed_block_end("finalize_newton_step");
+        timed_block_start("corrector_step");
         finalize_bound_and_set_to_max();
         if (has_ineq && settings.ipm_enable_affine_step()) {
             // line search with max bounds
@@ -173,9 +176,9 @@ void ns_sqp::update(size_t n_iter) {
             graph_.for_each_parallel(solver::ineq_soft::first_order_correction_start);
             /// @todo compute the residuals
             // solve the problem again with updated mu
-            // timed_block_start("riccati_recursion_correction");
+            timed_block_start("riccati_recursion_correction");
             graph_.apply_backward(solver::ns_riccati::riccati_recursion_correction, true);
-            // timed_block_end("riccati_recursion_correction");
+            timed_block_end("riccati_recursion_correction");
             graph_.for_each_parallel(solver::ns_riccati::compute_primal_sensitivity_correction);
             graph_.apply_forward(solver::ns_riccati::fwd_linear_rollout_correction, true);
             graph_.for_each_parallel([n_iter](data *d) {
@@ -194,6 +197,8 @@ void ns_sqp::update(size_t n_iter) {
             });
             finalize_bound_and_set_to_max();
         }
+        timed_block_end("corrector_step");
+        timed_block_start("iterative_refinement");
         // iterative refinement if the step is too small
         if (has_ineq) {
             kkt_info info;
@@ -231,11 +236,13 @@ void ns_sqp::update(size_t n_iter) {
                 if (inf_res_stat_u < 1e-10 && inf_res_stat_y < 1e-10) {
                     break;
                 }
+                timed_block_start("iterative_refinement_step");
                 graph_.for_each_parallel(iterative_refinement_start);
                 graph_.apply_backward(solver::ns_riccati::riccati_recursion_correction, true);
                 graph_.for_each_parallel(solver::ns_riccati::compute_primal_sensitivity_correction);
                 graph_.apply_forward(solver::ns_riccati::fwd_linear_rollout_correction, true);
                 graph_.for_each_parallel(iterative_refinement_end);
+                timed_block_end("iterative_refinement_step");
                 // recompute line search bounds with the corrected newton step
                 settings.ls_config_reset();
                 for (size_t i : range(n_worker)) {
@@ -249,6 +256,7 @@ void ns_sqp::update(size_t n_iter) {
             }
             // }
         }
+        timed_block_end("iterative_refinement");
         /// @todo: update the line search stepsize?
         // real line search step
         graph_.for_each_parallel([this](data *d) {
@@ -303,8 +311,15 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info() {
             } else /// @todo: include initial jac[__x] inf norm if init is optimized
                 info.inf_dual_res = std::max(info.inf_dual_res, cur->dense().jac_[__y].cwiseAbs().maxCoeff());
             // fmt::println("------ step {} dual_res: ", step++);
-            // fmt::println("{}", cur->dense().jac_[__x].cwiseAbs().maxCoeff());
-            // fmt::println("prim {}: {}", step, cur->value(__u).transpose());
+            // fmt::println("x dual res {}", cur->dense().jac_[__x]);
+            // fmt::println("y dual res {}", cur->dense().jac_[__y]);
+            // fmt::println("u dual res {}", cur->dense().jac_[__u]);
+            // // fmt::println("prim {}: {}", step, cur->prim_step[__x
+            // // fmt::println("prim {}: {}", step, cur->value(__u).transpose());
+            // for (auto f : constr_fields) {
+            //     if (cur->dense().dual_[f].size() > 0)
+            //         fmt::println("dual {}: {}", f, cur->dense().dual_[f].transpose());
+            // }
             // fmt::println("dual {}: {}", step, cur->dense().dual_[__ineq_xu].transpose());
             // fmt::println("jac  {}: {}", step++, cur->dense().jac_[__u]);
             // fmt::println("{}", cur->dense().jac_[__y].cwiseAbs().maxCoeff());

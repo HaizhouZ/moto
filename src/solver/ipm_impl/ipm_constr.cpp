@@ -202,6 +202,7 @@ void ipm_constr::propagate_hessian(func_approx_data &d) const {
             for (auto &inner : outer) {
                 if (inner.size() != 0) {
                     inner.noalias() += d.jac_[outer_idx].transpose() * d.as<ipm_data>().diag_scaling.asDiagonal() * d.jac_[inner_idx];
+                    assert((d.as<ipm_data>().diag_scaling.array() > 0).all() && "diag_scaling must be positive");
                     if (inner.hasNaN()) {
                         fmt::print("NaN in hess[{}][{}]\n", outer_idx, inner_idx);
                     }

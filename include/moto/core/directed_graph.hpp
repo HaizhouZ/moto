@@ -103,7 +103,7 @@ class directed_graph {
         unary_view_.reserve(100 * n_jobs);
         binary_view_.reserve(100 * n_jobs);
     }
-    size_t& n_jobs() { return n_jobs_; } ///< get the number of jobs
+    size_t &n_jobs() { return n_jobs_; }                ///< get the number of jobs
     directed_graph(const directed_graph &rhs) = delete; ///< copy constructor is deleted
     /**
      * @brief add an edge from start node to end node with a given length
@@ -369,7 +369,7 @@ class directed_graph {
         }
     }
 
-    template <bool forward = true, typename callback_t>
+    template <bool forward = true, bool parallel = false, typename callback_t>
     void apply(callback_t &&callback, bool null_on_end = false) {
         constexpr bool is_unary = std::is_invocable_r_v<void, callback_t, data_type *>;
         constexpr bool is_unary_with_tid = std::is_invocable_r_v<void, callback_t, size_t, data_type *>;
@@ -446,7 +446,7 @@ class directed_graph {
         return nodes_;
     } ///< get the nodes in the graph
 
-    auto &tail() {return *tail_; } ///< get the tail node of the graph
+    auto &tail() { return *tail_; } ///< get the tail node of the graph
 
   private:
     size_t n_jobs_ = MAX_THREADS; ///< number of jobs to run in parallel

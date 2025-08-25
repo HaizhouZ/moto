@@ -62,9 +62,11 @@ class doubleIntegratorDyn : public expr_list {
     func make_zero_vel() {
         auto d = constr("doubleIntegratorDynamics_zero_vel", approx_order::first, 3, __eq_x);
         d->value = [](func_approx_data &data) {
+            // data.v_(0) = data[0](0);
             data.v_ = data[0];
         };
         d->jacobian = [](func_approx_data &data) {
+            // data.jac(0).diagonal() << 1, 1, 0;
             data.jac(0).diagonal().setOnes();
         };
         d->add_arguments({v});
