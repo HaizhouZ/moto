@@ -226,8 +226,8 @@ void ns_sqp::update(size_t n_iter) {
                     // }
                     step++;
                 });
-                fmt::print("  iterative refinement {}, res_stat_u: {:.3e}, res_stat_y: {:.3e}, res_stat_x: {:.3e}\n",
-                           iter_refine, inf_res_stat_u, inf_res_stat_y, inf_res_stat_x);
+                // fmt::print("  iterative refinement {}, res_stat_u: {:.3e}, res_stat_y: {:.3e}, res_stat_x: {:.3e}\n",
+                //            iter_refine, inf_res_stat_u, inf_res_stat_y, inf_res_stat_x);
                 if (inf_res_stat_u < 1e-10 && inf_res_stat_y < 1e-10) {
                     break;
                 }

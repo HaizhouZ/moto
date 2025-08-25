@@ -111,11 +111,11 @@ class pinCasadiModel(cpin.Model):
         ]
 
         self.active_foot = [moto.params(f"af_{f}", 1, default_val=1) for f in foot_frames]  # active foot indicator
-        self.k_f = moto.params("k_f", default_val=100)  # kinematics constraint gain
-        self.z_clip = moto.params("z_c", 1, default_val=0.01)  # minimum height for the foot to be considered in contact
+        self.k_f = moto.params("k_f", default_val=300)  # kinematics constraint gain
+        self.z_clip = moto.params("z_c", 1, default_val=0.05)  # minimum height for the foot to be considered in contact
         self.kin_constr = [self.make_foot_kin_constr(i) for i in range(len(foot_frames))]
 
-        self.f_f = [moto.inputs(f"f_{f}", 3, default_val=np.array([0.0, 0.0, 0.1])) for f in foot_frames]
+        self.f_f = [moto.inputs(f"f_{f}", 3, default_val=np.array([0.0, 0.0, 10.0])) for f in foot_frames]
         self.F_f = [self.foot_jacs[i].T @ (self.active_foot[i] * self.f_f[i]) for i in range(len(foot_frames))]
 
         self.rnea = cpin.rnea(self, self.data, self.q_stack, self.v_stack, self.a_stack)
@@ -162,7 +162,7 @@ class pinCasadiModel(cpin.Model):
             f"kin_{self.foot_frames[i]}",
             self.pos_args + self.vel_args + [self.k_f, *self.active_foot, self.z_clip],
             # [self.q, k_f, *active_foot, z_clip],
-            # cs.vcat([v_f[:2, i], k_f * cs.tanh(z_f[i]) * z_clip + v_f[2, i]]) * active_foot[i],
+            # cs.vcat([self.v_f[:2, i], self.k_f * cs.tanh(self.z_f[i]) * self.z_clip + self.v_f[2, i]]) * self.active_foot[i],
             cs.vcat([self.v_f[:2, i], self.k_f * self.z_f[i] + self.v_f[2, i]]) * self.active_foot[i],
             # cs.vcat([v_f[:2, i], z_f[i]]) * active_foot[i],
         )
@@ -231,9 +231,9 @@ class pinCasadiModel(cpin.Model):
             return foot_lift_cost
 
 
-dt = moto.inputs("dt", 1, default_val=0.02)
+# dt = moto.inputs("dt", 1, default_val=0.02)
 dt_nom = moto.params("dt_nom", 1, default_val=0.02)
-# dt = 0.02
+dt = 0.02
 display = False
 go2 = load("go2", display=display, verbose=True)
 q_d = np.copy(go2.q0)
@@ -241,7 +241,7 @@ root_joint = pin.JointModelComposite()
 root_joint.addJoint(pin.JointModelTranslation())
 root_joint.addJoint(pin.JointModelSpherical())
 model = pin.buildModelFromUrdf(go2.urdf, root_joint)
-
+np.set_printoptions(precision=3, suppress=True, linewidth=200)
 foot_frames = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
 model = pinCasadiModel(model, dt=dt, q_nom=q_d, dense=True, foot_frames=foot_frames)
 # fmodel = model.fmodel
@@ -263,7 +263,7 @@ prob.add(model.kin_constr)
 model.add_dt_constr_and_cost(prob, dt_nom)
 prob.add(model.get_state_cost())
 prob.add(model.get_input_cost())
-prob.add(model.make_foot_lift_cost(lifted=True))
+# prob.add(model.make_foot_lift_cost(lifted=True))
 
 prob_term = prob.clone()
 prob_term.add(model.get_state_cost(terminal=True))
@@ -323,7 +323,7 @@ sqp.apply_forward(gait_setup)
 import time
 
 start = time.perf_counter()
-sqp.update(30)
+sqp.update(10)
 print(f"sqp.update(100) took {time.perf_counter() - start:.3f} seconds")
 
 q_res = []

@@ -131,17 +131,19 @@ void ipm_constr::value_impl(func_approx_data &data) const {
     auto &d = data.as<ipm_data>();
     d.g_ = d.v_;            //.cwiseMin(-d.reg_);
     d.v_ = d.g_ + d.slack_; // r_g = g_ + slack
-    for (size_t i = 0; i < dim_; i++) {
-        if (d.slack_(i) < 1e-4 && d.g_(i) < 1e-4) {
-            d.reg_(i) = 1e-8; // regularization for slack variables
-            d.active_[i] = 0; // active constraint
-            // d.slack_(i) = 0;
-        } else {
-            d.active_[i] = 0; // inactive constraint
-            d.reg_(i) = 1e-8; // regularization for slack variables
-        }
-    }
-    d.active_.array() = 1 - d.active_.array(); // invert the active set
+    // for (size_t i = 0; i < dim_; i++) {
+    //     if (d.slack_(i) < 1e-8 && d.g_(i) < 1e-8) {
+    //         d.reg_(i) = 1e-8; // regularization for slack variables
+    //         d.active_[i] = 0; // active constraint
+    //         d.slack_(i) = 1e-8;
+    //     } else {
+    //         d.active_[i] = 0; // inactive constraint
+    //         d.reg_(i) = 1e-8; // regularization for slack variables
+    //     }
+    // }
+    d.reg_.setConstant(1e-8);
+    d.active_.setConstant(1.0);
+    // d.active_.array() = 1 - d.active_.array(); // invert the active set
     d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array();
 }
 void ipm_constr::jacobian_impl(func_approx_data &data) const {
