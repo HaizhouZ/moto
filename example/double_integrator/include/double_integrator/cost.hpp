@@ -23,10 +23,13 @@ struct doubleIntegratorCosts {
             data.jac_[1].noalias() += data[1].transpose() * d_v.asDiagonal();
         };
         c->hessian = [=, this](func_approx_data &data) {
-            data.merit_hess_[0][0].diagonal() += d_r;
-            data.merit_hess_[1][1].diagonal() += d_v;
+            // data.merit_hess_[0][0].diagonal() += d_r;
+            // data.merit_hess_[1][1].diagonal() += d_v;
+            data.merit_hess_[0][0] += d_r;
+            data.merit_hess_[1][1] += d_v;
         };
         c->add_arguments({r, v});
+        c.set_diag_hess();
         return c;
     }
 
@@ -40,9 +43,11 @@ struct doubleIntegratorCosts {
             data.jac_[0].noalias() += data[0].transpose() * d_a.asDiagonal();
         };
         c->hessian = [=, this](func_approx_data &data) {
-            data.merit_hess_[0][0].diagonal() += d_a;
+            // data.merit_hess_[0][0].diagonal() += d_a;
+            data.merit_hess_[0][0] += d_a;
         };
         c->add_arguments({a});
+        c.set_diag_hess();
         return c;
     }
 
