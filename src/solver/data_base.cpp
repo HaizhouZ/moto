@@ -1,5 +1,9 @@
 #include <moto/solver/data_base.hpp>
 
+
+// #define ENABLE_TIMED_BLOCK
+#include <moto/utils/timed_block.hpp>
+
 namespace moto {
 namespace solver {
 data_base::data_base(sym_data *s, merit_data *dense)
@@ -24,20 +28,28 @@ data_base::data_base(sym_data *s, merit_data *dense)
     }
 }
 void data_base::merge_jacobian_modification() {
+    timed_block_start("backup_jacobian");
     Q_u_bak = Q_u; // backup
     Q_x_bak = Q_x;
     Q_y_bak = Q_y;
+    timed_block_end("backup_jacobian");
+    timed_block_start("merge_jacobian_modification");
     for (const auto &field : primal_fields) {
         dense_->jac_[field] += dense_->jac_modification_[field];
     }
+    timed_block_end("merge_jacobian_modification");
+    timed_block_start("backup_hessian");
     Q_uu_bak = Q_uu; // backup
     Q_yy_bak = Q_yy;
     Q_xx_bak = Q_xx;
+    timed_block_end("backup_hessian");
+    timed_block_start("merge_hessian_modification");
     for (size_t i = 0; i < field::num_prim; i++) {
         for (size_t j = i; j < field::num_prim; j++) {
             dense_->hessian_[j][i] += dense_->hessian_modification_[j][i];
         }
     }
+    timed_block_end("merge_hessian_modification");
 }
 
 void data_base::swap_jacobian_modification() {

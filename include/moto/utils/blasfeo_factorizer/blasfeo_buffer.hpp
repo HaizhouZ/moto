@@ -28,24 +28,33 @@ struct buffer {
             ::operator delete(mem_, std::align_val_t(64));
     }
 };
-struct blasfeo_buffer {
-    blasfeo_dmat data_;
+template <typename DataType>
+struct blasfeo_buffer_tpl {
+    DataType data_;
     void *mem_ = nullptr;
     size_t size_ = 0;
 
-    blasfeo_buffer() : mem_(nullptr) {}
+    blasfeo_buffer_tpl() : mem_(nullptr) {}
     void resize(size_t r, size_t c) {
-        size_t required_size = blasfeo_memsize_dmat(r, c);
+        size_t required_size;
+        if constexpr (std::is_same_v<DataType, blasfeo_dmat>)
+            required_size = blasfeo_memsize_dmat(r, c);
+        else {
+            assert(c == 1); // blasfeo_dvec only has one column
+            required_size = blasfeo_memsize_dvec(r);
+        }
         if (size_ < required_size) {
             if (mem_ != nullptr)
                 v_free_align(mem_);
-            int B_size = blasfeo_memsize_dmat(r, c); // size of memory needed by B
-            v_zeros_align(&mem_, B_size);
+            v_zeros_align(&mem_, required_size);
             size_ = required_size;
         }
-        blasfeo_create_dmat(r, c, &data_, mem_);
+        if constexpr (std::is_same_v<DataType, blasfeo_dmat>)
+            blasfeo_create_dmat(r, c, &data_, mem_);
+        else
+            blasfeo_create_dvec(r, &data_, mem_);
     }
-    ~blasfeo_buffer() {
+    ~blasfeo_buffer_tpl() {
         if (mem_ != nullptr)
             v_free_align(mem_);
     }
@@ -55,51 +64,29 @@ struct blasfeo_buffer {
     void from_eigen(const T &eigen_mat) {
         // Pack the data from the Eigen matrix into the BLASFEO matrix
         resize(eigen_mat.rows(), eigen_mat.cols());
-        blasfeo_pack_dmat(eigen_mat.rows(), eigen_mat.cols(), (double *)eigen_mat.data(), eigen_mat.rows(), &data_, 0, 0);
+        if constexpr (std::is_same_v<DataType, blasfeo_dmat>)
+            blasfeo_pack_dmat(eigen_mat.rows(), eigen_mat.cols(), (double *)eigen_mat.data(), eigen_mat.rows(), &data_, 0, 0);
+        else
+            blasfeo_pack_dvec(eigen_mat.rows(), (double *)eigen_mat.data(), 1, &data_, 0);
     }
     // Helper function to convert blasfeo_dmat to Eigen::MatrixXd.
     // This unpacks data from a BLASFEO matrix into an Eigen matrix.
     template <typename T>
     void to_eigen(T &eigen_mat) {
         // Resize the Eigen matrix to match BLASFEO matrix dimensions
-        eigen_mat.resize(data_.m, data_.n);
         // Unpack the data from the BLASFEO matrix into the Eigen matrix
-        blasfeo_unpack_dmat(data_.m, data_.n, &data_, 0, 0, (double *)eigen_mat.data(), eigen_mat.rows());
-    }
-};
-
-struct blasfeo_llt {
-    blasfeo_buffer L_, U_; // Lower triangular matrix from LLT
-    blasfeo_buffer rhs_, res_;
-
-    bool valid() const {
-        for(size_t i = 0; i < L_.data_.m; i++) {
-            for (size_t j = 0; j <= i; j++) {
-                double& v = BLASFEO_DMATEL(&L_.data_, i, j);
-                if (std::isnan(v) || std::isinf(v))
-                    return false;
-            }
+        if constexpr (std::is_same_v<DataType, blasfeo_dmat>) {
+            eigen_mat.resize(data_.m, data_.n);
+            blasfeo_unpack_dmat(data_.m, data_.n, &data_, 0, 0, (double *)eigen_mat.data(), eigen_mat.rows());
+        } else {
+            eigen_mat.resize(data_.m);
+            blasfeo_unpack_dvec(data_.m, &data_, 0, (double *)eigen_mat.data(), 1);
         }
-        return true;
-    }
-    void compute(matrix &A) {
-        L_.from_eigen(A);
-        U_.resize(L_.data_.m, L_.data_.n);
-        blasfeo_dpotrf_l(A.rows(), &L_.data_, 0, 0, &L_.data_, 0, 0);
-    }
-    template <typename rhs_type, typename res_type>
-    void solve(const rhs_type &b, res_type &a, double alpha = 1.0) {
-        size_t size = L_.data_.m;
-        assert(b.rows() == size && a.rows() == size);
-        assert(b.cols() == a.cols());
-        rhs_.from_eigen(b);
-        res_.resize(size, b.cols());
-        blasfeo_dtrsm_llnn(size, b.cols(), alpha, &L_.data_, 0, 0, &rhs_.data_, 0, 0, &res_.data_, 0, 0);
-        blasfeo_dtrtr_l(size, &L_.data_, 0, 0, &U_.data_, 0, 0);
-        blasfeo_dtrsm_lunn(size, b.cols(), 1, &U_.data_, 0, 0, &res_.data_, 0, 0, &res_.data_, 0, 0);
-        res_.to_eigen(a);
     }
 };
+
+using blasfeo_buffer = blasfeo_buffer_tpl<blasfeo_dmat>;
+using blasfeo_vec_buffer = blasfeo_buffer_tpl<blasfeo_dvec>;
 
 } // namespace utils
 } // namespace moto

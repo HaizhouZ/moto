@@ -280,7 +280,7 @@ print("--" * 15)
 
 N_horizon = 100
 
-sqp = moto.sqp(n_job=10)
+sqp = moto.sqp(n_job=8)
 g = sqp.graph
 n0 = g.set_head(g.add(sqp.create_node(prob)))
 n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
@@ -329,7 +329,7 @@ sqp.apply_forward(gait_setup)
 import time
 
 start = time.perf_counter()
-sqp.update(30)
+sqp.update(100)
 print(f"sqp.update(100) took {time.perf_counter() - start:.3f} seconds")
 
 q_res = []

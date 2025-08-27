@@ -2,7 +2,7 @@
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
 #include <moto/utils/field_conversion.hpp>
 
-#define ENABLE_TIMED_BLOCK
+// #define ENABLE_TIMED_BLOCK
 #include <moto/utils/timed_block.hpp>
 
 namespace moto {

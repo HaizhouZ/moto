@@ -7,8 +7,9 @@
 namespace moto {
 
 /// fwd declaration
-template <typename _MatrixType>
-class PartialPivLU;
+namespace utils {
+struct blasfeo_lu;
+}
 
 struct dense_dynamics : public func {
     class impl : public generic_dynamics {
@@ -17,7 +18,7 @@ struct dense_dynamics : public func {
         struct approx_data : public generic_dynamics::approx_data {
             // sparse_mat proj_f_x_;
             // sparse_mat proj_f_u_;
-            using lu_t = Eigen::PartialPivLU<matrix>;
+            using lu_t = utils::blasfeo_lu;
             movable_ptr<lu_t> lu_;                             ///< LU decomposition for dense dynamics
             aligned_map_t f_x_, f_y_, f_u_all_, proj_f_u_all_; ///< Jacobian of f_y
             std::vector<aligned_map_t> f_u_;                   ///< Jacobian of other fields

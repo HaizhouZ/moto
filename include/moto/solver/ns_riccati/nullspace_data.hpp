@@ -5,7 +5,7 @@
 
 #include <Eigen/Cholesky>
 #include <Eigen/LU>
-#include <moto/utils/blasfeo_factorization.hpp>
+#include <moto/utils/blasfeo_factorizer/blasfeo_llt.hpp>
 
 namespace moto {
 namespace solver {

@@ -1,6 +1,10 @@
 #include <Eigen/Eigenvalues>
 #include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
+
+// #define ENABLE_TIMED_BLOCK
+#include <moto/utils/timed_block.hpp>
+
 // #define SHOW_NSP_DEBUG
 
 namespace moto {
@@ -13,10 +17,14 @@ void ns_factorization(ns_node_data *cur) {
     auto &d = *cur;
     auto &nsp = *d.nsp_;
     auto &_approx = d.dense_->approx_;
+    timed_block_start("update_projected_dynamics");
     cur->update_projected_dynamics();
+    timed_block_end("update_projected_dynamics");
     // auto &F = _approx[__dyn].jac_;
     // partial value derivative
+    timed_block_start("merge_jacobian_modification");
     cur->merge_jacobian_modification();
+    timed_block_end("merge_jacobian_modification");
     // d.Q_x.noalias() += -d.F_0.transpose() * d.Q_yx;
     // nsp.Q_yy_F_x = -d.Q_yx;
     nsp.u_0_p_k = d.Q_u.transpose();
@@ -63,7 +71,7 @@ void ns_factorization(ns_node_data *cur) {
         nsp.s_c_stacked.conservativeResize(d.ncstr, Eigen::NoChange);
         nsp.s_c_stacked.setZero();
         d.d_lbd_s_c.conservativeResize(d.ncstr);
-
+        timed_block_start("copy_lhs_derivatives");
         if (constr_s) {
             nsp.s_u.setZero();
             d.s_y.times<false>(d.F_u, nsp.s_u);
@@ -75,8 +83,11 @@ void ns_factorization(ns_node_data *cur) {
             d.c_u.dump_into(nsp.s_c_stacked.bottomRows(d.nc), spmm::dump_config{.overwrite = true});
             // nsp.s_c_stacked.bottomRows(d.nc) = _approx[__eq_xu].jac_[__u];
         }
+        timed_block_end("copy_lhs_derivatives");
+        timed_block_start("lu_eq_compute");
         nsp.lu_eq_.compute(nsp.s_c_stacked);
         nsp.rank = nsp.lu_eq_.rank();
+        timed_block_end("lu_eq_compute");
         auto &rank = nsp.rank;
 #ifdef SHOW_NSP_DEBUG
         fmt::print("rank of equality constraints: {}\n", rank);
@@ -92,7 +103,9 @@ void ns_factorization(ns_node_data *cur) {
                 fmt::print("warning: fully constrained node detected\n");
 #endif
             } else {
+                timed_block_start("compute_nullspace");
                 nsp.Z_u = nsp.lu_eq_.kernel();
+                timed_block_end("compute_nullspace");
                 // auto &cod = nsp.lu_eq_;
                 // matrix V = cod.matrixZ().transpose();
                 // matrix Null_space = V.block(0, cod.rank(), V.rows(), V.cols() - cod.rank());
@@ -106,9 +119,11 @@ void ns_factorization(ns_node_data *cur) {
                 //     fmt::print("Z_u:\n{}\n", ((nsp.Z_u.transpose() * nsp.Z_u) - Eigen::MatrixXd::Identity(nullity, nullity)).cwiseAbs());
                 //     throw std::runtime_error("Numerical issue detected: nullspace basis is not orthonormal");
                 // }
+                timed_block_start("compute_Zy");
                 nsp.Z_y.resize(d.ny, nsp.Z_u.cols());
                 nsp.Z_y.setZero();
                 d.F_u.times<false>(nsp.Z_u, nsp.Z_y);
+                timed_block_end("compute_Zy");
 
                 // matrix stacked_Z = matrix::Zero(d.nu + d.ny, nsp.Z_u.cols());
                 // stacked_Z << nsp.Z_u, nsp.Z_y;
@@ -140,8 +155,10 @@ void ns_factorization(ns_node_data *cur) {
 #endif
                 // fmt::print("nullspace :\n {}\n", nsp.Z.cols());
                 d.rank_status_ = rank_status::constrained;
+                timed_block_start("compute_Qzz");
                 nsp.Q_zz.conservativeResize(nsp.Z_u.cols(), nsp.Z_u.cols());
                 nsp.Q_zz.noalias() = nsp.Z_u.transpose() * d.Q_uu * nsp.Z_u;
+                timed_block_end("compute_Qzz");
                 nsp.z_k.conservativeResize(nsp.Z_u.cols());
                 nsp.z_K.conservativeResize(nsp.Z_u.cols(), d.nx);
                 nsp.z_0_k.conservativeResize(nsp.Z_u.cols());
@@ -152,6 +169,7 @@ void ns_factorization(ns_node_data *cur) {
         nsp.s_c_stacked_0_k.conservativeResize(d.ncstr);
         nsp.s_c_stacked_0_K.conservativeResize(d.ncstr, Eigen::NoChange);
         nsp.s_c_stacked_0_K.setZero();
+        timed_block_start("setup ns residuals");
         if (constr_s) {
             // nsp.s_0_p_k.noalias() =
             //     _approx[__eq_x].v_ - nsp.s_y * nsp.F_0_k;
@@ -173,28 +191,36 @@ void ns_factorization(ns_node_data *cur) {
             // nsp.s_c_stacked_0_K.bottomRows(d.nc) = _approx[__eq_xu].jac_[__x];
             d.c_x.dump_into(nsp.s_c_stacked_0_K.bottomRows(d.nc));
         }
+        timed_block_end("setup ns residuals");
         if (d.rank_status_ != rank_status::unconstrained) {
+            timed_block_start("precompute_u_y");
             // pre compute
             nsp.u_y_k.noalias() = nsp.lu_eq_.solve(nsp.s_c_stacked_0_k);
             nsp.u_y_K.noalias() = nsp.lu_eq_.solve(nsp.s_c_stacked_0_K);
+            timed_block_end("precompute_u_y");
+            timed_block_start("precompute_u0p");
             nsp.u_0_p_k.noalias() -= d.Q_uu * nsp.u_y_k;
             nsp.u_0_p_K.noalias() -= d.Q_uu * nsp.u_y_K;
+            timed_block_end("precompute_u0p");
+            timed_block_start("precompute_z0");
             if (d.rank_status_ != rank_status::fully_constrained) {
                 nsp.z_0_k.noalias() = nsp.Z_u.transpose() * nsp.u_0_p_k;
                 nsp.z_0_K.noalias() = nsp.Z_u.transpose() * nsp.u_0_p_K;
             }
+            timed_block_end("precompute_z0");
             // fmt::print("jac: \n {}\n", nsp.s_c_stacked);
             // fmt::print("nyk :\n {}\n", nsp.u_y_k.transpose());
             // fmt::print("scstacked_0_K :\n {}\n", nsp.s_c_stacked_0_K);
             // fmt::print("nyK :\n {}\n", nsp.u_y_K);
             // fmt::print("F_u: \n{}\n", nsp.F_u.transpose());
             // fmt::print("F_0_K: \n{}\n", nsp.F_0_K.transpose());
+            timed_block_start("precompute_y_y");
             nsp.y_y_k = d.F_0;
             d.F_u.times<false>(nsp.u_y_k, nsp.y_y_k);
             nsp.y_y_K.setZero();
             d.F_x.dump_into(nsp.y_y_K);
             d.F_u.times<false>(nsp.u_y_K, nsp.y_y_K);
-
+            timed_block_end("precompute_y_y");
 // print_debug(cur);
 #ifdef SHOW_NSP_DEBUG
             fmt::print("scstacked :\n {}\n", nsp.s_c_stacked);
@@ -227,8 +253,10 @@ void ns_factorization(ns_node_data *cur) {
                 // fmt::print("eq xu K residual {}\n", (d.c_u.dense() * nsp.u_y_K - cur->dense_->approx_[__eq_xu].jac_[__x].dense()).cwiseAbs().maxCoeff());
             }
 #endif
+            timed_block_start("update_value_derivative");
             d.Q_x.noalias() -= nsp.u_0_p_k.transpose() * nsp.u_y_K + nsp.u_y_k.transpose() * d.Q_ux + nsp.y_y_k.transpose() * d.Q_yx;
             d.Q_xx.noalias() -= nsp.u_0_p_K.transpose() * nsp.u_y_K + nsp.u_y_K.transpose() * d.Q_ux + nsp.y_y_K.transpose() * d.Q_yx;
+            timed_block_end("update_value_derivative");
 
             if (d.rank_status_ == rank_status::fully_constrained) {
                 d.d_u.K = -nsp.u_y_K;

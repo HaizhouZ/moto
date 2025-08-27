@@ -63,7 +63,6 @@ inline void parallel_for(size_t start, size_t stop, callback_t &&callback, size_
 }
 
 template <typename callback_t>
-    requires std::invocable<callback_t, size_t>
 inline void sequential_for(size_t start, size_t stop, callback_t &&callback, size_t n_jobs = MAX_THREADS) {
 
     size_t n_threads = n_jobs;
@@ -80,7 +79,13 @@ inline void sequential_for(size_t start, size_t stop, callback_t &&callback, siz
 #pragma omp ordered
 #endif
         for (size_t i = begin; i < end; ++i) {
-            callback(i);
+            if constexpr (std::invocable<callback_t, size_t>)
+                callback(i);
+            else if constexpr (std::invocable<callback_t, size_t, size_t>)
+                callback(j, i); // pass thread id as second argument
+            else
+                static_assert(always_false<callback_t>,
+                              "callback must be invocable with size_t or [size_t, size_t]");
         }
     }
     // } catch (...) {

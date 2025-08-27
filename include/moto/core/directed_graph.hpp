@@ -404,28 +404,31 @@ class directed_graph {
             }
             while (binary_view_.update()) {
                 if constexpr (is_binary_with_tid) {
-                    sequential_for(
-                        0, binary_view_.size(),
-                        [&callback, this](size_t tid, size_t i) {
-                            callback(tid, binary_view_[i].first, binary_view_[i].second);
-                        },
-                        n_jobs_);
-                } else
-                    sequential_for(
-                        0, binary_view_.size(),
-                        [&callback, this](size_t i) {
-                            callback(binary_view_[i].first, binary_view_[i].second);
-                        },
-                        n_jobs_);
+                    auto job = [&callback, this](size_t tid, size_t i) {
+                        callback(tid, binary_view_[i].first, binary_view_[i].second);
+                    };
+                    if constexpr (parallel)
+                        parallel_for(0, binary_view_.size(), job, n_jobs_);
+                    else
+                        sequential_for(0, binary_view_.size(), job, n_jobs_);
+                } else{
+                    auto job = [&callback, this](size_t i) {
+                        callback(binary_view_[i].first, binary_view_[i].second);
+                    };
+                    if constexpr (parallel)
+                        parallel_for(0, binary_view_.size(), job, n_jobs_);
+                    else
+                        sequential_for(0, binary_view_.size(), job, n_jobs_);
+                }
             }
         } else {
             static_assert(false, "Callback function arity not supported in apply()");
         }
     }
 
-    template <typename callback_t>
+    template <bool parallel = false, typename callback_t>
     void apply_forward(callback_t &&callback, bool null_on_end = false) {
-        apply<true>(std::forward<callback_t>(callback), null_on_end);
+        apply<true, parallel>(std::forward<callback_t>(callback), null_on_end);
     } ///< apply function in forward direction
 
     template <typename callback_t>

@@ -1,6 +1,7 @@
-#include <Eigen/LU>
+// #include <Eigen/LU>
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
 #include <moto/ocp/problem.hpp>
+#include <moto/utils/blasfeo_factorizer/blasfeo_lu.hpp>
 
 namespace moto {
 
@@ -68,18 +69,18 @@ dense_dynamics::impl::approx_data::approx_data(generic_constr::approx_data &&rhs
 
 void dense_dynamics::impl::apply_jac_y_inverse_transpose(func_approx_data &data, vector_ref v, vector_ref dst) const {
     auto &d = data.as<approx_data>();
-    dst.noalias() = d.lu_->transpose().solve(v);
+    d.lu_->transpose_solve(v, dst);
 }
 
 void dense_dynamics::impl::compute_project_derivatives(func_approx_data &data) const {
     auto &d = data.as<approx_data>();
     d.lu_->compute(d.f_y_);             // LU decomposition of the dense Jacobian
-    d.proj_f_x_ = d.lu_->solve(d.f_x_); // Solve for the projection of f_x
+    d.lu_->solve(d.f_x_, d.proj_f_x_); // Solve for the projection of f_x
     // for (size_t i = 0; i < d.f_u_.size(); ++i) {
     //     d.proj_f_u_[i] = d.lu_->solve(d.f_u_[i]); // Solve for the projection of f_u
     // }
-    d.proj_f_u_all_.noalias() = d.lu_->solve(d.f_u_all_); // Solve for the projection of f_u_all
-    d.proj_f_res_.noalias() = d.lu_->solve(d.approx_->v_); // Solve for the projection of f_res
+    d.lu_->solve(d.f_u_all_, d.proj_f_u_all_); // Solve for the projection of f_u_all
+    d.lu_->solve(d.approx_->v_, d.proj_f_res_); // Solve for the projection of f_res
 }
 
 } // namespace moto
