@@ -22,7 +22,10 @@ struct sparse_mat {
     bool is_empty() const {
         return dense_panels_.empty() && diag_panels_.empty() && eye_panels_.empty();
     }
+    sparse_mat &operator=(const sparse_mat &other);
+    void setZero();
     void resize(size_t rows, size_t cols);
+    bool valid() const;
     matrix_ref insert(size_t r_st, size_t c_st, size_t r, size_t c, sparsity sp);
     template <sparsity Sp>
         requires(Sp == sparsity::diag || Sp == sparsity::eye)
@@ -60,7 +63,7 @@ struct sparse_mat {
     EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, sparse_mat, vector);             \
     EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix, matrix);                 \
     EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix, matrix::AlignedMapType); \
-    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix::AlignedMapType, matrix);        \
+    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix::AlignedMapType, matrix); \
     EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix, vector);                 \
     EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, row_vector, row_vector);         \
     EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, row_vector, vector);             \

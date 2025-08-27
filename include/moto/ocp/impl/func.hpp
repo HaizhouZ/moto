@@ -45,12 +45,14 @@ class generic_func : public expr {
     array_type<size_t, primal_fields> arg_dim_{};
     array_type<size_t, primal_fields> arg_tdim_{};
     array_type<size_t, primal_fields> arg_num_{};
-    array_type<std::set<size_t>, primal_fields> arg_uid_; ///< argument index for x, u, y
+
+    std::vector<std::vector<sparsity>> hess_sp_;
 
     std::unordered_map<size_t, size_t> sym_uid_idx_;
 
     friend class func_codegen;
     friend class func_arg_map;
+    friend class func_approx_data;
 
     void substitute(const sym &arg, const sym &rhs);
     void set_from_casadi(const var_inarg_list &in_args, const cs::SX &out);
@@ -60,6 +62,7 @@ class generic_func : public expr {
     virtual void jacobian_impl(func_approx_data &data) const;
     virtual void hessian_impl(func_approx_data &data) const;
     virtual void load_external_impl(const std::string &path = "gen");
+    virtual void set_hess_sparsity_impl() {}
 
     generic_func(const generic_func &) = default;
     generic_func &operator=(const generic_func &) = default;
@@ -79,6 +82,11 @@ class generic_func : public expr {
         set_from_casadi(in_args, out);
     }
 
+    void field_access_guard(field_t field) const {
+        assert(finalized_ && "function not finalized");
+        assert(in_field(field, primal_fields) && "field out of range");
+    } ///< guard access to field-based members
+
   public:
     virtual void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const {}
 
@@ -90,28 +98,27 @@ class generic_func : public expr {
     const auto &in_args(size_t i) const { return in_args_[i]; }
 
     const auto &in_args(field_t field) const {
-        assert(in_field(field, primal_fields) && "field out of range");
+        field_access_guard(field);
         return arg_by_field_[field];
     } ///< get the input arguments for a given field
 
     auto arg_num(field_t field) const {
-        assert(in_field(field, primal_fields) && "field out of range");
-        return arg_num_[field];
+        field_access_guard(field);
+        return arg_by_field_[field].size();
     } ///< get the number of arguments for a given field
 
     auto arg_dim(field_t field) const {
-        assert(in_field(field, primal_fields) && "field out of range");
+        field_access_guard(field);
         return arg_dim_[field];
     } ///< get the dimension of the argument for a given field
 
     auto arg_tdim(field_t field) const {
-        assert(in_field(field, primal_fields) && "field out of range");
+        field_access_guard(field);
         return arg_tdim_[field];
     } ///< get the tangent dimension of the argument for a given field
 
     bool has_arg(const sym &s) const {
-        assert(in_field(s.field(), primal_fields) && "field out of range");
-        return arg_uid_[s.field()].contains(s.uid());
+        return sym_uid_idx_.contains(s.uid());
     } ///< check if the function has argument for a given field
 
     template <typename T>
@@ -121,15 +128,6 @@ class generic_func : public expr {
     void add_argument(T &&in) {
         auto &s = in_args_.emplace_back(std::forward<T>(in));
         add_dep(s);
-        auto f = s->field();
-        if (in_field(f, primal_fields)) {
-            arg_dim_[f] += s->dim();
-            arg_tdim_[f] += s->tdim();
-            arg_num_[f]++;
-            arg_by_field_[f].emplace_back(s);
-            arg_uid_[f].insert(s->uid());
-        }
-        sym_uid_idx_[s->uid()] = sym_uid_idx_.size();
     }
     void add_arguments(const var_inarg_list &args) {
         for (sym &in : args) {

@@ -76,7 +76,11 @@ void generic_constr::finalize_impl() {
     if (in_field(field_, std::array{__eq_x, __ineq_x, __eq_x_soft})) {
         // do in_arg substitute
         try {
-            bool pure_x = arg_dim(__y) == 0;
+            bool pure_x = true;
+            for (const sym &arg : in_args_) {
+                if (arg.field() == __y)
+                    pure_x = false;
+            }
             for (sym &arg : in_args_) {
                 // here is a bit tricky, we substitute __x to __y if only __x exists in the in_args
                 // but __y existing dont mean the constraint is solvable - probably it is not

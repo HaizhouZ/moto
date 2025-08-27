@@ -104,10 +104,14 @@ void func_approx_data::setup_hessian() {
                         /// h[i][j] = h[j][i] if i, j in the same field or field(i) < field(j)
                         /// otherwise only keep h[i][j] (empty)
                         if (field_1 >= field_2) {
-                            merit_hess_[i].push_back((*hessian)[field_1][field_2].block(
+                            // merit_hess_[i].push_back((*hessian)[field_1][field_2].block(
+                            //     raw.prob_->get_expr_start_tangent(in_args[i]),
+                            //     raw.prob_->get_expr_start_tangent(in_args[j]),
+                            //     in_args[i]->tdim(), in_args[j]->tdim()));
+                            merit_hess_[i].push_back((*hessian)[field_1][field_2].insert(
                                 raw.prob_->get_expr_start_tangent(in_args[i]),
                                 raw.prob_->get_expr_start_tangent(in_args[j]),
-                                in_args[i]->tdim(), in_args[j]->tdim()));
+                                in_args[i]->tdim(), in_args[j]->tdim(), func_.hess_sp_[i][j]));
                             continue;
                         }
                     }

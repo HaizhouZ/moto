@@ -66,49 +66,49 @@ void generic_func::substitute(const sym &arg, const sym &rhs) {
     if (gen_.task_) {
         gen_.task_->sx_output = cs::SX::substitute(gen_.task_->sx_output, arg, rhs);
     }
-    auto nh = sym_uid_idx_.extract(arg.uid());
-    nh.key() = rhs.uid();
-    auto it = sym_uid_idx_.insert(std::move(nh)); // update the uid index
-    assert(it.inserted && "substitute failed");
-    size_t in_arg_pos = it.position->second;
-    in_args_.at(in_arg_pos) = rhs;           // update the in_args_ to point to the new sym
-    dep_.at(in_arg_pos) = rhs;               // update the dep_ to point to the new sym
-    arg_dim_[arg.field()] -= arg.dim();      // update the dimension of the field
-    arg_dim_[rhs.field()] += rhs.dim();      // update the dimension of the field
-    arg_tdim_[arg.field()] -= arg.tdim();      // update the tangent dimension of the field
-    arg_tdim_[rhs.field()] += rhs.tdim();      // update the tangent dimension
-    arg_num_[arg.field()] -= 1;              // update the number of arguments in the field
-    arg_num_[rhs.field()] += 1;              // update the number of arguments in the field
-    arg_uid_[arg.field()].erase(arg.uid());  // remove the uid from the set
-    arg_uid_[rhs.field()].insert(rhs.uid()); // add the uid to the set
-    std::remove(arg_by_field_[arg.field()].begin(),
-                arg_by_field_[arg.field()].end(), arg);
+    auto in_arg_it = std::find_if(in_args_.begin(), in_args_.end(),
+                                  [&arg](const sym &s) { return s.uid() == arg.uid(); });
+    if (in_arg_it == in_args_.end())
+        throw std::runtime_error(fmt::format("func {} substitute failed: argument to replace not found", name_));
+    auto in_arg_pos = in_arg_it - in_args_.begin();
+    in_args_.at(in_arg_pos) = rhs; // update the in_args_ to point to the new sym
+    dep_.at(in_arg_pos) = rhs;     // update the dep_ to point to the new sym
+    // arg_dim_[arg.field()] -= arg.dim();      // update the dimension of the field
+    // arg_dim_[rhs.field()] += rhs.dim();      // update the dimension of the field
+    // arg_tdim_[arg.field()] -= arg.tdim();      // update the tangent dimension of the field
+    // arg_tdim_[rhs.field()] += rhs.tdim();      // update the tangent dimension
+    // arg_num_[arg.field()] -= 1;              // update the number of arguments in the field
+    // arg_num_[rhs.field()] += 1;              // update the number of arguments in the field
+    // arg_uid_[arg.field()].erase(arg.uid());  // remove the uid from the set
+    // arg_uid_[rhs.field()].insert(rhs.uid()); // add the uid to the set
+    // std::remove(arg_by_field_[arg.field()].begin(),
+    //             arg_by_field_[arg.field()].end(), arg);
 
-    // find in in_args_ after in_arg_pos the first arg with the same field as rhs
-    auto first_after = std::find_if(in_args_.begin() + in_arg_pos + 1, in_args_.end(),
-                                    [&rhs](const sym &s) { return s.field() == rhs.field(); });
-    if (first_after == in_args_.end()) {
-        arg_by_field_[rhs.field()].emplace_back(rhs); // add rhs to the arg
-    } else {
-        auto insert_it = std::find(arg_by_field_[rhs.field()].begin(),
-                                   arg_by_field_[rhs.field()].end(), *first_after);
-        arg_by_field_[rhs.field()].insert(insert_it, rhs); // insert rhs before the first arg with the same field
-    }
+    // // find in in_args_ after in_arg_pos the first arg with the same field as rhs
+    // auto first_after = std::find_if(in_args_.begin() + in_arg_pos + 1, in_args_.end(),
+    //                                 [&rhs](const sym &s) { return s.field() == rhs.field(); });
+    // if (first_after == in_args_.end()) {
+    //     arg_by_field_[rhs.field()].emplace_back(rhs); // add rhs to the arg
+    // } else {
+    //     auto insert_it = std::find(arg_by_field_[rhs.field()].begin(),
+    //                                arg_by_field_[rhs.field()].end(), *first_after);
+    //     arg_by_field_[rhs.field()].insert(insert_it, rhs); // insert rhs before the first arg with the same field
+    // }
 
-    std::vector<std::reference_wrapper<const var>> inargs_same_field;
-    for (const var &s : in_args_) {
-        if (s->field() == rhs.field()) {
-            inargs_same_field.emplace_back(s);
-        }
-    }
-    if (inargs_same_field.size() != arg_by_field_[rhs.field()].size())
-        throw std::runtime_error(fmt::format("func {} substitute failed: in_args_ and arg_by_field_ size mismatch after substitution",
-                                             name_));
-    if (!std::equal(
-            inargs_same_field.begin(), inargs_same_field.end(),
-            arg_by_field_[rhs.field()].begin(), arg_by_field_[rhs.field()].end()))
-        throw std::runtime_error(fmt::format("func {} substitute failed: in_args_ and arg_by_field_ content mismatch after substitution",
-                                             name_));
+    // std::vector<std::reference_wrapper<const var>> inargs_same_field;
+    // for (const var &s : in_args_) {
+    //     if (s->field() == rhs.field()) {
+    //         inargs_same_field.emplace_back(s);
+    //     }
+    // }
+    // if (inargs_same_field.size() != arg_by_field_[rhs.field()].size())
+    //     throw std::runtime_error(fmt::format("func {} substitute failed: in_args_ and arg_by_field_ size mismatch after substitution",
+    //                                          name_));
+    // if (!std::equal(
+    //         inargs_same_field.begin(), inargs_same_field.end(),
+    //         arg_by_field_[rhs.field()].begin(), arg_by_field_[rhs.field()].end()))
+    //     throw std::runtime_error(fmt::format("func {} substitute failed: in_args_ and arg_by_field_ content mismatch after substitution",
+    //                                          name_));
 }
 void generic_func::set_from_casadi(const var_inarg_list &in_args, const cs::SX &out) {
     add_arguments(in_args);
@@ -191,14 +191,29 @@ struct func_codegen {
 };
 
 void generic_func::finalize_impl() {
+    size_t arg_idx = 0;
+    for (auto &s : in_args_) {
+        auto f = s->field();
+        if (in_field(f, primal_fields)) {
+            arg_dim_[f] += s->dim();
+            arg_tdim_[f] += s->tdim();
+            arg_num_[f]++;
+            arg_by_field_[f].emplace_back(s);
+        }
+        sym_uid_idx_[s->uid()] = sym_uid_idx_.size();
+    }
     if (order_ != approx_order::none && dim_ == dim_tbd) {
         throw std::runtime_error(fmt::format("generic_func {} has no dimension set", name_));
     }
+    // setup default hessian sparsity as dense
+    hess_sp_.assign(in_args_.size(), std::vector<sparsity>(in_args_.size(), sparsity::dense));
+    set_hess_sparsity_impl();
     if (gen_.task_ && !gen_.task_->sx_output.is_empty()) {
         func_codegen::get().make_codegen_task(this);
     } else {
         set_ready_status(true); ///< set the ready status
     }
+    finalized_ = true;
 }
 
 generic_func::gen_info::gen_info(const gen_info &rhs) {

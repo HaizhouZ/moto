@@ -1,7 +1,7 @@
+#include <Eigen/Eigenvalues>
 #include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
 #include <moto/utils/field_conversion.hpp>
-#include <Eigen/Eigenvalues>
 
 namespace moto {
 namespace solver {
@@ -17,11 +17,17 @@ void fwd_linear_rollout(ns_node_data *cur, ns_node_data *next) {
 void finalize_dual_newton_step(ns_node_data *cur) {
     auto &d = *cur;
     auto &nsp = *d.nsp_;
-    d.d_lbd_f.noalias() = -d.Q_y.transpose() - d.Q_yx * d.prim_step[__x] - d.Q_yy * d.prim_step[__y];
+    d.d_lbd_f.noalias() = -d.Q_y.transpose() - d.V_yy * d.prim_step[__y];
+    d.Q_yx.times<false>(d.prim_step[__x], d.d_lbd_f);
+    d.Q_yx_mod.times<false>(d.prim_step[__x], d.d_lbd_f);
     // update hard constraint multipliers
     if (d.ncstr > 0 && d.rank_status_ != rank_status::unconstrained) {
         // LU.solve([rhs])
-        d.d_lbd_s_c_pre_solve.noalias() = -d.Q_u.transpose() - d.Q_ux * d.prim_step[__x] - d.Q_uu * d.prim_step[__u];
+        d.d_lbd_s_c_pre_solve.noalias() = -d.Q_u.transpose();
+        d.Q_ux.times<false>(d.prim_step[__x], d.d_lbd_s_c_pre_solve);
+        d.Q_ux_mod.times<false>(d.prim_step[__x], d.d_lbd_s_c_pre_solve);
+        d.Q_uu.times<false>(d.prim_step[__u], d.d_lbd_s_c_pre_solve);
+        d.Q_uu_mod.times<false>(d.prim_step[__u], d.d_lbd_s_c_pre_solve);
         d.F_u.T_times<false>(d.d_lbd_f, d.d_lbd_s_c_pre_solve);
         // solve for hard constraint multiplers
         // fmt::print("Q_y: \n{}\n", d.Q_y);
@@ -91,7 +97,10 @@ void compute_kkt_residual(ns_node_data *cur) {
     auto dense = d.dense_;
     // fmt::println("Q_y: {}", d.Q_y);
     auto &f_u = dense->approx_[__dyn].jac_[__u];
-    dense->res_stat_[__u].noalias() = d.Q_uu_bak * d.prim_step[__u] + d.Q_u_bak.transpose(); // d.d_lbd_f
+    // dense->res_stat_[__u].noalias() = d.Q_uu_bak * d.prim_step[__u] + d.Q_u_bak.transpose(); // d.d_lbd_f
+    dense->res_stat_[__u].noalias() = d.Q_u_bak.transpose(); // d.d_lbd_f
+    d.Q_uu.times(d.prim_step[__u], dense->res_stat_[__u]);
+
     f_u.right_T_times(d.dual_step[__dyn], dense->res_stat_[__u]);
     // dense->res_stat_[__u].noalias() += d.dual_step[__dyn].transpose() * f_u.dense();
     if (d.nc) {
@@ -100,7 +109,9 @@ void compute_kkt_residual(ns_node_data *cur) {
     if (d.dual_step[__ineq_xu].size() > 0) {
         d.dense_->approx_[__ineq_xu].jac_[__u].right_T_times(d.dual_step[__ineq_xu], dense->res_stat_[__u]);
     }
-    dense->res_stat_[__y].noalias() = d.Q_yy_bak * d.prim_step[__y] + d.Q_y_bak.transpose();
+    // dense->res_stat_[__y].noalias() = d.Q_yy_bak * d.prim_step[__y] + d.Q_y_bak.transpose();
+    dense->res_stat_[__y].noalias() = d.Q_y_bak.transpose();
+    d.Q_yy.times(d.prim_step[__y], dense->res_stat_[__y]);
     auto &f_y = dense->approx_[__dyn].jac_[__y];
     f_y.right_T_times(d.dual_step[__dyn], dense->res_stat_[__y]);
     // dense->res_stat_[__y].noalias() += d.dual_step[__dyn].transpose() * f_y.dense();
@@ -111,7 +122,9 @@ void compute_kkt_residual(ns_node_data *cur) {
         d.dense_->approx_[__ineq_x].jac_[__y].right_T_times(d.dual_step[__ineq_x], dense->res_stat_[__y]);
     }
     auto &f_x = dense->approx_[__dyn].jac_[__x];
-    dense->res_stat_[__x].noalias() = d.Q_xx_bak * d.prim_step[__x] + d.Q_x_bak.transpose();
+    // dense->res_stat_[__x].noalias() = d.Q_xx_bak * d.prim_step[__x] + d.Q_x_bak.transpose();
+    dense->res_stat_[__x].noalias() = d.Q_x_bak.transpose();
+    d.Q_xx.times(d.prim_step[__x], dense->res_stat_[__x]);
     f_x.right_T_times(d.dual_step[__dyn], dense->res_stat_[__x]);
     // dense->res_stat_[__x].noalias() += d.dual_step[__dyn].transpose() * f_x.dense();
     if (d.nc) {

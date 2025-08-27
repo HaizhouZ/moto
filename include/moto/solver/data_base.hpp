@@ -20,11 +20,12 @@ struct data_base {
     row_vector &Q_x, Q_x_bak;
     row_vector &Q_u, Q_u_bak;
     row_vector &Q_y, Q_y_bak;
-    matrix &Q_xx, Q_xx_bak;
-    matrix &Q_ux, Q_ux_bak;
-    matrix &Q_uu, Q_uu_bak;
-    matrix &Q_yx, Q_yx_bak;
-    matrix &Q_yy, Q_yy_bak;
+    sparse_mat &Q_xx, &Q_xx_mod;
+    sparse_mat &Q_ux, &Q_ux_mod;
+    sparse_mat &Q_uu, &Q_uu_mod;
+    sparse_mat &Q_yx, &Q_yx_mod;
+    sparse_mat &Q_yy, &Q_yy_mod;
+    matrix V_xx, V_yy;
     array_type<vector, primal_fields> prim_step; ///< primal (newton) step
     array_type<vector, primal_fields> prim_corr; ///< correction for the primal step
     row_vector *Q_y_corr;                        ///< correction for the Q_y

@@ -6,26 +6,31 @@
 
 namespace moto {
 namespace utils {
-struct buffer {
-    matrix::AlignedMapType data_;
+template <typename T>
+struct buffer_tpl {
+    T::AlignedMapType data_;
+    using PlainObjectType = T;
+    using data_type = T::AlignedMapType;
+    constexpr static size_t alignment = Eigen::internal::traits<decltype(data_)>::Alignment;
     void *mem_;
     size_t size_;
 
-    buffer() : data_(nullptr, 0, 0), mem_(nullptr) {}
+    buffer_tpl() : data_(nullptr, 0, 0), mem_(nullptr) {}
     void resize(size_t r, size_t c) {
         size_t required_size = r * c;
         if (size_ < required_size) {
             if (mem_ != nullptr)
-                ::operator delete(mem_, std::align_val_t(64));
-            mem_ = ::operator new(sizeof(scalar_t) * required_size, std::align_val_t(64));
+                ::operator delete(mem_, std::align_val_t(alignment));
+            mem_ = ::operator new(sizeof(scalar_t) * required_size, std::align_val_t(alignment));
             size_ = required_size;
         }
+
         if (r != data_.rows() || c != data_.cols())
-            new (&data_) matrix::AlignedMapType(reinterpret_cast<scalar_t *>(mem_), r, c);
+            new (&data_) data_type(reinterpret_cast<scalar_t *>(mem_), r, c);
     }
-    ~buffer() {
+    ~buffer_tpl() {
         if (mem_ != nullptr)
-            ::operator delete(mem_, std::align_val_t(64));
+            ::operator delete(mem_, std::align_val_t(alignment));
     }
 };
 template <typename DataType>

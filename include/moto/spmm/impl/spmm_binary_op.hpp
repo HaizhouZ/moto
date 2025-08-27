@@ -28,7 +28,8 @@ void product(const lhs_type &lhs, const rhs_type &rhs, out_type &out) {
     };
     if constexpr (l_is_sp_mat && r_is_sp_mat) {
         constexpr size_t num = static_cast<size_t>(sparsity::num);
-
+        if (lhs.is_empty() || rhs.is_empty())
+            return;
         magic_enum::enum_for_each<sparsity>([&](auto lsp) {
             unary_select<lsp>(lhs, [&](auto &_lhs) {
                 magic_enum::enum_for_each<sparsity>([&](auto rsp) {
@@ -39,12 +40,16 @@ void product(const lhs_type &lhs, const rhs_type &rhs, out_type &out) {
             });
         });
     } else if constexpr (l_is_sp_mat) {
+        if (lhs.is_empty())
+            return;
         magic_enum::enum_for_each<sparsity>([&](auto lsp) {
             unary_select<lsp>(lhs, [&](auto &_lhs) {
                 product_impl(_lhs, rhs);
             });
         });
     } else if constexpr (r_is_sp_mat) {
+        if (rhs.is_empty())
+            return;
         magic_enum::enum_for_each<sparsity>([&](auto rsp) {
             unary_select<rsp>(rhs, [&](auto &_rhs) {
                 product_impl(lhs, _rhs);

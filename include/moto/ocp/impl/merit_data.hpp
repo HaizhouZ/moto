@@ -41,8 +41,8 @@ struct merit_data {
     /// modification of the merit jacobian, indexed by field
     array<row_vector, field::num_prim> jac_modification_;
     /// cost hessian h[a][b] is h_ab. Note only the upper block-triangular part is stored
-    array<array<matrix, field::num_prim>, field::num_prim> hessian_;
-    array<array<matrix, field::num_prim>, field::num_prim> hessian_modification_;
+    array<array<sparse_mat, field::num_prim>, field::num_prim> hessian_;
+    array<array<sparse_mat, field::num_prim>, field::num_prim> hessian_modification_;
 
     /// stationary residual
     array_type<row_vector, primal_fields> res_stat_;

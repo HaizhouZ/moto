@@ -38,7 +38,7 @@ merit_data::merit_data(ocp *prob) : prob_(prob) {
     for (auto i : range(field::num_prim)) {
         for (auto j : range(i, field::num_prim)) {
             hessian_[j][i].resize(prob_->tdim(j), prob_->tdim(i));
-            hessian_[j][i].setZero();
+            // hessian_[j][i].setZero();
         }
         jac_[i].resize(prob_->tdim(i));
         jac_[i].setZero();

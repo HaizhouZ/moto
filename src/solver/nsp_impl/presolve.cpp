@@ -28,9 +28,20 @@ void ns_factorization(ns_node_data *cur) {
     // d.Q_x.noalias() += -d.F_0.transpose() * d.Q_yx;
     // nsp.Q_yy_F_x = -d.Q_yx;
     nsp.u_0_p_k = d.Q_u.transpose();
-    nsp.u_0_p_K = d.Q_ux;
+    // nsp.u_0_p_K = d.Q_ux;
+    nsp.u_0_p_K.setZero();
+    d.Q_ux.dump_into(nsp.u_0_p_K);
+    d.Q_ux_mod.dump_into(nsp.u_0_p_K);
     nsp.y_0_p_k.setZero();
-    nsp.y_0_p_K = d.Q_yx;
+    nsp.y_0_p_K.setZero();
+    d.Q_yx.dump_into(nsp.y_0_p_K);
+    d.Q_yx_mod.dump_into(nsp.y_0_p_K);
+    d.V_xx.setZero();
+    d.Q_xx.dump_into(d.V_xx);
+    d.Q_xx_mod.dump_into(d.V_xx);
+    d.V_yy.setZero();
+    d.Q_yy.dump_into(d.V_yy);
+    d.Q_yy_mod.dump_into(d.V_yy);
     // check Q_xx symmetry
     // if ((d.Q_xx - d.Q_xx.transpose()).cwiseAbs().maxCoeff() > 1e-10) {
     //     fmt::print("Q_xx is not symmetric before nsp factorization: max abs diff = {}\n", (d.Q_xx - d.Q_xx.transpose()).cwiseAbs().maxCoeff());
@@ -54,11 +65,17 @@ void ns_factorization(ns_node_data *cur) {
         nsp.z_0_k.conservativeResize(d.nu);
         nsp.z_0_K.conservativeResize(d.nu, d.nx);
         nsp.Q_zz.conservativeResize(d.nu, d.nu);
-        nsp.Q_zz = d.Q_uu;
+        nsp.Q_zz.setZero();
+        // nsp.Q_zz = d.Q_uu;
+        d.Q_uu.dump_into(nsp.Q_zz);
+        d.Q_uu_mod.dump_into(nsp.Q_zz);
         nsp.z_0_k = nsp.u_0_p_k;
         nsp.z_0_K = nsp.u_0_p_K;
-        d.Q_x.noalias() -= d.F_0.transpose() * d.Q_yx;
-        d.F_x.T_times<false>(d.Q_yx, d.Q_xx);
+        // d.Q_x.noalias() -= d.F_0.transpose() * d.Q_yx;
+        d.Q_yx.right_T_times<false>(d.F_0, d.Q_x);
+        d.Q_yx_mod.right_T_times<false>(d.F_0, d.Q_x);
+        d.F_x.T_times<false>(d.Q_yx, d.V_xx);
+        d.F_x.T_times<false>(d.Q_yx_mod, d.V_xx);
     };
     if (!d.ncstr) {
         unconstrain_setup();
@@ -157,7 +174,13 @@ void ns_factorization(ns_node_data *cur) {
                 d.rank_status_ = rank_status::constrained;
                 timed_block_start("compute_Qzz");
                 nsp.Q_zz.conservativeResize(nsp.Z_u.cols(), nsp.Z_u.cols());
-                nsp.Q_zz.noalias() = nsp.Z_u.transpose() * d.Q_uu * nsp.Z_u;
+                thread_local moto::utils::buffer_tpl<matrix> buf;
+                // nsp.Q_zz.noalias() = nsp.Z_u.transpose() * d.Q_uu * nsp.Z_u;
+                buf.resize(d.nu, nsp.Z_u.cols());
+                buf.data_.setZero();
+                d.Q_uu.times(nsp.Z_u, buf.data_);
+                d.Q_uu_mod.times(nsp.Z_u, buf.data_);
+                nsp.Q_zz.noalias() = nsp.Z_u.transpose() * buf.data_;
                 timed_block_end("compute_Qzz");
                 nsp.z_k.conservativeResize(nsp.Z_u.cols());
                 nsp.z_K.conservativeResize(nsp.Z_u.cols(), d.nx);
@@ -199,8 +222,12 @@ void ns_factorization(ns_node_data *cur) {
             nsp.u_y_K.noalias() = nsp.lu_eq_.solve(nsp.s_c_stacked_0_K);
             timed_block_end("precompute_u_y");
             timed_block_start("precompute_u0p");
-            nsp.u_0_p_k.noalias() -= d.Q_uu * nsp.u_y_k;
-            nsp.u_0_p_K.noalias() -= d.Q_uu * nsp.u_y_K;
+            // nsp.u_0_p_k.noalias() -= d.Q_uu * nsp.u_y_k;
+            // nsp.u_0_p_K.noalias() -= d.Q_uu * nsp.u_y_K;
+            d.Q_uu.times<false>(nsp.u_y_k, nsp.u_0_p_k);
+            d.Q_uu_mod.times<false>(nsp.u_y_k, nsp.u_0_p_k);
+            d.Q_uu.times<false>(nsp.u_y_K, nsp.u_0_p_K);
+            d.Q_uu_mod.times<false>(nsp.u_y_K, nsp.u_0_p_K);
             timed_block_end("precompute_u0p");
             timed_block_start("precompute_z0");
             if (d.rank_status_ != rank_status::fully_constrained) {
@@ -254,8 +281,19 @@ void ns_factorization(ns_node_data *cur) {
             }
 #endif
             timed_block_start("update_value_derivative");
-            d.Q_x.noalias() -= nsp.u_0_p_k.transpose() * nsp.u_y_K + nsp.u_y_k.transpose() * d.Q_ux + nsp.y_y_k.transpose() * d.Q_yx;
-            d.Q_xx.noalias() -= nsp.u_0_p_K.transpose() * nsp.u_y_K + nsp.u_y_K.transpose() * d.Q_ux + nsp.y_y_K.transpose() * d.Q_yx;
+            // d.Q_x.noalias() -= nsp.u_0_p_k.transpose() * nsp.u_y_K + nsp.u_y_k.transpose() * d.Q_ux + nsp.y_y_k.transpose() * d.Q_yx;
+            // d.Q_xx.noalias() -= nsp.u_0_p_K.transpose() * nsp.u_y_K + nsp.u_y_K.transpose() * d.Q_ux + nsp.y_y_K.transpose() * d.Q_yx;
+            /// @todo sparse here
+            d.Q_x.noalias() -= nsp.u_0_p_k.transpose() * nsp.u_y_K;
+            d.V_xx.noalias() -= nsp.u_0_p_K.transpose() * nsp.u_y_K;
+            d.Q_ux.right_T_times<false>(nsp.u_y_k, d.Q_x);
+            d.Q_ux_mod.right_T_times<false>(nsp.u_y_k, d.Q_x);
+            d.Q_yx.right_T_times<false>(nsp.y_y_k, d.Q_x);
+            d.Q_yx_mod.right_T_times<false>(nsp.y_y_k, d.Q_x);
+            d.Q_ux.right_T_times<false>(nsp.u_y_K, d.V_xx);
+            d.Q_ux_mod.right_T_times<false>(nsp.u_y_K, d.V_xx);
+            d.Q_yx.right_T_times<false>(nsp.y_y_K, d.V_xx);
+            d.Q_yx_mod.right_T_times<false>(nsp.y_y_K, d.V_xx);
             timed_block_end("update_value_derivative");
 
             if (d.rank_status_ == rank_status::fully_constrained) {

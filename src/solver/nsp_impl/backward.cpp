@@ -14,47 +14,47 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
     auto &d = *cur;
     auto &nsp = *d.nsp_;
     // check positiveness
-    // bool qyy_invertible = isPositiveDefinite(d.Q_yy);
-    timed_block_start("Q_yy symmetrize");
-    d.Q_yy.array() /= 2;
+    // bool qyy_invertible = isPositiveDefinite(d.V_yy);
+    timed_block_start("V_yy symmetrize");
+    d.V_yy.array() /= 2;
     /// @todo: temporary
-    d.Q_yy = d.Q_yy + d.Q_yy.transpose().eval();
-    timed_block_end("Q_yy symmetrize");
-    // d.Q_yy.diagonal().array() += 1e-6; // ensure positive definiteness
-    if (d.Q_yy.hasNaN() || !d.Q_yy.allFinite()) {
-        fmt::print("Q_yy: \n {}\n", d.Q_yy);
+    d.V_yy = d.V_yy + d.V_yy.transpose().eval();
+    timed_block_end("V_yy symmetrize");
+    // d.V_yy.diagonal().array() += 1e-6; // ensure positive definiteness
+    if (d.V_yy.hasNaN() || !d.V_yy.allFinite()) {
+        fmt::print("V_yy: \n {}\n", d.V_yy);
         print_debug(cur);
-        throw std::runtime_error("Q_yy has NaN or inf");
+        throw std::runtime_error("V_yy has NaN or inf");
     }
-    // if (d.Q_yy.llt().info() != Eigen::Success) {
-    //     fmt::print("Q_yy: \n {}\n", d.Q_yy);
+    // if (d.V_yy.llt().info() != Eigen::Success) {
+    //     fmt::print("V_yy: \n {}\n", d.V_yy);
     //     // print eigenvalues
-    //     auto eigs = d.Q_yy.eigenvalues();
-    //     fmt::print("Q_yy eigenvalues: {}\n", eigs.transpose());
+    //     auto eigs = d.V_yy.eigenvalues();
+    //     fmt::print("V_yy eigenvalues: {}\n", eigs.transpose());
     //     print_debug(cur);
-    //     throw std::runtime_error("Q_yy is not positive definite");
+    //     throw std::runtime_error("V_yy is not positive definite");
     // }
     timed_block_start("compute_U");
-    nsp.y_0_p_k.noalias() = d.Q_y.transpose() - d.Q_yy * nsp.y_y_k;
+    nsp.y_0_p_k.noalias() = d.Q_y.transpose() - d.V_yy * nsp.y_y_k;
     if (d.rank_status_ == rank_status::unconstrained) {
-        d.F_x.right_times<false>(d.Q_yy, nsp.y_0_p_K);
-        d.F_u.inner_product(d.Q_yy, nsp.Q_zz);
+        d.F_x.right_times<false>(d.V_yy, nsp.y_0_p_K);
+        d.F_u.inner_product(d.V_yy, nsp.Q_zz);
         d.F_u.T_times<false>(nsp.y_0_p_k, nsp.z_0_k);
         d.F_u.T_times<false>(nsp.y_0_p_K, nsp.z_0_K);
     } else if (d.rank_status_ == rank_status::constrained) {
-        nsp.y_0_p_K.noalias() = d.Q_yx - d.Q_yy * nsp.y_y_K;
-        nsp.Q_zz.noalias() += nsp.Z_y.transpose() * d.Q_yy * nsp.Z_y; /// todo unconstrained
+        nsp.y_0_p_K.noalias() -= d.V_yy * nsp.y_y_K;
+        nsp.Q_zz.noalias() += nsp.Z_y.transpose() * d.V_yy * nsp.Z_y; /// todo unconstrained
         // compute bar{y}_0
         nsp.z_0_k.noalias() += nsp.Z_y.transpose() * nsp.y_0_p_k;
         nsp.z_0_K.noalias() += nsp.Z_y.transpose() * nsp.y_0_p_K;
     }
     timed_block_end("compute_U");
     // auto min_Q_uu = d.Q_uu.eigenvalues().real().minCoeff();
-    // auto min_Q_yy = d.Q_yy.eigenvalues().real().minCoeff();
+    // auto min_Q_yy = d.V_yy.eigenvalues().real().minCoeff();
     // auto min_Q_zz = nsp.Q_zz.eigenvalues().real().minCoeff();
     // if (min_Q_uu <= 0 || min_Q_yy <= 0 || min_Q_zz <= 0) {
     //     fmt::print("Q_uu min eigenvalue: {}\n", min_Q_uu);
-    //     fmt::print("Q_yy min eigenvalue: {}\n", min_Q_yy);
+    //     fmt::print("V_yy min eigenvalue: {}\n", min_Q_yy);
     //     fmt::print("Q_zz min eigenvalue: {}\n", min_Q_zz);
     //     throw std::runtime_error("One or more matrices are not positive definite");
     // }
@@ -68,8 +68,8 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
         nsp.llt_ns_.compute(nsp.Q_zz);
         // if (nsp.llt_ns_.info() != Eigen::Success) {
         if (!nsp.llt_ns_.valid()) {
-            fmt::print("Q_uu: \n{}\n", d.Q_uu);
-            fmt::print("Q_yy: \n{}\n", d.Q_yy);
+            fmt::print("Q_uu: \n{}\n", d.Q_uu.dense());
+            fmt::print("V_yy: \n{}\n", d.V_yy);
             fmt::print("Q_zz: \n{}\n", nsp.Q_zz);
             kkt_diagnosis(cur);
             print_debug(cur);
@@ -96,25 +96,25 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
     timed_block_start("update_value_function");
     if (d.rank_status_ == rank_status::fully_constrained) {
         d.Q_x.noalias() += -nsp.y_0_p_k.transpose() * nsp.y_y_K;
-        d.Q_xx.noalias() += -nsp.y_0_p_K.transpose() * nsp.y_y_K;
+        d.V_xx.noalias() += -nsp.y_0_p_K.transpose() * nsp.y_y_K;
     } else if (d.rank_status_ == rank_status::constrained) {
         d.Q_x.noalias() += nsp.z_0_k.transpose() * nsp.z_K - nsp.y_0_p_k.transpose() * nsp.y_y_K;
-        d.Q_xx.noalias() += nsp.z_0_K.transpose() * nsp.z_K - nsp.y_0_p_K.transpose() * nsp.y_y_K;
+        d.V_xx.noalias() += nsp.z_0_K.transpose() * nsp.z_K - nsp.y_0_p_K.transpose() * nsp.y_y_K;
     } else {
         d.Q_x.noalias() += nsp.z_0_k.transpose() * nsp.z_K;
         d.F_x.right_T_times<false>(nsp.y_0_p_k, d.Q_x);
-        d.Q_xx.noalias() += nsp.z_0_K.transpose() * nsp.z_K;
-        d.F_x.right_T_times<false>(nsp.y_0_p_K, d.Q_xx);
+        d.V_xx.noalias() += nsp.z_0_K.transpose() * nsp.z_K;
+        d.F_x.right_T_times<false>(nsp.y_0_p_K, d.V_xx);
     }
     // update value function derivatives of previous node
     if (prev != nullptr) [[likely]] {
         auto &d_pre = *prev;
         auto &perm = utils::permutation_from_y_to_x(prev->dense_->prob_, cur->dense_->prob_);
         d.Q_x *= perm;
-        d.Q_xx *= perm;
-        d.Q_xx.applyOnTheLeft(perm.transpose());
+        d.V_xx *= perm;
+        d.V_xx.applyOnTheLeft(perm.transpose());
         d_pre.Q_y.noalias() += d.Q_x;
-        d_pre.Q_yy.noalias() += d.Q_xx;
+        d_pre.V_yy.noalias() += d.V_xx;
     }
     timed_block_end("update_value_function");
 }

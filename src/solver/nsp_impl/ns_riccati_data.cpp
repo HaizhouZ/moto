@@ -50,6 +50,8 @@ ns_node_data::ns_node_data(node_data *full_data)
     nsp_->u_y_K.resize(nu, nx);
     nsp_->u_0_p_k.resize(nu);
     nsp_->u_0_p_K.resize(nu, nx);
+    nsp_->y_0_p_k.resize(nx);
+    nsp_->y_0_p_K.resize(nx, nx);
     nsp_->s_u.resize(ns, nu);
     nsp_->s_c_stacked.resize(ncstr, nu);
     nsp_->s_c_stacked_0_k.resize(ncstr);

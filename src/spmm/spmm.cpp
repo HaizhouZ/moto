@@ -21,6 +21,45 @@ void sparse_mat::resize(size_t rows, size_t cols) {
     rows_ = rows;
     cols_ = cols;
 }
+bool sparse_mat::valid() const {
+    for (const auto &panel : dense_panels_)
+        if (panel.data_.hasNaN() || panel.data_.allFinite() == false)
+            return false;
+    for (const auto &panel : diag_panels_)
+        if (panel.data_.hasNaN() || panel.data_.allFinite() == false)
+            return false;
+    return true;
+}
+sparse_mat &sparse_mat::operator=(const sparse_mat &other) {
+    if (this != &other && this->is_empty()) {
+        rows_ = other.rows_;
+        cols_ = other.cols_;
+        dense_panels_ = other.dense_panels_;
+        diag_panels_ = other.diag_panels_;
+        eye_panels_ = other.eye_panels_;
+    } else {
+        assert(rows_ == other.rows_ && cols_ == other.cols_);
+        assert(dense_panels_.size() == other.dense_panels_.size());
+        assert(diag_panels_.size() == other.diag_panels_.size());
+        assert(eye_panels_.size() == other.eye_panels_.size());
+        for (size_t i = 0; i < other.dense_panels_.size(); i++) {
+            dense_panels_[i].data_ = other.dense_panels_[i].data_;
+        }
+        for (size_t i = 0; i < other.diag_panels_.size(); i++) {
+            diag_panels_[i].data_ = other.diag_panels_[i].data_;
+        }
+    }
+    return *this;
+}
+void sparse_mat::setZero() {
+    for (auto &panel : dense_panels_) {
+        panel.data_.setZero();
+    }
+    for (auto &panel : diag_panels_) {
+        panel.data_.setZero();
+    }
+    // eye panels do not need to be set to zero
+}
 matrix_ref sparse_mat::insert(size_t r_st, size_t c_st, size_t r, size_t c, sparsity sp) {
     rows_ = std::max(rows_, r_st + r);
     cols_ = std::max(cols_, c_st + c);
