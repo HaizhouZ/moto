@@ -2,7 +2,7 @@
 #include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
 
-// #define ENABLE_TIMED_BLOCK
+#define ENABLE_TIMED_BLOCK
 #include <moto/utils/timed_block.hpp>
 
 // #define SHOW_NSP_DEBUG

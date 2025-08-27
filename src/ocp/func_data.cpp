@@ -103,7 +103,9 @@ void func_approx_data::setup_hessian() {
                         /// @note order matches merit_data
                         /// h[i][j] = h[j][i] if i, j in the same field or field(i) < field(j)
                         /// otherwise only keep h[i][j] (empty)
-                        if (field_1 >= field_2) {
+                        if (func_.default_hess_sp_ != sparsity::dense && i != j) {
+                            goto BIND_EMPTY_HESS;
+                        } else if (field_1 >= field_2) {
                             // merit_hess_[i].push_back((*hessian)[field_1][field_2].block(
                             //     raw.prob_->get_expr_start_tangent(in_args[i]),
                             //     raw.prob_->get_expr_start_tangent(in_args[j]),
@@ -112,9 +114,16 @@ void func_approx_data::setup_hessian() {
                                 raw.prob_->get_expr_start_tangent(in_args[i]),
                                 raw.prob_->get_expr_start_tangent(in_args[j]),
                                 in_args[i]->tdim(), in_args[j]->tdim(), func_.hess_sp_[i][j]));
+                            // fmt::print("setting up hessian of func {} in {}\n", func_.name(), func_.field());
+                            // fmt::print("hess {}{} sp count : eye {}, diag {}, dense {} \n",
+                            //            field_t(field_1), field_t(field_2),
+                            //            (*hessian)[field_1][field_2].eye_panels_.size(),
+                            //            (*hessian)[field_1][field_2].diag_panels_.size(),
+                            //            (*hessian)[field_1][field_2].dense_panels_.size());
                             continue;
                         }
                     }
+                BIND_EMPTY_HESS:
                     // this should be empty. do this anyway to make the shape of merit_hess_ right
                     static matrix empty;
                     merit_hess_[i].push_back(empty);

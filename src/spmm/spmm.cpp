@@ -68,9 +68,11 @@ matrix_ref sparse_mat::insert(size_t r_st, size_t c_st, size_t r, size_t c, spar
         dense_panels_.emplace_back(r_st, c_st, r, c);
         return dense_panels_.back().mat();
     case sparsity::diag:
+        assert(r == c && "Diagonal panel must be square");
         diag_panels_.emplace_back(r_st, c_st, r, c);
         return diag_panels_.back().mat();
     case sparsity::eye:
+        assert(r == c && "Eye panel must be square");
         eye_panels_.emplace_back(r_st, c_st, r, c);
         return eye_panels_.back().mat();
     default:

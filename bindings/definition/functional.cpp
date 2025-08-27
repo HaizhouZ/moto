@@ -198,6 +198,7 @@ void register_submodule_functional(nb::module_ &m) {
         .def(
             nb::init<const std::string &, approx_order>(),
             nb::arg("name"), nb::arg("order") = approx_order::second)
+        .def("set_diag_hess", &cost::set_diag_hess, nb::rv_policy::move)
         .def(
             "as_terminal",
             [](cost &self) { return self.as_terminal(); }, nb::rv_policy::move)
