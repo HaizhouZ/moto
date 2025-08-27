@@ -173,14 +173,14 @@ struct srbd_dynamics {
                             cs::SX::sumsqr(v) +                                  // velocity cost
                             1e-3 * (cs::SX::sumsqr(f_l) + cs::SX::sumsqr(f_r)) + // force cost
                             0.1 * (cs::SX::sumsqr(v_l) + cs::SX::sumsqr(v_r));   // foot velocity cost
-        return {cost("srbd_cost", {r, v, r_l, r_r, f_l, f_r, v_l, v_r, r_d}, dt * running_cost)};
+        return {cost("srbd_cost", {r, v, r_l, r_r, f_l, f_r, v_l, v_r, r_d}, dt * running_cost).set_diag_hess()};
     }
     expr_list terminal_cost() {
         auto running_cost = 100 * cs::SX::sumsqr(r - r_d) +          // position cost
                             cs::SX::sumsqr(v) +                      // velocity cost
                             cs::SX::sumsqr((r_l))(cs::Slice(0, 2)) + // foot position cost
                             cs::SX::sumsqr((r_r))(cs::Slice(0, 2));  // foot position cost
-        return {cost("srbd_cost", {r, v, r_l, r_r, r_d}, running_cost).as_terminal()};
+        return {cost("srbd_cost", {r, v, r_l, r_r, r_d}, running_cost).as_terminal().set_diag_hess()};
     }
 };
 

@@ -1,15 +1,10 @@
 #ifndef MOTO_SPMM_PANEL_MAT_HPP
 #define MOTO_SPMM_PANEL_MAT_HPP
 
-#include <moto/core/fwd.hpp>
+#include <moto/spmm/fwd.hpp>
 
 namespace moto {
-enum class sparsity : size_t {
-    dense = 0,
-    diag,
-    eye,
-    num
-};
+
 
 // Forward declaration for panel_mat with sparsity as non-type template parameter
 template <sparsity Sp>

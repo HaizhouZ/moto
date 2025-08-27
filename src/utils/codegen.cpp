@@ -498,6 +498,15 @@ void task::finalize(job_list &jobs_) {
                 } else {
                     hess[idx_i][idx_j] = cs::SX::jacobian(jacs_copy[idx_i], j);
                 }
+                if (!hess_sp.empty()) { /// @todo maybe inconsistent
+                    if (hess_sp[idx_i][idx_j] == sparsity::diag) {
+                        assert(hess[idx_i][idx_j].rows() == hess[idx_i][idx_j].columns());
+                        hess[idx_i][idx_j] = cs::SX::diag(hess[idx_i][idx_j]);
+                    } else if (hess_sp[idx_i][idx_j] == sparsity::eye) {
+                        assert(hess[idx_i][idx_j].rows() == hess[idx_i][idx_j].columns());
+                        hess[idx_i][idx_j] = cs::SX::eye(hess[idx_i][idx_j].rows());
+                    }
+                }
             }
         }
         // hess = [item for sublist in hess for item in sublist]

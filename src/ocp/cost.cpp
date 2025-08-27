@@ -52,6 +52,11 @@ cost::cost(const std::string &name, const var_inarg_list &in_args, const cs::SX 
     assert(out.is_scalar() && "cost output must be a scalar");
 }
 
+cost &cost::set_diag_hess() {
+    (*this)->set_default_hess_sparsity(sparsity::diag);
+    return (*this);
+}
+
 cost &cost::as_terminal() {
     (*this)->name_ += "_terminal";
     (*this)->finalize_hint_.substitute_x_to_y = true;

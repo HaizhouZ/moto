@@ -11,6 +11,8 @@
 #include <casadi/casadi.hpp>
 #include <re2/re2.h>
 
+#include <moto/spmm/fwd.hpp> // moto::sparsity
+
 namespace moto {
 namespace utils {
 
@@ -47,6 +49,7 @@ struct task {
     bool gen_hessian = false;
     std::vector<std::pair<shared_expr, cs::SX>> ext_jac;
     std::vector<std::tuple<shared_expr, shared_expr, cs::SX>> ext_hess;
+    std::vector<std::vector<sparsity>> hess_sp;
     std::string output_dir = "gen";
     bool force_recompile = false;
     bool check_jac_ad = false; // check if jacobian is correct by comparing with ad

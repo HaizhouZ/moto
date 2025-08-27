@@ -7,6 +7,7 @@ struct cost : public func {
     cost(const std::string &name, approx_order order = approx_order::second);
     cost(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
          approx_order order = approx_order::second);
+    cost &set_diag_hess();
     cost &as_terminal(); ///< convert to terminal cost
     cost &set_gauss_newton(); ///< convert to convex-over-nonlinear cost
     generic_cost *operator->() const;

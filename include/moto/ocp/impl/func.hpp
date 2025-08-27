@@ -48,6 +48,8 @@ class generic_func : public expr {
 
     std::vector<std::vector<sparsity>> hess_sp_;
 
+    sparsity default_hess_sp_ = sparsity::dense;
+
     std::unordered_map<size_t, size_t> sym_uid_idx_;
 
     friend class func_codegen;
@@ -62,7 +64,6 @@ class generic_func : public expr {
     virtual void jacobian_impl(func_approx_data &data) const;
     virtual void hessian_impl(func_approx_data &data) const;
     virtual void load_external_impl(const std::string &path = "gen");
-    virtual void set_hess_sparsity_impl() {}
 
     generic_func(const generic_func &) = default;
     generic_func &operator=(const generic_func &) = default;
@@ -96,6 +97,8 @@ class generic_func : public expr {
     PROPERTY(order)
     PROPERTY(in_args)
     const auto &in_args(size_t i) const { return in_args_[i]; }
+
+    void set_default_hess_sparsity(sparsity sp) { default_hess_sp_ = sp; }
 
     const auto &in_args(field_t field) const {
         field_access_guard(field);
