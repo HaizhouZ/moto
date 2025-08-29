@@ -32,7 +32,7 @@ void sym::finalize_impl() {
     set_ready_status(true);
 }
 func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, const generic_func &f)
-    : func_(f), impl_(shared), sym_uid_idx_(f.sym_uid_idx_) {
+    : func_(f), shared_(shared), sym_uid_idx_(f.sym_uid_idx_), primal_(&primal) {
     auto &in_args = f.in_args();
     in_args_.reserve(in_args.size());
     for (auto &arg : in_args) {

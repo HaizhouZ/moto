@@ -7,6 +7,8 @@
 #include <Eigen/LU>
 #include <moto/utils/blasfeo_factorizer/blasfeo_llt.hpp>
 
+#include <moto/solver/ns_riccati/sparse_ns_factorizer.hpp>
+
 namespace moto {
 namespace solver {
 namespace ns_riccati {
@@ -44,7 +46,11 @@ struct nullspace_data {
     Eigen::FullPivLU<matrix> lu_eq_; ///< LU factorizer of the eq constraints
     // Eigen::LLT<matrix> llt_ns_;      ///< LLT solver of the projected hessian
     utils::blasfeo_llt llt_ns_; ///< LLT solver of the projected hessian
-    size_t rank{0};                  ///< rank of the equality constraints, 0 if unconstrained, ncstr if fully constrained
+    size_t rank{0};             ///< rank of the equality constraints, 0 if unconstrained, ncstr if fully constrained
+
+    sparse_mat Z_y_sp, Z_u_sp; ///< sparse nullspace basis for y and u
+    sparse_mat u_y_K_sp, y_y_K_sp; ///< sparse pseudo solutions for y and u
+    sparse_ns_factorizer_ptr_t sparse_factorizer_; ///< sparse factorizer for computing nullspace
 };
 } // namespace ns_riccati
 } // namespace solver

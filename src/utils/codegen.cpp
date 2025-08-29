@@ -31,7 +31,7 @@ auto vec_type() {
 }
 
 namespace impl {
-job_list jobs_{};
+// job_list jobs_{};
 std::mutex mutex_{};
 // Generates a list of (row, col) pairs from CasADi's CCS sparsity format
 std::vector<std::pair<int, int>> ccs_index_to_ij(const cs::Sparsity &sp) {
@@ -249,8 +249,13 @@ void run(
         // throw std::runtime_error("Auxiliary variable is not supported in this context.");
         sx_inputs_cs.emplace_back(aux);
     }
-    cs::Function casadi_func = filter_func_near_zero(func_name, sx_inputs_cs, sx_outputs, !aux.is_empty());
-    auto filtered_outputs = casadi_func(sx_inputs_cs);
+    // cs::Function casadi_func = filter_func_near_zero(func_name, sx_inputs_cs, sx_outputs, !aux.is_empty());
+    // auto filtered_outputs = casadi_func(sx_inputs_cs);
+    cs::SXVector filtered_outputs;
+    for (auto &e : sx_outputs)
+        filtered_outputs.push_back(cs::SX::sparsify(e));
+
+    auto casadi_func = cs::Function(func_name, sx_inputs_cs, filtered_outputs);
 
     // Step 2: Generate raw C code
     std::string casadi_real_t = std::is_same_v<scalar_t, double> ? "double" : "float";
@@ -417,21 +422,27 @@ void task::finalize(job_list &jobs_) {
         }
         if (gen_jacobian and !jacs.empty()) {
             cs::Function f_ad;
-            if (check_jac_ad) {
-                std::vector<cs::SX> sx_inputs_cs;
-                std::vector<cs::SX> jac_ad;
-                for (sym &e : sx_inputs) {
-                    sx_inputs_cs.push_back(e);
-                    jac_ad.push_back(cs::SX::jacobian(sx_output, e));
+            if (!jac_outputs.empty()) {
+                jacs = jac_outputs;
+                if (gen_hessian)
+                    throw std::runtime_error("Cannot compute hessian when multiple jacobian outputs are specified.");
+            } else {
+                if (check_jac_ad) {
+                    std::vector<cs::SX> sx_inputs_cs;
+                    std::vector<cs::SX> jac_ad;
+                    for (sym &e : sx_inputs) {
+                        sx_inputs_cs.push_back(e);
+                        jac_ad.push_back(cs::SX::jacobian(sx_output, e));
+                    }
+                    f_ad = cs::Function(func_name + "_ad", sx_inputs_cs, jac_ad);
                 }
-                f_ad = cs::Function(func_name + "_ad", sx_inputs_cs, jac_ad);
-            }
-            if (gen_hessian && !merit_jac_for_hess) {
-                // if we are generating hessian, we need to copy jacs
-                if (gen_jacobian)
-                    jacs_copy = jacs;
-                else
-                    jacs_copy = std::move(jacs);
+                if (gen_hessian && !merit_jac_for_hess) {
+                    // if we are generating hessian, we need to copy jacs
+                    if (gen_jacobian)
+                        jacs_copy = jacs;
+                    else
+                        jacs_copy = std::move(jacs);
+                }
             }
             jobs_.add(std::bind(&impl::run,
                                 full_func_name + "_jac",
@@ -533,20 +544,23 @@ void task::finalize(job_list &jobs_) {
 job_list generate_and_compile(task &&_task) {
     job_list jobs_tmp;
     _task.finalize(jobs_tmp);
-    std::lock_guard<std::mutex> lock(impl::mutex_);
-    impl::jobs_.add(jobs_tmp);
+    if (_task.extra_task) {
+        _task.extra_task->finalize(jobs_tmp);
+    }
+    // std::lock_guard<std::mutex> lock(impl::mutex_);
+    // impl::jobs_.add(jobs_tmp);
     // Launch the implementation in a new thread
     return jobs_tmp;
 }
 
 // Waits for all compilation threads to finish
-void wait_until_generated() {
-    std::lock_guard<std::mutex> lock(impl::mutex_);
-    std::cout << "Waiting for code generation tasks to complete..." << std::endl;
-    impl::jobs_.wait_until_finished();
-    impl::jobs_.jobs.clear();
-    std::cout << "All code generation completed." << std::endl;
-}
+// void wait_until_generated() {
+//     std::lock_guard<std::mutex> lock(impl::mutex_);
+//     std::cout << "Waiting for code generation tasks to complete..." << std::endl;
+//     impl::jobs_.wait_until_finished();
+//     impl::jobs_.jobs.clear();
+//     std::cout << "All code generation completed." << std::endl;
+// }
 } // namespace cs_codegen
 } // namespace utils
 } // namespace moto

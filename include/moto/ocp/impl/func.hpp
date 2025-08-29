@@ -36,6 +36,7 @@ class generic_func : public expr {
         movable_ptr<task_type> task_ = nullptr;
         gen_info() = default;
         gen_info(const gen_info &rhs);
+        gen_info(gen_info &&) = default;
         ~gen_info();
     };
     gen_info gen_;

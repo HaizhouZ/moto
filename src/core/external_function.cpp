@@ -27,17 +27,21 @@ void *load_from_shared(const std::string &lib_path, const std::string &func_name
     return func_sym;
 }
 
+ext_func::ext_func(const std::string &func_name, const std::string &lib_path) {
+    std::filesystem::path p(lib_path);
+    func_ = load_from_shared(p / ("lib" + func_name + ".so"), func_name);
+}
+
 std::array<ext_func, 3> load_approx(const std::string &name,
                                     bool load_eval, bool load_jac, bool load_hess,
                                     const std::string &path) {
     std::array<ext_func, 3> funcs;
-    std::filesystem::path p(path);
     if (load_eval)
-        funcs[0] = ext_func(p / ("lib" + name + ".so"), name);
+        funcs[0] = ext_func(name, path);
     if (load_jac)
-        funcs[1] = ext_func(p / ("lib" + name + "_jac.so"), name + "_jac");
+        funcs[1] = ext_func(name + "_jac", path);
     if (load_hess)
-        funcs[2] = ext_func(p / ("lib" + name + "_hess.so"), name + "_hess");
+        funcs[2] = ext_func(name + "_hess", path);
     return funcs;
 }
 

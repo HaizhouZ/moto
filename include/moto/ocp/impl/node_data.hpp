@@ -37,7 +37,7 @@ struct node_data {
 
     auto &sym_val() const { return *sym_; }   ///< getter for sym_
     auto &dense() const { return *dense_; }   ///< getter for dense_
-    auto &shared() const { return *shared_; } ///< getter for impl_
+    auto &shared() const { return *shared_; } ///< getter for shared_
     auto &problem() const { return *prob_; }  ///< getter for prob_
 
     // get value of the whole field

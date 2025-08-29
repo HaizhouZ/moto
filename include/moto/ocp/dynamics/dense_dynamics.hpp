@@ -39,7 +39,7 @@ struct dense_dynamics : public func {
         }
 
         void compute_project_derivatives(func_approx_data &data) const override;
-        void apply_jac_y_inverse_transpose(func_approx_data &data, vector_ref v, vector_ref dst) const override;
+        void apply_jac_y_inverse_transpose(func_approx_data &data, vector& v, vector& dst) const override;
     };
 
     dense_dynamics(const std::string &name, approx_order order, size_t dim = dim_tbd);

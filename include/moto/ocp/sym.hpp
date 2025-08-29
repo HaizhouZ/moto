@@ -75,6 +75,8 @@ class sym : public expr, public cs::SX {
         integrator_(x, dx, out, alpha);
     } ///< integrate the variable by dx with step size alpha
 
+    PROPERTY(integrator) ///< integrator function
+
     /// @brief make a symbolic input
     static var inputs(const std::string &name, size_t dim, default_val_t default_val = default_val_none_t()) {
         return sym(name, dim, __u, default_val);

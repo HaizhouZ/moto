@@ -67,7 +67,7 @@ dense_dynamics::impl::approx_data::approx_data(generic_constr::approx_data &&rhs
     }
 }
 
-void dense_dynamics::impl::apply_jac_y_inverse_transpose(func_approx_data &data, vector_ref v, vector_ref dst) const {
+void dense_dynamics::impl::apply_jac_y_inverse_transpose(func_approx_data &data, vector& v, vector& dst) const {
     auto &d = data.as<approx_data>();
     d.lu_->transpose_solve(v, dst);
 }

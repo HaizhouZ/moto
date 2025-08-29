@@ -5,8 +5,8 @@
 #include <cstddef> // For size_t
 #include <fmt/core.h>
 #include <memory>
-#include <ranges>
 #include <new>
+#include <ranges>
 
 #include <moto/utils/eigen_fmt.h>
 
@@ -28,8 +28,16 @@ using mapped_vector = Eigen::Map<vector>;
 using mapped_const_vector = Eigen::Map<const_vector>;
 using mapped_matrix = Eigen::Map<matrix>;
 
+template <typename T, bool Aligned = true, typename Base = std::conditional_t<Aligned, typename T::AlignedMapType, typename T::MapType>>
+struct null_init_map : public Base {
+    using Base::Base;
+    null_init_map() : Base(nullptr, 0, 0) {}
+};
+using aligned_map_t = null_init_map<matrix>;
+using aligned_vector_map_t = null_init_map<vector>;
+
 #define def_ptr(name) typedef std::shared_ptr<name> name##_ptr_t
-#define def_raw_ptr(name) typedef name* name##_ptr_t
+#define def_raw_ptr(name) typedef name *name##_ptr_t
 #define def_ptr_named(name, type_name) typedef std::shared_ptr<type_name> name##_ptr_t
 #define def_ptr_in_namespace(name, name_sp) typedef std::shared_ptr<name_sp::name> name##_ptr_t
 #define def_unique_ptr(name) typedef std::unique_ptr<name> name##_ptr_t

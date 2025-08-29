@@ -64,8 +64,10 @@ struct func_arg_map {
     func_arg_map(sym_data &primal, shared_data &shared, const generic_func &f);
 
     virtual ~func_arg_map() = default;
-    const generic_func &func_; ///< pointer to the func
-    shared_data &impl_;        ///< ref to shared data
+    const generic_func &func_;   ///< pointer to the func
+    shared_data &shared_;          ///< ref to shared data
+    sym_data *primal_ = nullptr; ///< reference to the primal data
+
     /**
      * @brief get the input argument values
      * @note this is a wrapper of in_args_ to access the values
@@ -79,7 +81,7 @@ struct func_arg_map {
 
     const auto &in_arg_data() const { return in_args_; }
 
-    auto problem() const { return impl_.prob_; }
+    auto problem() const { return shared_.prob_; }
 
     // template <typename T>
     // T &as() { return dynamic_cast<T &>(*this); }
@@ -103,7 +105,7 @@ struct func_arg_map {
 struct func_approx_data : public func_arg_map {
     merit_data *merit_data_ = nullptr; ///< reference to the merit data
     ///////////////////////////////////////////////////
-    vector_ref v_;            ///< value ref
+    vector_ref v_;                ///< value ref
     std::vector<matrix_ref> jac_; ///< jacobian references
     /// jacobian for cost, index corresponds to @ref func_arg_map::in_args_
     std::vector<row_vector_ref> merit_jac_;

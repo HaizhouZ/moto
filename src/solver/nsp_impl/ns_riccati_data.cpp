@@ -57,6 +57,8 @@ ns_node_data::ns_node_data(node_data *full_data)
     nsp_->s_c_stacked_0_k.resize(ncstr);
     nsp_->s_c_stacked_0_K.resize(ncstr, nx);
     d_y.K.setZero();
+    // if (nsp_->sparse_factorizer_)
+    // nsp_->sparse_factorizer_->init(nsp_);
 }
 ns_node_data::~ns_node_data() {
     if (nsp_)

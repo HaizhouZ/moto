@@ -80,6 +80,9 @@ void ns_factorization(ns_node_data *cur) {
     if (!d.ncstr) {
         unconstrain_setup();
     } else {
+        if (nsp.sparse_factorizer_) {
+            nsp.sparse_factorizer_->update(&nsp);
+        }
         d.nis = 0;
         d.nic = 0;
         size_t constr_s = d.ns + d.nis;

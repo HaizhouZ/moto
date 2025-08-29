@@ -35,6 +35,4 @@ void register_submodule_codegen(nb::module_ &m) {
 
     m.def("generate_and_compile", &utils::cs_codegen::generate_and_compile,
                        nb::arg("task"), "Generate and compile code for the given task.");
-    m.def("wait_until_generated", &utils::cs_codegen::wait_until_generated,
-                       "Wait until all code generation tasks are finished.");
 }

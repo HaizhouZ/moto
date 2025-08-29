@@ -3,6 +3,8 @@
 
 #include <moto/core/fwd.hpp>
 
+#define FUNC_DEFAULT_LIB_PATH "gen"
+
 namespace moto {
 /**
  * @brief Load a function from a shared library
@@ -28,11 +30,10 @@ struct ext_func {
     bool empty() { return func_ == nullptr; }
     /**
      * @brief Construct a new ext_func object by calling @ref load_from_shared
-     * @param lib_path Path to the shared library (e.g., "gen/libmy_approx.so")
+     * @param lib_path Path to the shared library (e.g., "gen")
      * @param func_name Name of the function to load (e.g., "my_approx")
      */
-    ext_func(const std::string &lib_path, const std::string &func_name)
-        : func_(load_from_shared(lib_path, func_name)) {}
+    ext_func(const std::string &func_name, const std::string &lib_path = FUNC_DEFAULT_LIB_PATH);
     /**
      * @brief Invoke the loaded function
      *
@@ -59,7 +60,7 @@ struct ext_func {
  */
 std::array<ext_func, 3> load_approx(const std::string &name,
                                     bool load_eval, bool load_jac, bool load_hess,
-                                    const std::string &path = "gen");
+                                    const std::string &path = FUNC_DEFAULT_LIB_PATH);
 } // namespace moto
 
 #endif // MOTO_EVAL_EXTERNAL_FUNCTION_HPP
