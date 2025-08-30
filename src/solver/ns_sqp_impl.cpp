@@ -1,5 +1,5 @@
 #include <moto/solver/ineq_soft.hpp>
-#include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
+#include <moto/solver/ns_riccati/generic_solver.hpp>
 #include <moto/solver/ns_sqp.hpp>
 #include <moto/utils/field_conversion.hpp>
 #include <numeric>
@@ -69,28 +69,29 @@ void ns_sqp::print_stats(int i_iter, const kkt_info &info, bool has_ineq) {
 
     fmt::print("\n");
 };
-void iterative_refinement_start(ns_sqp::data *data) {
-    data->Q_y_corr = nullptr;
-    data->prim_corr[__x].setZero();
-    // data->clear_merit_jac();
-    // clear modification
-    for (auto field : primal_fields) {
-        data->dense().jac_modification_[field].setZero();
-    }
-    /// @todo fill the residual here
-    data->dense().jac_modification_[__u] = data->dense().res_stat_[__u];
-    data->dense().jac_modification_[__y] = data->dense().res_stat_[__y];
-    data->swap_jacobian_modification(); // move modification to the jacobian for later solving
-}
-void iterative_refinement_end(ns_sqp::data *data) {
-    data->swap_jacobian_modification();                     // move
-    data->Q_y_corr = &data->dense().jac_modification_[__y]; // cache the Q_y after correction
-    solver::ns_riccati::finalize_newton_step_correction(data);
-    solver::ineq_soft::finalize_newton_step(data, false);
-    solver::ns_riccati::finalize_dual_newton_step(data);
-}
 
 void ns_sqp::update(size_t n_iter) {
+    auto iterative_refinement_start = [this](ns_sqp::data *data) {
+        data->Q_y_corr = nullptr;
+        data->prim_corr[__x].setZero();
+        // data->clear_merit_jac();
+        // clear modification
+        for (auto field : primal_fields) {
+            data->dense().jac_modification_[field].setZero();
+        }
+        /// @todo fill the residual here
+        data->dense().jac_modification_[__u] = data->dense().res_stat_[__u];
+        data->dense().jac_modification_[__y] = data->dense().res_stat_[__y];
+        data->swap_jacobian_modification(); // move modification to the jacobian for later solving
+    };
+
+    auto iterative_refinement_end = [this](ns_sqp::data *data) {
+        data->swap_jacobian_modification();                     // move
+        data->Q_y_corr = &data->dense().jac_modification_[__y]; // cache the Q_y after correction
+        riccati_solver_->finalize_newton_step_correction(data);
+        solver::ineq_soft::finalize_newton_step(data, false);
+        riccati_solver_->finalize_dual_newton_step(data);
+    };
     fmt::print("Initialization for SQP...\n");
     graph_.for_each_parallel([this](data *cur) {
         // setup solver settings
@@ -138,17 +139,17 @@ void ns_sqp::update(size_t n_iter) {
 
         timed_block_start("sqp_single_iter");
         detail_timed_block_start("ns factorization");
-        graph_.for_each_parallel(solver::ns_riccati::ns_factorization);
+        graph_.for_each_parallel(bind(&solver_type::ns_factorization));
         detail_timed_block_end("ns factorization");
 
         detail_timed_block_start("riccati_recursion");
-        graph_.apply_backward(solver::ns_riccati::riccati_recursion, true);
+        graph_.apply_backward(bind(&solver_type::riccati_recursion), true);
         detail_timed_block_end("riccati_recursion");
         detail_timed_block_start("post solve");
-        graph_.for_each_parallel(solver::ns_riccati::compute_primal_sensitivity);
+        graph_.for_each_parallel(bind(&solver_type::compute_primal_sensitivity));
         detail_timed_block_end("post solve");
         detail_timed_block_start("fwd_linear_rollout");
-        graph_.apply_forward(solver::ns_riccati::fwd_linear_rollout, true);
+        graph_.apply_forward(bind(&solver_type::fwd_linear_rollout), true);
         detail_timed_block_end("fwd_linear_rollout");
 
         bool finalize_dual = true;
@@ -160,8 +161,8 @@ void ns_sqp::update(size_t n_iter) {
             update_res_stat = false; // do not update stationary residual
         }
         detail_timed_block_start("finalize_newton_step");
-        graph_.for_each_parallel([finalize_dual, &setting_per_thread](size_t tid, data *d) {
-            solver::ns_riccati::finalize_newton_step(d, finalize_dual);
+        graph_.for_each_parallel([finalize_dual, &setting_per_thread, this](size_t tid, data *d) {
+            riccati_solver_->finalize_newton_step(d, finalize_dual);
             solver::ineq_soft::finalize_newton_step(d, false);
             // decide line search bounds (e.g., fraction-to-bounds)
             solver::ineq_soft::calculate_line_search_bounds(d, &setting_per_thread[tid]);
@@ -187,15 +188,15 @@ void ns_sqp::update(size_t n_iter) {
             /// @todo compute the residuals
             // solve the problem again with updated mu
             detail_timed_block_start("riccati_recursion_correction");
-            graph_.apply_backward(solver::ns_riccati::riccati_recursion_correction, true);
+            graph_.apply_backward(bind(&solver_type::riccati_recursion_correction), true);
             detail_timed_block_end("riccati_recursion_correction");
-            graph_.for_each_parallel(solver::ns_riccati::compute_primal_sensitivity_correction);
-            graph_.apply_forward(solver::ns_riccati::fwd_linear_rollout_correction, true);
-            graph_.for_each_parallel([n_iter](data *d) {
+            graph_.for_each_parallel(bind(&solver_type::compute_primal_sensitivity_correction));
+            graph_.apply_forward(bind(&solver_type::fwd_linear_rollout_correction), true);
+            graph_.for_each_parallel([n_iter, this](data *d) {
                 solver::ineq_soft::first_order_correction_end(d);
-                solver::ns_riccati::finalize_newton_step_correction(d);
+                riccati_solver_->finalize_newton_step_correction(d);
                 solver::ineq_soft::finalize_newton_step(d, false);
-                solver::ns_riccati::finalize_dual_newton_step(d);
+                riccati_solver_->finalize_dual_newton_step(d);
             });
             // recompute line search bounds with the corrected newton step
             settings.ls_config_reset();
@@ -225,7 +226,7 @@ void ns_sqp::update(size_t n_iter) {
             detail_timed_block_start("iterative_refinement");
             while (iter_refine < iter_refine_max) {
                 detail_timed_block_start("check_residual");
-                graph_.for_each_parallel(solver::ns_riccati::compute_kkt_residual);
+                graph_.for_each_parallel(bind(&solver_type::compute_kkt_residual));
                 detail_timed_block_end("check_residual");
                 struct MOTO_ALIGN_NO_SHARING inf_res_state_worker {
                     scalar_t inf_res_stat_u = 0.;
@@ -254,10 +255,10 @@ void ns_sqp::update(size_t n_iter) {
                 graph_.for_each_parallel(iterative_refinement_start);
                 detail_timed_block_end("iterative_refinement_presolve");
                 detail_timed_block_start("riccati_recursion_correction");
-                graph_.apply_backward(solver::ns_riccati::riccati_recursion_correction, true);
+                graph_.apply_backward(bind(&solver_type::riccati_recursion_correction), true);
                 detail_timed_block_end("riccati_recursion_correction");
-                graph_.for_each_parallel(solver::ns_riccati::compute_primal_sensitivity_correction);
-                graph_.apply_forward(solver::ns_riccati::fwd_linear_rollout_correction, true);
+                graph_.for_each_parallel(bind(&solver_type::compute_primal_sensitivity_correction));
+                graph_.apply_forward(bind(&solver_type::fwd_linear_rollout_correction), true);
                 detail_timed_block_start("iterative_refinement_step_finalize");
                 graph_.for_each_parallel(iterative_refinement_end);
                 detail_timed_block_end("iterative_refinement_step_finalize");
@@ -280,7 +281,7 @@ void ns_sqp::update(size_t n_iter) {
         // real line search step
         detail_timed_block_start("line_search_step");
         graph_.for_each_parallel([this](data *d) {
-            solver::ns_riccati::apply_affine_step(d, &settings);
+            riccati_solver_->apply_affine_step(d, &settings);
             solver::ineq_soft::apply_affine_step(d, &settings);
         });
         detail_timed_block_end("line_search_step");

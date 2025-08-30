@@ -1,12 +1,12 @@
-#include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
-#include <moto/solver/ns_riccati/nullspace_data.hpp>
+#define MOTO_NS_RICCATI_IMPL
+#include <moto/solver/ns_riccati/generic_solver.hpp>
 
 namespace moto {
 namespace solver {
 namespace ns_riccati {
-void compute_primal_sensitivity(ns_node_data *cur) {
+void generic_solver::compute_primal_sensitivity(ns_riccati_data *cur) {
     auto &d = *cur;
-    auto &nsp = *d.nsp_;
+    auto &nsp = d.nsp_;
     // compute k_u
     if (d.rank_status_ == rank_status::unconstrained) {
         // nsp.z_k = -nsp.z_0_k;
@@ -30,9 +30,9 @@ void compute_primal_sensitivity(ns_node_data *cur) {
         d.d_y.K.noalias() = nsp.Z_y * nsp.z_K - nsp.y_y_K;
     }
 }
-void compute_primal_sensitivity_correction(ns_node_data *cur) {
+void generic_solver::compute_primal_sensitivity_correction(ns_riccati_data *cur) {
     auto &d = *cur;
-    auto &nsp = *d.nsp_;
+    auto &nsp = d.nsp_;
     // k_u correction
     if (d.rank_status_ == rank_status::unconstrained) {
         // nsp.z_k = -nsp.z_0_k;

@@ -274,7 +274,7 @@ prob.add(model.make_foot_lift_cost(lifted=True))
 prob_term = prob.clone()
 prob_term.add(model.get_state_cost(terminal=True))
 
-moto.print_problem(prob)
+prob.print_summary()
 print("--" * 15)
 # # moto.print_problem(prob_term)
 

@@ -1,5 +1,6 @@
-#include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
-#include <moto/solver/ns_riccati/nullspace_data.hpp>
+#define MOTO_NS_RICCATI_IMPL
+
+#include <moto/solver/ns_riccati/generic_solver.hpp>
 #include <moto/utils/field_conversion.hpp>
 
 // #define ENABLE_TIMED_BLOCK
@@ -8,11 +9,11 @@
 namespace moto {
 namespace solver {
 namespace ns_riccati {
-extern void kkt_diagnosis(ns_node_data *cur);
-extern void print_debug(ns_node_data *cur);
-void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
+extern void kkt_diagnosis(ns_riccati_data *cur);
+extern void print_debug(ns_riccati_data *cur);
+void generic_solver::riccati_recursion(ns_riccati_data *cur, ns_riccati_data *prev) {
     auto &d = *cur;
-    auto &nsp = *d.nsp_;
+    auto &nsp = d.nsp_;
     // check positiveness
     // bool qyy_invertible = isPositiveDefinite(d.V_yy);
     timed_block_start("V_yy symmetrize");
@@ -119,9 +120,9 @@ void riccati_recursion(ns_node_data *cur, ns_node_data *prev) {
     timed_block_end("update_value_function");
 }
 // only Q_() changed
-void riccati_recursion_correction(ns_node_data *cur, ns_node_data *prev) {
+void generic_solver::riccati_recursion_correction(ns_riccati_data *cur, ns_riccati_data *prev) {
     auto &d = *cur;
-    auto &nsp = *d.nsp_;
+    auto &nsp = d.nsp_;
     // compute z_u correction
     // nsp.z_u_k.noalias() = d.Q_u.transpose() - nsp.F_u.transpose() * d.Q_y.transpose();
     // nsp.z_u_k.noalias() = d.Q_u.transpose() - d.F_u.dense().transpose() * d.Q_y.transpose();

@@ -1,12 +1,12 @@
-#include <Eigen/Eigenvalues>
-#include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
-#include <moto/solver/ns_riccati/nullspace_data.hpp>
+#define MOTO_NS_RICCATI_IMPL
+#include <moto/solver/ns_riccati/generic_solver.hpp>
+
 #include <moto/utils/field_conversion.hpp>
 
 namespace moto {
 namespace solver {
 namespace ns_riccati {
-void fwd_linear_rollout(ns_node_data *cur, ns_node_data *next) {
+void generic_solver::fwd_linear_rollout(ns_riccati_data *cur, ns_riccati_data *next) {
     // get_data(nodes_.front()).prim_step[__x].setZero();
     auto &d = *cur;
     d.prim_step[__y].noalias() = d.d_y.k + d.d_y.K * d.prim_step[__x];
@@ -14,9 +14,9 @@ void fwd_linear_rollout(ns_node_data *cur, ns_node_data *next) {
         utils::copy_y_to_x_tangent(d.prim_step[__y], next->prim_step[__x], cur->dense_->prob_, next->dense_->prob_);
     }
 }
-void finalize_dual_newton_step(ns_node_data *cur) {
+void generic_solver::finalize_dual_newton_step(ns_riccati_data *cur) {
     auto &d = *cur;
-    auto &nsp = *d.nsp_;
+    auto &nsp = d.nsp_;
     d.d_lbd_f.noalias() = -d.Q_y.transpose() - d.V_yy * d.prim_step[__y];
     d.Q_yx.times<false>(d.prim_step[__x], d.d_lbd_f);
     d.Q_yx_mod.times<false>(d.prim_step[__x], d.d_lbd_f);
@@ -60,16 +60,16 @@ void finalize_dual_newton_step(ns_node_data *cur) {
     // d.dual_step[__dyn].noalias() =  nsp.lu_dyn_.transpose().solve(d.d_lbd_f);
     cur->apply_jac_y_inverse_transpose(d.d_lbd_f, d.dual_step[__dyn]);
 }
-void finalize_newton_step(ns_node_data *cur, bool finalize_dual) {
+void generic_solver::finalize_newton_step(ns_riccati_data *cur, bool finalize_dual) {
     auto &d = *cur;
-    auto &nsp = *d.nsp_;
+    auto &nsp = d.nsp_;
     d.prim_step[__u].noalias() = d.d_u.k + d.d_u.K * d.prim_step[__x];
     // multiplier
     // dynamics multiplier first two terms
     if (finalize_dual)
         finalize_dual_newton_step(cur);
 }
-void fwd_linear_rollout_correction(ns_node_data *cur, ns_node_data *next) {
+void generic_solver::fwd_linear_rollout_correction(ns_riccati_data *cur, ns_riccati_data *next) {
     // get_data(nodes_.front()).prim_step[__x].setZero();
     auto &d = *cur;
     d.prim_corr[__y].noalias() = d.d_y.k + d.d_y.K * d.prim_corr[__x];
@@ -77,9 +77,8 @@ void fwd_linear_rollout_correction(ns_node_data *cur, ns_node_data *next) {
         utils::copy_y_to_x_tangent(d.prim_corr[__y], next->prim_corr[__x], cur->dense_->prob_, next->dense_->prob_);
     }
 }
-void finalize_newton_step_correction(ns_node_data *cur) {
+void generic_solver::finalize_newton_step_correction(ns_riccati_data *cur) {
     auto &d = *cur;
-    auto &nsp = *d.nsp_;
     d.prim_corr[__u].noalias() = d.d_u.k + d.d_u.K * d.prim_corr[__x];
     // correction for the primal step
     for (auto f : primal_fields) {
@@ -89,9 +88,8 @@ void finalize_newton_step_correction(ns_node_data *cur) {
     d.Q_u += d.dense_->jac_modification_[__u];
     d.Q_y += d.dense_->jac_modification_[__y];
 }
-void compute_kkt_residual(ns_node_data *cur) {
+void generic_solver::compute_kkt_residual(ns_riccati_data *cur) {
     auto &d = *cur;
-    auto &nsp = *d.nsp_;
     // compute KKT residual
     // fmt::println("KKT residuals:");
     auto dense = d.dense_;

@@ -1,11 +1,12 @@
-#include <moto/solver/linesearch_config.hpp>
-#include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
 #include <moto/ocp/impl/sym_data.hpp>
-
+#include <moto/solver/linesearch_config.hpp>
+#include <moto/core/workspace_data.hpp>
+#define MOTO_NS_RICCATI_IMPL
+#include <moto/solver/ns_riccati/generic_solver.hpp>
 namespace moto {
 namespace solver {
 namespace ns_riccati {
-void apply_affine_step(ns_node_data *cur, workspace_data *_cfg) {
+void generic_solver::apply_affine_step(ns_riccati_data *cur, workspace_data *_cfg) {
     auto &cfg = _cfg->as<solver::linesearch_config>();
     auto &d = *cur;
     for (auto f : primal_fields) {

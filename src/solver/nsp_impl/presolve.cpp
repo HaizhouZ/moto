@@ -1,6 +1,5 @@
-#include <Eigen/Eigenvalues>
-#include <moto/solver/ns_riccati/ns_riccati_solve.hpp>
-#include <moto/solver/ns_riccati/nullspace_data.hpp>
+#define MOTO_NS_RICCATI_IMPL
+#include <moto/solver/ns_riccati/generic_solver.hpp>
 
 #define ENABLE_TIMED_BLOCK
 #include <moto/utils/timed_block.hpp>
@@ -10,12 +9,12 @@
 namespace moto {
 namespace solver {
 namespace ns_riccati {
-extern void print_debug(ns_node_data *cur);
+extern void print_debug(ns_riccati_data *cur);
 
-void ns_factorization(ns_node_data *cur) {
+void generic_solver::ns_factorization(ns_riccati_data *cur) {
     // collect constraint residuals and jacobians
     auto &d = *cur;
-    auto &nsp = *d.nsp_;
+    auto &nsp = d.nsp_;
     auto &_approx = d.dense_->approx_;
     timed_block_start("update_projected_dynamics");
     cur->update_projected_dynamics();
@@ -80,9 +79,6 @@ void ns_factorization(ns_node_data *cur) {
     if (!d.ncstr) {
         unconstrain_setup();
     } else {
-        if (nsp.sparse_factorizer_) {
-            nsp.sparse_factorizer_->update(&nsp);
-        }
         d.nis = 0;
         d.nic = 0;
         size_t constr_s = d.ns + d.nis;
