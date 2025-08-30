@@ -1,10 +1,10 @@
 #ifndef __EXPRESSION_BASE__
 #define __EXPRESSION_BASE__
 
-#include <atomic>
 #include <moto/core/fields.hpp>
-
-#include <moto/utils/movable_ptr.hpp>
+#include <moto/utils/optional_boolean.hpp>
+#include <moto/utils/unique_id.hpp>
+#include <condition_variable>
 
 namespace moto {
 class expr; // forward declaration of expr
@@ -73,33 +73,6 @@ constexpr size_t dim_tbd = 0;
     auto &mem_name() { return mem_name##_; } \
     const auto &mem_name() const { return mem_name##_; }
 
-namespace impl {
-class expr_async_ready_status;
-template <typename T>
-class unique_id {
-  private:
-    size_t uid_;
-
-  public:
-    constexpr static size_t uid_max = std::numeric_limits<size_t>::max();
-    static std::atomic<size_t> max_uid; ///< maximum uid used for this type
-    /// default constructor, assigns a new uid
-    unique_id() : uid_(uid_max) {}
-    void set_inc() { uid_ = max_uid++; } ///< set the uid to a new value
-    /// copy constructor, assigns a new uid
-    unique_id(const unique_id &rhs) : uid_(max_uid++) {}
-    /// move constructor, assigns a new uid
-    unique_id(unique_id &&rhs) noexcept : uid_(rhs.uid_) { rhs.uid_ = uid_max; }
-    bool is_valid() const { return uid_ < uid_max; } ///< check if the uid is valid
-    operator size_t &() { return uid_; }             ///< conversion to size_t operator
-    operator const size_t &() const { return uid_; } ///< conversion to const size_t
-};
-} // namespace impl
-template <typename T>
-inline auto format_as(const impl::unique_id<T> &uid) { return static_cast<size_t>(uid); } ///< format the unique id as a string
-
-#define INIT_UID_(type) template <> \
-                        std::atomic<size_t> impl::unique_id<type>::max_uid = 0;
 /**
  * @brief general expression base class (now merged with impl)
  */
@@ -108,16 +81,26 @@ class expr : public std::enable_shared_from_this<expr> {
     static size_t max_uid; /// < uid used to index global expressions
 
   protected:
+    class async_ready_status {
+      private:
+        utils::optional_bool ready_ = utils::optional_bool::Unset; ///< ready state of the expression
+        std::mutex ready_mutex_;                                   ///< mutex for ready state
+        std::condition_variable ready_cond_;                       ///< condition variable for ready state
+      public:
+        void set_ready_status(bool ready = true);
+        bool wait_until_ready();
+    };
+
     bool finalized_ = false;
 
     std::string name_;
     size_t dim_ = 0;
     size_t tdim_; ///< tangent space dimension, for manifolds
-    impl::unique_id<expr> uid_;
+    utils::unique_id<expr> uid_;
     field_t field_ = __undefined;
     expr_list dep_; // now a direct member, not a pointer
 
-    mutable movable_ptr<impl::expr_async_ready_status> async_ready_status_; ///< async ready status, if any
+    mutable std::shared_ptr<async_ready_status> async_ready_status_; ///< async ready status, if any
 
     shared_expr shared_;
 
@@ -181,14 +164,9 @@ class expr : public std::enable_shared_from_this<expr> {
 
     // Copy assignment operator (gets a new uid and leaves un-finalized)
     expr &operator=(const expr &rhs) = default;
+    expr &operator=(expr &&rhs) noexcept = default;
     // Move constructor
     expr(expr &&rhs) = default;
-
-    virtual ~expr();
-
-    void set_impl(expr *e) {
-        // No-op in merged version, kept for compatibility
-    }
 
     [[nodiscard]]
     auto make_vec(scalar_t *ptr) const { return mapped_vector(ptr, dim_); }
@@ -197,7 +175,7 @@ class expr : public std::enable_shared_from_this<expr> {
 
     bool finalize(bool block_until_ready = false); ///< finalize the expression, set ready status
 
-    bool wait_until_ready() const; ///< wait until the expression is ready
+    virtual bool wait_until_ready() const; ///< wait until the expression is ready
 
     size_t use_count() const { return shared_ ? shared_->use_count() : weak_from_this().use_count(); } ///< get the use count of the expression
 };

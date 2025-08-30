@@ -3,7 +3,6 @@
 #include <iostream>
 #include <moto/solver/ns_riccati/nullspace_data.hpp>
 #include <moto/solver/ns_sqp.hpp>
-#include <moto/utils/print.hpp>
 
 using namespace moto;
 
@@ -16,8 +15,8 @@ int main() {
     auto prob_terminal = prob->clone();
     prob_terminal->add(costs.terminal(dyn.r_next, dyn.v_next));
 
-    utils::print_problem(prob);
-    utils::print_problem(prob_terminal);
+    prob->print_summary();
+    prob_terminal->print_summary();
 
     fmt::print("good!\n");
 

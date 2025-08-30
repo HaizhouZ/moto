@@ -30,6 +30,7 @@ inline bool operator==(const var &lhs, const var &rhs) {
 class sym : public expr, public cs::SX {
 
   public:
+    constexpr static char next_suffix_[] = "_nxt"; ///< suffix for next state variable
     friend class expr;
     using default_val_t = std::variant<vector, scalar_t, std::monostate>;
     using default_val_none_t = std::monostate;
@@ -57,17 +58,18 @@ class sym : public expr, public cs::SX {
      */
     sym(const std::string &name, size_t dim, field_t type, default_val_t default_val = default_val_none_t());
 
-    sym(sym &&rhs) = default;            ///< move constructor
-    sym &operator=(sym &&rhs) = default; ///< move assignment operator
-
     std::function<void(vector_ref, vector_ref, vector_ref, scalar_t)> integrator_;
 
   public:
+    sym(sym &&rhs) = default;            ///< move constructor
+    sym &operator=(sym &&rhs) = default; ///< move assignment operator
+
     using expr::dim;
     using expr::name; ///< name of the symbolic variable
     using expr::operator bool;
 
     PROPERTY(default_value) ///< default value of the symbolic variable
+    PROPERTY(dual)          ///< dual variable, only used for state variables
 
     void set_default_value(const default_val_t &default_val); ///< set the default value of the symbolic variable
 
@@ -75,8 +77,8 @@ class sym : public expr, public cs::SX {
         integrator_(x, dx, out, alpha);
     } ///< integrate the variable by dx with step size alpha
 
-    PROPERTY(integrator) ///< integrator function
-
+    PROPERTY(integrator)                                        ///< integrator function
+    auto get_next_name() const { return name_ + next_suffix_; } ///< get the name of the next state variable
     /// @brief make a symbolic input
     static var inputs(const std::string &name, size_t dim, default_val_t default_val = default_val_none_t()) {
         return sym(name, dim, __u, default_val);
@@ -88,7 +90,7 @@ class sym : public expr, public cs::SX {
     /// @brief make a pair of symbolic state
     static auto states(const std::string &name, size_t dim, default_val_t default_val = default_val_none_t()) {
         auto temp = var(sym(name, dim, __x, default_val));
-        auto next = var(sym(name + "_nxt", dim, __y, default_val));
+        auto next = var(sym(temp->get_next_name(), dim, __y, default_val));
         temp->dual_ = next;
         next->dual_ = temp;
         return std::make_pair(std::move(temp), std::move(next));
@@ -121,6 +123,8 @@ class sym : public expr, public cs::SX {
     static var symbol(const std::string &name, size_t dim, field_t field, default_val_t default_val = default_val_none_t()) {
         return sym(name, dim, field, default_val);
     } ///< make a symbolic primitive
+
+    var clone() const { return var(sym(*this)); } ///< clone the symbolic variable
 };
 inline sym *var::operator->() const {
     return static_cast<sym *>(base::operator->());

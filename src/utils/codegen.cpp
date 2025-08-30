@@ -334,7 +334,7 @@ void run(
         }
 
         // Step 6: Create JSON metadata and cleanup
-        json j;
+        json j; /// @todo the order here is not guaranteed
         j["name"] = func_name;
         for (const sym &e : sx_inputs) {
             j["inputs"][e.name()] = {e.dim(), static_cast<int>(e.field())};

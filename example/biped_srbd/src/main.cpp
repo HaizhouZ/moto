@@ -3,7 +3,6 @@
 #include <moto/ocp/problem.hpp>
 #include <moto/solver/ns_sqp.hpp>
 #include <moto/utils/field_conversion.hpp>
-#include <moto/utils/print.hpp>
 
 int main() {
     using namespace moto;
@@ -21,8 +20,8 @@ int main() {
     prob->add(dyn.running_cost());
     auto terminal_prob = prob->clone();
     terminal_prob->add(dyn.terminal_cost());
-    utils::print_problem(prob);
-    utils::print_problem(terminal_prob);
+    prob->print_summary();
+    terminal_prob->print_summary();
 
     ns_sqp solver;
     auto &graph = solver.graph_;

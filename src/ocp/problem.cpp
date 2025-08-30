@@ -76,6 +76,21 @@ void ocp::maintain_order(expr &ex) {
         }
     }
 }
+void ocp::print_summary() const {
+    fmt::print("-------------------------------------------------\n");
+    fmt::print("problem uid {}\n", uid_);
+    for (size_t i = 0; i < field::num; i++) {
+        if (exprs(i).size() > 0) {
+            fmt::print("field : {}, \ttotal dim {}\n",
+                       field::name(static_cast<field_t>(i)),
+                       dim(i));
+            for (const auto &expr : exprs(i)) {
+                fmt::print(" - {} uid {} dim: {}\n", expr->name(), expr->uid(), expr->dim());
+            }
+        }
+    }
+    fmt::print("-------------------------------------------------\n");
+}
 void ocp::wait_until_ready() const {
     for (const auto &f : expr_) {
         for (const auto &e : f) {

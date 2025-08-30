@@ -15,7 +15,7 @@ merit_data::merit_data(ocp *prob) : prob_(prob) {
             approx_[i].v_.resize(dim);
             approx_[i].v_.setZero();
             for (auto f : primal_fields) {
-                approx_[i].jac_[f].resize(dim, prob_->dim(f));
+                approx_[i].jac_[f].resize(dim, prob_->tdim(f));
             }
         }
         // dual variables

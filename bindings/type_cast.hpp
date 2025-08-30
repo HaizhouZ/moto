@@ -138,15 +138,15 @@ func &cast_to_func(const nb::handle &h);
 namespace nanobind {
 namespace detail {
 template <typename T>
-struct type_caster<moto::impl::unique_id<T>> {
-    NB_TYPE_CASTER(moto::impl::unique_id<T>, const_name("int"));
+struct type_caster<moto::utils::unique_id<T>> {
+    NB_TYPE_CASTER(moto::utils::unique_id<T>, const_name("int"));
 
     bool from_python(handle src, uint8_t flags, cleanup_list *cleanup) {
         value = size_t(src);
         return true;
     }
 
-    static handle from_cpp(const moto::impl::unique_id<T> &src, rv_policy policy, cleanup_list *cleanup) {
+    static handle from_cpp(const moto::utils::unique_id<T> &src, rv_policy policy, cleanup_list *cleanup) {
         return nb::int_(size_t(src));
     }
 };

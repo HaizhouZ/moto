@@ -31,7 +31,9 @@ using mapped_matrix = Eigen::Map<matrix>;
 template <typename T, bool Aligned = true, typename Base = std::conditional_t<Aligned, typename T::AlignedMapType, typename T::MapType>>
 struct null_init_map : public Base {
     using Base::Base;
-    null_init_map() : Base(nullptr, 0, 0) {}
+    constexpr static size_t default_rows = Base::RowsAtCompileTime == Eigen::Dynamic ? 0 : Base::RowsAtCompileTime;
+    constexpr static size_t default_cols = Base::ColsAtCompileTime == Eigen::Dynamic ? 0 : Base::ColsAtCompileTime;
+    null_init_map() : Base(nullptr, default_rows, default_cols) {}
 };
 using aligned_map_t = null_init_map<matrix>;
 using aligned_vector_map_t = null_init_map<vector>;

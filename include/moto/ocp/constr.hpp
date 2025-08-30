@@ -45,7 +45,7 @@ class generic_constr : public generic_func {
      */
     struct approx_data : public func_approx_data {
         solver::linesearch_config *ls_cfg = nullptr; ///< line search configuration, can be nullptr
-        scalar_t *merit_;                              ///< pointer to the merit value
+        scalar_t *merit_;                            ///< pointer to the merit value
         vector_ref multiplier_;                      ///< multiplier vector reference
         /**
          * @brief construct a new generic_constr data object by moving from another sparse approximation map
@@ -111,6 +111,10 @@ class generic_constr : public generic_func {
         data_base d(func_approx_data(primal, raw, shared, *this));
         return new data_derived(std::move(d));
     }
+#define OVERLOAD_CREATE_APPROX_DATA(derived)                                                                                \
+    func_approx_data_ptr_t create_approx_data(sym_data &primal, merit_data &raw, shared_data &shared) const override { \
+        return func_approx_data_ptr_t(make_approx<derived>(primal, raw, shared));                                      \
+    }
     /**
      * @brief wrapped data maker for generic_constr
      * @details if field_ is in @ref merit_data::stored_constr_fields, it will return approx_data
@@ -120,9 +124,7 @@ class generic_constr : public generic_func {
      * @param shared shared data
      * @return func_approx_data_ptr_t
      */
-    func_approx_data_ptr_t create_approx_data(sym_data &primal, merit_data &raw, shared_data &shared) const override {
-        return func_approx_data_ptr_t(make_approx(primal, raw, shared));
-    }
+    OVERLOAD_CREATE_APPROX_DATA(generic_constr);
     DEF_FUNC_CLONE;
 };
 

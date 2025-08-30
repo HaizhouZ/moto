@@ -20,7 +20,7 @@ class ocp {
     bool add_impl(expr &);
     void maintain_order(expr &);
     static size_t max_uid; ///< uid used to index global expressions
-    impl::unique_id<ocp> uid_;
+    utils::unique_id<ocp> uid_;
     /// collection of all expressions in the problem
     std::array<expr_list, field::num> expr_;
     /// data index of expr in serialized vector, by uid
@@ -42,6 +42,8 @@ class ocp {
     size_t num(size_t f) const { return expr_[f].size(); } ///< getter for num of exprs in field f
     size_t tdim(size_t f) const { return tdim_.at(f); }                        ///< getter for tdim_
     void wait_until_ready() const;
+
+    void print_summary() const;
 
     static auto create() { return std::shared_ptr<ocp>(new ocp()); }
     auto clone() { return std::shared_ptr<ocp>(new ocp(*this)); }

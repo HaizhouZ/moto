@@ -61,6 +61,17 @@ void sparse_mat::setZero() {
     // eye panels do not need to be set to zero
 }
 matrix_ref sparse_mat::insert(size_t r_st, size_t c_st, size_t r, size_t c, sparsity sp) {
+    static matrix empty;
+    static vector empty_vec;
+    static row_vector empty_rvec;
+    if (r == 0 || c == 0)
+        if (c == 1 || sp == sparsity::eye || sp == sparsity::diag) {
+            return empty_vec;
+        } else if (r == 1) {
+            return empty_rvec;
+        } else {
+            return empty;
+        }
     rows_ = std::max(rows_, r_st + r);
     cols_ = std::max(cols_, c_st + c);
     switch (sp) {

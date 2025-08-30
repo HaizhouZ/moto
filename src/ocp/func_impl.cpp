@@ -62,6 +62,7 @@ void generic_func::load_external_impl(const std::string &path) {
         hess.invoke(d.in_arg_data(), d.merit_hess_);
     };
 }
+
 void generic_func::substitute(const sym &arg, const sym &rhs) {
     if (gen_.task_) {
         gen_.task_->sx_output = cs::SX::substitute(gen_.task_->sx_output, arg, rhs);
@@ -73,43 +74,8 @@ void generic_func::substitute(const sym &arg, const sym &rhs) {
     auto in_arg_pos = in_arg_it - in_args_.begin();
     in_args_.at(in_arg_pos) = rhs; // update the in_args_ to point to the new sym
     dep_.at(in_arg_pos) = rhs;     // update the dep_ to point to the new sym
-    // arg_dim_[arg.field()] -= arg.dim();      // update the dimension of the field
-    // arg_dim_[rhs.field()] += rhs.dim();      // update the dimension of the field
-    // arg_tdim_[arg.field()] -= arg.tdim();      // update the tangent dimension of the field
-    // arg_tdim_[rhs.field()] += rhs.tdim();      // update the tangent dimension
-    // arg_num_[arg.field()] -= 1;              // update the number of arguments in the field
-    // arg_num_[rhs.field()] += 1;              // update the number of arguments in the field
-    // arg_uid_[arg.field()].erase(arg.uid());  // remove the uid from the set
-    // arg_uid_[rhs.field()].insert(rhs.uid()); // add the uid to the set
-    // std::remove(arg_by_field_[arg.field()].begin(),
-    //             arg_by_field_[arg.field()].end(), arg);
-
-    // // find in in_args_ after in_arg_pos the first arg with the same field as rhs
-    // auto first_after = std::find_if(in_args_.begin() + in_arg_pos + 1, in_args_.end(),
-    //                                 [&rhs](const sym &s) { return s.field() == rhs.field(); });
-    // if (first_after == in_args_.end()) {
-    //     arg_by_field_[rhs.field()].emplace_back(rhs); // add rhs to the arg
-    // } else {
-    //     auto insert_it = std::find(arg_by_field_[rhs.field()].begin(),
-    //                                arg_by_field_[rhs.field()].end(), *first_after);
-    //     arg_by_field_[rhs.field()].insert(insert_it, rhs); // insert rhs before the first arg with the same field
-    // }
-
-    // std::vector<std::reference_wrapper<const var>> inargs_same_field;
-    // for (const var &s : in_args_) {
-    //     if (s->field() == rhs.field()) {
-    //         inargs_same_field.emplace_back(s);
-    //     }
-    // }
-    // if (inargs_same_field.size() != arg_by_field_[rhs.field()].size())
-    //     throw std::runtime_error(fmt::format("func {} substitute failed: in_args_ and arg_by_field_ size mismatch after substitution",
-    //                                          name_));
-    // if (!std::equal(
-    //         inargs_same_field.begin(), inargs_same_field.end(),
-    //         arg_by_field_[rhs.field()].begin(), arg_by_field_[rhs.field()].end()))
-    //     throw std::runtime_error(fmt::format("func {} substitute failed: in_args_ and arg_by_field_ content mismatch after substitution",
-    //                                          name_));
 }
+
 void generic_func::set_from_casadi(const var_inarg_list &in_args, const cs::SX &out) {
     add_arguments(in_args);
     if (gen_.task_)
@@ -190,6 +156,40 @@ struct func_codegen {
     } ///< daemon to wait for codegen jobs
 };
 
+generic_func generic_func::share(bool copy_args, const var_inarg_list &skip_copy_args) const {
+    if (!wait_until_ready())
+        throw std::runtime_error(fmt::format("func {} not ready, cannot share", name()));
+    gen_.copy_task = false;
+    generic_func f(*this);
+    gen_.copy_task = true;
+    f.finalized_ = true;                               // keep finalized
+    f.async_ready_status_ = this->async_ready_status_; // share the async status
+    if (copy_args) {
+        bool skip_copy[in_args_.size()] = {false};
+        for (const sym &s : skip_copy_args) {
+            if (has_arg(s)) {
+                skip_copy[sym_uid_idx_.at(s.uid())] = true;
+            }
+        }
+        size_t idx = 0;
+        for (sym &s : in_args_) {
+            if (skip_copy[idx++])
+                continue;
+            auto s_new = s.clone();
+            s_new->name() = s.name() + "_copy";
+            if (bool(s.dual()) && has_arg(s.dual())) {
+                skip_copy[sym_uid_idx_.at(s.dual()->uid())] = true;
+                auto s_dual = s.dual()->clone();
+                s_dual->name() = s.dual()->name() + "_copy";
+                s_new->dual() = s_dual;
+                s_dual->dual() = s_new;
+            }
+            f.substitute(s, s_new);
+        }
+    }
+    return f;
+}
+
 void generic_func::finalize_impl() {
     size_t arg_idx = 0;
     for (auto &s : in_args_) {
@@ -202,7 +202,7 @@ void generic_func::finalize_impl() {
         }
         sym_uid_idx_[s->uid()] = sym_uid_idx_.size();
     }
-    if (order_ != approx_order::none && dim_ == dim_tbd) {
+    if (order_ != approx_order::none && dim_ == dim_tbd && !zero_dim_) {
         throw std::runtime_error(fmt::format("generic_func {} has no dimension set", name_));
     }
     // setup default hessian sparsity as dense
@@ -216,9 +216,19 @@ void generic_func::finalize_impl() {
 }
 
 generic_func::gen_info::gen_info(const gen_info &rhs) {
-    if (rhs.task_) {
+    if (rhs.task_ && rhs.copy_task) {
         task_ = new task_type(*rhs.task_);
     }
+}
+generic_func::gen_info &generic_func::gen_info::operator=(const gen_info &rhs) {
+    if (task_) {
+        delete task_.get();
+        task_ = nullptr;
+    }
+    if (rhs.task_ && rhs.copy_task) {
+        task_ = new task_type(*rhs.task_);
+    }
+    return *this;
 }
 generic_func::gen_info::~gen_info() {
     if (task_) {

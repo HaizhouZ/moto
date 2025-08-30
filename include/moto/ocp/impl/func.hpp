@@ -34,12 +34,16 @@ class generic_func : public expr {
     struct gen_info {
         using task_type = utils::cs_codegen::task;
         movable_ptr<task_type> task_ = nullptr;
+        mutable bool copy_task = true; // if true, *task_ is copied in copy constructor
         gen_info() = default;
         gen_info(const gen_info &rhs);
         gen_info(gen_info &&) = default;
+        gen_info &operator=(const gen_info &rhs);
+        gen_info &operator=(gen_info &&) = default;
         ~gen_info();
     };
     gen_info gen_;
+    bool zero_dim_ = false; // whether the function has zero dimension
     approx_order order_ = approx_order::first;
     var_list in_args_;
     array_type<var_list, primal_fields> arg_by_field_{};
@@ -92,6 +96,10 @@ class generic_func : public expr {
   public:
     virtual void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const {}
 
+    /// @brief get a shared duplicate of the function with different uid
+    /// @param duplicate_args whether to copy the input arguments (with new uid) or just share the same arguments
+    generic_func share(bool copy_args = true, const var_inarg_list& skip_copy_args = {}) const;
+
     generic_func(generic_func &&) = default;
     generic_func &operator=(generic_func &&) = default;
 
@@ -124,6 +132,10 @@ class generic_func : public expr {
     bool has_arg(const sym &s) const {
         return sym_uid_idx_.contains(s.uid());
     } ///< check if the function has argument for a given field
+
+    size_t arg_idx(const sym &s) const {
+        return sym_uid_idx_.at(s.uid());
+    } ///< get the index of the argument for a given symbol
 
     template <typename T>
         requires std::is_same_v<var, std::remove_cvref_t<T>> ||

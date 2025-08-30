@@ -68,7 +68,8 @@ struct sparse_mat {
     EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, row_vector, row_vector);         \
     EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, row_vector, vector);             \
     EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, vector, row_vector);             \
-    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, vector, vector);
+    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, vector, vector);                 \
+    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, vector_ref, vector_ref);
 
 EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE(times)
 EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE(T_times)

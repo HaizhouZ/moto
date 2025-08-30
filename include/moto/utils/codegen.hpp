@@ -70,6 +70,7 @@ struct task {
         noncopyable_task(const noncopyable_task &rhs) : base(nullptr) {
             throw std::runtime_error("noncopyable_task cannot be copied");
         }
+        noncopyable_task(noncopyable_task &&) = default;
     } extra_task = nullptr; // extra task to run after this task
 
     void finalize(job_list &jobs);
