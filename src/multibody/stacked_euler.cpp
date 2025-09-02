@@ -17,32 +17,32 @@ void stacked_euler::finalize_impl() {
     std::sort(dyn_.begin(), dyn_.end(), [](const euler &a, const euler &b) {
         return a.v_int_type_ <= b.v_int_type_;
     });
-    dt_ = ((euler &)dyn_[0]).dt_;
+    dt_ = ((euler &)dyn_[0]).dt;
     has_timestep_ = dt_->field() == __u;
     for (const euler &e : dyn_) {
-        if (dt_ != e.dt_) {
+        if (dt_ != e.dt) {
             throw std::runtime_error("all euler dynamics must have the same time step variable");
         }
         if (e.v_int_type_ == euler::v_int_type::_implicit) {
             imp_st_ = std::min(imp_st_, nv_);
-            dim_imp_ += e.v_->dim();
+            dim_imp_ += e.v->dim();
         } else if (e.v_int_type_ == euler::v_int_type::_mid_point) {
             mid_st_ = std::min(mid_st_, nv_);
-            dim_mid_ += e.v_->dim();
+            dim_mid_ += e.v->dim();
         } else if (e.v_int_type_ == euler::v_int_type::_explicit) {
             exp_st_ = std::min(exp_st_, nv_);
-            dim_exp_ += e.v_->dim();
+            dim_exp_ += e.v->dim();
         }
-        add_argument(e.q_);
-        add_argument(e.q_->next());
-        add_argument(e.a_);
-        nq_ += e.q_->tdim();
-        nv_ += e.v_->dim();
+        add_argument(e.q);
+        add_argument(e.q->next());
+        add_argument(e.a);
+        nq_ += e.q->tdim();
+        nv_ += e.v->dim();
         dim_ += e.dim();
     }
     for (euler &e : dyn_) {
-        add_argument(e.v_);
-        add_argument(e.v_->next());
+        add_argument(e.v);
+        add_argument(e.v->next());
     }
     add_argument(dt_);
     generic_dynamics::finalize_impl();
@@ -98,11 +98,11 @@ stacked_euler::approx_data::approx_data(generic_dynamics::approx_data &&rhs) : g
     size_t f_x_off_diag_st_offset = x_off_diag_st;
     size_t f_y_off_diag_st_offset = y_off_diag_st;
     for (euler &e : dyn.dyn_) {
-        size_t q_st = prob.get_expr_start_tangent(e.q_);
-        size_t v_st = prob.get_expr_start_tangent(e.v_);
-        size_t qn_st = prob.get_expr_start_tangent(e.q_->next());
-        size_t vn_st = prob.get_expr_start_tangent(e.v_->next());
-        size_t a_st = prob.get_expr_start_tangent(e.a_);
+        size_t q_st = prob.get_expr_start_tangent(e.q);
+        size_t v_st = prob.get_expr_start_tangent(e.v);
+        size_t qn_st = prob.get_expr_start_tangent(e.q->next());
+        size_t vn_st = prob.get_expr_start_tangent(e.v->next());
+        size_t a_st = prob.get_expr_start_tangent(e.a);
         euler_data d(*this->primal_, *this->merit_data_, this->shared_, func_);
         auto set_sp_mat = [&, this](sparse_mat &dst, euler::jac_block &jb, size_t c_st, auto &_map, bool is_vel = false) {
             auto m = dst.insert(f_st + e_st + jb.dense_block.r_st,
@@ -147,21 +147,21 @@ stacked_euler::approx_data::approx_data(generic_dynamics::approx_data &&rhs) : g
             set_sp_mat(dyn_proj_->proj_f_u_, e.pos_diff_proj_jac_.da, a_st, d.proj_f_u_q_block);
             set_diag_zero(proj_f_u_q_diag_, e.pos_diff_proj_jac_.da, f_y_off_diag_st_offset);
         }
-        setup_map(d.f_u_v_diag_, f_u_v_diag_.segment(e_st, e.v_->dim()));
+        setup_map(d.f_u_v_diag_, f_u_v_diag_.segment(e_st, e.v->dim()));
         if (e.v_int_type_ != euler::v_int_type::_implicit) {
-            setup_map(d.f_x_v_off_diag_, f_x_off_diag_.segment(e_st - f_x_off_diag_st_offset, e.v_->dim()));
+            setup_map(d.f_x_v_off_diag_, f_x_off_diag_.segment(e_st - f_x_off_diag_st_offset, e.v->dim()));
         }
         if (e.v_int_type_ != euler::v_int_type::_explicit) {
-            setup_map(d.f_y_v_off_diag_, f_y_off_diag_.segment(e_st - f_y_off_diag_st_offset, e.v_->dim()));
+            setup_map(d.f_y_v_off_diag_, f_y_off_diag_.segment(e_st - f_y_off_diag_st_offset, e.v->dim()));
         }
         if (dyn.has_timestep_) {
-            setup_map(d.f_t_q, f_t.segment(e_st, e.q_->tdim()));
-            setup_map(d.f_t_v, f_t.segment(e_st + dyn.nv_, e.v_->dim()));
-            setup_map(d.proj_f_t_q, proj_f_t_.segment(e_st, e.q_->tdim()));
+            setup_map(d.f_t_q, f_t.segment(e_st, e.q->tdim()));
+            setup_map(d.f_t_v, f_t.segment(e_st + dyn.nv_, e.v->dim()));
+            setup_map(d.proj_f_t_q, proj_f_t_.segment(e_st, e.q->tdim()));
         }
         e.setup_data(d);
         euler_data_.emplace_back(std::move(d));
-        e_st += e.v_->dim();
+        e_st += e.v->dim();
     }
 }
 void stacked_euler::value_impl(func_approx_data &data) const {

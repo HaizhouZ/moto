@@ -210,7 +210,7 @@ void ns_sqp::update(size_t n_iter) {
         }
         detail_timed_block_end("corrector_step");
         // iterative refinement if the step is too small
-        if (has_ineq) {
+        if (0) {
             kkt_info info;
             for (auto n : graph_.flatten_nodes()) {
                 for (auto f : primal_fields)

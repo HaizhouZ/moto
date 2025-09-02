@@ -79,6 +79,13 @@ class generic_func : public expr {
     using wrapper_type = func;
 
     generic_func() = default;
+
+    void field_access_guard(field_t field) const {
+        assert(finalized_ && "function not finalized");
+        assert(in_field(field, primal_fields) && "field out of range");
+    } ///< guard access to field-based members
+
+  public:
     generic_func(const std::string &name, approx_order order, size_t dim, field_t field)
         : expr(name, dim, field), order_(order) {}
     generic_func(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
@@ -88,17 +95,11 @@ class generic_func : public expr {
         set_from_casadi(in_args, out);
     }
 
-    void field_access_guard(field_t field) const {
-        assert(finalized_ && "function not finalized");
-        assert(in_field(field, primal_fields) && "field out of range");
-    } ///< guard access to field-based members
-
-  public:
     virtual void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const {}
 
     /// @brief get a shared duplicate of the function with different uid
     /// @param duplicate_args whether to copy the input arguments (with new uid) or just share the same arguments
-    generic_func share(bool copy_args = true, const var_inarg_list& skip_copy_args = {}) const;
+    generic_func share(bool copy_args = true, const var_inarg_list &skip_copy_args = {}) const;
 
     generic_func(generic_func &&) = default;
     generic_func &operator=(generic_func &&) = default;

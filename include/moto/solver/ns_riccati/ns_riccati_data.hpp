@@ -60,12 +60,13 @@ struct ns_riccati_data : public data_base {
         // Eigen::LLT<matrix> llt_ns_;      ///< LLT solver of the projected hessian
         utils::blasfeo_llt llt_ns_; ///< LLT solver of the projected hessian
         size_t rank{0};             ///< rank of the equality constraints, 0 if unconstrained, ncstr if fully constrained
-
-        sparse_mat Z_y_sp, Z_u_sp;                     ///< sparse nullspace basis for y and u
-        sparse_mat u_y_K_sp, y_y_K_sp;                 ///< sparse pseudo solutions for y and u
     } nsp_;
 
     node_data *full_data_;
+    struct aux_data {
+        virtual ~aux_data() = default;
+    };
+    std::unique_ptr<aux_data> aux_; // auxiliary data pointer, can be used to store custom data
 
     rank_status rank_status_;
     // sensitivity for sqp step

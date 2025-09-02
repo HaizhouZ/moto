@@ -25,7 +25,7 @@ sym_data::sym_data(ocp *prob) : prob_(prob) {
     }
 }
 
-void sym_data::integrate(field_t f, vector& dx, scalar_t alpha) {
+void sym_data::integrate(field_t f, vector &dx, scalar_t alpha) {
     assert(dx.size() == prob_->tdim(f) && "dx size mismatch");
     for (const sym &s : prob_->exprs(f)) {
         auto v = get(s);
@@ -105,6 +105,9 @@ void node_data::update_approximation(update_mode config) {
                           !no_jac && _f.order() >= approx_order::first,
                           !no_hess && _f.order() >= approx_order::second);
     });
+    for (const generic_custom_func &f : prob_->exprs(__post_comp)) {
+        f.custom_call((*shared_)[f]); ///< @todo pass update mode
+    }
     for (auto f : merit_data::stored_constr_fields) {
         if (prob_->dim(f) == 0)
             continue; // skip empty jacobian

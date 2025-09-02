@@ -66,17 +66,18 @@ void product(const lhs_type &lhs, const rhs_type &rhs, out_type &out) {
     template void sparse_mat::func<true, lhs_type, rhs_type>(const lhs_type &rhs, rhs_type &out); \
     template void sparse_mat::func<false, lhs_type, rhs_type>(const lhs_type &rhs, rhs_type &out);
 
-#define EXPLICIT_SP_MEMFUNC_INSTANTIATE(func)                                   \
-    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, sparse_mat, matrix);             \
-    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, sparse_mat, vector);             \
-    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix, matrix);                 \
-    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix, matrix::AlignedMapType); \
-    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix::AlignedMapType, matrix); \
-    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix, vector);                 \
-    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, row_vector, row_vector);         \
-    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, row_vector, vector);             \
-    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, vector, row_vector);             \
-    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, vector, vector);                 \
+#define EXPLICIT_SP_MEMFUNC_INSTANTIATE(func)                                       \
+    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, sparse_mat, matrix);                 \
+    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, sparse_mat, vector);                 \
+    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, sparse_mat, matrix::AlignedMapType); \
+    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix, matrix);                     \
+    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix, matrix::AlignedMapType);     \
+    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix::AlignedMapType, matrix);     \
+    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix, vector);                     \
+    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, row_vector, row_vector);             \
+    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, row_vector, vector);                 \
+    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, vector, row_vector);                 \
+    EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, vector, vector);                     \
     EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, vector_ref, vector_ref);
 
 } // namespace moto

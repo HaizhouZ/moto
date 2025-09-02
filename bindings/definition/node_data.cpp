@@ -57,7 +57,8 @@ void register_submodule_node_data(nb::module_ &m) {
         .def_prop_ro("dense", [](node_data &self) -> auto & { return self.dense(); })
         .def_prop_ro("shared", [](node_data &self) -> auto & { return self.shared(); })
         .def("print_residuals", &node_data::print_residuals, "Print the residuals of the node data")
-        .def("data", &node_data::data, nb::arg("func"), "Get the sparse func data by pointer")
+        .def("data", nb::overload_cast<const func&>(&node_data::data, nb::const_), nb::arg("func"), "Get the sparse func data by pointer")
+        .def("data", nb::overload_cast<const custom_func&>(&node_data::data, nb::const_), nb::arg("func"), "Get the custom func data by pointer")
         .def("cost", &node_data::cost, "Get the cost value");
 
     nb::class_<func_arg_map>(m, "func_arg_map")

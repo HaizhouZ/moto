@@ -1,7 +1,7 @@
 #ifndef MOTO_MULTIBODY_EULER_HPP
 #define MOTO_MULTIBODY_EULER_HPP
 
-#include <moto/multibody/fwd.hpp>
+#include <moto/multibody/state.hpp>
 #include <moto/ocp/dynamics.hpp>
 
 namespace moto {
@@ -9,7 +9,7 @@ namespace multibody {
 struct euler_data;
 struct stacked_euler;
 // Euler angles utilities
-class euler : public generic_func {
+class euler : public state, public generic_func {
   public:
     enum class v_int_type : size_t {
         _explicit = 0,
@@ -51,17 +51,12 @@ class euler : public generic_func {
     using wrapper_type = func;
 
   public:
-    const auto &pos() const { return q_; }
-    const auto &vel() const { return v_; }
-    const auto &acc() const { return a_; }
-    const auto &dt() const { return dt_; }
     static func from_urdf(const std::string &urdf_path,
                           var dt,
                           root_joint_t root_joint = root_joint_t::xyz_quat,
                           euler::v_int_type v_int = euler::v_int_type::_implicit);
     euler() = default;
-    euler(const std::string &name,
-          const var &q, const var &v, const var &a, const var &dt, cs::SX pos_step,
+    euler(const std::string &name, const state &s, cs::SX pos_step,
           cs::SX pos_diff, binary_jac_t dpos_diff, cs::SX pos_int, binary_jac_t dpos_int);
     void load_external_impl(const std::string &path) override;
     void finalize_impl() override;

@@ -265,11 +265,11 @@ prob = moto.ocp.create()
 prob.add(model.dyn)
 prob.add(model.fric)
 prob.add(model.kin_constr)
-prob.add(model.zf_constr)
+# prob.add(model.zf_constr)
 model.add_dt_constr_and_cost(prob, dt_nom)
 prob.add(model.get_state_cost())
 prob.add(model.get_input_cost())
-prob.add(model.make_foot_lift_cost(lifted=True))
+# prob.add(model.make_foot_lift_cost(lifted=True))
 
 prob_term = prob.clone()
 prob_term.add(model.get_state_cost(terminal=True))
@@ -280,7 +280,7 @@ print("--" * 15)
 
 N_horizon = 100
 
-sqp = moto.sqp(n_job=1)
+sqp = moto.sqp(n_job=10)
 g = sqp.graph
 n0 = g.set_head(g.add(sqp.create_node(prob)))
 n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
@@ -329,7 +329,7 @@ sqp.apply_forward(gait_setup)
 import time
 
 start = time.perf_counter()
-sqp.update(100)
+sqp.update(1000)
 print(f"sqp.update(100) took {time.perf_counter() - start:.3f} seconds")
 
 q_res = []

@@ -28,7 +28,6 @@ struct sparse_mat {
     bool valid() const;
     matrix_ref insert(size_t r_st, size_t c_st, size_t r, size_t c, sparsity sp);
     template <sparsity Sp>
-        requires(Sp == sparsity::diag || Sp == sparsity::eye)
     matrix_ref insert(size_t r_st, size_t c_st, size_t dim) {
         return insert(r_st, c_st, dim, dim, Sp);
     }
@@ -58,17 +57,18 @@ struct sparse_mat {
     extern template void sparse_mat::func<true, lhs_type, rhs_type>(const lhs_type &rhs, rhs_type &out); \
     extern template void sparse_mat::func<false, lhs_type, rhs_type>(const lhs_type &rhs, rhs_type &out);
 
-#define EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE(func)                                   \
-    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, sparse_mat, matrix);             \
-    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, sparse_mat, vector);             \
-    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix, matrix);                 \
-    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix, matrix::AlignedMapType); \
-    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix::AlignedMapType, matrix); \
-    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix, vector);                 \
-    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, row_vector, row_vector);         \
-    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, row_vector, vector);             \
-    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, vector, row_vector);             \
-    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, vector, vector);                 \
+#define EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE(func)                                       \
+    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, sparse_mat, matrix::AlignedMapType); \
+    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, sparse_mat, matrix);                 \
+    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, sparse_mat, vector);                 \
+    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix, matrix);                     \
+    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix, matrix::AlignedMapType);     \
+    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix::AlignedMapType, matrix);     \
+    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, matrix, vector);                     \
+    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, row_vector, row_vector);             \
+    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, row_vector, vector);                 \
+    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, vector, row_vector);                 \
+    EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, vector, vector);                     \
     EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE_IMPL(func, vector_ref, vector_ref);
 
 EXPORT_EXPLICIT_SP_MEMFUNC_INSTANTIATE(times)

@@ -1,12 +1,16 @@
 #ifndef MOTO_SOLVER_NS_RICCATI_SOLVER_HPP
 #define MOTO_SOLVER_NS_RICCATI_SOLVER_HPP
 
+#include <moto/solver/ns_riccati/ns_riccati_data.hpp>
+
 namespace moto {
 struct workspace_data;
+struct node_data;
 namespace solver {
 namespace ns_riccati {
-struct ns_riccati_data;
 struct generic_solver {
+
+    virtual ns_riccati_data *create_data(node_data *full_data);
     /**
      * @brief factorization for the nullspace kernel using the hard constraints
      * @details will directly add related parts to the Q-derivatives
@@ -81,9 +85,5 @@ struct generic_solver {
 } // namespace ns_riccati
 } // namespace solver
 } // namespace moto
-
-#ifdef MOTO_NS_RICCATI_IMPL
-#include <moto/solver/ns_riccati/ns_riccati_data.hpp>
-#endif
 
 #endif

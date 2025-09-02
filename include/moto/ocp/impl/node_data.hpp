@@ -1,7 +1,7 @@
 #ifndef __MOTO_NODE_DATA_HPP__
 #define __MOTO_NODE_DATA_HPP__
 
-#include <moto/ocp/impl/func.hpp>
+#include <moto/ocp/impl/custom_func.hpp>
 #include <moto/ocp/problem.hpp>
 #include <moto/utils/func_traits.hpp>
 
@@ -54,7 +54,13 @@ struct node_data {
      * @param f
      * @return auto&
      */
-    auto &data(const func &f) const { return *sparse_[f->field()][prob_->pos(f)]; }
+    auto &data(const func &f) const {
+        if (in_field(f->field(), custom_func_fields))
+            throw std::runtime_error("custom_func does not have sparse data");
+        return *sparse_[f->field()][prob_->pos(f)];
+    }
+
+    auto &data(const custom_func &f) const { return shared_->get(f->uid()); }
 
     scalar_t cost() const { return dense_->cost_; }
 

@@ -1,6 +1,6 @@
 #include <moto/ocp/impl/node_data.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
-
+#include <moto/solver/ns_riccati/generic_solver.hpp>
 #include <moto/ocp/dynamics.hpp>
 
 namespace moto {
@@ -15,6 +15,10 @@ void ns_riccati_data::apply_jac_y_inverse_transpose(vector &v, vector &dst) {
     full_data_->for_each(__dyn, [&v, &dst](const generic_dynamics &dyn, func_approx_data &data) {
         dyn.apply_jac_y_inverse_transpose(data, v, dst);
     });
+}
+
+ns_riccati_data *generic_solver::create_data(node_data *full_data) {
+    return new ns_riccati_data(full_data);
 }
 
 ns_riccati_data::ns_riccati_data(node_data *full_data)

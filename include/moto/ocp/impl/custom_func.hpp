@@ -12,7 +12,7 @@ struct custom_func : public func {
     generic_custom_func *operator->() const;
 };
 
-class generic_custom_func final : public generic_func {
+class generic_custom_func : public generic_func {
 
   protected:
     void finalize_impl() override {
@@ -24,8 +24,6 @@ class generic_custom_func final : public generic_func {
     using wrapper_type = custom_func;
 
     friend struct custom_func; ///< allow custom_func to access private members
-    friend struct usr_func;    ///< allow usr_func to access private members
-    friend struct pre_compute; ///< allow pre_compute to access private members
 
   public:
     using generic_func::generic_func;

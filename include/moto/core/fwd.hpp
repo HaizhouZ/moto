@@ -34,6 +34,11 @@ struct null_init_map : public Base {
     constexpr static size_t default_rows = Base::RowsAtCompileTime == Eigen::Dynamic ? 0 : Base::RowsAtCompileTime;
     constexpr static size_t default_cols = Base::ColsAtCompileTime == Eigen::Dynamic ? 0 : Base::ColsAtCompileTime;
     null_init_map() : Base(nullptr, default_rows, default_cols) {}
+    template <typename U>
+    null_init_map(U &&other) : Base(other.data(), other.rows(), other.cols()) {}
+    template <typename U>
+    void reset(U &&other) { new (this) null_init_map(other); }
+    auto& get() { return static_cast<Base&>(*this); }
 };
 using aligned_map_t = null_init_map<matrix>;
 using aligned_vector_map_t = null_init_map<vector>;

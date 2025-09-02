@@ -21,6 +21,7 @@ enum field_t : size_t {
     __usr_var,    // user defined variables
     // user functions
     __pre_comp, // will be called before the computation of the approximation update, also the data will be shared
+    __post_comp, // will be called after the computation of the approximation update, also the data will be shared
     __usr_func, // user function, will not be called in the approximation update, only users can use them
     NUM,
     __undefined,
@@ -50,7 +51,7 @@ constexpr auto concat_fields(const std::array<field_t, sizes> &...arrays) {
 constexpr auto ineq_soft_constr_fields = concat_fields(ineq_constr_fields, soft_constr_fields);
 constexpr auto constr_fields = concat_fields(hard_constr_fields, ineq_soft_constr_fields);
 constexpr auto func_fields = concat_fields(constr_fields, std::array{__cost});
-constexpr auto custom_func_fields = std::array{__pre_comp, __usr_func};
+constexpr auto custom_func_fields = std::array{__pre_comp, __post_comp, __usr_func};
 
 namespace field {
 constexpr auto name(field_t f) { return magic_enum::enum_name<field_t>(f); }

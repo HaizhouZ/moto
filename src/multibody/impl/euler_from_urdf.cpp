@@ -86,7 +86,7 @@ func euler::from_urdf(const std::string &urdf_path, var dt, root_joint_t root_jo
     pin::casadi::copy(dpos_diff_dq, dpos_diff_dq_cs);
     pin::casadi::copy(dpos_diff_dqn, dpos_diff_dqn_cs);
     std::string name = model.name + std::string(magic_enum::enum_name<euler::v_int_type>(v_int)) + "_euler";
-    return func(multibody::euler(name, q, v, a, dt,
+    return func(multibody::euler(name, state{q, v, a, dt, root_joint},
                                  pos_step, pos_diff,
                                  std::array{dpos_diff_dqn_cs, dpos_diff_dq_cs},
                                  pos_int_only, std::array{dpos_int_dq_cs, dpos_int_dqstep_cs}));

@@ -43,24 +43,24 @@ void euler::jac_block::setup(const cs::SX &mat, size_t c_offset) {
     }
 }
 euler::euler(const std::string &name,
-             const var &q, const var &v, const var &a, const var &dt, cs::SX pos_step,
+             const state &s, cs::SX pos_step,
              cs::SX pos_diff, binary_jac_t dpos_diff, cs::SX pos_int, binary_jac_t dpos_int)
     : base(name,
-           {q, v, q->next(), v->next(), a, dt},
+           {s.q, s.v, s.q->next(), s.v->next(), s.a, s.dt},
            cs::SX::vertcat({pos_diff, v->next() - (v + a * dt)}),
            approx_order::first, __dyn),
-      q_(q), v_(v), a_(a), dt_(dt),
+      state(s),
       pos_integrate_(pos_int), pos_diff_(pos_diff), pos_step_(pos_step),
       dpos_diff_(dpos_diff), dpos_int_(dpos_int) {
-    q_->tdim() = pos_diff_.size1();
-    q_->next()->tdim() = pos_diff_.size1();
-    assert(pos_integrate_.size1() == q_->dim() && "the position step must have the same dimension as q");
-    assert(v_->dim() == q_->tdim() && "the velocity dimension must match the tangent space dimension of q");
+    q->tdim() = pos_diff_.size1();
+    q->next()->tdim() = pos_diff_.size1();
+    assert(pos_integrate_.size1() == q->dim() && "the position step must have the same dimension as q");
+    assert(v->dim() == q->tdim() && "the velocity dimension must match the tangent space dimension of q");
 }
 void euler::load_external_impl(const std::string &path) {
     generic_func::load_external_impl(path);
     auto f = ext_func(gen_.task_->extra_task->func_name);
-    q_->integrator() = [f_ = std::move(f), nv = v_->dim()](vector_ref x, vector_ref dx, vector_ref out, scalar_t alpha) {
+    q->integrator() = [f_ = std::move(f), nv = v->dim()](vector_ref x, vector_ref dx, vector_ref out, scalar_t alpha) {
         std::vector<vector_ref> args = {x, dx, mapped_vector(&alpha, 1)};
         f_.invoke(args, out);                // for pos
         out.tail(nv) += dx.tail(nv) * alpha; // for vel
@@ -70,8 +70,8 @@ void euler::finalize_impl() {
     pos_diff_jac_.dqn.setup(dpos_diff_[0]);
     pos_diff_jac_.dq.setup(cs::SX::mtimes(dpos_diff_[1], dpos_int_[0]));
     auto dpos_diff_dstep = cs::SX::mtimes(dpos_diff_[1], dpos_int_[1]);
-    pos_diff_jac_.dvn.setup(cs::SX::mtimes(dpos_diff_dstep, cs::SX::jacobian(pos_step_, v_->next())), q_->tdim());
-    pos_diff_jac_.dv.setup(cs::SX::mtimes(dpos_diff_dstep, cs::SX::jacobian(pos_step_, v_)), q_->tdim());
+    pos_diff_jac_.dvn.setup(cs::SX::mtimes(dpos_diff_dstep, cs::SX::jacobian(pos_step_, v->next())), q->tdim());
+    pos_diff_jac_.dv.setup(cs::SX::mtimes(dpos_diff_dstep, cs::SX::jacobian(pos_step_, v)), q->tdim());
     // setup the projection jacobian
     // the inverse of F_y is the same as F_y, maybe buggy if the dqn and dq are not consistent
     if (pos_diff_jac_.dqn.has_block)
@@ -97,7 +97,7 @@ void euler::finalize_impl() {
     // generate the casadi integrator
     utils::cs_codegen::task integrator_task;
     integrator_task.func_name = name_ + "_int";
-    integrator_task.sx_inputs = {q_, v_, dt_}; // v_ here just represent the step in the integrator
+    integrator_task.sx_inputs = {q, v, dt}; // v here just represent the step in the integrator
     integrator_task.sx_output = pos_integrate_;
     integrator_task.keep_generated_src = true;
     gen_.task_->extra_task.reset(new utils::cs_codegen::task(std::move(integrator_task)));
@@ -109,8 +109,8 @@ void euler::finalize_impl() {
     jacs.emplace_back(pos_diff_jac_.dv.dense);
     jacs.emplace_back(pos_diff_jac_.dvn.diag);
     jacs.emplace_back(pos_diff_jac_.dv.diag);
-    if (dt_->field() == __u) {
-        jacs.emplace_back(cs::SX::jacobian(pos_diff_, dt_));
+    if (dt->field() == __u) {
+        jacs.emplace_back(cs::SX::jacobian(pos_diff_, dt));
     }
     n_jac_output_ = jacs.size();
     base::finalize_impl();
@@ -126,7 +126,7 @@ void euler::setup_data(euler_data &data) const {
     data.jac_.emplace_back(data.f_x_v_block);
     data.jac_.emplace_back(data.f_y_v_off_diag_);
     data.jac_.emplace_back(data.f_x_v_off_diag_);
-    if (dt_->field() == __u) {
+    if (dt->field() == __u) {
         data.jac_.emplace_back(data.f_t_q);
     }
 }
@@ -134,7 +134,7 @@ void euler::setup_data(euler_data &data) const {
 void euler::jacobian_impl(func_approx_data &data) const {
     base::jacobian_impl(data);
     auto &d = data.as<euler_data>();
-    d.f_t_v.array() = -data[a_];
+    d.f_t_v.array() = -data[a];
 }
 
 void euler::compute_project_derivatives(euler_data &data) const {
@@ -169,7 +169,7 @@ void euler::compute_project_derivatives(euler_data &data) const {
         size_t n = pos_diff_proj_jac_.da.dense_block.nrow;
         data.proj_f_u_q_block.noalias() = data.f_y_inv_v_block * data.f_u_v_diag_.segment(st, n).asDiagonal();
     }
-    if (dt_->field() == __u) {
+    if (dt->field() == __u) {
         if (pos_diff_jac_.dqn.has_block) {
             size_t st = pos_diff_proj_jac_.dq.dense_block.r_st;
             size_t n = pos_diff_proj_jac_.dq.dense_block.nrow;
@@ -184,21 +184,21 @@ void euler::compute_project_derivatives(euler_data &data) const {
 }
 func euler::share(const std::string &name) const {
     euler e;
-    static_cast<generic_func &>(e) = base::share(true, {dt_});
+    static_cast<generic_func &>(e) = base::share(true, {dt});
     e.pos_diff_jac_ = pos_diff_jac_;
     e.pos_diff_proj_jac_ = pos_diff_proj_jac_;
     e.n_jac_output_ = n_jac_output_;
     e.v_int_type_ = v_int_type_;
     e.name_ = name.empty() ? name_ + "_copy" : name;
-    e.q_ = e.in_args_[arg_idx(q_)];
-    e.v_ = e.in_args_[arg_idx(v_)];
-    e.a_ = e.in_args_[arg_idx(a_)];
-    e.q_->name() = name.empty() ? q_->name() + "_copy" : name + "_q";
-    e.v_->name() = name.empty() ? v_->name() + "_copy" : name + "_v";
-    e.a_->name() = name.empty() ? a_->name() + "_copy" : name + "_a";
-    e.dt_ = dt_; // share the same dt
-    e.q_->next()->name() = e.q_->get_next_name();
-    e.v_->next()->name() = e.v_->get_next_name();
+    e.q = e.in_args_[arg_idx(q)];
+    e.v = e.in_args_[arg_idx(v)];
+    e.a = e.in_args_[arg_idx(a)];
+    e.q->name() = name.empty() ? q->name() + "_copy" : name + "_q";
+    e.v->name() = name.empty() ? v->name() + "_copy" : name + "_v";
+    e.a->name() = name.empty() ? a->name() + "_copy" : name + "_a";
+    e.dt = dt; // share the same dt
+    e.q->next()->name() = e.q->get_next_name();
+    e.v->next()->name() = e.v->get_next_name();
     return func(std::move(e));
 }
 } // namespace multibody

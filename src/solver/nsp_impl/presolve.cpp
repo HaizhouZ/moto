@@ -1,7 +1,7 @@
 #define MOTO_NS_RICCATI_IMPL
 #include <moto/solver/ns_riccati/generic_solver.hpp>
 
-#define ENABLE_TIMED_BLOCK
+// #define ENABLE_TIMED_BLOCK
 #include <moto/utils/timed_block.hpp>
 
 // #define SHOW_NSP_DEBUG
