@@ -11,6 +11,7 @@ void lcid_solver::ns_factorization(ns_riccati_data *cur) {
     auto &ld = full_data.data(lcid_).as<multibody::lcid::data>();
     auto &nsp = d.nsp_;
     auto &c_x = d.dense_->approx_[__eq_xu].jac_[__x];
+    d.update_projected_dynamics();
     // prepare
     nsp.u_0_p_k = d.Q_u.transpose();
     nsp.u_0_p_K.setZero();
@@ -52,22 +53,22 @@ void lcid_solver::ns_factorization(ns_riccati_data *cur) {
     // compute fz
     auto &e = euler_.as<multibody::stacked_euler>();
     auto &ed = full_data.data(euler_).as<multibody::stacked_euler::approx_data>();
-    aux.f_z_a.noalias() = ed.f_u_v_diag_.asDiagonal() * aux.sp_Z_u_a;
-    if (l.has_timestep_) {
-        aux.f_z_dt.array() = ed.f_t.array();
-    }
     // compute Q_zz U part
     thread_local moto::utils::buffer_tpl<matrix> buf;
     // nsp.Q_zz.noalias() = nsp.Z_u.transpose() * d.Q_uu * nsp.Z_u;
-    buf.resize(d.nu, nsp.Z_u.cols());
+    buf.resize(d.nu, d.nz);
     buf.data_.setZero();
     d.Q_uu.times(aux.sp_Z_u, buf.data_);
     d.Q_uu_mod.times(aux.sp_Z_u, buf.data_);
+    nsp.Q_zz.conservativeResize(d.nz, d.nz);
     nsp.Q_zz.setZero();
     aux.sp_Z_u.T_times(buf.data_, nsp.Q_zz);
+    nsp.z_K.conservativeResize(d.nz, d.nx);
+    nsp.z_k.conservativeResize(d.nz);
     // update Z_0_K
     d.Q_uu.times<false>(aux.sp_u_y_K, nsp.u_0_p_K);
     d.Q_uu_mod.times<false>(aux.sp_u_y_K, nsp.u_0_p_K);
+    nsp.z_0_K.conservativeResize(d.nz, d.nx);
     nsp.z_0_K.setZero();
     aux.sp_Z_u.T_times(nsp.u_0_p_K, nsp.z_0_K);
     aux.sp_Z_u.T_times(d.Q_ux, nsp.z_0_K);
@@ -75,17 +76,23 @@ void lcid_solver::ns_factorization(ns_riccati_data *cur) {
     nsp.y_0_p_K.setZero();
     // for now assume Q_yx is zero
     // aux.f_z.T_times(d.Q_yx, nsp.z_0_K); // Z_0_K = f_z^T * Q_yx + ,,,
-    aux.f_a_times_u_y_K.noalias() = ed.f_u_v_diag_.asDiagonal() * aux.sp_u_y_K_a_f.topRows(l.nv_);
     // update zero order terms
     nsp.u_y_k.setZero();
     nsp.u_y_k.head(l.nv_ + l.nc_).noalias() = ld.G_ * d.dense_->approx_[__eq_xu].v_;
-    d.F_u.times(aux.sp_Z_u, nsp.Z_y);
-    nsp.y_y_k = d.dense_->approx_[__dyn].v_;
-    aux.f_u.times<false>(nsp.u_y_k, nsp.y_y_k);
+    nsp.z_0_k.conservativeResize(d.nz);
     nsp.z_0_k.setZero();
     d.Q_uu.times<false>(nsp.u_y_k, nsp.u_0_p_k);
     d.Q_uu_mod.times<false>(nsp.u_y_k, nsp.u_0_p_k);
     aux.sp_Z_u.T_times(nsp.u_0_p_k, nsp.z_0_k);
+    // update dense y terms
+    nsp.Z_y.conservativeResize(d.ny, d.nz);
+    nsp.Z_y.setZero();
+    d.F_u.times<false>(aux.sp_Z_u, nsp.Z_y);
+    nsp.y_y_k = d.F_0;
+    d.F_u.times<false>(nsp.u_y_k, nsp.y_y_k);
+    nsp.y_y_K.setZero();
+    d.F_x.dump_into(nsp.y_y_K);
+    d.F_u.times<false>(aux.sp_u_y_K, nsp.y_y_K);
     // precompute value function terms
     aux.sp_u_y_K.right_T_times<false>(nsp.u_0_p_k, d.Q_x);
     aux.sp_u_y_K.right_T_times<false>(nsp.u_0_p_K, d.V_xx);
@@ -97,6 +104,14 @@ void lcid_solver::ns_factorization(ns_riccati_data *cur) {
     d.Q_ux_mod.right_T_times<false>(aux.sp_u_y_K, d.V_xx);
     // d.Q_yx.right_T_times<false>(nsp.y_y_K, d.V_xx);
     // d.Q_yx_mod.right_T_times<false>(nsp.y_y_K, d.V_xx);
+    // nsp.y_y_K.setZero();
+    // d.F_x.dump_into(nsp.y_y_K);
+    // d.F_u.times<false>(aux.sp_u_y_K, nsp.y_y_K);
+
+    aux.Q_yy_F_u_.setZero();
+    aux.Q_yy_F_u_Z_u.setZero();
+    aux.F_u_T_Q_yy_F_u_Z_u_.setZero();
+    // aux.F_u_T_buf_data_.setZero();
 }
 } // namespace lcid_riccati
 } // namespace solver

@@ -42,7 +42,7 @@ void generic_solver::riccati_recursion(ns_riccati_data *cur, ns_riccati_data *pr
         d.F_u.inner_product(d.V_yy, nsp.Q_zz);
         d.F_u.T_times<false>(nsp.y_0_p_k, nsp.z_0_k);
         d.F_u.T_times<false>(nsp.y_0_p_K, nsp.z_0_K);
-    } else if (d.rank_status_ == rank_status::constrained) {
+    } else if (d.rank_status_ == rank_status::constrained) [[likely]] {
         nsp.y_0_p_K.noalias() -= d.V_yy * nsp.y_y_K;
         nsp.Q_zz.noalias() += nsp.Z_y.transpose() * d.V_yy * nsp.Z_y; /// todo unconstrained
         // compute bar{y}_0
@@ -84,7 +84,7 @@ void generic_solver::riccati_recursion(ns_riccati_data *cur, ns_riccati_data *pr
         // generic_constr rank > 0
         if (d.rank_status_ == rank_status::fully_constrained) {
             // fully constrained
-        } else {
+        } else [[likely]] {
             // solve nullspace system
             // nsp.z_K = -nsp.z_0_K;
             timed_block_start("solve_nullspace");
@@ -98,7 +98,7 @@ void generic_solver::riccati_recursion(ns_riccati_data *cur, ns_riccati_data *pr
     if (d.rank_status_ == rank_status::fully_constrained) {
         d.Q_x.noalias() += -nsp.y_0_p_k.transpose() * nsp.y_y_K;
         d.V_xx.noalias() += -nsp.y_0_p_K.transpose() * nsp.y_y_K;
-    } else if (d.rank_status_ == rank_status::constrained) {
+    } else if (d.rank_status_ == rank_status::constrained) [[likely]] {
         d.Q_x.noalias() += nsp.z_0_k.transpose() * nsp.z_K - nsp.y_0_p_k.transpose() * nsp.y_y_K;
         d.V_xx.noalias() += nsp.z_0_K.transpose() * nsp.z_K - nsp.y_0_p_K.transpose() * nsp.y_y_K;
     } else {

@@ -16,7 +16,7 @@ class data_mgr;
  * stores the shooting node data including symbolics, raw approximation and its sparse mapping
  * @note to use your own data class with data_mgr, inherit this class and implement constructor C(ocp_ptr_t)
  */
-struct node_data {
+struct MOTO_ALIGN_NO_SHARING node_data {
     scalar_t inf_prim_res_ = 0.;
     scalar_t inf_comp_res_ = 0.;
 

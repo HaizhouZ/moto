@@ -30,7 +30,10 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("mu", &ns_sqp::settings_t::mu, "Barrier parameter for the IPM solver")
         .def_rw("mu_method", &ns_sqp::settings_t::mu_method, "Adaptive mu method for the IPM solver")
         .def_rw("ipm_conditional_corrector", &ns_sqp::settings_t::ipm_conditional_corrector, "Whether to use conditional corrector in the IPM solver")
-        .def_rw("adaptive_mu_allowed", &ns_sqp::settings_t::adaptive_mu_allowed, "Whether to adapt mu during line search");
+        .def_rw("adaptive_mu_allowed", &ns_sqp::settings_t::adaptive_mu_allowed, "Whether to adapt mu during line search")
+        .def_rw("prim_tol", &ns_sqp::settings_t::prim_tol, "Primal feasibility tolerance")
+        .def_rw("dual_tol", &ns_sqp::settings_t::dual_tol, "Dual feasibility tolerance")
+        .def_rw("comp_tol", &ns_sqp::settings_t::comp_tol, "Complementarity feasibility tolerance");
 
     nb::enum_<moto::solver::ipm_config::adaptive_mu_t> enum_binder(sqp, "adaptive_mu_t");
 

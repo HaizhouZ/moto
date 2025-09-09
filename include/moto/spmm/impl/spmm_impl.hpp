@@ -346,7 +346,8 @@ struct binary_op {
     operand<lhs_type, false, lhs_transposed, lhs_all> lhs_; // panel matrix
     operand<rhs_type, true, rhs_transposed, rhs_all> rhs_;  // right-hand side expression
 
-    binary_op(const lhs_type &lhs, const rhs_type &rhs) : lhs_(lhs), rhs_(rhs) {
+    binary_op(const lhs_type &lhs, const rhs_type &rhs, clip_info info = clip_info())
+        : lhs_(lhs), rhs_(rhs) {
         int inner_idx_st = std::max<int>(lhs_.inner_st, rhs_.inner_st);                  // intersection of rows - starting point
         int inner_idx_ed = std::min<int>(lhs_.inner_ed, rhs_.inner_ed);                  // intersection of rows - ending point
         int dim_mid = std::max<int>(inner_idx_ed - inner_idx_st, 0);                     // number of intersecting rows

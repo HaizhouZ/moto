@@ -12,7 +12,7 @@ namespace solver {
  * and also an array of primal (newton) step for later linear rollout
  * @note this class can be used as base class for other solver data (optional)
  */
-struct data_base {
+struct MOTO_ALIGN_NO_SHARING data_base {
     size_t nx, nu, ny; ///< dimensions of the problem
     sym_data *sym_;
     merit_data *dense_; ///< pointer to the dense approximation data

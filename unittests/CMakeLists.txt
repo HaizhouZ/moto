@@ -30,7 +30,7 @@ endfunction()
 
 # add_moto_test(expr_ownership)
 # add_moto_test(constr_cast)
-# add_moto_test(dynamics)
+add_moto_test(dynamics)
 # add_moto_test(field_conversion)
 # add_moto_test(spmm)
 # add_moto_test(dynamics_cen)

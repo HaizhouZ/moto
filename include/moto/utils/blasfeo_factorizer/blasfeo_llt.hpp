@@ -8,7 +8,7 @@ namespace moto {
 namespace utils {
 struct blasfeo_llt {
     blasfeo_buffer L_, U_; // Lower triangular matrix from LLT
-    blasfeo_buffer I_;   // Identity matrix for computing inverse
+    blasfeo_buffer I_;     // Identity matrix for computing inverse
     blasfeo_buffer rhs_, res_;
     blasfeo_vec_buffer vec_rhs_, vec_res_;
 
@@ -55,6 +55,7 @@ struct blasfeo_llt {
         I_.resize(size, size);
         for (size_t i = 0; i < size; i++)
             BLASFEO_DMATEL(&I_.data_, i, i) = 1.0;
+        res_.resize(size, size);
         blasfeo_dtrsm_llnn(size, size, alpha, &L_.data_, 0, 0, &I_.data_, 0, 0, &res_.data_, 0, 0);
         blasfeo_dtrsm_lunn(size, size, 1, &U_.data_, 0, 0, &res_.data_, 0, 0, &res_.data_, 0, 0);
         res_.to_eigen(a);

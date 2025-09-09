@@ -16,6 +16,9 @@ struct generic_solver;
 struct ns_sqp {
     struct settings_t
         : public workspace_data_collection<solver::linesearch_config, solver::ipm_config> {
+        double prim_tol = 1e-6; ///< primal feasibility tolerance
+        double dual_tol = 1e-4; ///< dual feasibility tolerance
+        double comp_tol = 1e-6; ///< complementarity feasibility tolerance
     } settings;
     // using node_base = ;
     using solver_type = solver::ns_riccati::generic_solver;
@@ -37,6 +40,12 @@ struct ns_sqp {
         scalar_t inf_comp_res = 0.;  // (inequality) complementarity residual
         scalar_t inf_prim_step = 0.; // infinity norm of the step
         scalar_t inf_dual_step = 0.; // infinity norm of the step
+        static constexpr scalar_t inf_val = 1e20;
+        void set_inf_res(scalar_t p = inf_val, scalar_t d = inf_val, scalar_t c = inf_val) {
+            inf_prim_res = p;
+            inf_dual_res = d;
+            inf_comp_res = c;
+        }
     };
 
     ns_sqp(size_t n_jobs = MAX_THREADS);

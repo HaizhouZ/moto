@@ -10,7 +10,7 @@ namespace solver {
 namespace ns_riccati {
 struct generic_solver {
 
-    virtual ns_riccati_data *create_data(node_data *full_data);
+    virtual ns_riccati_data create_data(node_data *full_data);
     /**
      * @brief factorization for the nullspace kernel using the hard constraints
      * @details will directly add related parts to the Q-derivatives

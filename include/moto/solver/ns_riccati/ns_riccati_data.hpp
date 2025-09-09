@@ -19,7 +19,7 @@ enum rank_status : int { unconstrained = 0,
 // fwd declaration
 struct nullspace_data;
 
-struct ns_riccati_data : public data_base {
+struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
     // dim
     size_t ns, nc, ncstr;
     size_t nis, nic; // number of active inequality constraints

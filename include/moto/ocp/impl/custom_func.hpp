@@ -20,6 +20,7 @@ class generic_custom_func : public generic_func {
             throw std::runtime_error(fmt::format("func {} field type {} not qualified as custom function - finalization failed",
                                                  name_, field::name(field_)));
         }
+        generic_func::finalize_impl();
     }
     using wrapper_type = custom_func;
 

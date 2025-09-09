@@ -17,8 +17,8 @@ void ns_riccati_data::apply_jac_y_inverse_transpose(vector &v, vector &dst) {
     });
 }
 
-ns_riccati_data *generic_solver::create_data(node_data *full_data) {
-    return new ns_riccati_data(full_data);
+ns_riccati_data generic_solver::create_data(node_data *full_data) {
+    return ns_riccati_data(full_data);
 }
 
 ns_riccati_data::ns_riccati_data(node_data *full_data)

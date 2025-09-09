@@ -62,7 +62,6 @@ stacked_euler::approx_data::approx_data(generic_dynamics::approx_data &&rhs) : g
     vector_ref f_y_main_diag = approx_->jac_[__y].insert<sparsity::diag>(f_st, y_st, func_.dim()).setConstant(1);
     vector_ref f_x_main_diag = approx_->jac_[__x].insert<sparsity::diag>(f_st, x_st, func_.dim()).setConstant(-1);
     vector_ref proj_f_x_main_diag = dyn_proj_->proj_f_x_.insert<sparsity::diag>(f_st, x_st, func_.dim()).setConstant(-1);
-    approx_->jac_[__u].insert<sparsity::diag>(f_st + dyn.nv_, u_st, dyn.nv_);
     // setup inverse
     f_y_inv.resize(func_.dim(), func_.dim());
     vector_ref f_y_inv_main_diag = f_y_inv.insert<sparsity::diag>(f_st, y_st, func_.dim()).setConstant(1);

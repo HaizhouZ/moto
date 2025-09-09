@@ -16,7 +16,7 @@ struct lcid : public generic_custom_func {
         constr c;
     };
 
-    struct data : public func_arg_map {
+    struct MOTO_ALIGN_NO_SHARING data : public func_arg_map {
         using base = func_arg_map;
         using base::base;
         sparse_mat Minv_;
@@ -29,9 +29,8 @@ struct lcid : public generic_custom_func {
         sparse_mat tq_S_;   // torque selection matrix
     };
 
-    utils::blasfeo_llt llt_;
-    std::vector<utils::blasfeo_llt> M_llt_;
-    size_t ntq_, nv_, nc_;
+
+    size_t ntq_ = 0, nv_ = 0, nc_ = 0;
     bool has_timestep_ = false;
 
     lcid(const std::string &name);

@@ -4,6 +4,8 @@
 namespace moto {
 namespace multibody {
 lcid::lcid(const std::string &name) : generic_custom_func(name, approx_order::none, 0, __usr_func) {
+}
+void lcid::finalize_impl() {
     create_custom_data = [this](sym_data &primal, shared_data &shared) {
         auto ptr = std::make_unique<data>(primal, shared, *this);
         ptr->Minv_.resize(nv_, nv_);
@@ -26,15 +28,12 @@ lcid::lcid(const std::string &name) : generic_custom_func(name, approx_order::no
         for (const auto &d : kin_constr_) {
             for (const auto &s : d.s) {
                 size_t c_st = prob.get_expr_start_tangent(s.q); // assume q is always the first
-                ptr->Jc_T_.insert<sparsity::dense>(r_st, prob.get_expr_start_tangent(s.q), s.q->tdim());
-                ptr->Jc_T_.insert<sparsity::dense>(r_st, prob.get_expr_start_tangent(s.v), s.v->dim());
+                ptr->Jc_T_.insert<sparsity::dense>(r_st, prob.get_expr_start_tangent(s.a) - 1, s.a->dim());
             }
             r_st += d.c->dim();
         }
         return ptr;
     };
-}
-void lcid::finalize_impl() {
     // reorder deps, add dynamics first
     for (const auto &d : dyn_constr_) {
         add_dep(d.c);
@@ -42,7 +41,7 @@ void lcid::finalize_impl() {
         if (s.dt->field() == __u)
             has_timestep_ = true;
         nv_ += s.v->dim();
-        ntq_ += nv_ - (s.root_type != root_joint_t::fixed ? 6 : 0);
+        ntq_ += s.v->dim() - (s.root_type != root_joint_t::fixed ? 6 : 0);
     }
     for (const auto &c : kin_constr_) {
         add_dep(c.c);
@@ -51,12 +50,16 @@ void lcid::finalize_impl() {
     generic_custom_func::finalize_impl();
 }
 void lcid::compute_osim_inv(data &d) {
+    thread_local utils::blasfeo_llt llt_;
+    thread_local std::vector<utils::blasfeo_llt> M_llt_;
+    if (M_llt_.size() != dyn_constr_.size())
+        M_llt_.resize(dyn_constr_.size());
     for (size_t i = 0; i < M_llt_.size(); i++) {
         auto &llt = M_llt_[i];
         llt.compute(d.Minv_.dense_panels_[0].data_);
         llt.get_inverse(d.Minv_.dense_panels_[0].data_);
     }
-    d.Jc_Minv_.resize(d.Jc_T_.rows(), d.Minv_.cols());
+    d.Jc_Minv_.resize(d.Jc_T_.cols(), d.Minv_.cols());
     d.Jc_Minv_.setZero();
     d.Jc_T_.T_times(d.Minv_, d.Jc_Minv_);
     d.osim_inv_.setZero();

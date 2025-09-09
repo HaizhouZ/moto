@@ -199,13 +199,13 @@ TEST_CASE("inner_product") {
     // dyn.create_2nd_ord_lin("robot", 3);
     // dyn.create_1st_ord_lin("foot", 6);
     // dyn.create_1st_ord_lin("hand", 12);
-    dyn.create_2nd_ord_lin("obj", 3, true);
-    dyn.create_2nd_ord_lin("obj2", 3, true);
-    dyn.create_2nd_ord_lin("obj3", 3, true);
+    // dyn.create_2nd_ord_lin("obj", 3, true);
+    // dyn.create_2nd_ord_lin("obj2", 3, true);
+    // dyn.create_2nd_ord_lin("obj3", 3, true);
     dyn.create_2nd_ord_lin("robot", 15, true);
-    dyn.create_2nd_ord_ang("ang1", true);
-    dyn.create_2nd_ord_ang("ang2", true);
-    dyn.create_2nd_ord_ang("ang3", true);
+    // dyn.create_2nd_ord_ang("ang1", true);
+    // dyn.create_2nd_ord_ang("ang2", true);
+    // dyn.create_2nd_ord_ang("ang3", true);
     dyn.create_2nd_ord_ang("robang", true);
     // dyn.create_2nd_ord_lin("robot2", 18); // todo: for dynamics, check if symbols conflict
     var dt = sym::inputs("dt", 1);
@@ -238,7 +238,7 @@ TEST_CASE("inner_product") {
         sh_data.reserve(n_trials);
         for (size_t i = n_trials; i--;)
             sh_data.emplace_back(prob.get(), &s_data[i]);
-
+        std::vector<matrix> hess_;
         for (size_t i = n_trials; i--;) {
             auto d_ptr = dyn->create_approx_data(s_data[i], m_data[i], sh_data[i]);
             auto &d = *d_ptr;
@@ -248,8 +248,10 @@ TEST_CASE("inner_product") {
             s_data[i].value_[__x].setRandom();
             s_data[i].value_[__u].setRandom();
             s_data[i].value_[__y].setRandom();
-            auto &hess = m_data[i].hessian_[__y][__y].setRandom();
+            // auto &hess = m_data[i].hessian_[__y][__y].setRandom();
+            matrix hess = matrix::Random(prob->dim(__y), prob->dim(__y));
             hess = hess * hess.transpose();
+            hess_.emplace_back(hess);
 
             dyn->compute_approx(d, true, true, false);
             dyn->compute_project_derivatives(d);
@@ -260,7 +262,7 @@ TEST_CASE("inner_product") {
             }
         }
         matrix U(prob->dim(__u), prob->dim(__u));
-        matrix cache(prob->dim(__y), prob->dim(__u));
+        matrix cache(prob->dim(__y), prob->dim(__y));
         U.setZero();
 
         // dyn2->compute_approx(d2, true, true, false);
@@ -279,7 +281,7 @@ TEST_CASE("inner_product") {
             "dense_inner_product",
             auto n = n_trials;
             while (n--) {
-                auto &hess = m_data[n].hessian_[__y][__y];
+                auto &hess = hess_[n];
                 // U.noalias() = dense_f_u[n].transpose() * hess * dense_f_u[n];
                 dense_inner_product(dense_f_u[n], hess, U);
             });
@@ -289,7 +291,7 @@ TEST_CASE("inner_product") {
             while (n--) {
                 // auto f = __x;
                 auto &jac_sp = m_data[n].proj_f_u();
-                auto &hess = m_data[n].hessian_[__y][__y];
+                auto &hess = hess_[n];
                 jac_sp.inner_product(hess, U);
             });
     }

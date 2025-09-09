@@ -24,7 +24,7 @@ void ipm_constr::initialize(ipm::data_map_t &data) const {
     d.slack_ = (-d.g_).cwiseMax(1e-2); // clip
     d.v_ = d.g_ + d.slack_;            // r_g = g_ + slack
     d.multiplier_.array() = d.ipm_cfg->mu / d.slack_.array();
-    d.multiplier_ = d.multiplier_.cwiseMin(1e3); // clip
+    d.multiplier_ = d.multiplier_.cwiseMin(1); // clip
     d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array();
     if (d.multiplier_.hasNaN() || d.slack_.hasNaN()) {
         fmt::print("multiplier: {}\n", d.multiplier_);
@@ -136,6 +136,7 @@ void ipm_constr::value_impl(func_approx_data &data) const {
     //         d.reg_(i) = 1e-8; // regularization for slack variables
     //         d.active_[i] = 0; // active constraint
     //         d.slack_(i) = 1e-8;
+    //         fmt::println("{} active almost", name_);
     //     } else {
     //         d.active_[i] = 0; // inactive constraint
     //         d.reg_(i) = 1e-8; // regularization for slack variables
@@ -178,6 +179,7 @@ void ipm_constr::propagate_jacobian(func_approx_data &data) const {
                     fmt::print("arg: {}: {}\n", arg.name(), d[arg].transpose());
                 }
                 fmt::print("jac: \n{:.3}\n", j);
+                fmt::print("g: {:.3}\n", d.g_.transpose());
                 fmt::print("slack: {:.3}\n", d.slack_.transpose());
                 fmt::print("multiplier: {:.3}\n", d.multiplier_.transpose());
                 fmt::print("diag_scaling: {:.3}\n", d.diag_scaling.transpose());
