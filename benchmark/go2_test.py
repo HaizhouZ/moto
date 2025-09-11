@@ -34,11 +34,6 @@ class pinCasadiModel(cpin.Model):
         self.foot_frames = foot_frames
         self.use_fwd_dyn = use_fwd_dyn
 
-        if self.is_floating_based:
-            self.nqb = 6
-        if self.nq - self.nv == 1:
-            self.nqb = 7
-
         if dense:
             # make_primal
             self.q, self.qn = moto.states(name + "_q", self.nq)
@@ -99,8 +94,8 @@ class pinCasadiModel(cpin.Model):
                     name, semi_implicit=True
                 )
                 if q_nom is not None:
-                    self.quat.default_value = q_nom[3:self.nqb]
-                    self.quatn.default_value = q_nom[3:self.nqb]
+                    self.quat.default_value = q_nom[3:7]
+                    self.quatn.default_value = q_nom[3:7]
                 else:
                     self.quat.default_value = np.array([0.0, 0.0, 0.0, 1.0])
                     self.quatn.default_value = np.array([0.0, 0.0, 0.0, 1.0])
@@ -172,9 +167,7 @@ class pinCasadiModel(cpin.Model):
             #         moto.constr(self.name + "_id", in_arg, self.rnea[:6])]
             if self.use_fwd_dyn:
                 v_next = self.v + self.aba
-                return moto.dense_dynamics(
-                    self.name + "_fd", args, cs.vcat(out + [self.vn - v_next])
-                )
+                return moto.dense_dynamics(self.name + "_fd", args, cs.vcat(out + [self.vn - v_next]))
             else:
                 tau = cs.vcat([cs.SX.zeros(6), self.tq]) if self.is_floating_based else self.tq
                 return moto.dense_dynamics(self.name + "_id", args, cs.vcat(out + [self.rnea - tau * self.dt]))
@@ -254,8 +247,8 @@ class pinCasadiModel(cpin.Model):
     def get_state_cost(self, terminal: bool = False):
         q_nom_res = self.q_stack - self.q_nom
         state_cost = (
-            100.0 * cs.sumsqr(q_nom_res[:self.nqb])
-            + 1 * cs.sumsqr(q_nom_res[self.nqb:])
+            100.0 * cs.sumsqr(q_nom_res[:7])
+            + 1 * cs.sumsqr(q_nom_res[7:])
             + 1.0 * cs.sumsqr(self.v_stack[:6])
             + 0.01 * cs.sumsqr(self.v_stack[6:])
         )
@@ -299,17 +292,15 @@ class pinCasadiModel(cpin.Model):
 dt_nom = moto.params("dt_nom", 1, default_val=0.02)
 dt = 0.02
 display = True
-go2 = load("go2", display=display, verbose=True)
+go2 = load("go2", display=True, verbose=True)
 q_d = np.copy(go2.q0)
 root_joint = pin.JointModelComposite()
 root_joint.addJoint(pin.JointModelTranslation())
 root_joint.addJoint(pin.JointModelSpherical())
-# root_joint.addJoint(pin.JointModelSphericalZYX())
-# q_d = np.concatenate((q_d[:3], np.array([0.0, 0.0, 0.0]), q_d[7:]))
 model = pin.buildModelFromUrdf(go2.urdf, root_joint)
 np.set_printoptions(precision=3, suppress=True, linewidth=200)
 foot_frames = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
-model = pinCasadiModel(model, dt=dt, q_nom=q_d, dense=True, foot_frames=foot_frames, use_fwd_dyn=False)
+model = pinCasadiModel(model, dt=dt, q_nom=q_d, dense=True, foot_frames=foot_frames, use_fwd_dyn=True)
 # fmodel = model.fmodel
 # config = pin.randomConfiguration(fmodel)
 # config[:3] = np.random.rand(3) * 0.1
@@ -343,113 +334,104 @@ print("--" * 15)
 
 N_horizon = 100
 
-sqp = moto.sqp(n_job=10)
-g = sqp.graph
-n0 = g.set_head(g.add(sqp.create_node(prob)))
-n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
-g.add_edge(n0, n1, N_horizon)
 
-sqp.settings.mu = 1
-# sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
-sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
-sqp.settings.ipm_conditional_corrector = True
-sqp.settings.prim_tol = 1e-4
-sqp.settings.dual_tol = 1e-4
-sqp.settings.comp_tol = 1e-4
+import argparse, json
 
-# setup gait
-steps = 4
-nodes_per_step = 20
-total_gait_steps = steps * nodes_per_step
-stance_length = int(N_horizon - total_gait_steps) / 2
-step = 0
-node_idx = 0
+parser = argparse.ArgumentParser()
+parser.add_argument("--output_file", type=str)
+parser.add_argument("--config", type=str)
 
-gait = 'trot'
-# gait = "bound_fwd"
-gait_setting = {
-    "trot": [1, 1, 0, 0],
-    "bound_fwd": [0, 0, 0, 0],
-}
+args = parser.parse_args()
 
-cfg = [[-0.8787878787878788, -0.8181818181818181], [0.7777777777777779, 0.9595959595959598]]
-# cfg = [[-0.030303030303030276, 0.6363636363636365], [0.27272727272727293, -1.0]]
-# cfg = [[0., 0.], [0., 0.]]
-# cfg = [[-0.2929292929292928, 0.3737373737373739], [0.5555555555555556, -0.07070707070707061]]
+output_file = args.output_file
+with open(args.config, "r") as f:
+    config = json.load(f)
 
-def gait_setup(data: moto.sqp.data_type):
-    global step, node_idx
-    if node_idx >= stance_length and node_idx + stance_length < N_horizon:
-        switch_step = (node_idx - stance_length) % nodes_per_step == 0
-        if switch_step:
-            step += 1
-        for idx, f in enumerate([0, 3, 1, 2]):
-            if step % 2 == 0:
-                data.value[model.active_foot[f]] = gait_setting[gait][idx]
-                if gait == "bound_fwd":
-                    data.value[model.q_nom][2] = 0.5
-            else:
-                data.value[model.active_foot[f]] = 1 - gait_setting[gait][idx]
-    else:
-        for f in model.active_foot:
-            data.value[f] = 1.0
-    # data.value[model.q_nom][1] = node_idx / N_horizon * 1.5
-    if step >= 1 and step <= 2:
-        data.value[model.q_nom][0] = node_idx / N_horizon * cfg[0][0]
-        data.value[model.q_nom][1] = node_idx / N_horizon * cfg[0][1]
-    elif step > 2:
-        data.value[model.q_nom][0] = cfg[0][0] + node_idx / N_horizon * (cfg[1][0] - cfg[0][0])
-        data.value[model.q_nom][1] = cfg[0][1] + node_idx / N_horizon * (cfg[1][1] - cfg[0][1])
-    # if step >= 1 and step <= 2:
-    #     data.value[model.q_nom][0] = node_idx / N_horizon * 1.0
-    # elif step >= 2:
-    #     data.value[model.q_nom][1] = node_idx / N_horizon * 0.5
-    # data.value[model.q_nom][0] = node_idx / N_horizon * 2.0
-    node_idx += 1
-
-
-sqp.apply_forward(gait_setup)
+gaits = ["trot", "bound_fwd"]
+stats = []
+from tqdm import tqdm
+import itertools
 import time
 
-start = time.perf_counter()
-sqp.update(100)
-print(f"sqp.update(100) took {time.perf_counter() - start:.3f} seconds")
+for gait, (idx_cfg, cfg) in tqdm(itertools.product(gaits, enumerate(config)), total=len(gaits)*len(config)):
+    assert isinstance(cfg, list) and len(cfg) == 2
+    sqp = moto.sqp(n_job=10)
+    g = sqp.graph
+    n0 = g.set_head(g.add(sqp.create_node(prob)))
+    n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
+    g.add_edge(n0, n1, N_horizon)
 
-q_res = []
-dt_res = []
-node_idx = 0
+    sqp.settings.mu = 1
+    # sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
+    sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
+    sqp.settings.ipm_conditional_corrector = True
+    sqp.settings.prim_tol = 1e-4
+    sqp.settings.dual_tol = 1e-4
+    sqp.settings.comp_tol = 1e-4
 
+    # setup gait
+    steps = 4
+    nodes_per_step = 20
+    total_gait_steps = steps * nodes_per_step
+    stance_length = int(N_horizon - total_gait_steps) / 2
+    step = 0
+    node_idx = 0
 
-def get_sym(node: moto.sqp.data_type):
-    global node_idx
-    q_res.append(node.value[model.q])
-    if isinstance(dt, float):
-        dt_res.append(dt)
-    else:
-        dt_res.append(node.value[dt])
-    node_idx += 1
-    if node_idx >= N_horizon:
-        q_res.append(node.value[model.qn])
+    # gait = 'trot'
+    # gait = "bound_fwd"
+    gait_setting = {
+        "trot": [1, 1, 0, 0],
+        "bound_fwd": [0, 0, 0, 0],
+    }
 
+    def gait_setup(data: moto.sqp.data_type):
+        global step, node_idx, gait
+        if node_idx >= stance_length and node_idx + stance_length < N_horizon:
+            switch_step = (node_idx - stance_length) % nodes_per_step == 0
+            if switch_step:
+                step += 1
+            for idx, f in enumerate([0, 3, 1, 2]):
+                if step % 2 == 0:
+                    data.value[model.active_foot[f]] = gait_setting[gait][idx]
+                    if gait == "bound_fwd":
+                        data.value[model.q_nom][2] = 0.5
+                else:
+                    data.value[model.active_foot[f]] = 1 - gait_setting[gait][idx]
+        else:
+            for f in model.active_foot:
+                data.value[f] = 1.0
+        if step >= 1 and step <= 2:
+            data.value[model.q_nom][0] = node_idx / N_horizon * cfg[0][0]
+            data.value[model.q_nom][1] = node_idx / N_horizon * cfg[0][1]
+        elif step >= 2:
+            data.value[model.q_nom][0] = cfg[0][0] + node_idx / N_horizon * (cfg[1][0] - cfg[0][0])
+            data.value[model.q_nom][1] = cfg[0][1] + node_idx / N_horizon * (cfg[1][1] - cfg[0][1])
+        # data.value[model.q_nom][0] = node_idx / N_horizon * 2.0
+        node_idx += 1
 
-sqp.apply_forward(get_sym)
+    sqp.apply_forward(gait_setup)
 
-if display:
+    start = time.perf_counter()
+    info = sqp.update(100, verbose=False)
+    end = time.perf_counter()
 
-    import time
+    tim = end - start
 
-    while True:
-        for i in range(len(q_res)):
-            start = time.perf_counter()
-            go2.display(q_res[i])
-            if i is not N_horizon:
-                dt_ = dt_res[i]
-                while time.perf_counter() - start < dt_:
-                    pass
-        time.sleep(0.5)
+    stats.append(
+        {
+            "label": gait,
+            "config": idx_cfg,
+            "solved": info.solved,
+            "num_iter": info.num_iter,
+            "time": tim,
+        }
+    )
 
-# def print_sym(node: moto.sqp.data_type):
-#     node.sym.print()
-#     node.print_residuals()
+    del sqp
 
-# sqp.apply_forward(print_sym, early_stop=20)
+import os
+import json
+
+with open(output_file, "w") as f:
+    json.dump(stats, f, indent=2)
+print(f"Stats dumped to {output_file}")

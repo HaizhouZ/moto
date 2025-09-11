@@ -23,7 +23,7 @@ set(MOTO_COMPILE_OPTS -march=native -fPIC -Wno-interference-size)
 set(MOTO_COMPILE_DEFS MOTO_USE_OMP)
 set(MOTO_COMPILE_FEATURES cxx_std_20)
 
-option(BUILD_MULTIBODY "Build multibody module" ON)
+option(BUILD_MULTIBODY "Build multibody module" OFF)
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
 

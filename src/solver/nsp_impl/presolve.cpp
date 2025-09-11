@@ -41,6 +41,8 @@ void generic_solver::ns_factorization(ns_riccati_data *cur) {
     d.V_yy.setZero();
     d.Q_yy.dump_into(d.V_yy);
     d.Q_yy_mod.dump_into(d.V_yy);
+
+    nsp.y_y_k = d.F_0;
     // check Q_xx symmetry
     // if ((d.Q_xx - d.Q_xx.transpose()).cwiseAbs().maxCoeff() > 1e-10) {
     //     fmt::print("Q_xx is not symmetric before nsp factorization: max abs diff = {}\n", (d.Q_xx - d.Q_xx.transpose()).cwiseAbs().maxCoeff());
@@ -101,12 +103,23 @@ void generic_solver::ns_factorization(ns_riccati_data *cur) {
         }
         timed_block_end("copy_lhs_derivatives");
         timed_block_start("lu_eq_compute");
+        // nsp.lu_eq_.setThreshold(1e-2);
         nsp.lu_eq_.compute(nsp.s_c_stacked);
         nsp.rank = nsp.lu_eq_.rank();
         timed_block_end("lu_eq_compute");
+        using lu_type = std::remove_cvref_t<decltype(nsp.lu_eq_.matrixLU())>;
         auto &rank = nsp.rank;
+        // auto& lu_diag = const_cast<lu_type &>(nsp.lu_eq_.matrixLU()).diagonal().head(rank);
+        // fmt::print("diagonal of LU: {}\n", const_cast<lu_type &>(nsp.lu_eq_.matrixLU()).diagonal().transpose());
+        // fmt::println("threshold for LU pivoting: {}", nsp.lu_eq_.threshold());
+        // fmt::println("LU matrix: \n{}", const_cast<lu_type &>(nsp.lu_eq_.matrixLU()));
+        // // for (int i = 0; i < rank; ++i) {
+        // //     lu_diag(i) = 
+        // // }
+        // fmt::print("ns {}, nc {}, rank {}\n", d.ns, d.nc, rank);
+        // fmt::print("s_c_stacked \n{}\n", nsp.s_c_stacked);
+        // fmt::print("rank of equality constraints: {}\n", rank);
 #ifdef SHOW_NSP_DEBUG
-        fmt::print("rank of equality constraints: {}\n", rank);
 #endif
 
         if (rank == 0) {
@@ -165,8 +178,8 @@ void generic_solver::ns_factorization(ns_riccati_data *cur) {
                     throw std::runtime_error("Numerical issue detected: very large constraint Jacobian");
                 }
                 // fmt::print("stacked_Z {}\n", stacked_Z.cwiseAbs().maxCoeff());
-                fmt::print("kernel residual u = {}\n", (nsp.s_c_stacked * nsp.Z_u).cwiseAbs().maxCoeff());
                 // fmt::print("kernel residual = {}\n", (stacked_ * stacked_Z).cwiseAbs().maxCoeff());
+                fmt::print("kernel residual u = {}\n", (nsp.s_c_stacked * nsp.Z_u).cwiseAbs().maxCoeff());
 
 #endif
                 // fmt::print("nullspace :\n {}\n", nsp.Z.cols());
@@ -241,7 +254,6 @@ void generic_solver::ns_factorization(ns_riccati_data *cur) {
             // fmt::print("F_u: \n{}\n", nsp.F_u.transpose());
             // fmt::print("F_0_K: \n{}\n", nsp.F_0_K.transpose());
             timed_block_start("precompute_y_y");
-            nsp.y_y_k = d.F_0;
             d.F_u.times<false>(nsp.u_y_k, nsp.y_y_k);
             nsp.y_y_K.setZero();
             d.F_x.dump_into(nsp.y_y_K);
@@ -249,22 +261,40 @@ void generic_solver::ns_factorization(ns_riccati_data *cur) {
             timed_block_end("precompute_y_y");
 // print_debug(cur);
 #ifdef SHOW_NSP_DEBUG
-            fmt::print("scstacked :\n {}\n", nsp.s_c_stacked);
-            fmt::print("scstacked_0_k :\n {}\n", nsp.s_c_stacked_0_k.transpose());
+            // fmt::print("scstacked :\n {}\n", nsp.s_c_stacked);
+            // fmt::print("scstacked_0_k :\n {}\n", nsp.s_c_stacked_0_k.transpose());
             // Compute dynamics residual using dense_->approx
-            fmt::print("u_y_k: \n{}\n", nsp.u_y_k.transpose());
-            fmt::print("u_y_K: \n{}\n", nsp.u_y_K);
-            fmt::print("lu residual = {}\n", (nsp.s_c_stacked * nsp.u_y_k - nsp.s_c_stacked_0_k).cwiseAbs().maxCoeff());
+            // fmt::print("u_y_k: \n{}\n", nsp.u_y_k.transpose());
+            // fmt::print("u_y_K: \n{}\n", nsp.u_y_K);
+            // fmt::print("lu residual = {}\n", (nsp.s_c_stacked * nsp.u_y_k - nsp.s_c_stacked_0_k).cwiseAbs().maxCoeff());
             vector proj_dyn_res = d.F_0 - d.F_u.dense() * nsp.u_y_k - nsp.y_y_k;
-            fmt::print("projected dynamics residual: {}\n", proj_dyn_res.cwiseAbs().maxCoeff());
+            // fmt::print("projected dynamics residual: {}\n", proj_dyn_res.cwiseAbs().maxCoeff());
             vector dyn_residual = cur->dense_->approx_[__dyn].v_ - cur->dense_->approx_[__dyn].jac_[__y].dense() * nsp.y_y_k - cur->dense_->approx_[__dyn].jac_[__u].dense() * nsp.u_y_k;
-            fmt::print("dynamics residual: {}\n", dyn_residual.cwiseAbs().maxCoeff());
+            // fmt::print("dynamics residual: {}\n", dyn_residual.cwiseAbs().maxCoeff());
             matrix dyn_jac_res = cur->dense_->approx_[__dyn].jac_[__x].dense() - cur->dense_->approx_[__dyn].jac_[__y].dense() * nsp.y_y_K - cur->dense_->approx_[__dyn].jac_[__u].dense() * nsp.u_y_K;
-            fmt::print("dynamics jacobian residual: {}\n", dyn_jac_res.cwiseAbs().maxCoeff());
-
+            // fmt::print("dynamics jacobian residual: {}\n", dyn_jac_res.cwiseAbs().maxCoeff());
+            if (dyn_residual.cwiseAbs().maxCoeff() > 1e-10) {
+                fmt::print("F_0:\n{}\n", d.F_0.transpose());
+                fmt::print("F_u:\n{}\n", d.F_u.dense());
+                fmt::print("F_x:\n{}\n", d.F_x.dense());
+                fmt::print("u_y_k:\n{}\n", nsp.u_y_k.transpose());
+                fmt::print("y_y_k:\n{}\n", nsp.y_y_k.transpose());
+                fmt::print("dyn_residual:\n{}\n", dyn_residual.transpose());
+                throw std::runtime_error("Numerical issue detected: dynamics residual too large");
+            }
+            if (dyn_jac_res.cwiseAbs().maxCoeff() > 1e-10) {
+                throw std::runtime_error("Numerical issue detected: dynamics jacobian residual too large");
+            }
             if (d.ns > 0) {
-                assert((d.s_y.dense() * nsp.y_y_k - cur->dense_->approx_[__eq_x].v_).cwiseAbs().maxCoeff() < 1e-10);
-                assert((d.s_y.dense() * nsp.y_y_K - cur->dense_->approx_[__eq_x].jac_[__x].dense()).cwiseAbs().maxCoeff() < 1e-10);
+                if (!((d.s_y.dense() * nsp.y_y_k - cur->dense_->approx_[__eq_x].v_).cwiseAbs().maxCoeff() < 1e-10)) {
+                    fmt::print("s_y:\n{}\n", d.s_y.dense());
+                    fmt::print("lhs:\n{}\n", (d.s_y.dense() * nsp.y_y_k).transpose());
+                    fmt::print("rhs:\n{}\n", cur->dense_->approx_[__eq_x].v_.transpose());
+                    throw std::runtime_error("Numerical issue detected: equality constraint residual too large");
+                }
+                if (!((d.s_y.dense() * nsp.y_y_K - cur->dense_->approx_[__eq_x].jac_[__x].dense()).cwiseAbs().maxCoeff() < 1e-10)) {
+                    throw std::runtime_error("Numerical issue detected: equality constraint jacobian residual too large");
+                }
                 // fmt::print("eq x k residual {}\n", (d.s_y.dense() * nsp.y_y_k - cur->dense_->approx_[__eq_x].v_).cwiseAbs().maxCoeff());
                 // fmt::print("eq x K residual {}\n", (d.s_y.dense() * nsp.y_y_K - cur->dense_->approx_[__eq_x].jac_[__x].dense()).cwiseAbs().maxCoeff());
                 // fmt::print("s_y:\n{}\n", d.s_y.dense());

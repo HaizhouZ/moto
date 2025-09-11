@@ -68,6 +68,12 @@ void ipm_constr::apply_corrector_step(data_map_t &data) const {
     }
     d.scaled_res_.array() /= (d.slack_.array() + d.reg_.array() * d.multiplier_.array());
     d.scaled_res_.array() *= d.active_.array();
+    if (d.scaled_res_.hasNaN()) {
+        fmt::print("scaled_res: {}\n", d.scaled_res_.transpose());
+        fmt::print("mu : {}, corrector: {}\n", d.ipm_cfg->mu, d.corrector_.transpose());
+        fmt::print("slack: {}, \nreg: {}, \nmultiplier: {}\n", d.slack_.transpose(), d.reg_.transpose(), d.multiplier_.transpose());
+        throw std::runtime_error("ipm_constr apply_corrector_step failed due to NaN");
+    }
     propagate_jacobian(d);
 }
 void ipm_constr::update_linesearch_bounds(ipm::data_map_t &data, workspace_data *cfg) const {
@@ -104,9 +110,11 @@ void ipm_constr::finalize_predictor_step(ipm::data_map_t &data, workspace_data *
     ipm_worker.prev_aff_comp += d.multiplier_.dot(d.slack_.cwiseProduct(d.active_));
     // finalize the affine step
     d.corrector_.array() = ls_cfg.alpha_dual * d.d_multiplier_.array() * ls_cfg.alpha_primal * d.d_slack_.array();
-    d.d_multiplier_.array() *= ls_cfg.alpha_dual;
-    d.d_slack_.array() *= ls_cfg.alpha_primal;
-    ipm_worker.post_aff_comp += (d.multiplier_ + d.d_multiplier_).cwiseProduct(d.active_).dot(d.slack_ + d.d_slack_);
+    // d.d_multiplier_.array() *= ls_cfg.alpha_dual;
+    // d.d_slack_.array() *= ls_cfg.alpha_primal;
+    ipm_worker.post_aff_comp += (d.multiplier_ + ls_cfg.alpha_dual * d.d_multiplier_)
+                                    .cwiseProduct(d.active_)
+                                    .dot(d.slack_ + ls_cfg.alpha_primal * d.d_slack_);
     // assert(d.multiplier_.dot(d.slack_) > 0 &&
     //        "the complementarity must be positive before the line search step");
     // assert((d.multiplier_ + d.d_multiplier_).dot(d.slack_ + d.d_slack_) > 0);
@@ -131,6 +139,11 @@ void ipm_constr::value_impl(func_approx_data &data) const {
     auto &d = data.as<ipm_data>();
     d.g_ = d.v_;            //.cwiseMin(-d.reg_);
     d.v_ = d.g_ + d.slack_; // r_g = g_ + slack
+    if (d.v_.hasNaN()) {
+        fmt::print("g: {}\n", d.g_.transpose());
+        fmt::print("slack: {}\n", d.slack_.transpose());
+        throw std::runtime_error("ipm_constr value_impl failed due to NaN");
+    }
     // for (size_t i = 0; i < dim_; i++) {
     //     if (d.slack_(i) < 1e-8 && d.g_(i) < 1e-8) {
     //         d.reg_(i) = 1e-8; // regularization for slack variables

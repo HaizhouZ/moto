@@ -19,9 +19,10 @@ void register_submodule_ns_sqp(nb::module_ &m) {
     nb::class_<ns_sqp> sqp(m, "ns_sqp_impl");
     sqp.def(nb::init<size_t>(), "Constructor for the SQP solver with a specified number of jobs")
         .def_prop_ro("graph", [](ns_sqp &self) -> auto & { return self.graph_; })
-        .def("update", [](ns_sqp &self, size_t n_iter) {
+        .def("update", [](ns_sqp &self, size_t n_iter, bool verbose) {
             nb::gil_scoped_release rel;
-            self.update(n_iter); }, nb::arg("n_iter") = 1, "Update the SQP solver for a given number of iterations")
+            return self.update(n_iter, verbose);
+        }, nb::arg("n_iter") = 1, nb::arg("verbose") = true, "Update the SQP solver for a given number of iterations")
         .def_rw("settings", &ns_sqp::settings, "Get the settings of the SQP solver")
         .def("forward", &ns_sqp::forward)
         .def("create_node", &ns_sqp::create_node, nb::arg("formulation"), nb::rv_policy::reference, "Create a new node in the SQP graph with the given OCP problem formulation");
@@ -36,6 +37,16 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("comp_tol", &ns_sqp::settings_t::comp_tol, "Complementarity feasibility tolerance");
 
     nb::enum_<moto::solver::ipm_config::adaptive_mu_t> enum_binder(sqp, "adaptive_mu_t");
+
+    nb::class_<ns_sqp::kkt_info>(sqp, "kkt_info")
+        .def_rw("solved", &ns_sqp::kkt_info::solved, "Whether the problem is solved")
+        .def_rw("num_iter", &ns_sqp::kkt_info::num_iter, "Number of iterations")
+        .def_rw("objective", &ns_sqp::kkt_info::objective, "Objective value")
+        .def_rw("inf_prim_res", &ns_sqp::kkt_info::inf_prim_res, "Primal residual (constraint violation)")
+        .def_rw("inf_dual_res", &ns_sqp::kkt_info::inf_dual_res, "Dual residual (stationary condition)")
+        .def_rw("inf_comp_res", &ns_sqp::kkt_info::inf_comp_res, "Inequality complementarity residual")
+        .def_rw("inf_prim_step", &ns_sqp::kkt_info::inf_prim_step, "Infinity norm of the primal step")
+        .def_rw("inf_dual_step", &ns_sqp::kkt_info::inf_dual_step, "Infinity norm of the dual step");
 
     // Iterate over all enum values provided by magic_enum
     for (auto [value, name] : magic_enum::enum_entries<moto::solver::ipm_config::adaptive_mu_t>()) {

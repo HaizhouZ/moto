@@ -54,10 +54,11 @@ struct blasfeo_buffer_tpl {
             v_zeros_align(&mem_, required_size);
             size_ = required_size;
         }
-        if constexpr (std::is_same_v<DataType, blasfeo_dmat>)
+        if constexpr (std::is_same_v<DataType, blasfeo_dmat>) {
             blasfeo_create_dmat(r, c, &data_, mem_);
-        else
+        } else {
             blasfeo_create_dvec(r, &data_, mem_);
+        }
     }
     ~blasfeo_buffer_tpl() {
         if (mem_ != nullptr)

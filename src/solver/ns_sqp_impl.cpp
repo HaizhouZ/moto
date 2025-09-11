@@ -4,7 +4,7 @@
 #include <moto/utils/field_conversion.hpp>
 #include <numeric>
 
-#define ENABLE_TIMED_BLOCK
+// #define ENABLE_TIMED_BLOCK
 #include <moto/utils/timed_block.hpp>
 
 #define SHOW_DETAIL_TIMING
@@ -42,11 +42,12 @@ stat_item stats[] = {{"no.", 3},
                      {"||d||"},
                      {"alpha_p"},
                      {"alpha_d"},
+                     {"ls", 3},
                      {"ipm_mu", stat_width + 2}};
 
 void ns_sqp::print_stats(int i_iter, const kkt_info &info, bool has_ineq) {
     scalar_t stats_value[] = {i_iter, info.objective, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res, info.inf_prim_step, info.inf_dual_step,
-                              settings.alpha_primal, settings.alpha_dual, settings.mu};
+                              settings.alpha_primal, settings.alpha_dual, info.ls_steps, settings.mu};
     std::string_view ipm_flags;
     if (has_ineq && settings.ipm_enable_corrector()) {
         if (settings.ipm_accept_corrector()) {
@@ -59,6 +60,8 @@ void ns_sqp::print_stats(int i_iter, const kkt_info &info, bool has_ineq) {
     for (auto &item : stats) {
         if (item.name == "no.") {
             fmt::print("| {:<{}} |", i_iter < 0 ? "--" : std::to_string(i_iter + 1), item.width);
+        } else if (item.name == "ls") {
+            fmt::print("| {:<{}} |", info.ls_steps < 0 ? "--" : std::to_string(info.ls_steps), item.width);
         } else if (item.name == "ipm_mu") {
             fmt::print("| {:<{}} |", has_ineq ? fmt::format("{:.6e}{}", stats_value[idx_stat], ipm_flags) : "---------", item.width);
         } else {
@@ -70,7 +73,7 @@ void ns_sqp::print_stats(int i_iter, const kkt_info &info, bool has_ineq) {
     fmt::print("\n");
 };
 
-void ns_sqp::update(size_t n_iter) {
+ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
     auto iterative_refinement_start = [this](ns_sqp::data *data) {
         data->Q_y_corr = nullptr;
         data->prim_corr[__x].setZero();
@@ -92,7 +95,8 @@ void ns_sqp::update(size_t n_iter) {
         solver::ineq_soft::finalize_newton_step(data, false);
         riccati_solver_->finalize_dual_newton_step(data);
     };
-    fmt::print("Initialization for SQP...\n");
+    if (verbose)
+        fmt::print("Initialization for SQP...\n");
     graph_.for_each_parallel([this](data *cur) {
         // setup solver settings
         cur->for_each_constr([this](const generic_func &c, func_approx_data &d) { c.setup_workspace_data(d, &settings); });
@@ -106,163 +110,101 @@ void ns_sqp::update(size_t n_iter) {
     kkt_info info_last = compute_kkt_info();
     // print statistics header
     size_t widths[] = {3, stat_width, stat_width, stat_width, stat_width, stat_width, stat_width, stat_width};
-    for (const auto &term : stats) {
-        term.print_header();
+    if (verbose) {
+        for (const auto &term : stats) {
+            term.print_header();
+        }
+        fmt::print("\n");
+        print_stats(-1, info_last, false); // print initial stats
     }
-    fmt::print("\n");
-    print_stats(-1, info_last, false); // print initial stats
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     //// main loop
-    for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
-        bool has_ineq = false;
-        for (data &n : graph_.nodes()) {
-            if (n.problem().dim(__ineq_x) > 0 || n.problem().dim(__ineq_xu) > 0) {
-                has_ineq = true;
-                break;
-            }
-        }
-        settings.ls_config_reset();
-        size_t n_worker = graph_.n_jobs();
-        settings_t::worker setting_per_thread[n_worker];
-        auto finalize_bound_and_set_to_max = [&]() {
-            for (size_t i : range(n_worker)) {
-                settings.primal.merge_from(setting_per_thread[i].primal);
-                settings.dual.merge_from(setting_per_thread[i].dual);
-            }
-            settings.alpha_primal = settings.primal.alpha_max;
-            settings.alpha_dual = settings.dual.alpha_max;
-            // copy the settings to each worker
-            for (size_t i : range(n_worker)) {
-                setting_per_thread[i].copy_from(settings);
-            }
-        };
-
-        timed_block_start("sqp_single_iter");
-        detail_timed_block_start("ns factorization");
-        graph_.for_each_parallel(bind(&solver_type::ns_factorization));
-        detail_timed_block_end("ns factorization");
-
-        detail_timed_block_start("riccati_recursion");
-        graph_.apply_backward(bind(&solver_type::riccati_recursion), true);
-        detail_timed_block_end("riccati_recursion");
-        detail_timed_block_start("post solve");
-        graph_.for_each_parallel(bind(&solver_type::compute_primal_sensitivity));
-        detail_timed_block_end("post solve");
-        detail_timed_block_start("fwd_linear_rollout");
-        graph_.apply_forward(bind(&solver_type::fwd_linear_rollout), true);
-        detail_timed_block_end("fwd_linear_rollout");
-
-        bool finalize_dual = true;
-        bool update_res_stat = true;
-
-        if (has_ineq && settings.ipm_enable_affine_step()) { // compute the affine step, no need to finalize dual step
-            settings.ipm_start_predictor_computation();
-            finalize_dual = false;   // do not finalize dual step
-            update_res_stat = false; // do not update stationary residual
-        }
-        detail_timed_block_start("finalize_newton_step");
-        graph_.for_each_parallel([finalize_dual, &setting_per_thread, this](size_t tid, data *d) {
-            riccati_solver_->finalize_newton_step(d, finalize_dual);
-            solver::ineq_soft::finalize_newton_step(d, false);
-            // decide line search bounds (e.g., fraction-to-bounds)
-            solver::ineq_soft::calculate_line_search_bounds(d, &setting_per_thread[tid]);
-        });
-        detail_timed_block_end("finalize_newton_step");
-        detail_timed_block_start("corrector_step");
-        finalize_bound_and_set_to_max();
-        if (has_ineq && settings.ipm_enable_affine_step()) {
-            // line search with max bounds
-            graph_.for_each_parallel([&setting_per_thread](size_t tid, data *d) {
-                solver::ineq_soft::finalize_predictor_step(d, &setting_per_thread[tid]);
-            });
-            settings.ipm_end_predictor_computation(); // ipm affine step computation is done
-            // collect worker ipm data
-            solver::ipm_config::worker &main_worker = setting_per_thread[0];
-            for (size_t i : range(n_worker)) {
-                main_worker += setting_per_thread[i];
-            }
-            // adaptive mu update
-            settings.adaptive_mu_update(main_worker);
-            // use the new mu to update the rhs jacobian
-            graph_.for_each_parallel(solver::ineq_soft::first_order_correction_start);
-            /// @todo compute the residuals
-            // solve the problem again with updated mu
-            detail_timed_block_start("riccati_recursion_correction");
-            graph_.apply_backward(bind(&solver_type::riccati_recursion_correction), true);
-            detail_timed_block_end("riccati_recursion_correction");
-            graph_.for_each_parallel(bind(&solver_type::compute_primal_sensitivity_correction));
-            graph_.apply_forward(bind(&solver_type::fwd_linear_rollout_correction), true);
-            graph_.for_each_parallel([n_iter, this](data *d) {
-                solver::ineq_soft::first_order_correction_end(d);
-                riccati_solver_->finalize_newton_step_correction(d);
-                solver::ineq_soft::finalize_newton_step(d, false);
-                riccati_solver_->finalize_dual_newton_step(d);
-            });
-            // recompute line search bounds with the corrected newton step
-            settings.ls_config_reset();
-            for (size_t i : range(n_worker)) {
-                setting_per_thread[i].ls_config_reset();
-            }
-            graph_.for_each_parallel([&setting_per_thread](size_t tid, data *d) {
-                solver::ineq_soft::calculate_line_search_bounds(d, &setting_per_thread[tid]);
-            });
-            finalize_bound_and_set_to_max();
-        }
-        detail_timed_block_end("corrector_step");
-        // iterative refinement if the step is too small
-        if (has_ineq) {
-            kkt_info info;
-            for (auto n : graph_.flatten_nodes()) {
-                for (auto f : primal_fields)
-                    info.inf_prim_step = std::max(info.inf_prim_step, n->prim_step[__x].cwiseAbs().maxCoeff());
-                for (auto f : constr_fields) {
-                    if (n->dual_step[f].size() > 0)
-                        info.inf_dual_step = std::max(info.inf_dual_step, n->dual_step[f].cwiseAbs().maxCoeff());
-                }
-            }
-            // if (info.inf_prim_step < 1e-1 || info.inf_dual_step < 1e-1) {
-            size_t iter_refine_max = 5;
-            size_t iter_refine = 0;
-            detail_timed_block_start("iterative_refinement");
-            while (iter_refine < iter_refine_max) {
-                detail_timed_block_start("check_residual");
-                graph_.for_each_parallel(bind(&solver_type::compute_kkt_residual));
-                detail_timed_block_end("check_residual");
-                struct MOTO_ALIGN_NO_SHARING inf_res_state_worker {
-                    scalar_t inf_res_stat_u = 0.;
-                    scalar_t inf_res_stat_y = 0.;
-                } thread_res[n_worker];
-                size_t step = 0;
-                graph_.apply_forward<true>([&](size_t tid, data *d, data *next) {
-                    thread_res[tid].inf_res_stat_u = std::max(thread_res[tid].inf_res_stat_u, d->dense().res_stat_[__u].cwiseAbs().maxCoeff());
-                    next->dense().res_stat_[__x].applyOnTheRight(utils::permutation_from_y_to_x(&d->problem(), &next->problem()));
-                    d->dense().res_stat_[__y] += next->dense().res_stat_[__x];
-                    thread_res[tid].inf_res_stat_y = std::max(thread_res[tid].inf_res_stat_y, d->dense().res_stat_[__y].cwiseAbs().maxCoeff());
-                });
-                scalar_t inf_res_stat_u = 0.;
-                scalar_t inf_res_stat_y = 0.;
-                for (auto &w : thread_res) {
-                    inf_res_stat_u = std::max(inf_res_stat_u, w.inf_res_stat_u);
-                    inf_res_stat_y = std::max(inf_res_stat_y, w.inf_res_stat_y);
-                }
-                // fmt::print("  iterative refinement {}, res_stat_u: {:.3e}, res_stat_y: {:.3e}\n",
-                //            iter_refine, inf_res_stat_u, inf_res_stat_y);
-                if (inf_res_stat_u < 1e-10 && inf_res_stat_y < 1e-10) {
+    try {
+        for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
+            bool has_ineq = false;
+            for (data &n : graph_.nodes()) {
+                if (n.problem().dim(__ineq_x) > 0 || n.problem().dim(__ineq_xu) > 0) {
+                    has_ineq = true;
                     break;
                 }
-                detail_timed_block_start("iterative_refinement_step");
-                detail_timed_block_start("iterative_refinement_presolve");
-                graph_.for_each_parallel(iterative_refinement_start);
-                detail_timed_block_end("iterative_refinement_presolve");
+            }
+            settings.ls_config_reset();
+            size_t n_worker = graph_.n_jobs();
+            settings_t::worker setting_per_thread[n_worker];
+            auto finalize_bound_and_set_to_max = [&]() {
+                for (size_t i : range(n_worker)) {
+                    settings.primal.merge_from(setting_per_thread[i].primal);
+                    settings.dual.merge_from(setting_per_thread[i].dual);
+                }
+                settings.alpha_primal = settings.primal.alpha_max;
+                settings.alpha_dual = settings.dual.alpha_max;
+                // copy the settings to each worker
+                for (size_t i : range(n_worker)) {
+                    setting_per_thread[i].copy_from(settings);
+                }
+            };
+
+            timed_block_start("sqp_single_iter");
+            detail_timed_block_start("ns factorization");
+            graph_.for_each_parallel(bind(&solver_type::ns_factorization));
+            detail_timed_block_end("ns factorization");
+
+            detail_timed_block_start("riccati_recursion");
+            graph_.apply_backward(bind(&solver_type::riccati_recursion), true);
+            detail_timed_block_end("riccati_recursion");
+            detail_timed_block_start("post solve");
+            graph_.for_each_parallel(bind(&solver_type::compute_primal_sensitivity));
+            detail_timed_block_end("post solve");
+            detail_timed_block_start("fwd_linear_rollout");
+            graph_.apply_forward(bind(&solver_type::fwd_linear_rollout), true);
+            detail_timed_block_end("fwd_linear_rollout");
+
+            bool finalize_dual = true;
+            bool update_res_stat = true;
+
+            if (has_ineq && settings.ipm_enable_affine_step()) { // compute the affine step, no need to finalize dual step
+                settings.ipm_start_predictor_computation();
+                finalize_dual = false;   // do not finalize dual step
+                update_res_stat = false; // do not update stationary residual
+            }
+            detail_timed_block_start("finalize_newton_step");
+            graph_.for_each_parallel([finalize_dual, &setting_per_thread, this](size_t tid, data *d) {
+                riccati_solver_->finalize_newton_step(d, finalize_dual);
+                solver::ineq_soft::finalize_newton_step(d, false);
+                // decide line search bounds (e.g., fraction-to-bounds)
+                solver::ineq_soft::calculate_line_search_bounds(d, &setting_per_thread[tid]);
+            });
+            detail_timed_block_end("finalize_newton_step");
+            detail_timed_block_start("corrector_step");
+            finalize_bound_and_set_to_max();
+            if (has_ineq && settings.ipm_enable_affine_step()) {
+                // line search with max bounds
+                graph_.for_each_parallel([&setting_per_thread](size_t tid, data *d) {
+                    solver::ineq_soft::finalize_predictor_step(d, &setting_per_thread[tid]);
+                });
+                settings.ipm_end_predictor_computation(); // ipm affine step computation is done
+                // collect worker ipm data
+                solver::ipm_config::worker &main_worker = setting_per_thread[0];
+                for (size_t i : range(n_worker)) {
+                    main_worker += setting_per_thread[i];
+                }
+                // adaptive mu update
+                settings.adaptive_mu_update(main_worker);
+                // use the new mu to update the rhs jacobian
+                graph_.for_each_parallel(solver::ineq_soft::first_order_correction_start);
+                /// @todo compute the residuals
+                // solve the problem again with updated mu
                 detail_timed_block_start("riccati_recursion_correction");
                 graph_.apply_backward(bind(&solver_type::riccati_recursion_correction), true);
                 detail_timed_block_end("riccati_recursion_correction");
                 graph_.for_each_parallel(bind(&solver_type::compute_primal_sensitivity_correction));
                 graph_.apply_forward(bind(&solver_type::fwd_linear_rollout_correction), true);
-                detail_timed_block_start("iterative_refinement_step_finalize");
-                graph_.for_each_parallel(iterative_refinement_end);
-                detail_timed_block_end("iterative_refinement_step_finalize");
-                detail_timed_block_end("iterative_refinement_step");
+                graph_.for_each_parallel([n_iter, this](data *d) {
+                    solver::ineq_soft::first_order_correction_end(d);
+                    riccati_solver_->finalize_newton_step_correction(d);
+                    solver::ineq_soft::finalize_newton_step(d, false);
+                    riccati_solver_->finalize_dual_newton_step(d);
+                });
                 // recompute line search bounds with the corrected newton step
                 settings.ls_config_reset();
                 for (size_t i : range(n_worker)) {
@@ -272,63 +214,153 @@ void ns_sqp::update(size_t n_iter) {
                     solver::ineq_soft::calculate_line_search_bounds(d, &setting_per_thread[tid]);
                 });
                 finalize_bound_and_set_to_max();
-                iter_refine++;
             }
-            detail_timed_block_end("iterative_refinement");
+            detail_timed_block_end("corrector_step");
+            // iterative refinement if the step is too small
+            if (has_ineq) {
+                kkt_info info;
+                for (auto n : graph_.flatten_nodes()) {
+                    for (auto f : primal_fields)
+                        info.inf_prim_step = std::max(info.inf_prim_step, n->prim_step[__x].cwiseAbs().maxCoeff());
+                    for (auto f : constr_fields) {
+                        if (n->dual_step[f].size() > 0)
+                            info.inf_dual_step = std::max(info.inf_dual_step, n->dual_step[f].cwiseAbs().maxCoeff());
+                    }
+                }
+                // if (info.inf_prim_step < 1e-1 || info.inf_dual_step < 1e-1) {
+                size_t iter_refine_max = 5;
+                size_t iter_refine = 0;
+                detail_timed_block_start("iterative_refinement");
+                while (iter_refine < iter_refine_max) {
+                    detail_timed_block_start("check_residual");
+                    graph_.for_each_parallel(bind(&solver_type::compute_kkt_residual));
+                    detail_timed_block_end("check_residual");
+                    struct MOTO_ALIGN_NO_SHARING inf_res_state_worker {
+                        scalar_t inf_res_stat_u = 0.;
+                        scalar_t inf_res_stat_y = 0.;
+                    } thread_res[n_worker];
+                    size_t step = 0;
+                    graph_.apply_forward<true>([&](size_t tid, data *d, data *next) {
+                        thread_res[tid].inf_res_stat_u = std::max(thread_res[tid].inf_res_stat_u, d->dense().res_stat_[__u].cwiseAbs().maxCoeff());
+                        next->dense().res_stat_[__x].applyOnTheRight(utils::permutation_from_y_to_x(&d->problem(), &next->problem()));
+                        d->dense().res_stat_[__y] += next->dense().res_stat_[__x];
+                        thread_res[tid].inf_res_stat_y = std::max(thread_res[tid].inf_res_stat_y, d->dense().res_stat_[__y].cwiseAbs().maxCoeff());
+                    });
+                    scalar_t inf_res_stat_u = 0.;
+                    scalar_t inf_res_stat_y = 0.;
+                    for (auto &w : thread_res) {
+                        inf_res_stat_u = std::max(inf_res_stat_u, w.inf_res_stat_u);
+                        inf_res_stat_y = std::max(inf_res_stat_y, w.inf_res_stat_y);
+                    }
+                    fmt::print("  iterative refinement {}, res_stat_u: {:.3e}, res_stat_y: {:.3e}\n",
+                               iter_refine, inf_res_stat_u, inf_res_stat_y);
+                    if (inf_res_stat_u < 1e-10 && inf_res_stat_y < 1e-10) {
+                        break;
+                    }
+                    detail_timed_block_start("iterative_refinement_step");
+                    detail_timed_block_start("iterative_refinement_presolve");
+                    graph_.for_each_parallel(iterative_refinement_start);
+                    detail_timed_block_end("iterative_refinement_presolve");
+                    detail_timed_block_start("riccati_recursion_correction");
+                    graph_.apply_backward(bind(&solver_type::riccati_recursion_correction), true);
+                    detail_timed_block_end("riccati_recursion_correction");
+                    graph_.for_each_parallel(bind(&solver_type::compute_primal_sensitivity_correction));
+                    graph_.apply_forward(bind(&solver_type::fwd_linear_rollout_correction), true);
+                    detail_timed_block_start("iterative_refinement_step_finalize");
+                    graph_.for_each_parallel(iterative_refinement_end);
+                    detail_timed_block_end("iterative_refinement_step_finalize");
+                    detail_timed_block_end("iterative_refinement_step");
+                    // recompute line search bounds with the corrected newton step
+                    settings.ls_config_reset();
+                    for (size_t i : range(n_worker)) {
+                        setting_per_thread[i].ls_config_reset();
+                    }
+                    graph_.for_each_parallel([&setting_per_thread](size_t tid, data *d) {
+                        solver::ineq_soft::calculate_line_search_bounds(d, &setting_per_thread[tid]);
+                    });
+                    finalize_bound_and_set_to_max();
+                    iter_refine++;
+                }
+                detail_timed_block_end("iterative_refinement");
+                // }
+            }
+            /// @todo: update the line search stepsize?
+            // real line search step
+            size_t max_ls_steps = 5, ls_step = 0;
+            bool enforce_min_step = false;
+            scalar_t initial_alpha_primal = settings.alpha_primal;
+            scalar_t initial_alpha_dual = settings.alpha_dual;
+        LS_START:
+            detail_timed_block_start("line_search_step");
+            graph_.for_each_parallel([this](data *d) {
+                riccati_solver_->apply_affine_step(d, &settings);
+                solver::ineq_soft::apply_affine_step(d, &settings);
+            });
+            detail_timed_block_end("line_search_step");
+            detail_timed_block_start("update_approx");
+            graph_.for_each_parallel(data::update_approx);
+            detail_timed_block_end("update_approx");
+            // if (i_iter + 1 == n_iter) {
+            //     graph_.apply_forward([](data *d) {
+            //         d->merge_jacobian_modification();
+            //     });
             // }
+            detail_timed_block_start("update_res_stat");
+            kkt_info info = compute_kkt_info();
+            detail_timed_block_end("update_res_stat");
+            // basic globalization
+            if (!enforce_min_step && info.inf_dual_res > 0.99 * info_last.inf_dual_res &&
+                info.inf_prim_res > 0.99 * info_last.inf_prim_res) {
+                if (max_ls_steps > ls_step) {
+                    ls_step++;
+                    settings.alpha_primal = -initial_alpha_primal / (max_ls_steps + 1e-8);
+                    settings.alpha_dual = -initial_alpha_dual / (max_ls_steps + 1e-8);
+                    // fmt::print("  ls backtrack, alpha_p: {:.3e}, alpha_d: {:.3e}\n", settings.alpha_primal, settings.alpha_dual);
+                    goto LS_START;
+                } else {
+                    if (verbose)
+                        fmt::print("  ls failed, entering  feasibility restoration phase...\n");
+                    enforce_min_step = true;
+                    auto scale = 0.001 / std::max(initial_alpha_primal, initial_alpha_dual);
+                    fmt::print("  enforce min step, scale: {:.3e}\n", scale);
+                    settings.alpha_primal = initial_alpha_primal * scale;
+                    settings.alpha_dual = initial_alpha_dual * scale;
+                    goto LS_START;
+                }
+            } else {
+                if (!enforce_min_step) {
+                    settings.alpha_primal = initial_alpha_primal - initial_alpha_primal / (max_ls_steps + 1e-8) * ls_step;
+                    settings.alpha_dual = initial_alpha_dual - initial_alpha_dual / (max_ls_steps + 1e-8) * ls_step;
+                }
+            }
+            timed_block_end("sqp_single_iter");
+            // print statistics
+            info.num_iter = i_iter + 1;
+            info.ls_steps = ls_step;
+            if (verbose)
+                print_stats(i_iter, info, has_ineq);
+
+            info_last = info;
+            if (info.inf_dual_res < settings.dual_tol && info.inf_prim_res < settings.prim_tol &&
+                info.inf_comp_res < settings.comp_tol) {
+                if (verbose)
+                    fmt::print("Converged!\n");
+                info_last.solved = true;
+                break;
+            }
+            // });
         }
-        /// @todo: update the line search stepsize?
-        // real line search step
-        size_t max_ls_steps = 10;
-    LS_START:
-        detail_timed_block_start("line_search_step");
-        graph_.for_each_parallel([this](data *d) {
-            riccati_solver_->apply_affine_step(d, &settings);
-            solver::ineq_soft::apply_affine_step(d, &settings);
-        });
-        detail_timed_block_end("line_search_step");
-        if (i_iter + 1 == n_iter) {
-            fmt::print("after line search step\n");
-            // graph_.apply_forward(solver::ns_riccati::compute_kkt_residual);
-            // settings.mu_method = solver::ipm_config::quality_function_based;
-        }
-        detail_timed_block_start("update_approx");
-        graph_.for_each_parallel(data::update_approx);
-        detail_timed_block_end("update_approx");
-        // if (i_iter + 1 == n_iter) {
-        //     graph_.apply_forward([](data *d) {
-        //         d->merge_jacobian_modification();
-        //     });
-        // }
-        detail_timed_block_start("update_res_stat");
-        kkt_info info = compute_kkt_info();
-        // basic globalization
-        // if (info.inf_dual_res > info_last.inf_dual_res && max_ls_steps > 0) {
-        //     settings.alpha_primal *= 0.9;
-        //     settings.alpha_dual *= 0.9;
-        //     max_ls_steps--;
-        //     fmt::print("  ls backtrack, alpha_p: {:.3e}, alpha_d: {:.3e}\n", settings.alpha_primal, settings.alpha_dual);
-        //     goto LS_START;
-        // } else {
-        //     info_last = info;
-        // }
-        detail_timed_block_end("update_res_stat");
-        timed_block_end("sqp_single_iter");
-        // print statistics
-        print_stats(i_iter, info, has_ineq);
-        if (info.inf_dual_res < settings.dual_tol && info.inf_prim_res < settings.prim_tol &&
-            info.inf_comp_res < settings.comp_tol) {
-            fmt::print("Converged!\n");
-            break;
-        }
-        // });
+    } catch (const std::exception &e) {
+        // if (verbose)
+        fmt::print("Exception caught during SQP iterations: {}\n", e.what());
     }
+    return info_last;
 }
 ns_sqp::kkt_info ns_sqp::compute_kkt_info() {
     kkt_info info;
     // scalar_t avg_dual_res = 0;
     for (auto n : graph_.flatten_nodes()) {
-        info.objective += n->dense().merit_;
+        info.objective += n->cost();
         info.inf_prim_res = std::max(info.inf_prim_res, n->inf_prim_res_);
         info.inf_dual_res = std::max(info.inf_dual_res, n->dense().jac_[__u].cwiseAbs().maxCoeff());
         // avg_dual_res += n->dense().jac_[__u].cwiseAbs().maxCoeff();

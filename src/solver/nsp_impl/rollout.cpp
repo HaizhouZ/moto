@@ -31,25 +31,33 @@ void generic_solver::finalize_dual_newton_step(ns_riccati_data *cur) {
         d.F_u.T_times<false>(d.d_lbd_f, d.d_lbd_s_c_pre_solve);
         // solve for hard constraint multiplers
         // fmt::print("Q_y: \n{}\n", d.Q_y);
+        // fmt::print("Q_x: \n{}\n", d.Q_x);
         // fmt::print("Q_zz: \n{}\n", nsp.Q_zz);
         // fmt::print("Q_zz eigenvalues: {}\n", nsp.Q_zz.eigenvalues().transpose());
         // fmt::print("\n");
         // fmt::print("Q_u: \n{}\n", d.Q_u);
         // fmt::print("Q_yy: \n{}\n", d.Q_yy);
-        // // fmt::print("Z_u: \n{}\n", nsp.Z_u);
-        // // fmt::print("Z_y: \n{}\n", nsp.Z_y);
+        // fmt::print("V_xx: \n{}\n", d.V_xx);
+        // fmt::print("V_yy: \n{}\n", d.V_yy);
+        // fmt::print("Z_u: \n{}\n", nsp.Z_u);
+        // fmt::print("Z_y: \n{}\n", nsp.Z_y);
         // fmt::print("Z_k: \n{}\n", nsp.z_K);
-        // // fmt::print("y_y_K: \n{}\n", nsp.y_y_K);
+        // fmt::print("u_y_k: \n{}\n", nsp.u_y_k.transpose());
+        // fmt::print("y_y_k: \n{}\n", nsp.y_y_k.transpose());
+        // fmt::print("y_y_K: \n{}\n", nsp.y_y_K);
         // fmt::print("y_0_p_k: \n{}\n", nsp.y_0_p_k.transpose());
         // fmt::print("y_0_p_K: \n{}\n", nsp.y_0_p_K);
         // fmt::print("d_lbd_f: \n{}\n", d.d_lbd_f.transpose());
         // fmt::print("d_lbd_s_c_pre_solve: \n{}\n", d.d_lbd_s_c_pre_solve.transpose());
         d.d_lbd_s_c.noalias() = nsp.lu_eq_.transpose().solve(d.d_lbd_s_c_pre_solve);
+        // fmt::print("pre solve hard constr multipliers: {}\n", d.d_lbd_s_c_pre_solve.transpose());
+
         size_t cur_idx = 0;
         if (d.ns > 0) {
             // append last term in dynamics multipler computation
             d.dual_step[__eq_x] = d.d_lbd_s_c.head(d.ns);
             cur_idx += d.ns;
+            // fmt::print("eq x dual: {}\n", d.dual_step[__eq_x].transpose());
             // d.d_lbd_f.noalias() -= nsp.s_y.transpose() * d.dual_step[__eq_x];
             d.s_y.T_times<false>(d.dual_step[__eq_x], d.d_lbd_f);
         }

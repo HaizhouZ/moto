@@ -20,6 +20,7 @@ void generic_solver::riccati_recursion(ns_riccati_data *cur, ns_riccati_data *pr
     d.V_yy.array() /= 2;
     /// @todo: temporary
     d.V_yy = d.V_yy + d.V_yy.transpose().eval();
+    // d.V_yy.diagonal().array() += 10.0;
     timed_block_end("V_yy symmetrize");
     // d.V_yy.diagonal().array() += 1e-6; // ensure positive definiteness
     if (d.V_yy.hasNaN() || !d.V_yy.allFinite()) {
@@ -42,12 +43,14 @@ void generic_solver::riccati_recursion(ns_riccati_data *cur, ns_riccati_data *pr
         d.F_u.inner_product(d.V_yy, nsp.Q_zz);
         d.F_u.T_times<false>(nsp.y_0_p_k, nsp.z_0_k);
         d.F_u.T_times<false>(nsp.y_0_p_K, nsp.z_0_K);
-    } else if (d.rank_status_ == rank_status::constrained) [[likely]] {
+    } else {
         nsp.y_0_p_K.noalias() -= d.V_yy * nsp.y_y_K;
-        nsp.Q_zz.noalias() += nsp.Z_y.transpose() * d.V_yy * nsp.Z_y; /// todo unconstrained
-        // compute bar{y}_0
-        nsp.z_0_k.noalias() += nsp.Z_y.transpose() * nsp.y_0_p_k;
-        nsp.z_0_K.noalias() += nsp.Z_y.transpose() * nsp.y_0_p_K;
+        if (d.rank_status_ == rank_status::constrained) [[likely]] {
+            nsp.Q_zz.noalias() += nsp.Z_y.transpose() * d.V_yy * nsp.Z_y; /// todo unconstrained
+            // compute bar{y}_0
+            nsp.z_0_k.noalias() += nsp.Z_y.transpose() * nsp.y_0_p_k;
+            nsp.z_0_K.noalias() += nsp.Z_y.transpose() * nsp.y_0_p_K;
+        }
     }
     timed_block_end("compute_U");
     // auto min_Q_uu = d.Q_uu.eigenvalues().real().minCoeff();

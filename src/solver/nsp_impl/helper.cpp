@@ -9,9 +9,10 @@ namespace solver {
 namespace ns_riccati {
 void kkt_diagnosis(ns_riccati_data *cur) {
     auto &d = *cur;
-    fmt::print("U is not positive definite\n");
-    fmt::print("Eigenvalues of U: \n{}\n", d.nsp_.U.eigenvalues().transpose());
-    fmt::print("Eigenvalues of Q_yy: \n{}\n", d.V_yy.eigenvalues().transpose());
+    // fmt::print("U is not positive definite\n");
+    // fmt::print("Eigenvalues of U: \n{}\n", d.nsp_.U.eigenvalues().transpose());
+    // fmt::print("Eigenvalues of Q_yy: \n{}\n", d.V_yy.eigenvalues().transpose());
+    fmt::print("Eigenvalues of Q_zz: \n{}\n", d.nsp_.Q_zz.eigenvalues().transpose());
     /// @todo some more maybe about constraints
 }
 

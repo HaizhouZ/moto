@@ -25,6 +25,16 @@ void generic_solver::compute_primal_sensitivity(ns_riccati_data *cur) {
         // nsp.llt_ns_.solveInPlace(nsp.z_k);
         nsp.llt_ns_.solve(nsp.z_0_k, nsp.z_k, -1.0);
         d.d_u.k.noalias() = nsp.Z_u * nsp.z_k - nsp.u_y_k;
+        if (d.d_u.k.hasNaN()) {
+            fmt::print("nsp.Z_u: \n{}\n", nsp.Z_u);
+            fmt::print("nsp.Z_y: \n{}\n", nsp.Z_y);
+            fmt::print("nsp.z_0_k: {}\n", nsp.z_0_k.transpose());
+            fmt::print("nsp.y_0_p_k: {}\n", nsp.y_0_p_k.transpose());
+            fmt::print("nsp.u_0_p_k: {}\n", nsp.u_0_p_k.transpose());
+            fmt::print("nsp.z_k: {}\n", nsp.z_k.transpose());
+            fmt::print("nsp.u_y_k: {}\n", nsp.u_y_k.transpose());
+            throw std::runtime_error("generic_solver compute_primal_sensitivity: d_u.k is NaN");
+        }
         d.d_u.K.noalias() = nsp.Z_u * nsp.z_K - nsp.u_y_K;
         d.d_y.k.noalias() = nsp.Z_y * nsp.z_k - nsp.y_y_k;
         d.d_y.K.noalias() = nsp.Z_y * nsp.z_K - nsp.y_y_K;

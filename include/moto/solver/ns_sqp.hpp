@@ -31,9 +31,12 @@ struct ns_sqp {
             d->update_approximation();
         }
     };
-    void update(size_t n_iter);
     void forward();
     struct kkt_info {
+        bool solved = false; // whether the problem is solved
+        size_t num_iter = 0; // number of iterations
+        size_t ls_steps = 0; ///< line search steps
+
         scalar_t objective = 0.;     // objective value
         scalar_t inf_prim_res = 0.;  // primal residual (constraint violation)
         scalar_t inf_dual_res = 0.;  // dual residual (stationary condition)
@@ -47,6 +50,7 @@ struct ns_sqp {
             inf_comp_res = c;
         }
     };
+    kkt_info update(size_t n_iter, bool verbose = true);
 
     ns_sqp(size_t n_jobs = MAX_THREADS);
     ns_sqp(const ns_sqp &) = delete;
