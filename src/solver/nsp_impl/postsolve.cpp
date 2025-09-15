@@ -63,7 +63,7 @@ void generic_solver::compute_primal_sensitivity_correction(ns_riccati_data *cur)
         d.d_u.k.noalias() = nsp.Z_u * nsp.z_k; // - nsp.u_y_k;
         d.d_y.k.noalias() = nsp.Z_y * nsp.z_k; // - nsp.y_y_k;
     }
-}
+} 
 } // namespace ns_riccati
 } // namespace solver
 } // namespace moto

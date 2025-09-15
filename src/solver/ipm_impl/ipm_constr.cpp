@@ -110,6 +110,7 @@ void ipm_constr::finalize_predictor_step(ipm::data_map_t &data, workspace_data *
     ipm_worker.prev_aff_comp += d.multiplier_.dot(d.slack_.cwiseProduct(d.active_));
     // finalize the affine step
     d.corrector_.array() = ls_cfg.alpha_dual * d.d_multiplier_.array() * ls_cfg.alpha_primal * d.d_slack_.array();
+    // d.corrector_.array() = d.d_multiplier_.array() * d.d_slack_.array();
     // d.d_multiplier_.array() *= ls_cfg.alpha_dual;
     // d.d_slack_.array() *= ls_cfg.alpha_primal;
     ipm_worker.post_aff_comp += (d.multiplier_ + ls_cfg.alpha_dual * d.d_multiplier_)
@@ -123,10 +124,10 @@ void ipm_constr::apply_affine_step(ipm::data_map_t &data, workspace_data *cfg) c
     auto &d = data.as<ipm_data>();
     auto &ls_cfg = cfg->as<solver::linesearch_config>();
     assert(!d.ipm_cfg->ipm_computing_affine_step() && "ipm affine step computation not ended");
-    d.d_slack_.array() *= ls_cfg.alpha_primal;
-    d.d_multiplier_.array() *= ls_cfg.alpha_dual;
-    d.slack_.array() += d.d_slack_.array();
-    d.multiplier_.array() += d.d_multiplier_.array();
+    // d.d_slack_.array() *= ls_cfg.alpha_primal;
+    // d.d_multiplier_.array() *= ls_cfg.alpha_dual;
+    d.slack_.array() += ls_cfg.alpha_primal * d.d_slack_.array();
+    d.multiplier_.array() += ls_cfg.alpha_dual * d.d_multiplier_.array();
     // d.slack_.array() += ls_cfg.alpha_primal * d.d_slack_.array();
     // d.multiplier_.array() += ls_cfg.alpha_dual * d.d_multiplier_.array();
     if (d.ipm_cfg->ipm_accept_corrector()) {
@@ -167,7 +168,6 @@ void ipm_constr::jacobian_impl(func_approx_data &data) const {
     // setup T^{-1} N
     d.reg_T_inv_.array() = d.slack_.array() + d.reg_.array() * d.multiplier_.array();
     d.diag_scaling.array() = d.active_.array() * d.multiplier_.array() / d.reg_T_inv_.array();
-
     d.scaled_res_.array() = d.diag_scaling.array() * d.g_.array();
     if (!d.ipm_cfg->ipm_enable_affine_step()) {
         // if we are not in the affine step mode, we need to update the scaled residual with mu

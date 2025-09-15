@@ -241,16 +241,14 @@ dt = 0.02
 display = True
 ur5 = load("ur5_limited", display=display, verbose=True)
 q_d = np.copy(ur5.q0)
-# q_d = np.array([0.0, -np.pi / 2, 0.0, -np.pi / 2, 0.0, 0.0])
 model = pin.buildModelFromUrdf(ur5.urdf)
-# model.gravity.linear = np.array([0.0, 0.0, 0])
 np.set_printoptions(precision=3, suppress=True, linewidth=200)
 model = pinCasadiModel(model, dt=dt, q_nom=q_d, dense=True, use_fwd_dyn=False)
 
 prob = moto.ocp.create()
 prob.add(model.dyn)
 # prob.add(model.make_tq_limit_constr())
-prob.add(model.make_joint_limit_constr())
+# prob.add(model.make_joint_limit_constr())
 prob.add(model.get_state_cost())
 prob.add(model.get_input_cost())
 
@@ -259,81 +257,72 @@ prob_term.add(model.make_ee_pos_constr())
 prob_term.add(model.get_state_cost(terminal=True))
 
 prob.print_summary()
-prob_term.print_summary()
 print("--" * 15)
-# moto.print_problem(prob_term)
+# # moto.print_problem(prob_term)
 
 N_horizon = 50
 
-sqp = moto.sqp(n_job=1)
-g = sqp.graph
-n0 = g.set_head(g.add(sqp.create_node(prob)))
-n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
-g.add_edge(n0, n1, N_horizon)
+import argparse, json
 
-n1.data.value[model.r_des] = np.array([0.4, 0.4, 0.4])
-n1.data.value[model.quat_des] = np.array([0.0, 0.0, 0.0, 1.0])
+parser = argparse.ArgumentParser()
+parser.add_argument("--output_file", type=str)
+parser.add_argument("--config", type=str)
 
-sqp.settings.mu = 1
-# sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
-# sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
-sqp.settings.mu_method = moto.sqp.adaptive_mu_t.quality_function_based
-sqp.settings.ipm_conditional_corrector = True
-sqp.settings.prim_tol = 1e-4
-sqp.settings.dual_tol = 1e-4
-sqp.settings.comp_tol = 1e-4
+args = parser.parse_args()
+stats = []
 
-# setup gait
-steps = 4
-nodes_per_step = 20
-total_gait_steps = steps * nodes_per_step
-stance_length = int(N_horizon - total_gait_steps) / 2
-step = 0
-node_idx = 0
-
+output_file = args.output_file
+with open(args.config, "r") as f:
+    config = json.load(f)
+from tqdm import tqdm
 import time
 
-start = time.perf_counter()
-sqp.update(10)
-print(f"sqp.update(100) took {time.perf_counter() - start:.3f} seconds")
+for (idx_cfg, cfg) in tqdm(enumerate(config), total=len(config)):
 
-q_res = []
-dt_res = []
-node_idx = 0
+    sqp = moto.sqp(n_job=10)
+    g = sqp.graph
+    n0 = g.set_head(g.add(sqp.create_node(prob)))
+    n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
+    g.add_edge(n0, n1, N_horizon)
 
+    n1.data.value[model.r_des] = np.array(cfg[0][:3])
+    n1.data.value[model.quat_des] = np.array(cfg[0][3:7])
 
-def get_sym(node: moto.sqp.data_type):
-    global node_idx
-    q_res.append(node.value[model.q])
-    if isinstance(dt, float):
-        dt_res.append(dt)
-    else:
-        dt_res.append(node.value[dt])
-    node_idx += 1
-    if node_idx >= N_horizon:
-        q_res.append(node.value[model.qn])
+    def set_initial_state(data: moto.sqp.data_type):
+        data.value[model.q] = np.array(cfg[1])
+        data.value[model.qn] = np.array(cfg[1])
+    
+    sqp.apply_forward(set_initial_state)
 
+    sqp.settings.mu = 1
+    # sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
+    sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
+    sqp.settings.ipm_conditional_corrector = True
+    sqp.settings.prim_tol = 1e-4
+    sqp.settings.dual_tol = 1e-4
+    sqp.settings.comp_tol = 1e-4
 
-sqp.apply_forward(get_sym)
+    start = time.perf_counter()
+    info = sqp.update(100, verbose=False)
+    end = time.perf_counter()
 
-if display:
+    tim = end - start
 
-    import time
-    data = model.fmodel.createData()
-    while True:
-        for i in range(len(q_res)):
-            # print((q_res[i] - model.q_max) > 0)
-            # print((model.q_min - q_res[i]) > 0)
-            start = time.perf_counter()
-            ur5.display(q_res[i])
-            if i is not N_horizon:
-                dt_ = dt_res[i]
-                while time.perf_counter() - start < dt_:
-                    pass
-        time.sleep(0.5)
+    stats.append(
+        {
+            "label": "",
+            "config": idx_cfg,
+            "solved": info.solved,
+            "num_iter": info.num_iter,
+            "time": tim,
+        }
+    )
 
-# def print_sym(node: moto.sqp.data_type):
-#     node.sym.print()
-#     node.print_residuals()
+    del sqp
 
-# sqp.apply_forward(print_sym, early_stop=20)
+import os
+import json
+
+with open(output_file, "w") as f:
+    json.dump(stats, f, indent=2)
+print(f"Stats dumped to {output_file}")

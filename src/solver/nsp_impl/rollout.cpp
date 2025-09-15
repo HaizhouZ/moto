@@ -57,7 +57,6 @@ void generic_solver::finalize_dual_newton_step(ns_riccati_data *cur) {
             // append last term in dynamics multipler computation
             d.dual_step[__eq_x] = d.d_lbd_s_c.head(d.ns);
             cur_idx += d.ns;
-            // fmt::print("eq x dual: {}\n", d.dual_step[__eq_x].transpose());
             // d.d_lbd_f.noalias() -= nsp.s_y.transpose() * d.dual_step[__eq_x];
             d.s_y.T_times<false>(d.dual_step[__eq_x], d.d_lbd_f);
         }
@@ -67,6 +66,22 @@ void generic_solver::finalize_dual_newton_step(ns_riccati_data *cur) {
     }
     // d.dual_step[__dyn].noalias() =  nsp.lu_dyn_.transpose().solve(d.d_lbd_f);
     cur->apply_jac_y_inverse_transpose(d.d_lbd_f, d.dual_step[__dyn]);
+    vector y_res = d.V_yy * d.prim_step[__y] +
+                   d.dense_->approx_[__dyn].jac_[__y].dense().transpose() * d.dual_step[__dyn] +
+                   //    d.dense_->approx_[__eq_x].jac_[__y].dense().transpose() * d.dual_step[__eq_x] +
+                   //    d.dense_->approx_[__ineq_x].jac_[__y].dense().transpose() * d.dual_step[__ineq_x] +
+                   d.Q_y.transpose();
+    // if (!d.Q_yx.dense().isZero() || !d.Q_yx_mod.dense().isZero()) {
+    //     throw std::runtime_error("Q_yx not zero in dual finalize");
+    // }
+    if (d.ns) {
+        y_res.noalias() += d.dense_->approx_[__eq_x].jac_[__y].dense().transpose() * d.dual_step[__eq_x];
+    }
+    if (!y_res.isZero(1e-10)) {
+        fmt::print("y residual: {}\n", y_res.transpose());
+        throw std::runtime_error("y residual not zero in dual finalize");
+    }
+    // fmt::print("y residual after dual step: {}\n", y_res.transpose());
 }
 void generic_solver::finalize_newton_step(ns_riccati_data *cur, bool finalize_dual) {
     auto &d = *cur;

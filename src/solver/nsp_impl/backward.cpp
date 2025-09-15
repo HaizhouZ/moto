@@ -134,13 +134,13 @@ void generic_solver::riccati_recursion_correction(ns_riccati_data *cur, ns_ricca
     if (d.rank_status_ == rank_status::unconstrained) {
         nsp.z_0_k = d.Q_u.transpose();
         d.F_u.right_times<false>(d.Q_y, nsp.z_0_k);
-        d.Q_x.noalias() = nsp.z_0_k.transpose() * nsp.z_K;
+        d.Q_x.noalias() += nsp.z_0_k.transpose() * nsp.z_K;
         d.F_x.right_times<false>(d.Q_y, d.Q_x);
     } else if (d.rank_status_ == rank_status::constrained) {
         nsp.z_0_k.noalias() = nsp.Z_u.transpose() * d.Q_u.transpose() + nsp.Z_y.transpose() * d.Q_y.transpose();
-        d.Q_x.noalias() = nsp.z_0_k.transpose() * nsp.z_K - (d.Q_u * nsp.u_y_K + d.Q_y * nsp.y_y_K);
+        d.Q_x.noalias() += nsp.z_0_k.transpose() * nsp.z_K - (d.Q_u * nsp.u_y_K + d.Q_y * nsp.y_y_K);
     } else {
-        d.Q_x.noalias() = -(d.Q_u * nsp.u_y_K + d.Q_y * nsp.y_y_K);
+        d.Q_x.noalias() += -(d.Q_u * nsp.u_y_K + d.Q_y * nsp.y_y_K);
     }
     // compute Q_x correcton
     // d.Q_x.noalias() = -d.Q_y * nsp.F_0_K + nsp.z_u_k.transpose() * d.d_u.K;
