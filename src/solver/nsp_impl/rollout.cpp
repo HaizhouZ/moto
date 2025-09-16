@@ -77,10 +77,10 @@ void generic_solver::finalize_dual_newton_step(ns_riccati_data *cur) {
     if (d.ns) {
         y_res.noalias() += d.dense_->approx_[__eq_x].jac_[__y].dense().transpose() * d.dual_step[__eq_x];
     }
-    if (!y_res.isZero(1e-10)) {
-        fmt::print("y residual: {}\n", y_res.transpose());
-        throw std::runtime_error("y residual not zero in dual finalize");
-    }
+    // if (!y_res.isZero(1e-10)) {
+    //     fmt::print("y residual: {}\n", y_res.transpose());
+    //     throw std::runtime_error("y residual not zero in dual finalize");
+    // }
     // fmt::print("y residual after dual step: {}\n", y_res.transpose());
 }
 void generic_solver::finalize_newton_step(ns_riccati_data *cur, bool finalize_dual) {

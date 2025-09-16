@@ -12,18 +12,25 @@ class ipm_constr final : public ineq_constr {
     using base = ineq_constr;
 
   public:
+    /**
+     * @brief Approximation data for the IPM constraints
+     * @note data.v_ will store g + t (t is the slack variable)
+     */
     struct approx_data : public base::approx_data {
         ipm_config *ipm_cfg = nullptr; ///< pointer to the IPM settings
-        vector g_;                     ///< ipm primal value
+        vector g_;                     ///< constraint value
         vector r_s_;                   ///< ipm residuals g + t
         vector slack_;                 ///< slack variables for the constraints
         vector diag_scaling;           ///< Nesterov-Todd scaling T^{-1} N
+        vector diag_scaling_last_;     ///< Nesterov-Todd scaling T^{-1} N
         vector scaled_res_;            ///< residuals after NT scaling (Nr_g - r_s) T^{-1} = T{-1} N r_g + T^{-1} mu
+        vector scaled_res_last_;       ///< residuals after NT scaling (Nr_g - r_s) T^{-1} = T{-1} N r_g + T^{-1} mu
         vector d_slack_;               ///< newton step for slack variables
         vector corrector_;             ///< newton step for multipliers
         vector reg_;
         vector active_;
         vector reg_T_inv_;
+        vector multipler_backup_;
         approx_data(base::approx_data &&rhs);
     };
     using base::base;

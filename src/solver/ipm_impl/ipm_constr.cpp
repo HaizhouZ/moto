@@ -8,6 +8,10 @@ ipm_constr::approx_data::approx_data(base::approx_data &&rhs)
     slack_.setConstant(1e-6);
     diag_scaling.resize(func_.dim());
     diag_scaling.setZero();
+    scaled_res_last_.resize(func_.dim());
+    scaled_res_last_.setZero();
+    diag_scaling_last_.resize(func_.dim());
+    diag_scaling_last_.setZero();
     scaled_res_.resize(func_.dim());
     scaled_res_.setZero();
     reg_.resize(func_.dim());
@@ -16,16 +20,20 @@ ipm_constr::approx_data::approx_data(base::approx_data &&rhs)
     reg_T_inv_.setZero();
     active_.resize(func_.dim());
     active_.setZero();
+    multipler_backup_.resize(func_.dim());
+    multipler_backup_.setZero();
 }
 void ipm_constr::initialize(ipm::data_map_t &data) const {
     // dont call value_impl here
     auto &d = data.as<ipm_data>();
     // dont do d.g_ = d.v_; cuz already set in value_impl
-    d.slack_ = (-d.g_).cwiseMax(1e-2); // clip
+    d.slack_ = (-d.g_).cwiseMax(1); // clip
     d.v_ = d.g_ + d.slack_;            // r_g = g_ + slack
     d.multiplier_.array() = d.ipm_cfg->mu / d.slack_.array();
     d.multiplier_ = d.multiplier_.cwiseMin(1); // clip
     d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array();
+    d.multipler_backup_ = d.multiplier_;
+
     if (d.multiplier_.hasNaN() || d.slack_.hasNaN()) {
         fmt::print("multiplier: {}\n", d.multiplier_);
         fmt::print("slack: {}\n", d.slack_);
@@ -48,12 +56,24 @@ void ipm_constr::finalize_newton_step(ipm::data_map_t &data) const {
     if (d.ipm_cfg->ipm_computing_affine_step())
         d.d_multiplier_.array() = -(d.r_s_.array() + d.multiplier_.array() * d.d_slack_.array()) / d.reg_T_inv_.array();
     //     d.d_multiplier_.array() = -d.multiplier_.array() - d.diag_scaling.array() * d.d_slack_.array();
-    else
+    else {
         d.d_multiplier_.array() = -(d.r_s_.array() - d.ipm_cfg->mu + d.multiplier_.array() * d.d_slack_.array()) / d.reg_T_inv_.array();
+
+        // vector dist = d.ipm_cfg->mu * d.slack_.cwiseInverse().cwiseAbs2().cwiseQuotient(d.diag_scaling);
+        // vector diff = d.ipm_cfg->mu * d.slack_.cwiseInverse().cwiseAbs2() - d.diag_scaling;
+        // // vector dist = d.multiplier_.cwiseProduct(d.slack_) / d.ipm_cfg->mu;
+        // if ((dist.array() - 1 > 1e-3).any()) {
+        //     fmt::print("ideal: {}\n", d.ipm_cfg->mu * d.slack_.cwiseInverse().cwiseAbs2().transpose());
+        //     fmt::print("actual: {}\n", d.diag_scaling.transpose());
+        //     fmt::print("dist to central path: ratio {}, diff: {}\n", dist.transpose(), diff.transpose());
+        // }
+    }
     // d.d_multiplier_.array() = -d.multiplier_.array() + d.ipm_cfg->mu / (d.slack_.array() + d.reg_) - d.diag_scaling.array() * d.d_slack_.array();
     d.d_slack_.array() += d.reg_.array() * d.d_multiplier_.array();
     d.d_slack_.array() *= d.active_.array();      // apply the active set
-    d.d_multiplier_.array() *= d.active_.array(); // apply the active
+    d.d_multiplier_.array() *= d.active_.array(); // apply the active set
+    d.multipler_backup_ = d.multiplier_;
+
     // if (!d.ipm_cfg->ipm_computing_affine_step()) {
     //     fmt::print("diag_scaling: {:.3}, {:.3}\n", d.diag_scaling.transpose(), (d.active_.array() * d.multiplier_.array() / d.slack_.array()).matrix().transpose());
     //     fmt::print("ipm_constr: d_slack: {}, d_multiplier: {}\n", d.d_slack_.transpose(), d.d_multiplier_.transpose());
@@ -126,14 +146,18 @@ void ipm_constr::apply_affine_step(ipm::data_map_t &data, workspace_data *cfg) c
     assert(!d.ipm_cfg->ipm_computing_affine_step() && "ipm affine step computation not ended");
     // d.d_slack_.array() *= ls_cfg.alpha_primal;
     // d.d_multiplier_.array() *= ls_cfg.alpha_dual;
+    // d.slack_.array() += d.d_slack_.array();
+    // d.multiplier_.array() += d.d_multiplier_.array();
     d.slack_.array() += ls_cfg.alpha_primal * d.d_slack_.array();
-    d.multiplier_.array() += ls_cfg.alpha_dual * d.d_multiplier_.array();
-    // d.slack_.array() += ls_cfg.alpha_primal * d.d_slack_.array();
-    // d.multiplier_.array() += ls_cfg.alpha_dual * d.d_multiplier_.array();
+    // d.multiplier_.array() += std::min(ls_cfg.alpha_primal, ls_cfg.alpha_dual) * d.d_multiplier_.array();
+    d.multiplier_.noalias() = d.multipler_backup_ + ls_cfg.alpha_dual * d.d_multiplier_;
     if (d.ipm_cfg->ipm_accept_corrector()) {
         d.slack_ = d.slack_.array().max(1e-20);
         d.multiplier_ = d.multiplier_.array().max(1e-20);
     }
+    // correction
+    // constexpr scalar_t scale = 1e10;
+    // d.multiplier_.array() = d.multiplier_.array().min(scale * d.ipm_cfg->mu / d.slack_.array()).max(d.ipm_cfg->mu / (scale * d.slack_.array()));
 }
 void ipm_constr::value_impl(func_approx_data &data) const {
     base::value_impl(data);
@@ -146,7 +170,7 @@ void ipm_constr::value_impl(func_approx_data &data) const {
         throw std::runtime_error("ipm_constr value_impl failed due to NaN");
     }
     // for (size_t i = 0; i < dim_; i++) {
-    //     if (d.slack_(i) < 1e-8 && d.g_(i) < 1e-8) {
+    //     if (d.slack_(i) < 1e-8 && d.v_(i) < 1e-8) {
     //         d.reg_(i) = 1e-8; // regularization for slack variables
     //         d.active_[i] = 0; // active constraint
     //         d.slack_(i) = 1e-8;
@@ -174,6 +198,21 @@ void ipm_constr::jacobian_impl(func_approx_data &data) const {
         d.scaled_res_.array() += d.ipm_cfg->mu / d.reg_T_inv_.array();
     }
     d.scaled_res_.array() *= d.active_.array(); // only active constraints contribute to the scaled residual
+    // row_vector diag_change  = (d.diag_scaling - d.diag_scaling_last_).transpose();
+    // row_vector scaled_res_change = (d.scaled_res_ - d.scaled_res_last_).transpose();
+    // bool header_output = true;
+    // if (diag_change.cwiseAbs().maxCoeff() > 1e-12) {
+    //     fmt::print("ipm_constr::jacobian_impl {}\n", name_);
+    //     header_output = false;
+    //     fmt::print("diag scaling change: {:.3}\n", diag_change);
+    // }
+    // if (scaled_res_change.cwiseAbs().maxCoeff() > 1e-12) {
+    //     if (header_output)
+    //         fmt::print("ipm_constr::jacobian_impl {}\n", name_);
+    //     fmt::print("scaled residual change: {:.3}\n", scaled_res_change);
+    // }
+    // d.scaled_res_last_ = d.scaled_res_;
+    // d.diag_scaling_last_ = d.diag_scaling;
     propagate_jacobian(d);
     propagate_hessian(d);
 }

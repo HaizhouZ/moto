@@ -228,7 +228,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                     }
                 }
                 // if (info.inf_prim_step < 1e-1 || info.inf_dual_step < 1e-1) {
-                size_t iter_refine_max = 1;
+                size_t iter_refine_max = 5;
                 size_t iter_refine = 0;
                 detail_timed_block_start("iterative_refinement");
                 while (iter_refine < iter_refine_max) {
@@ -258,9 +258,9 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                     if (verbose)
                         fmt::print("  iterative refinement {}, res_stat_u: {:.3e}, res_stat_y: {:.3e}\n",
                                    iter_refine, inf_res_stat_u, inf_res_stat_y);
-                    // if (inf_res_stat_u < 1e-10 && inf_res_stat_y < 1e-10) {
-                    //     break;
-                    // }
+                    if (inf_res_stat_u < 1e-10 && inf_res_stat_y < 1e-10) {
+                        break;
+                    }
                     detail_timed_block_start("iterative_refinement_step");
                     detail_timed_block_start("iterative_refinement_presolve");
                     graph_.for_each_parallel(iterative_refinement_start);
@@ -313,30 +313,40 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             kkt_info info = compute_kkt_info();
             detail_timed_block_end("update_res_stat");
             // basic globalization
-            if (!enforce_min_step && info.inf_dual_res > 0.99 * info_last.inf_dual_res &&
-                info.inf_prim_res > 0.99 * info_last.inf_prim_res) {
+            if (!enforce_min_step &&
+                info.inf_dual_res > 0.9999 * info_last.inf_dual_res &&
+                info.inf_prim_res > 0.9999 * info_last.inf_prim_res) {
                 if (max_ls_steps > ls_step) {
                     ls_step++;
                     settings.alpha_primal = -initial_alpha_primal / (max_ls_steps + 1e-8);
-                    settings.alpha_dual = -initial_alpha_dual / (max_ls_steps + 1e-8);
-                    // fmt::print("  ls backtrack, alpha_p: {:.3e}, alpha_d: {:.3e}\n", settings.alpha_primal, settings.alpha_dual);
+                    // settings.alpha_dual = -initial_alpha_dual / (max_ls_steps + 1e-8);
+                    if (verbose)
+                        fmt::print("  ls backtrack, alpha_p: {:.3e}, alpha_d: {:.3e}\n", settings.alpha_primal, settings.alpha_dual);
                     goto LS_START;
                 } else {
                     enforce_min_step = true;
-                    auto scale = std::min(0.001 / std::max(initial_alpha_primal, initial_alpha_dual), 1.0);
+                    // auto scale = std::min(0.01 / std::max(initial_alpha_primal, initial_alpha_dual), 1.0);
+                    auto scale = std::min(0.01 / initial_alpha_primal, 1.0);
+                    auto scale2 = std::min(0.01 / initial_alpha_dual, 1.0);
                     if (verbose) {
                         fmt::print("  ls failed, entering  feasibility restoration phase...\n");
                         fmt::print("  scale: {:.3e}\n", scale);
                         fmt::print("  initial_alpha_primal: {:.3e}, initial_alpha_dual: {:.3e}\n", initial_alpha_primal, initial_alpha_dual);
                     }
                     settings.alpha_primal = initial_alpha_primal * scale;
-                    settings.alpha_dual = initial_alpha_dual * scale;
+                    // settings.alpha_dual = initial_alpha_dual * scale2;
+                    settings.alpha_dual = 0.0;
+                    settings.mu = 1.0;
+                    graph_.for_each_parallel([this](data *d) {
+                        // roll back the step
+                        solver::ineq_soft::initialize(d);
+                    });
                     goto LS_START;
                 }
             } else {
                 if (!enforce_min_step) {
                     settings.alpha_primal = initial_alpha_primal - initial_alpha_primal / (max_ls_steps + 1e-8) * ls_step;
-                    settings.alpha_dual = initial_alpha_dual - initial_alpha_dual / (max_ls_steps + 1e-8) * ls_step;
+                    // settings.alpha_dual = initial_alpha_dual - initial_alpha_dual / (max_ls_steps + 1e-8) * ls_step;
                 }
             }
             timed_block_end("sqp_single_iter");
@@ -364,6 +374,8 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
 }
 ns_sqp::kkt_info ns_sqp::compute_kkt_info() {
     kkt_info info;
+    field_t max_field;
+    vector max_step;
     // scalar_t avg_dual_res = 0;
     for (auto n : graph_.flatten_nodes()) {
         info.objective += n->cost();
@@ -371,16 +383,23 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info() {
         info.inf_dual_res = std::max(info.inf_dual_res, n->dense().jac_[__u].cwiseAbs().maxCoeff());
         // avg_dual_res += n->dense().jac_[__u].cwiseAbs().maxCoeff();
         info.inf_comp_res = std::max(info.inf_comp_res, n->inf_comp_res_);
-        for (auto f : primal_fields)
-            info.inf_prim_step = std::max(info.inf_prim_step, n->prim_step[__x].cwiseAbs().maxCoeff());
+        for (auto f : primal_fields) {
+            info.inf_prim_step = std::max(info.inf_prim_step, n->prim_step[f].cwiseAbs().maxCoeff());
+            if (n->prim_step[f].cwiseAbs().maxCoeff() == info.inf_prim_step) {
+                max_field = f;
+                max_step = n->prim_step[f];
+            }
+        }
         for (auto f : constr_fields) {
-            if (n->dual_step[f].size() > 0)
+            if (n->dual_step[f].size() > 0) {
                 info.inf_dual_step = std::max(info.inf_dual_step, n->dual_step[f].cwiseAbs().maxCoeff());
+            }
         }
     }
     // avg_dual_res /= graph_.flatten_nodes().size();
     // // avg_dual_res = 0;
     size_t step = 0;
+    size_t idx = 0;
     graph_.apply_forward(
         [&](node_data *cur, node_data *next) {
             if (next != nullptr) [[likely]] {
@@ -390,16 +409,28 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info() {
                 tmp.noalias() = next->dense().jac_[__x] *
                                     utils::permutation_from_y_to_x(&cur->problem(), &next->problem()) +
                                 cur->dense().jac_[__y];
-                info.inf_dual_res = std::max(info.inf_dual_res, tmp.cwiseAbs().maxCoeff());
+                // info.inf_dual_res = std::max(info.inf_dual_res, tmp.cwiseAbs().maxCoeff());
+                if (info.inf_dual_res < tmp.cwiseAbs().maxCoeff()) {
+                    info.inf_dual_res = tmp.cwiseAbs().maxCoeff();
+                    idx = step;
+                }
+                if (step == 69) {
+                    // fmt::println("------ step {} dual_res: ", step);
+                    // fmt::println("y dual res {}", tmp);
+                    // fmt::println("y dual res {}", next->dense().jac_[__x] *
+                    // utils::permutation_from_y_to_x(&cur->problem(), &next->problem()) +
+                    // cur->dense().jac_[__y]);
+                }
                 // avg_dual_res += tmp.cwiseAbs().maxCoeff();
             } else { /// @todo: include initial jac[__x] inf norm if init is optimized
-                info.inf_dual_res = std::max(info.inf_dual_res, cur->dense().jac_[__y].cwiseAbs().maxCoeff());
+                // info.inf_dual_res = std::max(info.inf_dual_res, cur->dense().jac_[__y].cwiseAbs().maxCoeff());
                 // avg_dual_res += cur->dense().jac_[__y].cwiseAbs().maxCoeff();
+                if (info.inf_dual_res < cur->dense().jac_[__y].cwiseAbs().maxCoeff()) {
+                    info.inf_dual_res = cur->dense().jac_[__y].cwiseAbs().maxCoeff();
+                    idx = step;
+                }
             }
-            // fmt::println("------ step {} dual_res: ", step++);
-            // fmt::println("x dual res {}", cur->dense().jac_[__x]);
-            // fmt::println("y dual res {}", cur->dense().jac_[__y]);
-            // fmt::println("u dual res {}", cur->dense().jac_[__u]);
+            step++;
             // // fmt::println("prim {}: {}", step, cur->prim_step[__x
             // // fmt::println("prim {}: {}", step, cur->value(__u).transpose());
             // for (auto f : constr_fields) {
@@ -412,6 +443,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info() {
         },
         true);
     // avg_dual_res /= graph_.flatten_nodes().size();
+    // fmt::print("max dual res at step {}\n", idx);
     return info;
 }
 } // namespace moto

@@ -56,6 +56,8 @@ void generic_solver::compute_primal_sensitivity_correction(ns_riccati_data *cur)
         d.F_u.times<false>(d.d_u.k, d.d_y.k);
 
     } else if (d.rank_status_ == rank_status::fully_constrained) {
+        d.d_u.k.setZero();
+        d.d_y.k.setZero();
     } else {
         // nsp.z_k = -nsp.z_0_k;
         // nsp.llt_ns_.solveInPlace(nsp.z_k);

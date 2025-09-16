@@ -7,6 +7,16 @@ import pinocchio.casadi as cpin
 from example_robot_data import load
 
 
+import argparse, json
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--output_file", type=str)
+parser.add_argument("--config", type=str)
+parser.add_argument("--soft", action="store_true")
+
+args = parser.parse_args()
+
+
 class pinCasadiModel(cpin.Model):
     def __init__(
         self,
@@ -33,6 +43,11 @@ class pinCasadiModel(cpin.Model):
         self.foot_idx = [model.getFrameId(f) for f in foot_frames]
         self.foot_frames = foot_frames
         self.use_fwd_dyn = use_fwd_dyn
+
+        if self.is_floating_based:
+            self.nqb = 6
+        if self.nq - self.nv == 1:
+            self.nqb = 7
 
         if dense:
             # make_primal
@@ -94,8 +109,8 @@ class pinCasadiModel(cpin.Model):
                     name, semi_implicit=True
                 )
                 if q_nom is not None:
-                    self.quat.default_value = q_nom[3:7]
-                    self.quatn.default_value = q_nom[3:7]
+                    self.quat.default_value = q_nom[3 : self.nqb]
+                    self.quatn.default_value = q_nom[3 : self.nqb]
                 else:
                     self.quat.default_value = np.array([0.0, 0.0, 0.0, 1.0])
                     self.quatn.default_value = np.array([0.0, 0.0, 0.0, 1.0])
@@ -123,7 +138,7 @@ class pinCasadiModel(cpin.Model):
         self.active_foot = [moto.params(f"af_{f}", 1, default_val=1) for f in foot_frames]  # active foot indicator
         self.k_f = moto.params("k_f", default_val=100)  # kinematics constraint gain
         self.z_clip = moto.params("z_c", 1, default_val=0.05)  # minimum height for the foot to be considered in contact
-        self.kin_constr = [self.make_foot_kin_constr(i) for i in range(len(foot_frames))]
+        self.kin_constr = [self.make_foot_kin_constr(i, soft=args.soft) for i in range(len(foot_frames))]
 
         self.f_f = [moto.inputs(f"f_{f}", 3, default_val=np.array([0.0, 0.0, 0.5])) for f in foot_frames]
         self.F_f = [self.foot_jacs[i].T @ (self.active_foot[i] * self.f_f[i]) for i in range(len(foot_frames))]
@@ -179,21 +194,19 @@ class pinCasadiModel(cpin.Model):
                 to_add.append(moto.constr(self.name + "_fb_id", args, self.rnea_base))
             return to_add
 
-    def make_foot_kin_constr(self, i: int):
+    def make_foot_kin_constr(self, i: int, soft: bool = False):
 
         self.z_f = cs.vcat([self.data.oMf[f].translation[2] for f in self.foot_idx])
         self.v_f = cs.hcat(
             [cpin.getFrameVelocity(self, self.data, f, pin.LOCAL_WORLD_ALIGNED).linear for f in self.foot_idx]
         )
-
-        return moto.constr(
-            f"kin_{self.foot_frames[i]}",
+        res = cs.vcat([self.v_f[:2, i], self.k_f * self.z_f[i] + self.v_f[2, i]]) * self.active_foot[i]
+        c = moto.constr(
+            f"kin_{self.foot_frames[i]}" + ("_soft" if soft else ""),
             self.pos_args + self.vel_args + [self.k_f, *self.active_foot, self.z_clip],
-            # [self.q, k_f, *active_foot, z_clip],
-            # cs.vcat([self.v_f[:2, i], self.k_f * cs.tanh(self.z_f[i]) * self.z_clip + self.v_f[2, i]]) * self.active_foot[i],
-            cs.vcat([self.v_f[:2, i], self.k_f * self.z_f[i] + self.v_f[2, i]]) * self.active_foot[i],
-            # cs.vcat([v_f[:2, i], z_f[i]]) * active_foot[i],
+            cs.vcat([res, -res]) if soft else res,
         )
+        return c.as_ineq() if soft else c
 
     def make_joint_limit_constr(self):
         q_min = model.lowerPositionLimit[-self.nj :]
@@ -247,8 +260,8 @@ class pinCasadiModel(cpin.Model):
     def get_state_cost(self, terminal: bool = False):
         q_nom_res = self.q_stack - self.q_nom
         state_cost = (
-            100.0 * cs.sumsqr(q_nom_res[:7])
-            + 1 * cs.sumsqr(q_nom_res[7:])
+            100.0 * cs.sumsqr(q_nom_res[:self.nqb])
+            + 1 * cs.sumsqr(q_nom_res[self.nqb:])
             + 1.0 * cs.sumsqr(self.v_stack[:6])
             + 0.01 * cs.sumsqr(self.v_stack[6:])
         )
@@ -297,6 +310,8 @@ q_d = np.copy(go2.q0)
 root_joint = pin.JointModelComposite()
 root_joint.addJoint(pin.JointModelTranslation())
 root_joint.addJoint(pin.JointModelSpherical())
+# root_joint.addJoint(pin.JointModelSphericalZYX())
+# q_d = np.concatenate((q_d[:3], np.array([0.0, 0.0, 0.0]), q_d[7:]))
 model = pin.buildModelFromUrdf(go2.urdf, root_joint)
 np.set_printoptions(precision=3, suppress=True, linewidth=200)
 foot_frames = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
@@ -335,14 +350,6 @@ print("--" * 15)
 N_horizon = 100
 
 
-import argparse, json
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--output_file", type=str)
-parser.add_argument("--config", type=str)
-
-args = parser.parse_args()
-
 output_file = args.output_file
 with open(args.config, "r") as f:
     config = json.load(f)
@@ -353,7 +360,7 @@ from tqdm import tqdm
 import itertools
 import time
 
-for gait, (idx_cfg, cfg) in tqdm(itertools.product(gaits, enumerate(config)), total=len(gaits)*len(config)):
+for gait, (idx_cfg, cfg) in tqdm(itertools.product(gaits, enumerate(config)), total=len(gaits) * len(config)):
     assert isinstance(cfg, list) and len(cfg) == 2
     sqp = moto.sqp(n_job=10)
     g = sqp.graph
@@ -365,9 +372,9 @@ for gait, (idx_cfg, cfg) in tqdm(itertools.product(gaits, enumerate(config)), to
     # sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
     sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
     sqp.settings.ipm_conditional_corrector = True
-    sqp.settings.prim_tol = 1e-4
-    sqp.settings.dual_tol = 1e-4
-    sqp.settings.comp_tol = 1e-4
+    sqp.settings.prim_tol = 1e-3
+    sqp.settings.dual_tol = 1e-3
+    sqp.settings.comp_tol = 1e-3
 
     # setup gait
     steps = 4
@@ -421,6 +428,7 @@ for gait, (idx_cfg, cfg) in tqdm(itertools.product(gaits, enumerate(config)), to
         {
             "label": gait,
             "config": idx_cfg,
+            "config_detail": cfg,
             "solved": info.solved,
             "num_iter": info.num_iter,
             "time": tim,

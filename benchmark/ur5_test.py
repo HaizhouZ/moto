@@ -7,6 +7,15 @@ import pinocchio.casadi as cpin
 from example_robot_data import load
 
 
+import argparse, json
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--output_file", type=str)
+parser.add_argument("--config", type=str)
+parser.add_argument("--soft", action="store_true")
+
+args = parser.parse_args()
+
 class pinCasadiModel(cpin.Model):
     def __init__(
         self,
@@ -173,14 +182,16 @@ class pinCasadiModel(cpin.Model):
                 args = self.pos_args + self.vel_args + self.acc_args + self.active_foot + self.f_f + [self.dt]
                 to_add.append(moto.constr(self.name + "_fb_id", args, self.rnea_base))
             return to_add
-    def make_ee_pos_constr(self):
+    def make_ee_pos_constr(self, soft: bool = False):
         self.r_des = moto.params("r_des", 3, default_val=np.zeros(3))
         self.quat_des = moto.params("quat_des", 4, default_val=np.array([0.0, 0.0, 0.0, 1.0]))
         ee_des = cpin.XYZQUATToSE3(cs.vcat([self.r_des, self.quat_des]))
         ee_pos = self.data.oMf[self.ee_id]
-        return moto.constr("ee_constr", self.pos_args + [self.r_des, self.quat_des], cpin.log6(ee_pos.inverse() * ee_des).np)
-        # res = cpin.log6(ee_pos.inverse() * ee_des).np
-        # return moto.constr("ee_constr_ineq", self.pos_args + [self.r_des, self.quat_des], cs.vcat([res, -res])).as_ineq()
+        if not soft:
+            return moto.constr("ee_constr", self.pos_args + [self.r_des, self.quat_des], cpin.log6(ee_pos.inverse() * ee_des).np)
+        else:
+            res = cpin.log6(ee_pos.inverse() * ee_des).np
+            return moto.constr("ee_constr_ineq", self.pos_args + [self.r_des, self.quat_des], cs.vcat([res, -res])).as_ineq()
         # W_ee_cost = moto.params("W_ee_cost", 1, default_val=4.0)
         # ee_lifted = moto.inputs("ee_lifted", 6, default_val=np.zeros(6))
         # return moto.cost("ee_cost", self.pos_args + [self.r_des, self.quat_des, W_ee_cost], W_ee_cost * cs.sumsqr(cpin.log6(ee_pos.inverse() * ee_des).np)).as_terminal()
@@ -253,7 +264,7 @@ prob.add(model.get_state_cost())
 prob.add(model.get_input_cost())
 
 prob_term = prob.clone()
-prob_term.add(model.make_ee_pos_constr())
+prob_term.add(model.make_ee_pos_constr(soft=args.soft))
 prob_term.add(model.get_state_cost(terminal=True))
 
 prob.print_summary()
@@ -262,13 +273,6 @@ print("--" * 15)
 
 N_horizon = 50
 
-import argparse, json
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--output_file", type=str)
-parser.add_argument("--config", type=str)
-
-args = parser.parse_args()
 stats = []
 
 output_file = args.output_file

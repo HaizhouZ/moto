@@ -99,8 +99,8 @@ class pinCasadiModel(cpin.Model):
                     name, semi_implicit=True
                 )
                 if q_nom is not None:
-                    self.quat.default_value = q_nom[3:self.nqb]
-                    self.quatn.default_value = q_nom[3:self.nqb]
+                    self.quat.default_value = q_nom[3 : self.nqb]
+                    self.quatn.default_value = q_nom[3 : self.nqb]
                 else:
                     self.quat.default_value = np.array([0.0, 0.0, 0.0, 1.0])
                     self.quatn.default_value = np.array([0.0, 0.0, 0.0, 1.0])
@@ -172,9 +172,7 @@ class pinCasadiModel(cpin.Model):
             #         moto.constr(self.name + "_id", in_arg, self.rnea[:6])]
             if self.use_fwd_dyn:
                 v_next = self.v + self.aba
-                return moto.dense_dynamics(
-                    self.name + "_fd", args, cs.vcat(out + [self.vn - v_next])
-                )
+                return moto.dense_dynamics(self.name + "_fd", args, cs.vcat(out + [self.vn - v_next]))
             else:
                 tau = cs.vcat([cs.SX.zeros(6), self.tq]) if self.is_floating_based else self.tq
                 return moto.dense_dynamics(self.name + "_id", args, cs.vcat(out + [self.rnea - tau * self.dt]))
@@ -254,8 +252,8 @@ class pinCasadiModel(cpin.Model):
     def get_state_cost(self, terminal: bool = False):
         q_nom_res = self.q_stack - self.q_nom
         state_cost = (
-            100.0 * cs.sumsqr(q_nom_res[:self.nqb])
-            + 1 * cs.sumsqr(q_nom_res[self.nqb:])
+            100.0 * cs.sumsqr(q_nom_res[: self.nqb])
+            + 1 * cs.sumsqr(q_nom_res[self.nqb :])
             + 1.0 * cs.sumsqr(self.v_stack[:6])
             + 0.01 * cs.sumsqr(self.v_stack[6:])
         )
@@ -309,7 +307,7 @@ root_joint.addJoint(pin.JointModelSpherical())
 model = pin.buildModelFromUrdf(go2.urdf, root_joint)
 np.set_printoptions(precision=3, suppress=True, linewidth=200)
 foot_frames = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
-model = pinCasadiModel(model, dt=dt, q_nom=q_d, dense=True, foot_frames=foot_frames, use_fwd_dyn=False)
+model = pinCasadiModel(model, dt=dt, q_nom=q_d, dense=True, foot_frames=foot_frames, use_fwd_dyn=True)
 # fmodel = model.fmodel
 # config = pin.randomConfiguration(fmodel)
 # config[:3] = np.random.rand(3) * 0.1
@@ -343,7 +341,7 @@ print("--" * 15)
 
 N_horizon = 100
 
-sqp = moto.sqp(n_job=10)
+sqp = moto.sqp(n_job=1)
 g = sqp.graph
 n0 = g.set_head(g.add(sqp.create_node(prob)))
 n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
@@ -352,10 +350,11 @@ g.add_edge(n0, n1, N_horizon)
 sqp.settings.mu = 1
 # sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
 sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
+# sqp.settings.mu_method = moto.sqp.adaptive_mu_t.quality_function_based
 sqp.settings.ipm_conditional_corrector = True
-sqp.settings.prim_tol = 1e-4
-sqp.settings.dual_tol = 1e-4
-sqp.settings.comp_tol = 1e-4
+sqp.settings.prim_tol = 1e-3
+sqp.settings.dual_tol = 1e-3
+sqp.settings.comp_tol = 1e-3
 
 # setup gait
 steps = 4
@@ -365,17 +364,27 @@ stance_length = int(N_horizon - total_gait_steps) / 2
 step = 0
 node_idx = 0
 
-gait = 'trot'
-# gait = "bound_fwd"
+# gait = "trot"
+gait = "bound_fwd"
 gait_setting = {
     "trot": [1, 1, 0, 0],
     "bound_fwd": [0, 0, 0, 0],
 }
 
-cfg = [[-0.8787878787878788, -0.8181818181818181], [0.7777777777777779, 0.9595959595959598]]
+# cfg = [[-0.8787878787878788, -0.8181818181818181], [0.7777777777777779, 0.9595959595959598]]
+cfg = [[0.8989898989898992, -0.030303030303030276], [-0.6767676767676767, -0.8383838383838383]]
+# cfg = [[0.22979797979797983, 0.12373737373737376], [0.45959595959595967, 0.24747474747474751]]
+# cfg = [[0.22979797979797983, 0.12373737373737376], [0.45959595959595967, 0.24747474747474751]]
+# cfg = [[0.2095959595959596, -0.17424242424242425], [0.4191919191919192, -0.3484848484848485]]
+# cfg = [[0.07070707070707072, 0.9595959595959598], [-0.5757575757575757, -0.13131313131313127]]
 # cfg = [[-0.030303030303030276, 0.6363636363636365], [0.27272727272727293, -1.0]]
+# cfg = [[-0.11111111111111105, 0.6767676767676769], [0.09090909090909105, -0.9191919191919192]]
+# cfg = [[-0.8383838383838383, 0.2525252525252526], [-0.4949494949494949, 0.8989898989898992]]
+# cfg = [[-0.8787878787878788, -0.8181818181818181], [0.7777777777777779, 0.9595959595959598]]
+
 # cfg = [[0., 0.], [0., 0.]]
 # cfg = [[-0.2929292929292928, 0.3737373737373739], [0.5555555555555556, -0.07070707070707061]]
+
 
 def gait_setup(data: moto.sqp.data_type):
     global step, node_idx
@@ -412,7 +421,7 @@ sqp.apply_forward(gait_setup)
 import time
 
 start = time.perf_counter()
-sqp.update(100)
+sqp.update(100, verbose=True)
 print(f"sqp.update(100) took {time.perf_counter() - start:.3f} seconds")
 
 q_res = []

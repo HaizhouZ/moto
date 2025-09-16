@@ -178,9 +178,9 @@ class pinCasadiModel(cpin.Model):
         self.quat_des = moto.params("quat_des", 4, default_val=np.array([0.0, 0.0, 0.0, 1.0]))
         ee_des = cpin.XYZQUATToSE3(cs.vcat([self.r_des, self.quat_des]))
         ee_pos = self.data.oMf[self.ee_id]
-        return moto.constr("ee_constr", self.pos_args + [self.r_des, self.quat_des], cpin.log6(ee_pos.inverse() * ee_des).np)
-        # res = cpin.log6(ee_pos.inverse() * ee_des).np
-        # return moto.constr("ee_constr_ineq", self.pos_args + [self.r_des, self.quat_des], cs.vcat([res, -res])).as_ineq()
+        # return moto.constr("ee_constr", self.pos_args + [self.r_des, self.quat_des], cpin.log6(ee_pos.inverse() * ee_des).np)
+        res = cpin.log6(ee_pos.inverse() * ee_des).np
+        return moto.constr("ee_constr_ineq", self.pos_args + [self.r_des, self.quat_des], cs.vcat([res, -res])).as_ineq()
         # W_ee_cost = moto.params("W_ee_cost", 1, default_val=4.0)
         # ee_lifted = moto.inputs("ee_lifted", 6, default_val=np.zeros(6))
         # return moto.cost("ee_cost", self.pos_args + [self.r_des, self.quat_des, W_ee_cost], W_ee_cost * cs.sumsqr(cpin.log6(ee_pos.inverse() * ee_des).np)).as_terminal()
@@ -249,7 +249,7 @@ model = pinCasadiModel(model, dt=dt, q_nom=q_d, dense=True, use_fwd_dyn=False)
 
 prob = moto.ocp.create()
 prob.add(model.dyn)
-# prob.add(model.make_tq_limit_constr())
+prob.add(model.make_tq_limit_constr())
 prob.add(model.make_joint_limit_constr())
 prob.add(model.get_state_cost())
 prob.add(model.get_input_cost())
@@ -276,8 +276,8 @@ n1.data.value[model.quat_des] = np.array([0.0, 0.0, 0.0, 1.0])
 
 sqp.settings.mu = 1
 # sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
-# sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
-sqp.settings.mu_method = moto.sqp.adaptive_mu_t.quality_function_based
+sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
+# sqp.settings.mu_method = moto.sqp.adaptive_mu_t.quality_function_based
 sqp.settings.ipm_conditional_corrector = True
 sqp.settings.prim_tol = 1e-4
 sqp.settings.dual_tol = 1e-4
@@ -294,7 +294,7 @@ node_idx = 0
 import time
 
 start = time.perf_counter()
-sqp.update(10)
+sqp.update(100)
 print(f"sqp.update(100) took {time.perf_counter() - start:.3f} seconds")
 
 q_res = []

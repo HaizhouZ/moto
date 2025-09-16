@@ -15,7 +15,8 @@ void generic_solver::apply_affine_step(ns_riccati_data *cur, workspace_data *_cf
         // d.prim_step[f] *= cfg.alpha_primal;
     }
     for (auto f : hard_constr_fields) {
-        cur->dense_->dual_[f].noalias() += cfg.alpha_dual * d.dual_step[f];
+        // cur->dense_->dual_[f].noalias() += cfg.alpha_dual * d.dual_step[f];
+        cur->dense_->dual_[f].noalias() += cfg.alpha_primal * d.dual_step[f];
         // d.dual_step[f] *= cfg.alpha_dual;
     }
 }
