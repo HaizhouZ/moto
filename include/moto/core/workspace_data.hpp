@@ -39,7 +39,7 @@ class workspace_data_collection : public workspace_data, public Ts... {
 
   public:
 
-    struct worker : public workspace_data, public get_worker_type<Ts>... {
+    struct MOTO_ALIGN_NO_SHARING worker : public workspace_data, public get_worker_type<Ts>... {
     };
 
     using worker_type = worker; ///< type of the worker

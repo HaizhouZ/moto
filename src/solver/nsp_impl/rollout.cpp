@@ -7,7 +7,6 @@ namespace moto {
 namespace solver {
 namespace ns_riccati {
 void generic_solver::fwd_linear_rollout(ns_riccati_data *cur, ns_riccati_data *next) {
-    // get_data(nodes_.front()).prim_step[__x].setZero();
     auto &d = *cur;
     d.prim_step[__y].noalias() = d.d_y.k + d.d_y.K * d.prim_step[__x];
     if (next != nullptr) [[likely]] {
@@ -57,31 +56,13 @@ void generic_solver::finalize_dual_newton_step(ns_riccati_data *cur) {
             // append last term in dynamics multipler computation
             d.dual_step[__eq_x] = d.d_lbd_s_c.head(d.ns);
             cur_idx += d.ns;
-            // d.d_lbd_f.noalias() -= nsp.s_y.transpose() * d.dual_step[__eq_x];
             d.s_y.T_times<false>(d.dual_step[__eq_x], d.d_lbd_f);
         }
         if (d.nc > 0) {
             d.dual_step[__eq_xu] = d.d_lbd_s_c.tail(d.nc);
         }
     }
-    // d.dual_step[__dyn].noalias() =  nsp.lu_dyn_.transpose().solve(d.d_lbd_f);
     cur->apply_jac_y_inverse_transpose(d.d_lbd_f, d.dual_step[__dyn]);
-    vector y_res = d.V_yy * d.prim_step[__y] +
-                   d.dense_->approx_[__dyn].jac_[__y].dense().transpose() * d.dual_step[__dyn] +
-                   //    d.dense_->approx_[__eq_x].jac_[__y].dense().transpose() * d.dual_step[__eq_x] +
-                   //    d.dense_->approx_[__ineq_x].jac_[__y].dense().transpose() * d.dual_step[__ineq_x] +
-                   d.Q_y.transpose();
-    // if (!d.Q_yx.dense().isZero() || !d.Q_yx_mod.dense().isZero()) {
-    //     throw std::runtime_error("Q_yx not zero in dual finalize");
-    // }
-    if (d.ns) {
-        y_res.noalias() += d.dense_->approx_[__eq_x].jac_[__y].dense().transpose() * d.dual_step[__eq_x];
-    }
-    // if (!y_res.isZero(1e-10)) {
-    //     fmt::print("y residual: {}\n", y_res.transpose());
-    //     throw std::runtime_error("y residual not zero in dual finalize");
-    // }
-    // fmt::print("y residual after dual step: {}\n", y_res.transpose());
 }
 void generic_solver::finalize_newton_step(ns_riccati_data *cur, bool finalize_dual) {
     auto &d = *cur;
@@ -93,7 +74,6 @@ void generic_solver::finalize_newton_step(ns_riccati_data *cur, bool finalize_du
         finalize_dual_newton_step(cur);
 }
 void generic_solver::fwd_linear_rollout_correction(ns_riccati_data *cur, ns_riccati_data *next) {
-    // get_data(nodes_.front()).prim_step[__x].setZero();
     auto &d = *cur;
     d.prim_corr[__y].noalias() = d.d_y.k + d.d_y.K * d.prim_corr[__x];
     if (next != nullptr) [[likely]] {
@@ -114,28 +94,22 @@ void generic_solver::finalize_newton_step_correction(ns_riccati_data *cur) {
 void generic_solver::compute_kkt_residual(ns_riccati_data *cur) {
     auto &d = *cur;
     // compute KKT residual
-    // fmt::println("KKT residuals:");
     auto dense = d.dense_;
-    // fmt::println("Q_y: {}", d.Q_y);
     auto &f_u = dense->approx_[__dyn].jac_[__u];
-    // dense->res_stat_[__u].noalias() = d.Q_uu_bak * d.prim_step[__u] + d.Q_u_bak.transpose(); // d.d_lbd_f
     dense->res_stat_[__u].noalias() = d.Q_u_bak.transpose(); // d.d_lbd_f
     d.Q_uu.times(d.prim_step[__u], dense->res_stat_[__u]);
 
     f_u.right_T_times(d.dual_step[__dyn], dense->res_stat_[__u]);
-    // dense->res_stat_[__u].noalias() += d.dual_step[__dyn].transpose() * f_u.dense();
     if (d.nc) {
         d.dense_->approx_[__eq_xu].jac_[__u].right_T_times(d.dual_step[__eq_xu], dense->res_stat_[__u]);
     }
     if (d.dual_step[__ineq_xu].size() > 0) {
         d.dense_->approx_[__ineq_xu].jac_[__u].right_T_times(d.dual_step[__ineq_xu], dense->res_stat_[__u]);
     }
-    // dense->res_stat_[__y].noalias() = d.Q_yy_bak * d.prim_step[__y] + d.Q_y_bak.transpose();
     dense->res_stat_[__y].noalias() = d.Q_y_bak.transpose();
     d.Q_yy.times(d.prim_step[__y], dense->res_stat_[__y]);
     auto &f_y = dense->approx_[__dyn].jac_[__y];
     f_y.right_T_times(d.dual_step[__dyn], dense->res_stat_[__y]);
-    // dense->res_stat_[__y].noalias() += d.dual_step[__dyn].transpose() * f_y.dense();
     if (d.ns) {
         d.dense_->approx_[__eq_x].jac_[__y].right_T_times(d.dual_step[__eq_x], dense->res_stat_[__y]);
     }
@@ -143,11 +117,9 @@ void generic_solver::compute_kkt_residual(ns_riccati_data *cur) {
         d.dense_->approx_[__ineq_x].jac_[__y].right_T_times(d.dual_step[__ineq_x], dense->res_stat_[__y]);
     }
     auto &f_x = dense->approx_[__dyn].jac_[__x];
-    // dense->res_stat_[__x].noalias() = d.Q_xx_bak * d.prim_step[__x] + d.Q_x_bak.transpose();
     dense->res_stat_[__x].noalias() = d.Q_x_bak.transpose();
     d.Q_xx.times(d.prim_step[__x], dense->res_stat_[__x]);
     f_x.right_T_times(d.dual_step[__dyn], dense->res_stat_[__x]);
-    // dense->res_stat_[__x].noalias() += d.dual_step[__dyn].transpose() * f_x.dense();
     if (d.nc) {
         d.dense_->approx_[__eq_xu].jac_[__x].right_T_times(d.dual_step[__eq_xu], dense->res_stat_[__x]);
     }

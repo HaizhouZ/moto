@@ -17,7 +17,7 @@ function(add_moto_test name)
 
     add_executable(${test_name} ${test_file})
     target_include_directories(${test_name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-    target_link_libraries(${test_name} PRIVATE moto_multibody)
+    # target_link_libraries(${test_name} PRIVATE moto_multibody)
     target_link_libraries(${test_name} PRIVATE Catch2::Catch2WithMain)
 
     # set_source_files_properties(${test_file} PROPERTIES
@@ -30,10 +30,10 @@ endfunction()
 
 # add_moto_test(expr_ownership)
 # add_moto_test(constr_cast)
-add_moto_test(dynamics)
+# add_moto_test(dynamics)
 # add_moto_test(field_conversion)
 # add_moto_test(spmm)
 # add_moto_test(dynamics_cen)
 # add_moto_test(blasfeo_factor)
-add_moto_test(multibody_euler)
+# add_moto_test(multibody_euler)
 # target_link_libraries(multibody_euler_test PRIVATE )

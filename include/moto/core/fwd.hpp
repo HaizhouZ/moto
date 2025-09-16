@@ -68,7 +68,7 @@ inline constexpr auto range_n(size_t st, size_t n) {
     return std::views::iota(st, st + n);
 }
 
-#define MOTO_ALIGN_NO_SHARING //alignas(std::hardware_destructive_interference_size)
+#define MOTO_ALIGN_NO_SHARING alignas(std::hardware_destructive_interference_size)
 } // namespace moto
 
 #endif /*__FWD_*/

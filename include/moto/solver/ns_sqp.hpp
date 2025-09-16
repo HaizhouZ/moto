@@ -19,6 +19,19 @@ struct ns_sqp {
         double prim_tol = 1e-6; ///< primal feasibility tolerance
         double dual_tol = 1e-4; ///< dual feasibility tolerance
         double comp_tol = 1e-6; ///< complementarity feasibility tolerance
+
+        size_t max_ls_steps = 5;     ///< max line search steps
+        bool use_line_search = true; ///< whether to use line search
+
+        scalar_t mu0 = 1.0; ///< initial barrier parameter
+
+        bool use_mu_globalization = true;     ///< whether to use mu globalization
+        bool use_iterative_refinement = true; ///< whether to use iterative refinement
+
+      private:
+        friend class ns_sqp;
+        bool verbose = true;
+        size_t n_worker = MAX_THREADS; ///< number of worker threads
     } settings;
     // using node_base = ;
     using solver_type = solver::ns_riccati::generic_solver;
@@ -31,7 +44,7 @@ struct ns_sqp {
             d->update_approximation();
         }
     };
-    void forward();
+
     struct kkt_info {
         bool solved = false; // whether the problem is solved
         size_t num_iter = 0; // number of iterations
@@ -43,13 +56,7 @@ struct ns_sqp {
         scalar_t inf_comp_res = 0.;  // (inequality) complementarity residual
         scalar_t inf_prim_step = 0.; // infinity norm of the step
         scalar_t inf_dual_step = 0.; // infinity norm of the step
-        static constexpr scalar_t inf_val = 1e20;
-        void set_inf_res(scalar_t p = inf_val, scalar_t d = inf_val, scalar_t c = inf_val) {
-            inf_prim_res = p;
-            inf_dual_res = d;
-            inf_comp_res = c;
-        }
-    };
+    } kkt_last;
     kkt_info update(size_t n_iter, bool verbose = true);
 
     ns_sqp(size_t n_jobs = MAX_THREADS);
@@ -70,8 +77,51 @@ struct ns_sqp {
 
   private:
     std::unique_ptr<solver_type> riccati_solver_ = nullptr;
+
+    template <typename worker_type>
+    struct stacked_workers : public std::vector<worker_type> {
+        void reset(size_t n) {
+            this->clear();
+            this->reserve(n);
+            for (size_t i = 0; i < n; ++i) {
+                this->emplace_back();
+            }
+        }
+    };
+
+    stacked_workers<settings_t::worker> setting_per_thread;
+
+    /// print statistics header
+    void print_stat_header();
+    /// print statistics for the current iteration
     void print_stats(int i_iter, const kkt_info &info, bool has_ineq);
+    /// compute the kkt information of the current solution
     kkt_info compute_kkt_info();
+    void iterative_refinement();
+    void finalize_ls_bound_and_set_to_max();
+
+    struct ls_info {
+        bool recompute_approx = true;
+        bool stop = false;   ///< whether to stop the line search
+        bool enforce_min = false; ///< whether to enforce the minimum step size
+        size_t step_cnt = 0; ///< current line search step
+        scalar_t initial_alpha_primal;
+        scalar_t initial_alpha_dual;
+    };
+
+    void backtrack_linesearch(ls_info &ls, const kkt_info &kkt);
+    /// initialize the solver before the first iteration or after a reset, returns the initial kkt info
+    kkt_info initialize();
+    void correction_step();
+    void finalize_correction(data *d);
+    /**
+     * @brief Bind a callback to the current @ref riccati_solver_ instance
+     *
+     * @tparam Func function type
+     * @param f function to be bound, must have the first argument as a pointer to @ref solver_type
+     * @return decltype(auto) the bound function
+     * @note the function can have any number of additional arguments
+     */
     template <typename Func>
     decltype(auto) bind(Func f) {
         using arg_type = utils::func_traits<decltype(f)>::arg_types;

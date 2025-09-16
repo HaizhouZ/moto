@@ -24,7 +24,6 @@ void register_submodule_ns_sqp(nb::module_ &m) {
             return self.update(n_iter, verbose);
         }, nb::arg("n_iter") = 1, nb::arg("verbose") = true, "Update the SQP solver for a given number of iterations")
         .def_rw("settings", &ns_sqp::settings, "Get the settings of the SQP solver")
-        .def("forward", &ns_sqp::forward)
         .def("create_node", &ns_sqp::create_node, nb::arg("formulation"), nb::rv_policy::reference, "Create a new node in the SQP graph with the given OCP problem formulation");
 
     nb::class_<ns_sqp::settings_t>(sqp, "settings_type")

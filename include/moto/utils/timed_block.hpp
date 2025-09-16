@@ -91,6 +91,14 @@ class perf_timer {
 /// @brief start the timer, timed_block_labeled(label, {code}), increment the count by 1
 #define timed_block_labeled(label, ...) timed_block_labeled_n(label, 1, __VA_ARGS__)
 
+#ifdef SHOW_DETAIL_TIMING
+#define detail_timed_block_start(label) timed_block_start(label)
+#define detail_timed_block_end(label) timed_block_end(label)
+#else
+#define detail_timed_block_start(label)
+#define detail_timed_block_end(label)
+#endif
+
 } // namespace utils
 } // namespace moto
 

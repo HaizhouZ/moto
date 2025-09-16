@@ -11,8 +11,6 @@
 #endif
 
 namespace moto {
-template <class... T>
-constexpr bool always_false = false;
 /**
  * @brief Get the number of threads available for parallel execution
  *
@@ -53,8 +51,7 @@ inline void parallel_for(size_t start, size_t stop, callback_t &&callback, size_
             else if constexpr (std::invocable<callback_t, size_t, size_t>)
                 callback(j, i); // pass thread id as second argument
             else
-                static_assert(always_false<callback_t>,
-                              "callback must be invocable with size_t or [size_t, size_t]");
+                static_assert(false, "callback must be invocable with size_t or [size_t, size_t]");
         }
     }
     // } catch (...) {
@@ -84,8 +81,7 @@ inline void sequential_for(size_t start, size_t stop, callback_t &&callback, siz
             else if constexpr (std::invocable<callback_t, size_t, size_t>)
                 callback(j, i); // pass thread id as second argument
             else
-                static_assert(always_false<callback_t>,
-                              "callback must be invocable with size_t or [size_t, size_t]");
+                static_assert(false, "callback must be invocable with size_t or [size_t, size_t]");
         }
     }
     // } catch (...) {

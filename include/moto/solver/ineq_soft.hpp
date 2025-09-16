@@ -11,18 +11,23 @@ namespace solver {
 namespace ineq_soft {
 using soft_constr = soft_constr;
 using soft_constr_data_t = soft_constr::data_map_t;
+/// @brief Get a lambda that applies the callback to each soft constraint
+/// @tparam Callback
+/// @param callback
+/// @return
 template <typename Callback>
-void for_each(node_data *data, Callback &&callback) {
-    data->for_each<ineq_soft_constr_fields>(
-        [&](const soft_constr &sf, soft_constr_data_t &sd) {
+    requires std::is_invocable_v<Callback, const soft_constr &, soft_constr_data_t &>
+auto get_for_each(Callback &&callback) {
+    return [callback = std::forward<Callback>(callback)]<typename data_type>(data_type *data) -> void {
+        dynamic_cast<node_data *>(data)->for_each<ineq_soft_constr_fields>(
+            [&](const soft_constr &sf, soft_constr_data_t &sd) {
             callback(sf, sd);
         });
-}
-template <typename node_type, typename Callback>
-auto for_each(Callback &&callback) {
-    return [callback = std::forward<Callback>(callback)](node_type *data) {
-        for_each(data, callback);
     };
+}
+/// @brief for each soft constraint, call the callback with (const soft_constr&, soft_constr::data_map_t&)
+inline void for_each(auto *data, auto &&callback) {
+    get_for_each(std::forward<decltype(callback)>(callback))(data);
 }
 void initialize(node_data *data);
 /**
@@ -30,7 +35,7 @@ void initialize(node_data *data);
  * @details it will call finalize_newton_step on each soft constraint
  * @param data data base
  */
-void finalize_newton_step(node_data *data, bool update_res_stat);
+void finalize_newton_step(node_data *data);
 /**
  * @brief finalize the predictor step, should be called after the rollout (@ref finalize_newton_step)
  * @details it will call finalize_predictor_step on each soft constraint
@@ -47,11 +52,11 @@ void finalize_predictor_step(node_data *data, workspace_data *config);
 void apply_affine_step(node_data *data, workspace_data *config);
 /**
  * @brief calculate the line search bounds for the soft constraints
- * @details it will call update_linesearch_bounds on each soft constraint
+ * @details it will call update_ls_bounds on each soft constraint
  * @param data data base
  * @param config workspace data pointer to the config to be updated
  */
-void calculate_line_search_bounds(node_data *data, workspace_data *config);
+void update_ls_bounds(node_data *data, workspace_data *config);
 /**
  * @brief prepare for the first-order primal correction and call to apply_corrector_step on each soft constraint
  * @details it will set prim_corr[__x] to zero and swap merit jacobian and its modifcation (as a pre-correction cache),
@@ -59,14 +64,14 @@ void calculate_line_search_bounds(node_data *data, workspace_data *config);
  * it is @b assumed Q_y will be used in newton step finalization
  * @param data
  */
-void first_order_correction_start(data_base *data);
+void corrector_step_start(data_base *data);
 /**
  * @brief finalize the first-order primal correction and cache Q_y after correction
  * @details it will swap back merit jacobian and its modification and set Q_y_corr to the Q_y correction
  * it is @b assumed Q_y will be used in newton step finalization
  * @param data
  */
-void first_order_correction_end(data_base *data);
+void corrector_step_end(data_base *data);
 } // namespace ineq_soft
 } // namespace solver
 } // namespace moto

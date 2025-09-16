@@ -60,7 +60,7 @@ class ipm_constr final : public ineq_constr {
     /// @brief line search step for the IPM constraint
     void apply_affine_step(data_map_t &data, workspace_data *cfg) const override final;
     /// @brief update the line search configuration (if necessary)
-    void update_linesearch_bounds(data_map_t &data, workspace_data *cfg) const override final;
+    void update_ls_bounds(data_map_t &data, workspace_data *cfg) const override final;
     /**
      * @brief make the sparse approximation data for the IPM
      * @param primal sym data including states inputs etc

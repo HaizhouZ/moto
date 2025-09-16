@@ -28,7 +28,6 @@ struct MOTO_ALIGN_NO_SHARING data_base {
     matrix V_xx, V_yy;
     array_type<vector, primal_fields> prim_step; ///< primal (newton) step
     array_type<vector, primal_fields> prim_corr; ///< correction for the primal step
-    row_vector *Q_y_corr;                        ///< correction for the Q_y
 
     array_type<vector, constr_fields> dual_step; // dual rollout
 
@@ -40,6 +39,25 @@ struct MOTO_ALIGN_NO_SHARING data_base {
     data_base(data_base &&rhs) = default;
     void merge_jacobian_modification();
     void swap_jacobian_modification();
+    template <typename Callback>
+    void first_order_correction_start(Callback &&callback) {
+        prim_corr[__x].setZero();
+        // clear modification
+        for (auto field : primal_fields) {
+            dense_->jac_modification_[field].setZero();
+        }
+        if constexpr (std::is_invocable_v<Callback, data_base *>) {
+            callback(this);
+        } else if constexpr (std::is_invocable_v<Callback>) {
+            callback();
+        } else {
+            static_assert(false, "Callback must be invocable with data_base* or void");
+        }
+        swap_jacobian_modification(); // move modification to the jacobian for later solving
+    }
+    void first_order_correction_end() {
+        swap_jacobian_modification();
+    }
     virtual ~data_base() = default;
 };
 } // namespace solver

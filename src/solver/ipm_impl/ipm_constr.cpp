@@ -96,7 +96,7 @@ void ipm_constr::apply_corrector_step(data_map_t &data) const {
     }
     propagate_jacobian(d);
 }
-void ipm_constr::update_linesearch_bounds(ipm::data_map_t &data, workspace_data *cfg) const {
+void ipm_constr::update_ls_bounds(ipm::data_map_t &data, workspace_data *cfg) const {
     constexpr scalar_t tau = 0.995; // scaling factor
     scalar_t alpha_max = 1.0;       // default max step size
     auto &d = data.as<ipm_data>();
