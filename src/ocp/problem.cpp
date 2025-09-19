@@ -6,7 +6,7 @@ namespace moto {
 INIT_UID_(ocp);
 bool ocp::add_impl(expr &ex) {
     size_t _uid = ex.uid();
-    if (d_idx_.find(_uid) == d_idx_.end()) { // skip repeated
+    if (!uids_.contains(_uid)) { // skip repeated
         // add dependencies
         if (!ex.finalize()) {
             throw std::runtime_error(fmt::format("cannot finalize expr {} uid {}", ex.name(), ex.uid()));
@@ -26,32 +26,39 @@ bool ocp::add_impl(expr &ex) {
                     }
             add(dep);
         }
-        size_t &n0 = dim_[ex.field()];
-        size_t n1 = n0 + ex.dim();
-        d_idx_[_uid] = n0;
-        n0 = n1;
-        if (ex.field() < field::num_prim) {
-            size_t &t0 = tdim_[ex.field()];
-            size_t t1 = t0 + ex.tdim();
-            d_idx_tangent_[_uid] = t0;
-            t0 = t1;
-        }
-        pos_by_uid_.try_emplace(_uid, num(ex.field()));
+        uids_.insert(_uid);
         return true;
     }
     return false;
 }
-void ocp::maintain_order(expr &ex) {
-    auto update_pos = [this](const expr_list &exprs) {
+void ocp::finalize() {
+    static std::mutex finalize_mutex_;
+    std::lock_guard lock(finalize_mutex_);
+    if (!finalized_) {
+        this->set_dim_and_idx();
+        this->finalized_ = true;
+    }
+}
+void ocp::set_dim_and_idx() {
+    for (size_t i = 0; i < field::num; i++) {
+        dim_[i] = 0;
+        if (i < field::num_prim)
+            tdim_[i] = 0;
         size_t cur = 0, idx = 0, tcur = 0;
-        for (expr &ex : exprs) {
+        for (expr &ex : expr_[i]) {
+            dim_[i] += ex.dim();
             d_idx_[ex.uid()] = cur;
-            d_idx_tangent_[ex.uid()] = tcur;
             cur += ex.dim();
-            tcur += ex.tdim();
+            if (i < field::num_prim) {
+                tdim_[i] += ex.tdim();
+                d_idx_tangent_[ex.uid()] = tcur;
+                tcur += ex.tdim();
+            }
             pos_by_uid_[ex.uid()] = idx++;
         }
-    };
+    }
+}
+void ocp::maintain_order(expr &ex) {
     if (ex.field() == __dyn) {
         auto &dyns = exprs(__dyn);
         for (auto f : {__x, __y}) {
@@ -69,14 +76,15 @@ void ocp::maintain_order(expr &ex) {
             }
             std::erase_if(exprs, [&tmp](const shared_expr &e) { return !bool(e); });
             if (!exprs.empty()) {
+                throw std::runtime_error(fmt::format("order maintenance failure: field {} has exprs not in dynamics args", field::name(f)));
                 tmp.insert(tmp.end(), exprs.begin(), exprs.end());
             }
             exprs = std::move(tmp);
-            update_pos(exprs);
         }
     }
 }
-void ocp::print_summary() const {
+void ocp::print_summary() {
+    finalize();
     fmt::print("-------------------------------------------------\n");
     fmt::print("problem uid {}\n", uid_);
     for (size_t i = 0; i < field::num; i++) {
@@ -91,7 +99,7 @@ void ocp::print_summary() const {
     }
     fmt::print("-------------------------------------------------\n");
 }
-void ocp::wait_until_ready() const {
+void ocp::wait_until_ready() {
     for (const auto &f : expr_) {
         for (const auto &e : f) {
             if (!e->wait_until_ready()) {
@@ -100,6 +108,19 @@ void ocp::wait_until_ready() const {
             }
         }
     }
+    finalize();
+}
+ocp_ptr_t ocp::clone(const expr_inarg_list &deactivate_list) const {
+    auto prob = std::shared_ptr<ocp>(new ocp(*this));
+    prob->finalized_ = false; // need to reset finalized
+    // disable expressions
+    for (const expr &ex : deactivate_list) {
+        size_t f = ex.field();
+        auto &exprs = prob->expr_[f];
+        std::erase_if(exprs, [&ex](const shared_expr &e) { return e->uid() == ex.uid(); });
+        prob->uids_.erase(ex.uid());
+    }
+    return prob;
 }
 } // namespace moto
 

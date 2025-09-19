@@ -10,7 +10,8 @@ void register_submodule_node_data(nb::module_ &m) {
         .def("add", [](ocp &self, expr_inarg_list &&exprs) { self.add(exprs); }, nb::arg("exprs"), "Add a list of expressions to the OCP problem")
         .def("add", [](ocp &self, const py_shared_expr_wrapper &ex) { self.add((shared_expr &)ex); }, nb::arg("ex"), "Add an expression to the OCP problem")
         .def_static("create", &ocp::create, "Create a new OCP problem")
-        .def("clone", &ocp::clone, "Clone the OCP problem")
+        .def("clone", [](ocp &self, expr_inarg_list &&exprs) { return self.clone(exprs); }, "Clone the OCP problem")
+        .def("clone", [](ocp &self) { return self.clone(); }, "Clone the OCP problem")
         .def("dim", [](ocp &self, field_t field) { return self.dim(field); }, nb::arg("field"), "Get the dimension of the field")
         //    .def("exprs", [](ocp &self, field_t field) { return expr_inarg_list(self.exprs<shared_expr>(field)); }, nb::arg("field"), "Get the expressions in the field")
         .def("exprs", [](ocp &self, field_t field) -> auto & { return static_cast<const std::vector<shared_expr> &>(self.exprs(field)); }, nb::arg("field"), "Get the expressions in the field", nb::rv_policy::reference_internal)
@@ -32,7 +33,7 @@ void register_submodule_node_data(nb::module_ &m) {
             } else {
                 throw std::runtime_error("Invalid type for sym_data assignment");
             } });
-            
+
     nb::class_<merit_data>(m, "merit_data")
         .def(nb::init<ocp *>(), nb::arg("prob"), "Constructor for merit_data with OCP problem")
         .def_prop_ro("prob", [](merit_data &self) -> ocp & { return *self.prob_; })
@@ -45,7 +46,7 @@ void register_submodule_node_data(nb::module_ &m) {
         .def_rw("jac_modification", &merit_data::jac_modification_);
 
     nb::class_<shared_data>(m, "shared_data")
-        .def(nb::init<const ocp *, sym_data *>(), nb::arg("prob"), nb::arg("primal"),
+        .def(nb::init<ocp *, sym_data *>(), nb::arg("prob"), nb::arg("primal"),
              "Constructor for shared data with OCP problem and sym data")
         .def_prop_ro("prob", [](node_data &self) -> auto & { return self.problem(); })
         .def("__getitem__", [](shared_data &self, const generic_func &f) -> auto & { return self[f]; });
@@ -58,8 +59,8 @@ void register_submodule_node_data(nb::module_ &m) {
         .def_prop_ro("dense", [](node_data &self) -> auto & { return self.dense(); })
         .def_prop_ro("shared", [](node_data &self) -> auto & { return self.shared(); })
         .def("print_residuals", &node_data::print_residuals, "Print the residuals of the node data")
-        .def("data", nb::overload_cast<const func&>(&node_data::data, nb::const_), nb::arg("func"), "Get the sparse func data by pointer")
-        .def("data", nb::overload_cast<const custom_func&>(&node_data::data, nb::const_), nb::arg("func"), "Get the custom func data by pointer")
+        .def("data", nb::overload_cast<const func &>(&node_data::data, nb::const_), nb::arg("func"), "Get the sparse func data by pointer")
+        .def("data", nb::overload_cast<const custom_func &>(&node_data::data, nb::const_), nb::arg("func"), "Get the custom func data by pointer")
         .def("cost", &node_data::cost, "Get the cost value");
 
     nb::class_<func_arg_map>(m, "func_arg_map")

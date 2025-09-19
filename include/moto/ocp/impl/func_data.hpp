@@ -16,7 +16,7 @@ class shared_data {
     std::unordered_map<size_t, func_arg_map_ptr_t> data_; ///< [uid (of data owner), data]
 
   public:
-    shared_data(const ocp *prob, sym_data *primal);
+    shared_data(ocp *prob, sym_data *primal);
     shared_data(shared_data &&) = default;
 
     const ocp *prob_;

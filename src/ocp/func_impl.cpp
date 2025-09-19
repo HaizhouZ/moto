@@ -191,7 +191,20 @@ generic_func generic_func::share(bool copy_args, const var_inarg_list &skip_copy
 }
 
 void generic_func::finalize_impl() {
-    size_t arg_idx = 0;
+    if (gen_.task_ && !gen_.task_->sx_output.is_empty()) {
+        // prune unused args
+        auto &out = gen_.task_->sx_output;
+        std::vector<size_t> unused_args;
+        for (const sym &s : in_args_) {
+            if (!cs::SX::depends_on(out, s)) {
+                unused_args.push_back(s.uid());
+            }
+        }
+        for (size_t uid : unused_args) {
+            std::erase_if(in_args_, [uid](const sym &arg) { return arg.uid() == uid; });
+            std::erase_if(dep_, [uid](const sym &arg) { return arg.uid() == uid; });
+        }
+    }
     for (auto &s : in_args_) {
         auto f = s->field();
         if (in_field(f, primal_fields)) {

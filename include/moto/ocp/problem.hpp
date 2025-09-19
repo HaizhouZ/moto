@@ -5,21 +5,25 @@
 #include <map>
 #include <unordered_map>
 #include <vector>
+#include <set>
 
 #include <moto/core/expr.hpp>
 
 namespace moto {
+class ocp;
+def_ptr(ocp);
 /**
  * @brief problem formulation of an OCP stage
  *
  */
 class ocp {
   protected:
-    ocp() { uid_.set_inc(); }; // default constructor
+    ocp() { uid_.set_inc(); };     // default constructor
     ocp(const ocp &rhs) = default; // copy constructor
     bool add_impl(expr &);
     void maintain_order(expr &);
     static size_t max_uid; ///< uid used to index global expressions
+    bool finalized_ = false;
     utils::unique_id<ocp> uid_;
     /// collection of all expressions in the problem
     std::array<expr_list, field::num> expr_;
@@ -34,19 +38,24 @@ class ocp {
     /// tangent space dimension of each field
     std::array<size_t, field::num_prim> tdim_{};
 
+    std::set<size_t> uids_; ///< set of uids to check for duplicates when adding expr
+    
+    void set_dim_and_idx();
+    void finalize();
   public:
     CONST_PROPERTY(uid);                                                       ///< getter for uid
     const auto &exprs(size_t f) const { return expr_.at(f); }                  ///< getter for expr_
     const auto &pos(const expr &ex) const { return pos_by_uid_.at(ex.uid()); } ///< getter for pos_by_uid_
     size_t dim(size_t f) const { return dim_.at(f); }                          ///< getter for dim_
-    size_t num(size_t f) const { return expr_[f].size(); } ///< getter for num of exprs in field f
+    size_t num(size_t f) const { return expr_[f].size(); }                     ///< getter for num of exprs in field f
     size_t tdim(size_t f) const { return tdim_.at(f); }                        ///< getter for tdim_
-    void wait_until_ready() const;
+    void wait_until_ready();
 
-    void print_summary() const;
+    void print_summary();
 
     static auto create() { return std::shared_ptr<ocp>(new ocp()); }
-    auto clone() { return std::shared_ptr<ocp>(new ocp(*this)); }
+
+    ocp_ptr_t clone(const expr_inarg_list &deactivate_list = {}) const;
 
     scalar_t *get_data_ptr(scalar_t *data, const expr &ex) const {
         return data + get_expr_start(ex);
@@ -76,7 +85,7 @@ class ocp {
                  std::is_base_of_v<expr, std::remove_reference_t<T>>
     void add(T &&ex) {
         if (add_impl(ex)) {
-            expr& ex_ = expr_[static_cast<const expr &>(ex).field()].emplace_back(std::forward<T>(ex));
+            expr &ex_ = expr_[static_cast<const expr &>(ex).field()].emplace_back(std::forward<T>(ex));
             maintain_order(ex_);
         }
     }
@@ -107,7 +116,6 @@ class ocp {
     }
 };
 
-def_ptr(ocp);
 } // namespace moto
 
 extern template void moto::ocp::add<const moto::shared_expr &>(const moto::shared_expr &ex);

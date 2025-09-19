@@ -296,7 +296,7 @@ class pinCasadiModel(cpin.Model):
 # dt = moto.inputs("dt", 1, default_val=0.02)
 dt_nom = moto.params("dt_nom", 1, default_val=0.02)
 dt = 0.02
-display = True
+display = False
 go2 = load("go2", display=display, verbose=True)
 q_d = np.copy(go2.q0)
 root_joint = pin.JointModelComposite()
@@ -421,7 +421,7 @@ sqp.apply_forward(gait_setup)
 import time
 
 start = time.perf_counter()
-sqp.update(100, verbose=True)
+sqp.update(5, verbose=True)
 print(f"sqp.update(100) took {time.perf_counter() - start:.3f} seconds")
 
 q_res = []
