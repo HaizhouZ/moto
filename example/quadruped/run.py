@@ -296,7 +296,7 @@ class pinCasadiModel(cpin.Model):
 # dt = moto.inputs("dt", 1, default_val=0.02)
 dt_nom = moto.params("dt_nom", 1, default_val=0.02)
 dt = 0.02
-display = False
+display = True
 go2 = load("go2", display=display, verbose=True)
 q_d = np.copy(go2.q0)
 root_joint = pin.JointModelComposite()
@@ -341,11 +341,49 @@ print("--" * 15)
 
 N_horizon = 100
 
-sqp = moto.sqp(n_job=1)
+# setup gait
+steps = 4
+nodes_per_step = 20
+total_gait_steps = steps * nodes_per_step
+stance_length = int((N_horizon - total_gait_steps) / 2)
+print(f"stance_length: {stance_length}, nodes_per_step: {nodes_per_step}")
+
+# gait = "trot"
+gait = "bound_fwd"
+gait_setting = {
+    "trot": [1, 1, 0, 0],
+    "bound_fwd": [0, 0, 0, 0],
+}
+sqp = moto.sqp(n_job=10)
 g = sqp.graph
 n0 = g.set_head(g.add(sqp.create_node(prob)))
+
+def create_phase_problem(step):
+    constr_to_disable = []
+    for idx, f in enumerate([0, 3, 1, 2]):
+        if step % 2 == 0:
+            if not gait_setting[gait][idx]:
+                constr_to_disable += [model.kin_constr[f], model.fric[f]]
+        else:
+            if gait_setting[gait][idx]:
+                constr_to_disable += [model.kin_constr[f], model.fric[f]]
+    phase_prob = prob.clone(constr_to_disable)
+    return phase_prob
+
+for step in range(steps):
+    np = g.add(sqp.create_node(create_phase_problem(step + 1)))
+    if step == 0:
+        g.add_edge(n0, np, stance_length, include_ed=False)
+    else:
+        g.add_edge(n_prev, np, nodes_per_step, include_ed=False)
+    n_prev = np
+
+nstop = g.add(sqp.create_node(prob))
+g.add_edge(n_prev, nstop, nodes_per_step, include_ed=False)
 n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
-g.add_edge(n0, n1, N_horizon)
+g.add_edge(nstop, n1, stance_length)
+# g.add_edge(n0, n1, N_horizon)
+# print(g.flatten_nodes())
 
 sqp.settings.mu = 1
 # sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
@@ -356,20 +394,6 @@ sqp.settings.prim_tol = 1e-3
 sqp.settings.dual_tol = 1e-3
 sqp.settings.comp_tol = 1e-3
 
-# setup gait
-steps = 4
-nodes_per_step = 20
-total_gait_steps = steps * nodes_per_step
-stance_length = int(N_horizon - total_gait_steps) / 2
-step = 0
-node_idx = 0
-
-# gait = "trot"
-gait = "bound_fwd"
-gait_setting = {
-    "trot": [1, 1, 0, 0],
-    "bound_fwd": [0, 0, 0, 0],
-}
 
 # cfg = [[-0.8787878787878788, -0.8181818181818181], [0.7777777777777779, 0.9595959595959598]]
 cfg = [[0.8989898989898992, -0.030303030303030276], [-0.6767676767676767, -0.8383838383838383]]
@@ -385,6 +409,8 @@ cfg = [[0.8989898989898992, -0.030303030303030276], [-0.6767676767676767, -0.838
 # cfg = [[0., 0.], [0., 0.]]
 # cfg = [[-0.2929292929292928, 0.3737373737373739], [0.5555555555555556, -0.07070707070707061]]
 
+step = 0
+node_idx = 0
 
 def gait_setup(data: moto.sqp.data_type):
     global step, node_idx
@@ -402,7 +428,7 @@ def gait_setup(data: moto.sqp.data_type):
     else:
         for f in model.active_foot:
             data.value[f] = 1.0
-    # data.value[model.q_nom][1] = node_idx / N_horizon * 1.5
+    data.value[model.q_nom][1] = node_idx / N_horizon * 1.5
     if step >= 1 and step <= 2:
         data.value[model.q_nom][0] = node_idx / N_horizon * cfg[0][0]
         data.value[model.q_nom][1] = node_idx / N_horizon * cfg[0][1]
@@ -421,8 +447,9 @@ sqp.apply_forward(gait_setup)
 import time
 
 start = time.perf_counter()
-sqp.update(5, verbose=True)
+res = sqp.update(100, verbose=True)
 print(f"sqp.update(100) took {time.perf_counter() - start:.3f} seconds")
+print(f"per iteration took {(time.perf_counter() - start) / res.num_iter * 1000 :.3f} ms")
 
 q_res = []
 dt_res = []

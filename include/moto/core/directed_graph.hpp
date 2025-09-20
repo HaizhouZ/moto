@@ -32,18 +32,17 @@ struct edge_base {
      * it will clone the start node for each intermediate node
      * @param start start node
      * @param end end node
-     * @param length number of intermediate nodes
+     * @param length number of appending nodes between start and end (excluding start and end)
      */
     edge_base(node *start, node *end, int length)
         : st(start), ed(end) {
         nodes.reserve(length); // reserve space for start and end nodes
+        st->out_edges.emplace(this);
+        ed->in_edges.emplace(this);
         if (length > 0) {
-            st->out_edges.emplace(this);
-            if (--length > 0) {
-                ed->in_edges.emplace(this);
-                while (--length) {           // exclude ed node
-                    nodes.emplace_back(*st); // clone the start node
-                }
+            while (length) {             // exclude ed node
+                nodes.emplace_back(*st); // clone the start node
+                --length;
             }
         }
     }
@@ -113,11 +112,11 @@ class directed_graph {
      * @param len length of the edge including start and end nodes
      * @return const auto& const reference to the added edge
      */
-    void add_edge(node &st, node &ed, size_t len = 2) {
+    void add_edge(node &st, node &ed, size_t len = 2, bool include_st = true, bool include_ed = true) {
         if (len < 2) {
             throw std::invalid_argument("Edge length must be no less than 2");
         }
-        edges_.emplace_back(&st, &ed, len);
+        edges_.emplace_back(&st, &ed, len - (include_st + include_ed));
         // return edges_.back();
     }
 
@@ -189,7 +188,7 @@ class directed_graph {
         bool forward_mode = true;        ///< if true, apply unary function in forward direction
         void forward_update() {
             this->clear();
-            if (!cur_nodes_.empty()) {
+            while (!cur_nodes_.empty()) {
                 for (auto n : cur_nodes_) {
                     // edge forward
                     this->emplace_back(n->data_);
@@ -212,7 +211,7 @@ class directed_graph {
         }
         void backward_update() {
             this->clear();
-            if (!cur_nodes_.empty()) {
+            while (!cur_nodes_.empty()) {
                 for (auto n : cur_nodes_) {
                     // edge backward
                     this->emplace_back(n->data_);
@@ -283,7 +282,7 @@ class directed_graph {
         }
         void forward_update() {
             this->clear();
-            if (!cur_edges_.empty()) {
+            while (!cur_edges_.empty()) {
                 for (auto e : cur_edges_) {
                     // edge forward
                     data_type *cur = e->st->data_;
@@ -305,7 +304,7 @@ class directed_graph {
         }
         void backward_update() {
             this->clear();
-            if (!cur_edges_.empty()) {
+            while (!cur_edges_.empty()) {
                 for (size_t i = 0; i < cur_edges_.size(); ++i) {
                     for (auto e : cur_edges_) {
                         // edge forward
@@ -411,7 +410,7 @@ class directed_graph {
                         parallel_for(0, binary_view_.size(), job, n_jobs_);
                     else
                         sequential_for(0, binary_view_.size(), job, n_jobs_);
-                } else{
+                } else {
                     auto job = [&callback, this](size_t i) {
                         callback(binary_view_[i].first, binary_view_[i].second);
                     };
