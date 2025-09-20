@@ -5,6 +5,8 @@
 #include <moto/utils/codegen.hpp>
 #include <mutex>
 
+#include <moto/ocp/problem.hpp>
+
 namespace moto {
 static bool impl_func_gen_delegated_ = false; ///< true if the codegen is delegated to @ref moto::func_codegen
 
@@ -227,7 +229,41 @@ void generic_func::finalize_impl() {
     }
     finalized_ = true;
 }
-
+void generic_func::setup_ocpwise_info(const ocp *prob) const {
+    if (ocpwise_info_map_.contains(prob->uid()))
+        return;
+    ocpwise_info info;
+    for (auto &arg : in_args_) {
+        auto f = arg->field();
+        if (prob->contains(arg) && f < field::num_prim) {
+            info.arg_by_field_[f].emplace_back(arg);
+            info.arg_dim_[f] += arg->dim();
+            info.arg_tdim_[f] += arg->tdim();
+            info.arg_num_[f]++;
+        }
+    }
+    ocpwise_info_map_[prob->uid()] = info;
+}
+const var_list &generic_func::active_args(field_t f, const ocp *prob) const {
+    field_access_guard(f);
+    setup_ocpwise_info(prob);
+    return ocpwise_info_map_.at(prob->uid()).arg_by_field_[f];
+}
+size_t generic_func::active_dim(field_t f, const ocp *prob) const {
+    field_access_guard(f);
+    setup_ocpwise_info(prob);
+    return ocpwise_info_map_.at(prob->uid()).arg_dim_[f];
+}
+size_t generic_func::active_tdim(field_t f, const ocp *prob) const {
+    field_access_guard(f);
+    setup_ocpwise_info(prob);
+    return ocpwise_info_map_.at(prob->uid()).arg_tdim_[f];
+}
+size_t generic_func::active_num(field_t f, const ocp *prob) const {
+    field_access_guard(f);
+    setup_ocpwise_info(prob);
+    return ocpwise_info_map_.at(prob->uid()).arg_num_[f];
+}
 generic_func::gen_info::gen_info(const gen_info &rhs) {
     if (rhs.task_ && rhs.copy_task) {
         task_ = new task_type(*rhs.task_);
@@ -264,6 +300,8 @@ void func_codegen::make_codegen_task(generic_func *f) {
     t.force_recompile = false;
     t.keep_generated_src = true;
     // constexpr std::string_view debug_compile_flag = "-g -O0 -march=native";
+    // t.jac_compile_flag = debug_compile_flag;
+    // t.hess_compile_flag = debug_compile_flag;
     auto workers = utils::cs_codegen::generate_and_compile(std::move(t));
     decltype(workers) workers_set_ready_status;
     std::shared_ptr<std::atomic<size_t>> n_jobs = std::make_shared<std::atomic<size_t>>(workers.jobs.size());

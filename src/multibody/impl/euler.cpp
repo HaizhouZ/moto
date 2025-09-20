@@ -102,7 +102,7 @@ void euler::finalize_impl() {
     integrator_task.keep_generated_src = true;
     gen_.task_->extra_task.reset(new utils::cs_codegen::task(std::move(integrator_task)));
     // setup the sparse jacs
-    auto &jacs = gen_.task_->jac_outputs;
+    auto &jacs = gen_.task_->sx_outputs;
     jacs.emplace_back(pos_diff_jac_.dqn.dense);
     jacs.emplace_back(pos_diff_jac_.dq.dense);
     jacs.emplace_back(pos_diff_jac_.dvn.dense);

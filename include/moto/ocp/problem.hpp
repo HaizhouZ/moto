@@ -5,7 +5,7 @@
 #include <map>
 #include <unordered_map>
 #include <vector>
-#include <set>
+#include <unordered_set>
 
 #include <moto/core/expr.hpp>
 
@@ -38,8 +38,8 @@ class ocp {
     /// tangent space dimension of each field
     std::array<size_t, field::num_prim> tdim_{};
 
-    std::set<size_t> uids_; ///< set of uids to check for duplicates when adding expr
-    
+    std::unordered_set<size_t> uids_; ///< set of uids to check for duplicates when adding expr
+
     void set_dim_and_idx();
     void finalize();
   public:
@@ -49,6 +49,7 @@ class ocp {
     size_t dim(size_t f) const { return dim_.at(f); }                          ///< getter for dim_
     size_t num(size_t f) const { return expr_[f].size(); }                     ///< getter for num of exprs in field f
     size_t tdim(size_t f) const { return tdim_.at(f); }                        ///< getter for tdim_
+    bool contains(const expr &ex) const { return uids_.contains(ex.uid()); } ///< check if expr is in the problem
     void wait_until_ready();
 
     void print_summary();

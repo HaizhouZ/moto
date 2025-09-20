@@ -363,10 +363,10 @@ def create_phase_problem(step):
     for idx, f in enumerate([0, 3, 1, 2]):
         if step % 2 == 0:
             if not gait_setting[gait][idx]:
-                constr_to_disable += [model.kin_constr[f], model.fric[f]]
+                constr_to_disable += [model.kin_constr[f], model.fric[f], model.f_f[f]]
         else:
             if gait_setting[gait][idx]:
-                constr_to_disable += [model.kin_constr[f], model.fric[f]]
+                constr_to_disable += [model.kin_constr[f], model.fric[f], model.f_f[f]]
     phase_prob = prob.clone(constr_to_disable)
     return phase_prob
 

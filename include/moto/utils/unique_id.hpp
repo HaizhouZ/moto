@@ -30,8 +30,7 @@ class unique_id {
     } ///< copy assignment operator, assigns a new uid
     unique_id &operator=(unique_id &&rhs) noexcept = default; ///< move assignment operator
     bool is_valid() const { return uid_ < uid_max; }          ///< check if the uid is valid
-    operator size_t &() { return uid_; }                      ///< conversion to size_t operator
-    operator const size_t &() const { return uid_; }          ///< conversion to const size_t
+    operator size_t() const { return uid_; }                      ///< conversion to size_t operator
 };
 
 template <typename T>

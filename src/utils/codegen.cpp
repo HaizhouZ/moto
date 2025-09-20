@@ -71,23 +71,29 @@ std::string process_generated_code(
     // Lambda for generating replacement strings
     auto make_input_ref_access = [&](int arg_idx, int index) -> std::string {
         auto [i, j] = ij_pairs_all.at(arg_idx).at(index);
-        return "inputs[" + std::to_string(arg_idx) + "](" + std::to_string(i) + ")";
+        ///@todo
+        std::stringstream out;
+        out << fmt::format("inputs[{}].data() ? ", arg_idx);
+        out << fmt::format("inputs[{}]({}) : 0", arg_idx, i);
+        return out.str();
     };
     auto make_output_ref_access = [&](int arg_idx, int index) -> std::string {
         auto [i, j] = ij_pairs_all.at(n_in + arg_idx).at(index);
-        std::string out;
+        std::stringstream out;
         if (is_hessian) {
             size_t row = arg_idx / (n_in - with_aux);
             size_t col = arg_idx % (n_in - with_aux);
-            out = fmt::format("outputs[{}][{}]({},{})", row, col, i, j);
+            out << fmt::format("if (outputs[{}][{}].data()) ", row, col);
+            out << fmt::format("outputs[{}][{}]({},{})", row, col, i, j);
         } else if (vec_out) {
-            out = fmt::format("outputs({})", i);
+            out << fmt::format("outputs({})", i);
         } else {
-            out = fmt::format("outputs[{}]({},{})", arg_idx, i, j);
+            out << fmt::format("if (outputs[{}].data()) ", arg_idx);
+            out << fmt::format("outputs[{}]({},{})", arg_idx, i, j);
         }
         if (append)
-            out += "+";
-        return out;
+            out << "+";
+        return out.str();
     };
 
     std::stringstream processed_code;
@@ -161,71 +167,6 @@ std::string process_generated_code(
     return processed_code.str();
 }
 
-// Replicates Python's filter_func_near_zero
-cs::Function filter_func_near_zero(
-    const std::string &func_name,
-    const cs::SXVector &sx_inputs,
-    const std::vector<cs::SX> &expr,
-    bool with_aux,
-    double tol = 1e-8,
-    int ntrials = 100) {
-    cs::Function f(func_name, sx_inputs, expr);
-    std::vector<cs::DM> nz_cnt;
-    nz_cnt.reserve(expr.size());
-    for (const auto &e : expr) {
-        nz_cnt.push_back(cs::DM::zeros(e.rows(), e.columns()));
-    }
-
-    for (int n = 0; n < ntrials; ++n) {
-        std::vector<cs::DM> inputs_data;
-        size_t idx = sx_inputs.size();
-        for (const auto &s : sx_inputs) {
-            cs::DM dm(s.rows(), s.columns());
-            if (with_aux && idx == 1) {
-                dm = cs::DM::ones(s.rows(), s.columns()); // Auxiliary variable is ones
-            } else {
-
-                thread_local static std::random_device rd;
-                thread_local static std::mt19937 gen(rd());
-                thread_local static std::uniform_real_distribution<> dis(-1.0, 1.0);
-
-                for (int i = 0; i < s.rows(); ++i) {
-                    for (int j = 0; j < s.columns(); ++j) {
-                        dm(i, j) = dis(gen);
-                    }
-                }
-            }
-            inputs_data.push_back(dm);
-            idx--;
-        }
-        auto res = f(inputs_data);
-        for (size_t k = 0; k < res.size(); ++k) {
-            for (int i = 0; i < res[k].rows(); ++i) {
-                for (int j = 0; j < res[k].columns(); ++j) {
-                    if (std::abs(static_cast<double>(res[k](i, j))) > tol) {
-                        nz_cnt[k](i, j) += 1;
-                    }
-                }
-            }
-        }
-    }
-
-    cs::SXVector filtered_expr;
-    for (size_t k = 0; k < expr.size(); ++k) {
-        cs::SX filtered = cs::SX::zeros(cs::Sparsity(expr[k].rows(), expr[k].columns()));
-        for (int i = 0; i < nz_cnt[k].rows(); ++i) {
-            for (int j = 0; j < nz_cnt[k].columns(); ++j) {
-                if (nz_cnt[k](i, j).scalar() > 0.) {
-                    filtered(i, j) = expr[k](i, j);
-                }
-            }
-        }
-        filtered_expr.push_back(filtered);
-    }
-
-    return cs::Function(func_name, sx_inputs, filtered_expr);
-}
-
 // Core implementation logic for a single function
 void run(
     std::string func_name,
@@ -249,7 +190,6 @@ void run(
         // throw std::runtime_error("Auxiliary variable is not supported in this context.");
         sx_inputs_cs.emplace_back(aux);
     }
-    // cs::Function casadi_func = filter_func_near_zero(func_name, sx_inputs_cs, sx_outputs, !aux.is_empty());
     // auto filtered_outputs = casadi_func(sx_inputs_cs);
     cs::SXVector filtered_outputs;
     for (auto &e : sx_outputs)

@@ -72,8 +72,7 @@ matrix_ref sparse_mat::insert(size_t r_st, size_t c_st, size_t r, size_t c, spar
         } else {
             return empty;
         }
-    rows_ = std::max(rows_, r_st + r);
-    cols_ = std::max(cols_, c_st + c);
+    assert(r_st + r <= rows_ && c_st + c <= cols_ && "Inserted panel exceeds matrix size");
     switch (sp) {
     case sparsity::dense:
         dense_panels_.emplace_back(r_st, c_st, r, c);

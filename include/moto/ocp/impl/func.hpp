@@ -51,6 +51,15 @@ class generic_func : public expr {
     array_type<size_t, primal_fields> arg_tdim_{};
     array_type<size_t, primal_fields> arg_num_{};
 
+    struct ocpwise_info {
+        array_type<var_list, primal_fields> arg_by_field_{};
+        array_type<size_t, primal_fields> arg_dim_{};
+        array_type<size_t, primal_fields> arg_tdim_{};
+        array_type<size_t, primal_fields> arg_num_{};
+    };
+
+    mutable std::unordered_map<size_t, ocpwise_info> ocpwise_info_map_;
+
     std::vector<std::vector<sparsity>> hess_sp_;
 
     sparsity default_hess_sp_ = sparsity::dense;
@@ -85,6 +94,8 @@ class generic_func : public expr {
         assert(in_field(field, primal_fields) && "field out of range");
     } ///< guard access to field-based members
 
+    void setup_ocpwise_info(const ocp *prob) const;
+
   public:
     generic_func(const std::string &name, approx_order order, size_t dim, field_t field)
         : expr(name, dim, field), order_(order) {}
@@ -114,6 +125,11 @@ class generic_func : public expr {
         field_access_guard(field);
         return arg_by_field_[field];
     } ///< get the input arguments for a given field
+
+    const var_list &active_args(field_t f, const ocp *prob) const;
+    size_t active_dim(field_t f, const ocp *prob) const;
+    size_t active_tdim(field_t f, const ocp *prob) const;
+    size_t active_num(field_t f, const ocp *prob) const;
 
     auto arg_num(field_t field) const {
         field_access_guard(field);
