@@ -72,10 +72,6 @@ class generic_constr : public generic_func {
         bool is_soft = false;              ///< true if soft constraint, false if hard constraint, default is false
     } field_hint_;                         ///< type hint for the constraint
 
-    /// @brief evaluate the value of the constraint for merit
-    void value_impl(func_approx_data &data) const override;
-    /// @brief evaluate the jacobian of the constraint and the multiplier-jacobian product (vjp) for merit jacobian
-    void jacobian_impl(func_approx_data &data) const override;
     /// @brief finalize the constraint, will be called upon added to a problem
     /// @note will set the field (if unset) based on the field hint and substitute __x to __y for pure-state constraints
     void finalize_impl() override;

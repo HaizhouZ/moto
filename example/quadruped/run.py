@@ -249,7 +249,7 @@ class pinCasadiModel(cpin.Model):
             + 0.01 * cs.sumsqr(self.v_stack[6:])
         )
         state_args = self.pos_args + self.vel_args
-        cost = moto.cost("c", state_args + [self.q_nom], state_cost).set_diag_hess()
+        cost = moto.cost("c", state_args + [self.q_nom], state_cost)
         if terminal:
             return cost.as_terminal()
         return cost
@@ -262,7 +262,7 @@ class pinCasadiModel(cpin.Model):
             input_cost = 1e-6 * cs.sumsqr(self.tq) + 1e-3 * cs.sumsqr(cs.vcat(self.f_f))
         else:
             input_cost = 1e-4 * cs.sumsqr(self.a_stack) + 1e-3 * cs.sumsqr(cs.vcat(self.f_f))
-        return moto.cost("c_u", input_args, input_cost).set_diag_hess()
+        return moto.cost("c_u", input_args, input_cost)
 
     def make_foot_lift_cost(self, lifted: bool = True):
         self.z_f_lift_d = moto.params("z_f_lift_d", 1, default_val=0.07)  # desired foot lift height

@@ -98,35 +98,6 @@ void generic_constr::finalize_impl() {
     generic_func::finalize_impl();
     assert(field_ >= __dyn && field_ - __dyn < field::num_constr);
 }
-
-void generic_constr::value_impl(func_approx_data &data) const {
-    base::value_impl(data);
-    // compute contribution to merit function
-    // auto &d = static_cast<approx_data &>(data);
-    // scalar_t res = d.multiplier_.dot(d.v_);
-    // fmt::print("\t{}:\tv:{}\n", name(), d.v_.transpose());
-    // #pragma omp critical
-    // {
-    // fmt::print("pre {}\n", *d.merit_);
-    // *d.merit_ += res;
-    //     fmt::print("\t{}:\tv:{}\n", name(), d.multiplier_.dot(d.v_));
-    //     fmt::print("after {}\n", *d.merit_);
-    // }
-    // fmt::print("\t{}:\tm:{}\n", name(), d.multiplier_.transpose());
-} // namespace moto
-void generic_constr::jacobian_impl(func_approx_data &data) const {
-    // compute jacobian first
-    auto &d = static_cast<approx_data &>(data);
-    jacobian(data);
-    // update multiplier - jacobian product
-    // for (size_t i = 0; i < in_args_.size(); i++) {
-    //     if (d.merit_jac_[i].size() != 0) { // skip if no jacobian for this input
-    //         d.merit_jac_[i].noalias() += d.multiplier_.transpose() * d.jac_[i];
-    //         // fmt::print("{}\t{}:i\t{:.3}\n", i, name(), d.in_args_[i].transpose());
-    //         // fmt::print("{}\t{}:jac\n{:.3}\n", i, name(), d.jac_[i]);
-    //     }
-    // }
-}
 constr::constr(const std::string &name, approx_order order, size_t dim, field_t field)
     : func(generic_constr(name, order, dim, field)) {
 } ///< create a generic constraint with name and dimension
