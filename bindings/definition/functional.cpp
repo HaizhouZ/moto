@@ -162,6 +162,9 @@ void register_submodule_functional(nb::module_ &m) {
              [](const func &f) { return fmt::format("func(name='{}', uid={}, order={}, dim={}, field={})",
                                                     f->name(), f->uid(), f->order(), f->dim(), f->field()); })
         .def("clone", [](const func &self) { return self->clone(); })
+        .def("finalize", [](func &self, bool block_until_ready) { self->finalize(block_until_ready); }, nb::arg("block_until_ready") = true)
+        .def("enable_if", [](func &self, const expr_inarg_list &args) { self->enable_if(args); }, nb::arg("args"))
+        .def("disable_if", [](func &self, const expr_inarg_list &args) { self->disable_if(args); }, nb::arg("args"))
         .def(
             "add_argument",
             [](func &self, const py_var_wrapper &v) { self->add_argument((var &)v); },

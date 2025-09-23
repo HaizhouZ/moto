@@ -18,11 +18,11 @@ enum field_t : size_t {
     __eq_x_soft,  // "soft state equality constraints"
     __eq_xu_soft, // "soft state-input equality constraints"
     __cost,       // "running cost"
-    __usr_var,    // user defined variables
     // user functions
     __pre_comp, // will be called before the computation of the approximation update, also the data will be shared
     __post_comp, // will be called after the computation of the approximation update, also the data will be shared
     __usr_func, // user function, will not be called in the approximation update, only users can use them
+    __usr_var,    // user defined variables
     NUM,
     __undefined,
 };

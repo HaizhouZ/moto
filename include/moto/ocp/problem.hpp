@@ -26,7 +26,7 @@ class ocp {
     bool finalized_ = false;
     utils::unique_id<ocp> uid_;
     /// collection of all expressions in the problem
-    std::array<expr_list, field::num> expr_;
+    std::array<expr_list, field::num> expr_, disabled_expr_, pruned_expr_;
     /// data index of expr in serialized vector, by uid
     std::unordered_map<size_t, size_t> d_idx_;
     /// data index of tagent space var of expr in serialized vector, by uid
@@ -56,7 +56,17 @@ class ocp {
 
     static auto create() { return std::shared_ptr<ocp>(new ocp()); }
 
-    ocp_ptr_t clone(const expr_inarg_list &deactivate_list = {}) const;
+    /// @brief configuration for cloning an ocp
+    /// @note deactivate_list will treated as forced deactivation, thus automatic-pruning will not re-enable them
+    /// @note activate_list will re-enable pruned expressions if their args are active
+    ///      but will NOT re-enable previously user-disabled expressions
+    /// @warning if an expr shows up in both lists, it will be deactivated
+    struct clone_config {
+        expr_inarg_list deactivate_list; ///< list of expressions to be deactivated in the cloned problem
+        expr_inarg_list activate_list;   ///< list of expressions to be re-activated in the cloned problem
+    };
+
+    ocp_ptr_t clone(const clone_config &config = {}) const;
 
     scalar_t *get_data_ptr(scalar_t *data, const expr &ex) const {
         return data + get_expr_start(ex);

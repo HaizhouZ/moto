@@ -1,10 +1,10 @@
 #ifndef __EXPRESSION_BASE__
 #define __EXPRESSION_BASE__
 
+#include <condition_variable>
 #include <moto/core/fields.hpp>
 #include <moto/utils/optional_boolean.hpp>
 #include <moto/utils/unique_id.hpp>
-#include <condition_variable>
 
 namespace moto {
 class expr; // forward declaration of expr
@@ -39,6 +39,8 @@ class shared_expr {
     shared_expr(shared_expr &&rhs) noexcept = default;            ///< move constructor
     shared_expr &operator=(const shared_expr &rhs) = default;     ///< copy assignment operator
     shared_expr &operator=(shared_expr &&rhs) noexcept = default; ///< move assignment operator
+    shared_expr(const std::reference_wrapper<expr> &rhs)
+        : shared_expr((const expr &)rhs) {} ///< constructor from a reference wrapper
 
     template <typename U, typename U_ = std::remove_cvref_t<U>>
         requires std::is_base_of_v<expr, U_> || std::is_base_of_v<U_, expr>

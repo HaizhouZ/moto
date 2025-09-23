@@ -6,18 +6,26 @@
 
 void register_submodule_node_data(nb::module_ &m) {
     using namespace moto;
-    nb::class_<ocp>(m, "ocp")
-        .def("add", [](ocp &self, expr_inarg_list &&exprs) { self.add(exprs); }, nb::arg("exprs"), "Add a list of expressions to the OCP problem")
-        .def("add", [](ocp &self, const py_shared_expr_wrapper &ex) { self.add((shared_expr &)ex); }, nb::arg("ex"), "Add an expression to the OCP problem")
-        .def_static("create", &ocp::create, "Create a new OCP problem")
-        .def("clone", [](ocp &self, expr_inarg_list &&exprs) { return self.clone(exprs); }, "Clone the OCP problem")
-        .def("clone", [](ocp &self) { return self.clone(); }, "Clone the OCP problem")
-        .def("dim", [](ocp &self, field_t field) { return self.dim(field); }, nb::arg("field"), "Get the dimension of the field")
-        //    .def("exprs", [](ocp &self, field_t field) { return expr_inarg_list(self.exprs<shared_expr>(field)); }, nb::arg("field"), "Get the expressions in the field")
-        .def("exprs", [](ocp &self, field_t field) -> auto & { return static_cast<const std::vector<shared_expr> &>(self.exprs(field)); }, nb::arg("field"), "Get the expressions in the field", nb::rv_policy::reference_internal)
-        .def_prop_ro("uid", &ocp::uid, "Get the unique identifier of the OCP problem")
-        .def("wait_until_ready", &ocp::wait_until_ready, "Wait until all expressions in the OCP problem are ready")
-        .def("print_summary", &ocp::print_summary, "Print a summary of the OCP problem");
+    auto ocp_handle =
+        nb::class_<ocp>(m, "ocp")
+            .def("add", [](ocp &self, expr_inarg_list &&exprs) { self.add(exprs); }, nb::arg("exprs"), "Add a list of expressions to the OCP problem")
+            .def("add", [](ocp &self, const py_shared_expr_wrapper &ex) { self.add((shared_expr &)ex); }, nb::arg("ex"), "Add an expression to the OCP problem")
+            .def_static("create", &ocp::create, "Create a new OCP problem")
+            .def("clone", [](ocp &self, ocp::clone_config &&config) { return self.clone(config); }, "Clone the OCP problem")
+            .def("clone", [](ocp &self) { return self.clone(); }, "Clone the OCP problem")
+            .def("dim", [](ocp &self, field_t field) { return self.dim(field); }, nb::arg("field"), "Get the dimension of the field")
+            //    .def("exprs", [](ocp &self, field_t field) { return expr_inarg_list(self.exprs<shared_expr>(field)); }, nb::arg("field"), "Get the expressions in the field")
+            .def("exprs", [](ocp &self, field_t field) -> auto & { return static_cast<const std::vector<shared_expr> &>(self.exprs(field)); }, nb::arg("field"), "Get the expressions in the field", nb::rv_policy::reference_internal)
+            .def_prop_ro("uid", &ocp::uid, "Get the unique identifier of the OCP problem")
+            .def("wait_until_ready", &ocp::wait_until_ready, "Wait until all expressions in the OCP problem are ready")
+            .def("print_summary", &ocp::print_summary, "Print a summary of the OCP problem");
+
+    nb::class_<ocp::clone_config>(ocp_handle, "clone_config")
+        .def(nb::init<>(), "Default constructor for clone_config")
+        .def(nb::init<expr_inarg_list, expr_inarg_list>(),
+             nb::arg("deactivate_list") = nb::list{},
+             nb::arg("activate_list") = nb::list{},
+             "Constructor for clone_config with deactivate and activate lists");
 
     nb::class_<sym_data>(m, "sym_data")
         .def(nb::init<ocp *>(), nb::arg("prob"), "Constructor for sym_data with OCP problem")

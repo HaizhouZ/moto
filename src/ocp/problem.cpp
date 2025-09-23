@@ -27,6 +27,7 @@ bool ocp::add_impl(expr &ex) {
             add(dep);
         }
         uids_.insert(_uid);
+        finalized_ = false;
         return true;
     }
     return false;
@@ -110,15 +111,116 @@ void ocp::wait_until_ready() {
     }
     finalize();
 }
-ocp_ptr_t ocp::clone(const expr_inarg_list &deactivate_list) const {
+ocp_ptr_t ocp::clone(const clone_config &config) const {
     auto prob = std::shared_ptr<ocp>(new ocp(*this));
     prob->finalized_ = false; // need to reset finalized
-    // disable expressions
-    for (const expr &ex : deactivate_list) {
+    auto delete_expr = [&](const expr &ex, bool prune = false) {
         size_t f = ex.field();
         auto &exprs = prob->expr_[f];
+        auto &target_list = prune ? prob->pruned_expr_[f] : prob->disabled_expr_[f];
+        target_list.emplace_back(ex);
         std::erase_if(exprs, [&ex](const shared_expr &e) { return e->uid() == ex.uid(); });
         prob->uids_.erase(ex.uid());
+    };
+    /// re-enable previously pruned expressions
+    auto re_enable_expr = [&](const expr &ex, bool from_pruned = false) {
+        size_t f = ex.field();
+        auto &exprs = prob->expr_[f];
+        auto &target_list = from_pruned ? prob->pruned_expr_[f] : prob->disabled_expr_[f];
+        auto it = std::find_if(target_list.begin(), target_list.end(),
+                               [&ex](const shared_expr &e) { return e->uid() == ex.uid(); });
+        if (it != target_list.end()) {
+            exprs.emplace_back(*it);
+            prob->uids_.insert(ex.uid());
+            target_list.erase(it);
+            return true;
+        }
+        return false;
+    };
+    for (expr &ex : config.activate_list) {
+        /// by activating an expression, previously pruned expressions may be re-enabled
+        /// but previously user-disabled expressions should not be re-enabled
+        if (re_enable_expr(ex, true) || re_enable_expr(ex, false)) {
+            prob->add(ex); // does not previous exist, add as new expr
+        }
+    }
+    // disable expressions
+    for (const expr &ex : config.deactivate_list) {
+        delete_expr(ex);
+    }
+    constexpr auto all_func_fields = concat_fields(func_fields, custom_func_fields);
+    // do lazy pruning and re-enabling to avoid order issues
+    array_type<std::vector<std::reference_wrapper<const expr>>, all_func_fields> to_delete, to_re_enable;
+    for (auto f : all_func_fields) {
+        if (prob->pruned_expr_[f].empty())
+            continue;
+        to_re_enable[f].reserve(prob->pruned_expr_[f].size());
+        for (const generic_func &e : prob->pruned_expr_[f]) {
+            bool has_active_primal_arg = false;
+            for (auto p : primal_fields) {
+                if (e.active_num(p, prob.get()) != 0)
+                    has_active_primal_arg = true;
+            }
+            // check if all enable_if_deps are active and all disable_if_deps are inactive
+            bool can_re_enable = has_active_primal_arg;
+            if (can_re_enable) {
+                for (const expr &s : e.enable_if_deps()) {
+                    if (!prob->contains(s)) {
+                        can_re_enable = false;
+                        break;
+                    }
+                }
+                for (const expr &s : e.disable_if_deps()) {
+                    if (prob->contains(s)) {
+                        can_re_enable = false;
+                        break;
+                    }
+                }
+            }
+            if (can_re_enable) {
+                to_re_enable[f].emplace_back(e);
+            }
+        }
+    }
+    // prune
+    for (auto f : all_func_fields) {
+        if (prob->expr_[f].empty())
+            continue;
+        to_delete[f].reserve(prob->expr_[f].size());
+        for (const generic_func &e : prob->expr_[f]) {
+            bool has_active_primal_arg = false;
+            for (auto p : primal_fields) {
+                if (e.active_num(p, prob.get()) != 0)
+                    has_active_primal_arg = true;
+            }
+            if (!has_active_primal_arg) {
+                // prune funcs with no active primal args
+                to_delete[f].emplace_back(e);
+            } else {
+                // prune disabled funcs
+                for (const expr &s : e.enable_if_deps()) {
+                    if (!prob->contains(s)) {
+                        to_delete[f].emplace_back(e);
+                        break;
+                    }
+                }
+                for (const expr &s : e.disable_if_deps()) {
+                    if (prob->contains(s)) {
+                        to_delete[f].emplace_back(e);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    // actually delete and re-enable
+    for (auto f : all_func_fields) {
+        for (const expr &e : to_delete[f]) {
+            delete_expr(e, true);
+        }
+        for (const expr &e : to_re_enable[f]) {
+            re_enable_expr(e, true);
+        }
     }
     return prob;
 }

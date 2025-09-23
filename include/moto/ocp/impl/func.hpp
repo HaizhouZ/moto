@@ -46,6 +46,8 @@ class generic_func : public expr {
     bool zero_dim_ = false; // whether the function has zero dimension
     approx_order order_ = approx_order::first;
     var_list in_args_;
+    expr_list enable_if_deps_; // if all these args are inactive, the function is disabled
+    expr_list disable_if_deps_; // if any of these args are active, the function is disabled
     array_type<var_list, primal_fields> arg_by_field_{};
     array_type<size_t, primal_fields> arg_dim_{};
     array_type<size_t, primal_fields> arg_tdim_{};
@@ -147,10 +149,12 @@ class generic_func : public expr {
     } ///< get the tangent dimension of the argument for a given field
 
     bool has_arg(const sym &s) const {
+        field_access_guard(s.field());
         return sym_uid_idx_.contains(s.uid());
     } ///< check if the function has argument for a given field
 
     size_t arg_idx(const sym &s) const {
+        field_access_guard(s.field());
         return sym_uid_idx_.at(s.uid());
     } ///< get the index of the argument for a given symbol
 
@@ -167,6 +171,11 @@ class generic_func : public expr {
             add_argument(in);
         }
     }
+
+    const auto &enable_if_deps() const { return enable_if_deps_; }
+    const auto &disable_if_deps() const { return disable_if_deps_; }
+    void enable_if(const expr_inarg_list &args); ///< disable if any of these args is inactive
+    void disable_if(const expr_inarg_list &args); ///< disable if any of these args is active
 
     virtual func_approx_data_ptr_t create_approx_data(sym_data &primal,
                                                       merit_data &raw,

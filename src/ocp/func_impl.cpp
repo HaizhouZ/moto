@@ -264,6 +264,12 @@ size_t generic_func::active_num(field_t f, const ocp *prob) const {
     setup_ocpwise_info(prob);
     return ocpwise_info_map_.at(prob->uid()).arg_num_[f];
 }
+void generic_func::enable_if(const expr_inarg_list &args) {
+    enable_if_deps_.insert(enable_if_deps_.end(), args.begin(), args.end());
+}
+void generic_func::disable_if(const expr_inarg_list &args) {
+    disable_if_deps_.insert(disable_if_deps_.end(), args.begin(), args.end());
+}
 generic_func::gen_info::gen_info(const gen_info &rhs) {
     if (rhs.task_ && rhs.copy_task) {
         task_ = new task_type(*rhs.task_);

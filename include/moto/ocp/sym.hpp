@@ -17,6 +17,7 @@ struct var : public shared_expr, public cs::SX {
         requires std::is_same_v<sym, T_>
     var(T &&rhs) noexcept : base(std::forward<T>(rhs)), cs::SX((sym &)*this) {}
     var(var &&rhs) noexcept : base(std::move(rhs)), cs::SX(static_cast<cs::SX &&>(rhs)) {}
+    var(const std::reference_wrapper<sym> &rhs) noexcept : var((const sym &)rhs) {}
     var(const var &) = default;                ///< copy constructor
     var &operator=(const var &) = default;     ///< copy assignment operator
     var &operator=(var &&) noexcept = default; ///< move assignment operator
