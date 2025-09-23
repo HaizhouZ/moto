@@ -46,7 +46,7 @@ class generic_func : public expr {
     bool zero_dim_ = false; // whether the function has zero dimension
     approx_order order_ = approx_order::first;
     var_list in_args_;
-    expr_list enable_if_deps_; // if all these args are inactive, the function is disabled
+    expr_list enable_if_deps_;  // if all these args are inactive, the function is disabled
     expr_list disable_if_deps_; // if any of these args are active, the function is disabled
     array_type<var_list, primal_fields> arg_by_field_{};
     array_type<size_t, primal_fields> arg_dim_{};
@@ -112,6 +112,7 @@ class generic_func : public expr {
 
     /// @brief get a shared duplicate of the function with different uid
     /// @param duplicate_args whether to copy the input arguments (with new uid) or just share the same arguments
+    /// @warning make sure the func is finalized before calling this function, otherwise it will block the thread
     generic_func share(bool copy_args = true, const var_inarg_list &skip_copy_args = {}) const;
 
     generic_func(generic_func &&) = default;
@@ -128,10 +129,10 @@ class generic_func : public expr {
         return arg_by_field_[field];
     } ///< get the input arguments for a given field
 
-    const var_list &active_args(field_t f, const ocp *prob) const;
-    size_t active_dim(field_t f, const ocp *prob) const;
-    size_t active_tdim(field_t f, const ocp *prob) const;
-    size_t active_num(field_t f, const ocp *prob) const;
+    const var_list &active_args(field_t f, const ocp *prob) const; /// < get the active arguments for a given field
+    size_t active_dim(field_t f, const ocp *prob) const;           /// < get the dim of active arguments for a given field
+    size_t active_tdim(field_t f, const ocp *prob) const;          /// < get the tangent dim of active arguments for a given field
+    size_t active_num(field_t f, const ocp *prob) const;           /// < get the num of active arguments for a given field
 
     auto arg_num(field_t field) const {
         field_access_guard(field);
@@ -158,6 +159,8 @@ class generic_func : public expr {
         return sym_uid_idx_.at(s.uid());
     } ///< get the index of the argument for a given symbol
 
+    /// @brief add a single argument
+    /// @param in argument to add, must be one of var, sym, or shared_expr
     template <typename T>
         requires std::is_same_v<var, std::remove_cvref_t<T>> ||
                  std::is_same_v<shared_expr, std::remove_cvref_t<T>> ||
@@ -166,28 +169,39 @@ class generic_func : public expr {
         auto &s = in_args_.emplace_back(std::forward<T>(in));
         add_dep(s);
     }
+    /// @brief add multiple arguments
+    /// @param args list of arguments to add
     void add_arguments(const var_inarg_list &args) {
         for (sym &in : args) {
             add_argument(in);
         }
     }
 
-    const auto &enable_if_deps() const { return enable_if_deps_; }
-    const auto &disable_if_deps() const { return disable_if_deps_; }
-    void enable_if(const expr_inarg_list &args); ///< disable if any of these args is inactive
-    void disable_if(const expr_inarg_list &args); ///< disable if any of these args is active
+    const auto &enable_if_deps() const { return enable_if_deps_; }   ///< get the enable_if dependencies
+    const auto &disable_if_deps() const { return disable_if_deps_; } ///< get the disable_if dependencies
+    void enable_if(const expr_inarg_list &args);                     ///< disable if any of these args is inactive
+    void disable_if(const expr_inarg_list &args);                    ///< disable if any of these args is active
 
     virtual func_approx_data_ptr_t create_approx_data(sym_data &primal,
                                                       merit_data &raw,
                                                       shared_data &shared) const;
+    /// @brief compute the approximation of the function
+    /// @param data approximation data
+    /// @param eval_val whether to evaluate the value
+    /// @param eval_jac whether to evaluate the jacobian
+    /// @param eval_hess whether to evaluate the hessian
     void compute_approx(func_approx_data &data,
                         bool eval_val, bool eval_jac = false, bool eval_hess = false) const;
 
-    auto *get_codegen_task() { return gen_.task_.get(); }
+    auto *get_codegen_task() { return gen_.task_.get(); } ///< get the codegen task
 
+    /// @brief load external function implementation from shared library
+    /// @param path path to the shared library, default is "gen"
     void load_external(const std::string &path = "gen") {
         load_external_impl(path);
     }
+    /// --- Callbacks for function evaluation ---
+    /// these functions can be overridden by derived classes
     std::function<void(func_approx_data &)> value;    ///< value callback
     std::function<void(func_approx_data &)> jacobian; ///< jacobian callback
     std::function<void(func_approx_data &)> hessian;  ///< hessian callback

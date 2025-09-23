@@ -220,7 +220,7 @@ void generic_func::finalize_impl() {
     if (order_ != approx_order::none && dim_ == dim_tbd && !zero_dim_) {
         throw std::runtime_error(fmt::format("generic_func {} has no dimension set", name_));
     }
-    // setup default hessian sparsity as dense
+    // setup default hessian sparsity as @ref default_hess_sp_
     hess_sp_.assign(in_args_.size(), std::vector<sparsity>(in_args_.size(), default_hess_sp_));
     if (gen_.task_ && !gen_.task_->sx_output.is_empty()) {
         func_codegen::get().make_codegen_task(this);
