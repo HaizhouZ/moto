@@ -389,6 +389,7 @@ sqp.settings.ipm_conditional_corrector = True
 sqp.settings.prim_tol = 1e-3
 sqp.settings.dual_tol = 1e-3
 sqp.settings.comp_tol = 1e-3
+sqp.settings.max_rf_iters = 2
 
 
 # cfg = [[-0.8787878787878788, -0.8181818181818181], [0.7777777777777779, 0.9595959595959598]]
@@ -445,10 +446,17 @@ def gait_setup(data: moto.sqp.data_type):
 sqp.apply_forward(gait_setup)
 import time
 
+cnt = 0
+iters = 0
 start = time.perf_counter()
-res = sqp.update(100, verbose=True)
-print(f"sqp.update(100) took {time.perf_counter() - start:.3f} seconds")
-print(f"per iteration took {(time.perf_counter() - start) / res.num_iter * 1000 :.3f} ms")
+while cnt < 50:
+    res = sqp.update(3, verbose=True)
+    sqp.settings.warm_start_ipm = True
+    cnt += 1
+    iters += res.num_iter
+print(f"sqp.update(100) took {(time.perf_counter() - start) / cnt:.3f} seconds")
+print("total iters:", iters)
+print(f"per iteration took {(time.perf_counter() - start) / iters * 1000 :.3f} ms")
 
 q_res = []
 dt_res = []

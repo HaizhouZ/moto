@@ -10,7 +10,7 @@
 namespace moto {
 void ns_sqp::iterative_refinement() {
     // if (info.inf_prim_step < 1e-1 || info.inf_dual_step < 1e-1) {
-    size_t iter_refine_max = 5;
+    size_t iter_refine_max = settings.max_rf_iters;
     size_t iter_refine = 0;
     detail_timed_block_start("iterative_refinement");
     while (iter_refine < iter_refine_max) {

@@ -20,6 +20,7 @@ struct ns_sqp {
         double dual_tol = 1e-4; ///< dual feasibility tolerance
         double comp_tol = 1e-6; ///< complementarity feasibility tolerance
 
+        size_t max_rf_iters = 5; ///< max refinement iterations
         size_t max_ls_steps = 5;     ///< max line search steps
         bool use_line_search = true; ///< whether to use line search
 
@@ -27,6 +28,8 @@ struct ns_sqp {
 
         bool use_mu_globalization = true;     ///< whether to use mu globalization
         bool use_iterative_refinement = true; ///< whether to use iterative refinement
+
+        bool warm_start_ipm = false; ///< whether to warm start the IPM solver
 
       private:
         friend class ns_sqp;

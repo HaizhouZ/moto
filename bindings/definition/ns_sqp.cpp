@@ -31,6 +31,13 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("mu_method", &ns_sqp::settings_t::mu_method, "Adaptive mu method for the IPM solver")
         .def_rw("ipm_conditional_corrector", &ns_sqp::settings_t::ipm_conditional_corrector, "Whether to use conditional corrector in the IPM solver")
         .def_rw("adaptive_mu_allowed", &ns_sqp::settings_t::adaptive_mu_allowed, "Whether to adapt mu during line search")
+        .def_rw("mu0", &ns_sqp::settings_t::mu0, "Initial barrier parameter for the IPM solver")
+        .def_rw("use_mu_globalization", &ns_sqp::settings_t::use_mu_globalization, "Whether to use mu globalization")
+        .def_rw("max_rf_iters", &ns_sqp::settings_t::max_rf_iters, "Maximum number of iterative refinement iterations")
+        .def_rw("use_iterative_refinement", &ns_sqp::settings_t::use_iterative_refinement, "Whether to use iterative refinement")
+        .def_rw("max_ls_steps", &ns_sqp::settings_t::max_ls_steps, "Maximum number of line search steps")
+        .def_rw("use_line_search", &ns_sqp::settings_t::use_line_search, "Whether to use line search")
+        .def_rw("warm_start_ipm", &ns_sqp::settings_t::warm_start_ipm, "Whether to warm start the IPM solver")
         .def_rw("prim_tol", &ns_sqp::settings_t::prim_tol, "Primal feasibility tolerance")
         .def_rw("dual_tol", &ns_sqp::settings_t::dual_tol, "Dual feasibility tolerance")
         .def_rw("comp_tol", &ns_sqp::settings_t::comp_tol, "Complementarity feasibility tolerance");

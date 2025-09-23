@@ -18,7 +18,8 @@ ns_sqp::kkt_info ns_sqp::initialize() {
         cur->for_each_constr([this](const generic_func &c, func_approx_data &d) { c.setup_workspace_data(d, &settings); });
         cur->update_approximation(node_data::update_mode::eval_val);
         // initialize the data
-        solver::ineq_soft::initialize(cur);
+        if (!settings.warm_start_ipm)
+            solver::ineq_soft::initialize(cur);
     });
     graph_.for_each_parallel([](data *cur) {
         cur->update_approximation(node_data::update_mode::eval_derivatives);
