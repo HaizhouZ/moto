@@ -104,12 +104,12 @@ void func_approx_data::setup_hessian() {
                     field_1 = in_args[i]->field();
                     field_2 = in_args[j]->field();
                     if (raw.prob_->contains(in_args[i]) &&
-                        field_2 < field::num_prim && 
+                        field_2 < field::num_prim &&
                         raw.prob_->contains(in_args[j])) {
                         /// @note order matches merit_data
                         /// h[i][j] = h[j][i] if i, j in the same field or field(i) < field(j)
                         /// otherwise only keep h[i][j] (empty)
-                        if (func_.default_hess_sp_ != sparsity::dense && i != j) {
+                        if (func_.hess_sp_[i][j] == sparsity::unknown) {
                             goto BIND_EMPTY_HESS;
                         } else if (field_1 >= field_2) {
                             // merit_hess_[i].push_back((*hessian)[field_1][field_2].block(

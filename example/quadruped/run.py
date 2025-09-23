@@ -449,13 +449,12 @@ import time
 cnt = 0
 iters = 0
 start = time.perf_counter()
-while cnt < 50:
-    res = sqp.update(3, verbose=True)
-    sqp.settings.warm_start_ipm = True
-    cnt += 1
-    iters += res.num_iter
-print(f"sqp.update(100) took {(time.perf_counter() - start) / cnt:.3f} seconds")
-print("total iters:", iters)
+# while cnt < 50:
+res = sqp.update(100, verbose=True)
+sqp.settings.warm_start_ipm = True
+cnt += 1
+iters += res.num_iter
+print(f"sqp.update() took {(time.perf_counter() - start) / cnt:.3f} seconds")
 print(f"per iteration took {(time.perf_counter() - start) / iters * 1000 :.3f} ms")
 
 q_res = []

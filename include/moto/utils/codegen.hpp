@@ -50,7 +50,7 @@ struct task {
     std::vector<cs::SX> jac_outputs; // for multiple outputs
     std::vector<std::pair<shared_expr, cs::SX>> ext_jac;
     std::vector<std::tuple<shared_expr, shared_expr, cs::SX>> ext_hess;
-    std::vector<std::vector<sparsity>> hess_sp;
+    std::vector<std::vector<sparsity>>* hess_sp = nullptr; // optional hessian sparsity pattern
     std::string output_dir = "gen";
     bool force_recompile = false;
     bool check_jac_ad = false; // check if jacobian is correct by comparing with ad

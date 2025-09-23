@@ -442,21 +442,30 @@ void task::finalize(job_list &jobs_) {
                 } else if (i.field() == j.field() and idx_i > idx_j) {
                     // for i,j in same field, just copy
                     hess[idx_i][idx_j] = hess[idx_j][idx_i].T();
+                    if (hess_sp != nullptr)
+                        (*hess_sp)[idx_i][idx_j] = (*hess_sp)[idx_j][idx_i];
                     continue;
                 }
                 if (merit_jac_for_hess) {
-                    hess[idx_i][idx_j] = cs::SX::jacobian(merit_jac_, j);
+                    hess[idx_i][idx_j] = cs::SX::sparsify(cs::SX::jacobian(merit_jac_, j));
                 } else {
-                    hess[idx_i][idx_j] = cs::SX::jacobian(jacs_copy[idx_i], j);
+                    hess[idx_i][idx_j] = cs::SX::sparsify(cs::SX::jacobian(jacs_copy[idx_i], j));
                 }
-                if (!hess_sp.empty()) { /// @todo maybe inconsistent
-                    if (hess_sp[idx_i][idx_j] == sparsity::diag) {
-                        assert(hess[idx_i][idx_j].rows() == hess[idx_i][idx_j].columns());
-                        hess[idx_i][idx_j] = cs::SX::diag(hess[idx_i][idx_j]);
-                    } else if (hess_sp[idx_i][idx_j] == sparsity::eye) {
-                        assert(hess[idx_i][idx_j].rows() == hess[idx_i][idx_j].columns());
-                        hess[idx_i][idx_j] = cs::SX::eye(hess[idx_i][idx_j].rows());
-                    }
+                if (hess[idx_i][idx_j].is_zero()) {
+                    hess[idx_i][idx_j] = cs::SX();
+                    if (hess_sp != nullptr)
+                        (*hess_sp)[idx_i][idx_j] = sparsity::unknown; // no hessian
+                    continue;
+                }
+                if (hess[idx_i][idx_j].is_square() && hess[idx_i][idx_j].sparsity().is_diag()) {
+                    bool is_eye = false;
+                    hess[idx_i][idx_j] = cs::SX::diag(hess[idx_i][idx_j]);
+                    if (hess[idx_i][idx_j].is_one())
+                        is_eye = true;
+                    if (is_eye)
+                        hess[idx_i][idx_j] = cs::SX::ones(hess[idx_i][idx_j].rows());
+                    if (hess_sp != nullptr)
+                        (*hess_sp)[idx_i][idx_j] = is_eye ? sparsity::eye : sparsity::diag;
                 }
             }
         }
