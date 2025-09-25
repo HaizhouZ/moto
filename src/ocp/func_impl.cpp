@@ -270,26 +270,31 @@ size_t generic_func::active_num(field_t f, const ocp *prob) const {
 const bool generic_func::check_enable(ocp *prob) const {
     if (disable_if_any_deps_.empty() && enable_if_all_deps_.empty() && enable_if_any_deps_.empty())
         return true;
-    bool pass_check = false;
+    bool pass_check = true;
     for (const auto &e : enable_if_any_deps_) {
         if (prob->is_active(e)) {
-            pass_check |= true;
-            break;
+            pass_check = true;
+            goto CHECK_DONE;
         }
     }
     for (const auto &e : disable_if_any_deps_) {
         if (prob->is_active(e)) {
-            pass_check |= false;
+            pass_check = false;
+            // fmt::print("func {} disabled because {} active\n", name(), e->name());
+            goto CHECK_DONE;
         }
     }
     for (const auto &e : enable_if_all_deps_) {
         if (!prob->is_active(e)) {
-            pass_check |= false;
+            pass_check = false;
+            // fmt::print("func {} disabled because {} not active\n", name(), e->name());
+            goto CHECK_DONE;
         }
     }
     for (auto &sub_prob : prob->sub_probs()) {
         pass_check |= check_enable(sub_prob.get());
     }
+CHECK_DONE:
     return pass_check;
 }
 void generic_func::enable_if_all(const expr_inarg_list &args) {

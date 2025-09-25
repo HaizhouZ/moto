@@ -203,10 +203,13 @@ ITER_START:
             if (!has_active_primal_arg) {
                 // prune funcs with no active primal args
                 to_delete[f].emplace_back(e);
+                // fmt::print("func {} pruned due to no active primal args\n", e.name());
             } else {
                 // prune disabled funcs
-                if (!e.check_enable(prob.get()))
+                if (!e.check_enable(prob.get())){
                     to_delete[f].emplace_back(e);
+                    // fmt::print("func {} pruned due to enable/disable conditions\n", e.name());
+                }
             }
         }
     }
@@ -214,10 +217,12 @@ ITER_START:
     for (auto f : all_func_fields) {
         for (const expr &e : to_delete[f]) {
             delete_expr(e, true);
+            // fmt::print("func {} pruned\n", e.name());
             changed = true;
         }
         for (const expr &e : to_re_enable[f]) {
             re_enable_expr(e, true);
+            // fmt::print("func {} re-enabled\n", e.name());
             changed = true;
         }
     }

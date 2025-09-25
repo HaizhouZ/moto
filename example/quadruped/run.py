@@ -193,7 +193,7 @@ class pinCasadiModel(cpin.Model):
             cs.vcat([self.v_f[:2, i], self.k_f * self.z_f[i] + self.v_f[2, i]]),
             # cs.vcat([v_f[:2, i], z_f[i]]) * active_foot[i],
         )
-        c.enable_if([self.f_f[i]])
+        c.enable_if_all([self.f_f[i]])
         return c
 
     def make_joint_limit_constr(self):

@@ -45,7 +45,7 @@ dense_dynamics::impl::approx_data::approx_data(generic_constr::approx_data &&rhs
     size_t u_col_offset = 0;
     for (auto &arg : in_args) {
         auto f = arg->field();
-        if (prob.contains(arg))
+        if (prob.is_active(arg))
             if (f == __u) {
                 // auto m = approx_->jac_[f].insert(f_st, prob.get_expr_start(arg), func_.dim(), arg->dim(), sparsity::dense);
                 // new (&jac_[arg_idx]) matrix_ref(m);
