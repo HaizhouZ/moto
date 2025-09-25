@@ -220,8 +220,11 @@ void generic_func::finalize_impl() {
     if (order_ != approx_order::none && dim_ == dim_tbd && !zero_dim_) {
         throw std::runtime_error(fmt::format("generic_func {} has no dimension set", name_));
     }
-    // setup default hessian sparsity as @ref default_hess_sp_, which will be later updated by codegen
-    hess_sp_.assign(in_args_.size(), std::vector<sparsity>(in_args_.size(), default_hess_sp_));
+    if (!zero_dim_) {
+        jac_sp_.assign(in_args_.size(), sparsity::dense);
+        // setup default hessian sparsity as @ref default_hess_sp_, which will be later updated by codegen
+        hess_sp_.assign(in_args_.size(), std::vector<sparsity>(in_args_.size(), default_hess_sp_));
+    }
     if (gen_.task_ && !gen_.task_->sx_output.is_empty()) {
         func_codegen::get().make_codegen_task(this);
     } else {
@@ -235,7 +238,7 @@ void generic_func::setup_ocpwise_info(const ocp *prob) const {
     ocpwise_info info;
     for (auto &arg : in_args_) {
         auto f = arg->field();
-        if (prob->contains(arg) && f < field::num_prim) {
+        if (prob->is_active(arg) && f < field::num_prim) {
             info.arg_by_field_[f].emplace_back(arg);
             info.arg_dim_[f] += arg->dim();
             info.arg_tdim_[f] += arg->tdim();
@@ -264,11 +267,48 @@ size_t generic_func::active_num(field_t f, const ocp *prob) const {
     setup_ocpwise_info(prob);
     return ocpwise_info_map_.at(prob->uid()).arg_num_[f];
 }
-void generic_func::enable_if(const expr_inarg_list &args) {
-    enable_if_deps_.insert(enable_if_deps_.end(), args.begin(), args.end());
+const bool generic_func::check_enable(ocp *prob) const {
+    if (disable_if_any_deps_.empty() && enable_if_all_deps_.empty() && enable_if_any_deps_.empty())
+        return true;
+    bool pass_check = false;
+    for (const auto &e : enable_if_any_deps_) {
+        if (prob->is_active(e)) {
+            pass_check |= true;
+            break;
+        }
+    }
+    for (const auto &e : disable_if_any_deps_) {
+        if (prob->is_active(e)) {
+            pass_check |= false;
+        }
+    }
+    for (const auto &e : enable_if_all_deps_) {
+        if (!prob->is_active(e)) {
+            pass_check |= false;
+        }
+    }
+    for (auto &sub_prob : prob->sub_probs()) {
+        pass_check |= check_enable(sub_prob.get());
+    }
+    return pass_check;
 }
-void generic_func::disable_if(const expr_inarg_list &args) {
-    disable_if_deps_.insert(disable_if_deps_.end(), args.begin(), args.end());
+void generic_func::enable_if_all(const expr_inarg_list &args) {
+    if (enable_if_any_deps_.size() > 0) {
+        throw std::runtime_error("Cannot use enable_if_all together with enable_if_any");
+    }
+    enable_if_all_deps_.insert(enable_if_all_deps_.end(), args.begin(), args.end());
+}
+void generic_func::disable_if_any(const expr_inarg_list &args) {
+    if (enable_if_any_deps_.size() > 0) {
+        throw std::runtime_error("Cannot use disable_if_any together with enable_if_any");
+    }
+    disable_if_any_deps_.insert(disable_if_any_deps_.end(), args.begin(), args.end());
+}
+void generic_func::enable_if_any(const expr_inarg_list &args) {
+    if (enable_if_all_deps_.size() > 0) {
+        throw std::runtime_error("Cannot use enable_if_any together with enable_if_all");
+    }
+    enable_if_any_deps_.insert(enable_if_any_deps_.end(), args.begin(), args.end());
 }
 generic_func::gen_info::gen_info(const gen_info &rhs) {
     if (rhs.task_ && rhs.copy_task) {

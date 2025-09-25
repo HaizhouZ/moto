@@ -1,7 +1,6 @@
 #include <double_integrator/cost.hpp>
 #include <double_integrator/dynamics.hpp>
 #include <iostream>
-#include <moto/solver/ns_riccati/nullspace_data.hpp>
 #include <moto/solver/ns_sqp.hpp>
 
 using namespace moto;

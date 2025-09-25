@@ -46,8 +46,9 @@ class generic_func : public expr {
     bool zero_dim_ = false; // whether the function has zero dimension
     approx_order order_ = approx_order::first;
     var_list in_args_;
-    expr_list enable_if_deps_;  // if all these args are inactive, the function is disabled
-    expr_list disable_if_deps_; // if any of these args are active, the function is disabled
+    expr_list enable_if_all_deps_;  // if all these args are active, the function is enabled
+    expr_list disable_if_any_deps_; // if any of these args are active, the function is disabled
+    expr_list enable_if_any_deps_;  // if any of these args are active, the function is enabled
     array_type<var_list, primal_fields> arg_by_field_{};
     array_type<size_t, primal_fields> arg_dim_{};
     array_type<size_t, primal_fields> arg_tdim_{};
@@ -62,7 +63,8 @@ class generic_func : public expr {
 
     mutable std::unordered_map<size_t, ocpwise_info> ocpwise_info_map_;
 
-    std::vector<std::vector<sparsity>> hess_sp_;
+    std::vector<sparsity> jac_sp_;               ///< jacobian sparsity for each arg
+    std::vector<std::vector<sparsity>> hess_sp_; ///< hessian sparsity for each pair of args
 
     sparsity default_hess_sp_ = sparsity::dense;
 
@@ -122,6 +124,9 @@ class generic_func : public expr {
     PROPERTY(in_args)
     const auto &in_args(size_t i) const { return in_args_[i]; }
 
+    const auto &jac_sparsity() const { return jac_sp_; }   ///< get the jacobian sparsity patterns
+    const auto &hess_sparsity() const { return hess_sp_; } ///< get the hessian sparsity patterns
+
     void set_default_hess_sparsity(sparsity sp) { default_hess_sp_ = sp; }
 
     const auto &in_args(field_t field) const {
@@ -129,10 +134,14 @@ class generic_func : public expr {
         return arg_by_field_[field];
     } ///< get the input arguments for a given field
 
-    const var_list &active_args(field_t f, const ocp *prob) const; /// < get the active arguments for a given field
-    size_t active_dim(field_t f, const ocp *prob) const;           /// < get the dim of active arguments for a given field
-    size_t active_tdim(field_t f, const ocp *prob) const;          /// < get the tangent dim of active arguments for a given field
-    size_t active_num(field_t f, const ocp *prob) const;           /// < get the num of active arguments for a given field
+    /// get the active arguments for a given field
+    const var_list &active_args(field_t f, const ocp *prob) const;
+    /// get the dim of active arguments for a given field
+    size_t active_dim(field_t f, const ocp *prob) const;
+    /// get the tangent dim of active arguments for a given field
+    size_t active_tdim(field_t f, const ocp *prob) const;
+    /// get the num of active arguments for a given field
+    size_t active_num(field_t f, const ocp *prob) const;
 
     auto arg_num(field_t field) const {
         field_access_guard(field);
@@ -177,10 +186,14 @@ class generic_func : public expr {
         }
     }
 
-    const auto &enable_if_deps() const { return enable_if_deps_; }   ///< get the enable_if dependencies
-    const auto &disable_if_deps() const { return disable_if_deps_; } ///< get the disable_if dependencies
-    void enable_if(const expr_inarg_list &args);                     ///< disable if any of these args is inactive
-    void disable_if(const expr_inarg_list &args);                    ///< disable if any of these args is active
+    /// get the enable_if dependencies
+    const bool check_enable(ocp *prob) const;
+    /// enable if all of these args are active
+    void enable_if_all(const expr_inarg_list &args);
+    /// disable if any of these args is active
+    void disable_if_any(const expr_inarg_list &args);
+    /// enable if any of these args is active
+    void enable_if_any(const expr_inarg_list &args);
 
     virtual func_approx_data_ptr_t create_approx_data(sym_data &primal,
                                                       merit_data &raw,

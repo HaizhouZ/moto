@@ -62,4 +62,24 @@ bool expr::wait_until_ready() const {
     }
     return async_ready_status_->wait_until_ready(); // return the ready state
 }
+
+expr_inarg_list::expr_inarg_list(const expr_list &exprs) {
+    reserve(exprs.size());
+    for (expr &ex : exprs) {
+        emplace_back(ex);
+    }
+} ///< constructor from a vector of shared_expr
+
+expr_list::expr_list(const expr_inarg_list &exprs) {
+    reserve(exprs.size());
+    for (const expr &ex : exprs) {
+        emplace_back(ex);
+    }
+} ///< constructor from a vector of reference wrappers
+
+shared_expr::~shared_expr() {
+    // if (ptr_ && *ptr_)
+    //     fmt::print("Shared object {} with uid {} is destroyed\n", ptr_->name(), ptr_->uid());
+} ///< destructor
+
 } // namespace moto

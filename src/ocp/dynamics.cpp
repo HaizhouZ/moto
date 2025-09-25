@@ -9,5 +9,4 @@ generic_dynamics::approx_data::approx_data(base::approx_data &&rhs)
     approx_ = &merit_data_->approx_[__dyn];
     dyn_proj_ = &merit_data_->dynamics_data_;
 }
-
 } // namespace moto

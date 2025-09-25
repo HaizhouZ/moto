@@ -163,8 +163,9 @@ void register_submodule_functional(nb::module_ &m) {
                                                     f->name(), f->uid(), f->order(), f->dim(), f->field()); })
         .def("clone", [](const func &self) { return self->clone(); })
         .def("finalize", [](func &self, bool block_until_ready) { self->finalize(block_until_ready); }, nb::arg("block_until_ready") = true)
-        .def("enable_if", [](func &self, const expr_inarg_list &args) { self->enable_if(args); }, nb::arg("args"))
-        .def("disable_if", [](func &self, const expr_inarg_list &args) { self->disable_if(args); }, nb::arg("args"))
+        .def("enable_if_all", [](func &self, const expr_inarg_list &args) { self->enable_if_all(args); }, nb::arg("args"))
+        .def("disable_if_any", [](func &self, const expr_inarg_list &args) { self->disable_if_any(args); }, nb::arg("args"))
+        .def("enable_if_any", [](func &self, const expr_inarg_list &args) { self->enable_if_any(args); }, nb::arg("args"))
         .def(
             "add_argument",
             [](func &self, const py_var_wrapper &v) { self->add_argument((var &)v); },
@@ -208,28 +209,28 @@ void register_submodule_functional(nb::module_ &m) {
         .def("set_gauss_newton", [](cost &self) { return self.set_gauss_newton(); }, nb::rv_policy::move)
         .def("clone", [](const cost &self) { return self->clone(); });
 
-    nb::class_<custom_func, func>(m, "custom_func")
-        .def_prop_rw(
-            "custom_call",
-            [](custom_func &self) { return self->custom_call; },
-            [](custom_func &self, const decltype(generic_custom_func::custom_call) &v) { self->custom_call = v; })
-        .def_prop_rw(
-            "create_custom_data",
-            [](custom_func &self) { return self->create_custom_data; },
-            [](custom_func &self, const decltype(generic_custom_func::create_custom_data) &v) { self->create_custom_data = v; });
+    // nb::class_<custom_func, func>(m, "custom_func")
+    //     .def_prop_rw(
+    //         "custom_call",
+    //         [](custom_func &self) { return self->custom_call; },
+    //         [](custom_func &self, const decltype(generic_custom_func::custom_call) &v) { self->custom_call = v; })
+    //     .def_prop_rw(
+    //         "create_custom_data",
+    //         [](custom_func &self) { return self->create_custom_data; },
+    //         [](custom_func &self, const decltype(generic_custom_func::create_custom_data) &v) { self->create_custom_data = v; });
 
-    nb::class_<usr_func, custom_func>(m, "usr_func")
-        .def(
-            nb::init<const std::string &, const var_inarg_list &, const cs::SX &, approx_order>(),
-            nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("order") = approx_order::first)
-        .def(
-            nb::init<const std::string &, approx_order, size_t>(),
-            nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd);
+    // nb::class_<usr_func, custom_func>(m, "usr_func")
+    //     .def(
+    //         nb::init<const std::string &, const var_inarg_list &, const cs::SX &, approx_order>(),
+    //         nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("order") = approx_order::first)
+    //     .def(
+    //         nb::init<const std::string &, approx_order, size_t>(),
+    //         nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd);
 
-    nb::class_<pre_compute, custom_func>(m, "pre_compute")
-        .def(
-            nb::init<const std::string &>(),
-            nb::arg("name") = "pre_compute");
+    // nb::class_<pre_compute, custom_func>(m, "pre_compute")
+    //     .def(
+    //         nb::init<const std::string &>(),
+    //         nb::arg("name") = "pre_compute");
 
     nb::class_<dense_dynamics, func>(m, "dense_dynamics")
         .def(

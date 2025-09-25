@@ -37,7 +37,7 @@ func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, const generic_
     in_args_.reserve(in_args.size());
     for (auto &arg : in_args) {
         static vector empty;
-        if (problem()->contains(arg))
+        if (problem()->is_active(arg))
             in_args_.push_back(primal[arg]);
         else
             in_args_.push_back(empty);
@@ -67,7 +67,7 @@ func_approx_data::func_approx_data(sym_data &primal,
         // bind merit jacobian
         merit_jac_.reserve(in_args_.size());
         for (size_t i : range(in_args_.size())) {
-            if (in_args[i]->field() < field::num_prim && raw.prob_->contains(in_args[i])) {
+            if (in_args[i]->field() < field::num_prim && raw.prob_->is_active(in_args[i])) {
                 merit_jac_.push_back(raw.prob_->extract_tangent(raw.jac_[in_args[i]->field()], in_args[i]));
             } else { // useless
                 static row_vector empty;
@@ -101,9 +101,9 @@ void func_approx_data::setup_hessian() {
                 for (size_t j : range(in_args_.size())) {
                     field_1 = in_args[i]->field();
                     field_2 = in_args[j]->field();
-                    if (raw.prob_->contains(in_args[i]) &&
+                    if (raw.prob_->is_active(in_args[i]) &&
                         field_2 < field::num_prim &&
-                        raw.prob_->contains(in_args[j])) {
+                        raw.prob_->is_active(in_args[j])) {
                         /// @note order matches merit_data
                         /// h[i][j] = h[j][i] if i, j in the same field or field(i) < field(j)
                         /// otherwise only keep h[i][j] (empty)

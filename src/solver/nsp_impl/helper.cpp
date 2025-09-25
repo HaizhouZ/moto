@@ -2,7 +2,6 @@
 #include <moto/ocp/impl/sym_data.hpp>
 #include <moto/ocp/problem.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
-#include <moto/solver/ns_riccati/nullspace_data.hpp>
 
 namespace moto {
 namespace solver {

@@ -16,7 +16,7 @@ class shared_data {
     std::unordered_map<size_t, func_arg_map_ptr_t> data_; ///< [uid (of data owner), data]
 
   public:
-    shared_data(ocp *prob, sym_data *primal);
+    shared_data(ocp *prob, sym_data *primal, merit_data *raw = nullptr);
     shared_data(shared_data &&) = default;
 
     const ocp *prob_;
@@ -29,12 +29,18 @@ class shared_data {
         assert(ex.field() == __pre_comp || ex.field() == __usr_func);
         add(ex.uid(), std::move(data));
     }
+    auto *try_get(size_t uid) {
+        auto it = data_.find(uid);
+        if (it == data_.end())
+            return static_cast<func_arg_map *>(nullptr);
+        return it->second.get();
+    }
     /// @brief get the data by uid
     auto &get(size_t uid) { return *data_.at(uid); }
     /// @brief get the data of the func (by uid)
-    template <typename derived>
-        requires std::is_base_of_v<generic_func, derived>
-    auto &operator[](const derived &ex) { return get(ex.uid()); }
+    auto &operator[](const expr &ex) { return get(ex.uid()); }
+    const auto &get(size_t uid) const { return *data_.at(uid); }
+    const auto &operator[](const expr &ex) const { return get(ex.uid()); }
 };
 def_unique_ptr(shared_data);
 /////////////////////////////////////////////////////////////////////
@@ -65,7 +71,7 @@ struct func_arg_map {
 
     virtual ~func_arg_map() = default;
     const generic_func &func_;   ///< pointer to the func
-    shared_data &shared_;          ///< ref to shared data
+    shared_data &shared_;        ///< ref to shared data
     sym_data *primal_ = nullptr; ///< reference to the primal data
 
     /**

@@ -1,5 +1,5 @@
 #include <algorithm>
-#include <moto/ocp/impl/func.hpp>
+#include <moto/ocp/dynamics.hpp>
 #include <moto/ocp/problem.hpp>
 
 namespace moto {
@@ -16,7 +16,7 @@ bool ocp::add_impl(expr &ex) {
             // check consistency for dynamics, x and y should not be in dep!
             if (ex.field() == __dyn)
                 for (auto f : {__x, __y})
-                    for (const generic_func &dyn : expr_[__dyn]) {
+                    for (const generic_dynamics &dyn : expr_[__dyn]) {
                         auto it = std::find_first_of(dep.begin(), dep.end(),
                                                      dyn.in_args(f).begin(), dyn.in_args(f).end());
                         if (it != dep.end()) {
@@ -28,6 +28,7 @@ bool ocp::add_impl(expr &ex) {
         }
         uids_.insert(_uid);
         finalized_ = false;
+        ex.add_to_ocp_callback(this);
         return true;
     }
     return false;
@@ -113,12 +114,17 @@ void ocp::wait_until_ready() {
 }
 ocp_ptr_t ocp::clone(const clone_config &config) const {
     auto prob = std::shared_ptr<ocp>(new ocp(*this));
-    prob->finalized_ = false; // need to reset finalized
+    prob->finalized_ = false;          // need to reset finalized
+    for (auto &p : prob->sub_probs_) { // recursively clone sub problems
+        p = p->clone(config);
+    } /// @warning this is not guaranteed to be consistent
     auto delete_expr = [&](const expr &ex, bool prune = false) {
         size_t f = ex.field();
         auto &exprs = prob->expr_[f];
         auto &target_list = prune ? prob->pruned_expr_[f] : prob->disabled_expr_[f];
+        auto &target_uids = prune ? prob->pruned_uids_ : prob->disabled_uids_;
         target_list.emplace_back(ex);
+        target_uids.insert(ex.uid());
         std::erase_if(exprs, [&ex](const shared_expr &e) { return e->uid() == ex.uid(); });
         prob->uids_.erase(ex.uid());
     };
@@ -127,12 +133,14 @@ ocp_ptr_t ocp::clone(const clone_config &config) const {
         size_t f = ex.field();
         auto &exprs = prob->expr_[f];
         auto &target_list = from_pruned ? prob->pruned_expr_[f] : prob->disabled_expr_[f];
+        auto &target_uids = from_pruned ? prob->pruned_uids_ : prob->disabled_uids_;
         auto it = std::find_if(target_list.begin(), target_list.end(),
                                [&ex](const shared_expr &e) { return e->uid() == ex.uid(); });
         if (it != target_list.end()) {
             exprs.emplace_back(*it);
             prob->uids_.insert(ex.uid());
             target_list.erase(it);
+            target_uids.erase(ex.uid());
             return true;
         }
         return false;
@@ -141,7 +149,9 @@ ocp_ptr_t ocp::clone(const clone_config &config) const {
         /// by activating an expression, previously pruned expressions may be re-enabled
         /// but previously user-disabled expressions should not be re-enabled
         if (re_enable_expr(ex, true) || re_enable_expr(ex, false)) {
-            prob->add(ex); // does not previous exist, add as new expr
+            // prob->add(ex); // does not previously exist, add as new expr
+            throw std::runtime_error(fmt::format("Cannot activate expression {} uid {}, it does not exist in the problem",
+                                                 ex.name(), ex.uid()));
         }
     }
     // disable expressions
@@ -149,7 +159,15 @@ ocp_ptr_t ocp::clone(const clone_config &config) const {
         delete_expr(ex);
     }
     constexpr auto all_func_fields = concat_fields(func_fields, custom_func_fields);
-    // do lazy pruning and re-enabling to avoid order issues
+    // do lazy pruning
+    // order: the user-defined deactivate_list -> prune_funcs -> check if any pruned funcs can be re-enabled
+    // this should be done iteratively until no more changes (conflict might happen)
+    int max_iter = 5;
+ITER_START:
+    if (max_iter-- == 0) {
+        throw std::runtime_error("ocp::clone failed to converge during pruning");
+    }
+    bool changed = false;
     array_type<std::vector<std::reference_wrapper<const expr>>, all_func_fields> to_delete, to_re_enable;
     for (auto f : all_func_fields) {
         if (prob->pruned_expr_[f].empty())
@@ -164,18 +182,7 @@ ocp_ptr_t ocp::clone(const clone_config &config) const {
             // check if all enable_if_deps are active and all disable_if_deps are inactive
             bool can_re_enable = has_active_primal_arg;
             if (can_re_enable) {
-                for (const expr &s : e.enable_if_deps()) {
-                    if (!prob->contains(s)) {
-                        can_re_enable = false;
-                        break;
-                    }
-                }
-                for (const expr &s : e.disable_if_deps()) {
-                    if (prob->contains(s)) {
-                        can_re_enable = false;
-                        break;
-                    }
-                }
+                can_re_enable = e.check_enable(prob.get());
             }
             if (can_re_enable) {
                 to_re_enable[f].emplace_back(e);
@@ -198,18 +205,8 @@ ocp_ptr_t ocp::clone(const clone_config &config) const {
                 to_delete[f].emplace_back(e);
             } else {
                 // prune disabled funcs
-                for (const expr &s : e.enable_if_deps()) {
-                    if (!prob->contains(s)) {
-                        to_delete[f].emplace_back(e);
-                        break;
-                    }
-                }
-                for (const expr &s : e.disable_if_deps()) {
-                    if (prob->contains(s)) {
-                        to_delete[f].emplace_back(e);
-                        break;
-                    }
-                }
+                if (!e.check_enable(prob.get()))
+                    to_delete[f].emplace_back(e);
             }
         }
     }
@@ -217,11 +214,15 @@ ocp_ptr_t ocp::clone(const clone_config &config) const {
     for (auto f : all_func_fields) {
         for (const expr &e : to_delete[f]) {
             delete_expr(e, true);
+            changed = true;
         }
         for (const expr &e : to_re_enable[f]) {
             re_enable_expr(e, true);
+            changed = true;
         }
     }
+    if (changed)
+        goto ITER_START;
     return prob;
 }
 } // namespace moto

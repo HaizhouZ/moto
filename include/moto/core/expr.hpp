@@ -60,10 +60,12 @@ template <typename U>
 inline bool operator==(const shared_expr &lhs, const U &rhs) {
     return lhs.operator->() == static_cast<const expr *>(&rhs);
 } ///< equality operator for shared_expr and derived types
-
+struct expr_inarg_list; ///< forward declaration
 /// @brief list of expressions, used for storing expressions in a vector
 struct expr_list : public std::vector<shared_expr> {
     using std::vector<shared_expr>::vector; ///< inherit constructors from std::vector
+    /// constructor from a vector of reference wrappers
+    expr_list(const expr_inarg_list &exprs);
 };
 
 constexpr size_t dim_tbd = 0;
@@ -75,6 +77,7 @@ constexpr size_t dim_tbd = 0;
     auto &mem_name() { return mem_name##_; } \
     const auto &mem_name() const { return mem_name##_; }
 
+class ocp;
 /**
  * @brief general expression base class (now merged with impl)
  */
@@ -132,6 +135,15 @@ class expr : public std::enable_shared_from_this<expr> {
         dep_.emplace_back(std::forward<T>(e));
     }
 
+    template <typename T>
+    void add_deps(const std::vector<T> &es) {
+        for (const auto &e : es) {
+            add_dep(e);
+        }
+    }
+
+    virtual void add_to_ocp_callback(ocp *) {} /// callback when added to an ocp
+
     auto get_shared() {
         if (use_count() > 0)
             return shared_expr(shared_from_this());
@@ -184,18 +196,9 @@ class expr : public std::enable_shared_from_this<expr> {
 /// @brief list of expressions, used for function arguments
 struct expr_inarg_list : public std::vector<std::reference_wrapper<expr>> {
     using std::vector<std::reference_wrapper<expr>>::vector; ///< inherit constructors from std::vector
-    expr_inarg_list(const expr_list &exprs) {                ///< constructor from a vector of shared_expr
-        reserve(exprs.size());
-        for (expr &ex : exprs) {
-            emplace_back(ex);
-        }
-    } ///< constructor from a vector of shared_expr
+    /// constructor from a vector of shared_expr
+    expr_inarg_list(const expr_list &exprs);
 }; ///< list of expressions
-
-inline shared_expr::~shared_expr() {
-    // if (ptr_ && *ptr_)
-    //     fmt::print("Shared object {} with uid {} is destroyed\n", ptr_->name(), ptr_->uid());
-} ///< destructor
 
 } // namespace moto
 

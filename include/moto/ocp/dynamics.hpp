@@ -5,7 +5,6 @@
 #include <moto/spmm/sparse_mat.hpp>
 
 namespace moto {
-
 /// @brief generic dynamics
 class generic_dynamics : public generic_constr {
   public:
@@ -20,10 +19,10 @@ class generic_dynamics : public generic_constr {
     };
     using base::base;
     virtual void compute_project_derivatives(func_approx_data &data) const = 0;
-    virtual void apply_jac_y_inverse_transpose(func_approx_data &data, vector& v, vector& dst) const { dst = v; };
+    virtual void apply_jac_y_inverse_transpose(func_approx_data &data, vector &v, vector &dst) const { dst = v; };
     template <typename T, typename src_type>
     static void setup_map(T &v, const src_type &src) {
-        new (&v) std::remove_cvref_t<T>(const_cast<scalar_t*>(src.data()), src.rows(), src.cols());
+        new (&v) std::remove_cvref_t<T>(const_cast<scalar_t *>(src.data()), src.rows(), src.cols());
     }
 };
 

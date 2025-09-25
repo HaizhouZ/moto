@@ -4,8 +4,8 @@
 #include <array>
 #include <map>
 #include <unordered_map>
-#include <vector>
 #include <unordered_set>
+#include <vector>
 
 #include <moto/core/expr.hpp>
 
@@ -37,11 +37,12 @@ class ocp {
     std::array<size_t, field::num> dim_{};
     /// tangent space dimension of each field
     std::array<size_t, field::num_prim> tdim_{};
-
-    std::unordered_set<size_t> uids_; ///< set of uids to check for duplicates when adding expr
+    /// set of uids to check for duplicates when adding expr
+    std::unordered_set<size_t> uids_, disabled_uids_, pruned_uids_;
 
     void set_dim_and_idx();
     void finalize();
+
   public:
     CONST_PROPERTY(uid);                                                       ///< getter for uid
     const auto &exprs(size_t f) const { return expr_.at(f); }                  ///< getter for expr_
@@ -49,24 +50,16 @@ class ocp {
     size_t dim(size_t f) const { return dim_.at(f); }                          ///< getter for dim_
     size_t num(size_t f) const { return expr_[f].size(); }                     ///< getter for num of exprs in field f
     size_t tdim(size_t f) const { return tdim_.at(f); }                        ///< getter for tdim_
-    bool contains(const expr &ex) const { return uids_.contains(ex.uid()); } ///< check if expr is in the problem
+    /// check if expr is in the problem
+    bool contains(const expr &ex) const {
+        return uids_.contains(ex.uid()) || 
+        disabled_uids_.contains(ex.uid()) || 
+        pruned_uids_.contains(ex.uid());
+    }
+    bool is_active(const expr &ex) const { return uids_.contains(ex.uid()); } ///< check if expr is in the problem
     void wait_until_ready();
 
     void print_summary();
-
-    static auto create() { return std::shared_ptr<ocp>(new ocp()); }
-
-    /// @brief configuration for cloning an ocp
-    /// @note deactivate_list will treated as forced deactivation, thus automatic-pruning will not re-enable them
-    /// @note activate_list will re-enable pruned expressions if their args are active
-    ///      but will NOT re-enable previously user-disabled expressions
-    /// @warning if an expr shows up in both lists, it will be deactivated
-    struct clone_config {
-        expr_inarg_list deactivate_list; ///< list of expressions to be deactivated in the cloned problem
-        expr_inarg_list activate_list;   ///< list of expressions to be re-activated in the cloned problem
-    };
-
-    ocp_ptr_t clone(const clone_config &config = {}) const;
 
     scalar_t *get_data_ptr(scalar_t *data, const expr &ex) const {
         return data + get_expr_start(ex);
@@ -100,11 +93,16 @@ class ocp {
             maintain_order(ex_);
         }
     }
-
+    /// add multiple exprs
     void add(const expr_inarg_list &exprs) {
         for (expr &ex : exprs) {
             add(ex);
         }
+    }
+
+    /// add a sub-problem
+    void add(const ocp_ptr_t &sub) {
+        sub_probs_.push_back(sub);
     }
 
     /**
@@ -125,6 +123,25 @@ class ocp {
             throw std::runtime_error(fmt::format("expr {} uid {} cannot be found", ex.name(), ex.uid()));
         }
     }
+
+    static auto create() { return std::shared_ptr<ocp>(new ocp()); }
+
+    /// @brief configuration for cloning an ocp
+    /// @note deactivate_list will treated as forced deactivation, thus automatic-pruning will not re-enable them
+    /// @note activate_list will re-enable pruned expressions if their args are active
+    ///      but will NOT re-enable previously user-disabled expressions
+    /// @warning if an expr shows up in both lists, it will be deactivated
+    struct clone_config {
+        expr_inarg_list deactivate_list; ///< list of expressions to be deactivated in the cloned problem
+        expr_inarg_list activate_list;   ///< list of expressions to be re-activated in the cloned problem
+    };
+
+    ocp_ptr_t clone(const clone_config &config = {}) const;
+
+  private:
+    std::vector<ocp_ptr_t> sub_probs_; ///< list of sub-problems owned by this problem
+  public:
+    const auto &sub_probs() const { return sub_probs_; }
 };
 
 } // namespace moto
