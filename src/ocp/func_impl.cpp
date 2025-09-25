@@ -292,7 +292,7 @@ const bool generic_func::check_enable(ocp *prob) const {
         }
     }
     for (auto &sub_prob : prob->sub_probs()) {
-        pass_check |= check_enable(sub_prob.get());
+        pass_check &= check_enable(sub_prob.get());
     }
 CHECK_DONE:
     return pass_check;

@@ -1,4 +1,4 @@
-#include <moto/multibody/stacked_euler.hpp>
+#include <moto/ocp/dynamics/stacked_euler.hpp>
 #include <moto/ocp/dynamics.hpp>
 #include <moto/ocp/problem.hpp>
 

@@ -51,12 +51,9 @@ class ocp {
     size_t num(size_t f) const { return expr_[f].size(); }                     ///< getter for num of exprs in field f
     size_t tdim(size_t f) const { return tdim_.at(f); }                        ///< getter for tdim_
     /// check if expr is in the problem
-    bool contains(const expr &ex) const {
-        return uids_.contains(ex.uid()) || 
-        disabled_uids_.contains(ex.uid()) || 
-        pruned_uids_.contains(ex.uid());
-    }
-    bool is_active(const expr &ex) const { return uids_.contains(ex.uid()); } ///< check if expr is in the problem
+    bool contains(const expr &ex, bool include_sub_prob = true) const;
+    /// check if expr is active in the problem
+    bool is_active(const expr &ex, bool include_sub_prob = true) const;
     void wait_until_ready();
 
     void print_summary();
@@ -87,12 +84,7 @@ class ocp {
     template <typename T>
         requires std::is_base_of_v<shared_expr, std::remove_cvref_t<T>> ||
                  std::is_base_of_v<expr, std::remove_reference_t<T>>
-    void add(T &&ex) {
-        if (add_impl(ex)) {
-            expr &ex_ = expr_[static_cast<const expr &>(ex).field()].emplace_back(std::forward<T>(ex));
-            maintain_order(ex_);
-        }
-    }
+    void add(T &&ex) { add_impl(ex); }
     /// add multiple exprs
     void add(const expr_inarg_list &exprs) {
         for (expr &ex : exprs) {
@@ -131,16 +123,22 @@ class ocp {
     /// @note activate_list will re-enable pruned expressions if their args are active
     ///      but will NOT re-enable previously user-disabled expressions
     /// @warning if an expr shows up in both lists, it will be deactivated
-    struct clone_config {
+    struct active_status_config {
         expr_inarg_list deactivate_list; ///< list of expressions to be deactivated in the cloned problem
         expr_inarg_list activate_list;   ///< list of expressions to be re-activated in the cloned problem
+        bool empty() const { return deactivate_list.empty() && activate_list.empty(); }
     };
 
-    ocp_ptr_t clone(const clone_config &config = {}) const;
+    ocp_ptr_t clone(const active_status_config &config = {}) const;
+    void update_active_status(const active_status_config &config, bool update_sub_probs = true);
 
   private:
-    std::vector<ocp_ptr_t> sub_probs_; ///< list of sub-problems owned by this problem
+    bool allow_inconsistent_dynamics_ = false; ///< allow inconsistent dynamics when updating active status
+    bool automatic_reorder_primal_ = true;     ///< automatically reorder primal variables by dynamics
+    std::vector<ocp_ptr_t> sub_probs_;         ///< list of sub-problems owned by this problem
   public:
+    PROPERTY(allow_inconsistent_dynamics) ///< getter and setter for allow_inconsistent_dynamics
+    PROPERTY(automatic_reorder_primal)    ///< getter and setter for automatic_reorder_primal
     const auto &sub_probs() const { return sub_probs_; }
 };
 

@@ -105,6 +105,8 @@ class expr : public std::enable_shared_from_this<expr> {
     field_t field_ = __undefined;
     expr_list dep_; // now a direct member, not a pointer
 
+    bool default_active_status_ = true; ///< default active status when added to an ocp (false means must be explicitly activated)
+
     mutable std::shared_ptr<async_ready_status> async_ready_status_; ///< async ready status, if any
 
     shared_expr shared_;
@@ -119,12 +121,13 @@ class expr : public std::enable_shared_from_this<expr> {
     friend class shared_expr;
 
   public:
-    PROPERTY(name);      ///< getter for name
-    PROPERTY(dim);       ///< getter for dim
-    PROPERTY(uid);       ///< getter for uid
-    PROPERTY(field);     ///< getter for field
-    PROPERTY(finalized); ///< getter for finalized
-    PROPERTY(tdim)       ///< tangent space dimension of the symbolic variable
+    PROPERTY(name);                 ///< getter for name
+    PROPERTY(dim);                  ///< getter for dim
+    PROPERTY(uid);                  ///< getter for uid
+    PROPERTY(field);                ///< getter for field
+    PROPERTY(finalized);            ///< getter for finalized
+    PROPERTY(tdim)                  ///< tangent space dimension of the symbolic variable
+    PROPERTY(default_active_status) ///< default active status when added to an ocp
 
     auto &dep() { return dep_; } ///< get the dependencies of this expression
 

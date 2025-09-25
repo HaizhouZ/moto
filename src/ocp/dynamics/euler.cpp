@@ -1,7 +1,7 @@
 #include <Eigen/LU>
 #include <moto/core/external_function.hpp>
-#include <moto/multibody/impl/euler.hpp>
-#include <moto/multibody/impl/euler_data.hpp>
+#include <moto/ocp/dynamics/euler.hpp>
+#include <moto/ocp/dynamics/euler_data.hpp>
 #include <moto/utils/codegen.hpp>
 
 namespace moto {

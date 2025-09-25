@@ -361,7 +361,7 @@ def create_phase_problem(step):
         else:
             if gait_setting[gait][idx]:
                 constr_to_disable += [model.f_f[f]]
-    phase_prob = prob.clone(moto.ocp.clone_config(deactivate_list=constr_to_disable))
+    phase_prob = prob.clone(moto.ocp.active_status_config(deactivate_list=constr_to_disable))
     return phase_prob
 
 
