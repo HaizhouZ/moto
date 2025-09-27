@@ -87,7 +87,7 @@ endif()
 
 include(cmake/installHelpers.cmake)
 
-add_subdirectory(example)
+# add_subdirectory(example)
 add_subdirectory(bindings)
 
 include(CTest)

@@ -5,9 +5,9 @@
 #include <numeric>
 
 // #define ENABLE_TIMED_BLOCK
+// #define SHOW_DETAIL_TIMING
 #include <moto/utils/timed_block.hpp>
 
-#define SHOW_DETAIL_TIMING
 
 namespace moto {
 ns_sqp::kkt_info ns_sqp::initialize() {

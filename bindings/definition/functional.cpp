@@ -9,7 +9,6 @@
 #include <type_cast.hpp>
 
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
-#include <moto/ocp/dynamics/euler_dynamics.hpp>
 
 namespace moto {
 shared_expr &cast_to_shared_expr(const nb::handle &h) {
@@ -242,19 +241,4 @@ void register_submodule_functional(nb::module_ &m) {
         .def(
             nb::init<const std::string &, approx_order, size_t>(),
             nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd);
-
-    nb::class_<euler_integrator, func>(m, "euler_integrator")
-        .def(
-            nb::init<const std::string &>(), nb::arg("name"))
-        .def("create_2nd_ord_lin", &euler_integrator::create_2nd_ord_lin,
-             nb::arg("name"), nb::arg("dim"), nb::arg("semi_implicit") = false,
-             "Create second order linear dynamics, returns position, next position, velocity, next velocity, acceleration")
-        .def("create_1st_ord_lin", &euler_integrator::create_1st_ord_lin,
-             nb::arg("name"), nb::arg("dim"),
-             "Create first order linear dynamics, returns position, next position, velocity")
-        .def("create_2nd_ord_ang", &euler_integrator::create_2nd_ord_ang,
-             nb::arg("name"), nb::arg("semi_implicit") = false,
-             "Create second order angular dynamics, returns quaternion, next quaternion, local angular velocity, next velocity, acceleration")
-        .def("set_dt", nb::overload_cast<scalar_t>(&euler_integrator::add_dt))
-        .def("set_dt", [](euler_integrator &self, const py_var_wrapper &dt) { self.add_dt(dt); }, nb::arg("dt"));
 }

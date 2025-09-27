@@ -3,7 +3,6 @@
 
 #include <moto/ocp/cost.hpp>
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
-#include <moto/ocp/dynamics/euler_dynamics.hpp>
 #include <moto/ocp/problem.hpp>
 #include <moto/solver/ipm/ipm_constr.hpp>
 namespace biped_srbd {

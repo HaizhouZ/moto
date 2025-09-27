@@ -289,7 +289,7 @@ class pinCasadiModel(cpin.Model):
 # dt = moto.inputs("dt", 1, default_val=0.02)
 dt_nom = moto.params("dt_nom", 1, default_val=0.02)
 dt = 0.02
-display = True
+display = False
 go2 = load("go2", display=display, verbose=True)
 q_d = np.copy(go2.q0)
 root_joint = pin.JointModelComposite()
@@ -341,8 +341,8 @@ total_gait_steps = steps * nodes_per_step
 stance_length = int((N_horizon - total_gait_steps) / 2)
 print(f"stance_length: {stance_length}, nodes_per_step: {nodes_per_step}")
 
-# gait = "trot"
-gait = "bound_fwd"
+gait = "trot"
+# gait = "bound_fwd"
 gait_setting = {
     "trot": [1, 1, 0, 0],
     "bound_fwd": [0, 0, 0, 0],
