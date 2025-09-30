@@ -99,8 +99,8 @@ class pinCasadiModel(cpin.Model):
                     name, semi_implicit=True
                 )
                 if q_nom is not None:
-                    self.quat.default_value = q_nom[3:self.nqb]
-                    self.quatn.default_value = q_nom[3:self.nqb]
+                    self.quat.default_value = q_nom[3 : self.nqb]
+                    self.quatn.default_value = q_nom[3 : self.nqb]
                 else:
                     self.quat.default_value = np.array([0.0, 0.0, 0.0, 1.0])
                     self.quatn.default_value = np.array([0.0, 0.0, 0.0, 1.0])
@@ -119,7 +119,7 @@ class pinCasadiModel(cpin.Model):
 
         cpin.forwardKinematics(self, self.data, self.q_stack, self.v_stack)
         cpin.updateFramePlacements(self, self.data)
-        
+
         if self.use_fwd_dyn:
             tau = cs.vcat([cs.SX.zeros(6), self.tq]) if self.is_floating_based else self.tq
             self.aba = cpin.aba(self, self.data, self.q_stack, self.v_stack, tau) * dt
@@ -139,13 +139,7 @@ class pinCasadiModel(cpin.Model):
         self.v_lim = v_lim
 
     def make_dynamics(self):
-        args = (
-            self.pos_args
-            + self.vel_args
-            + self.pos_args_n
-            + self.vel_args_n
-            + self.acc_args
-        )
+        args = self.pos_args + self.vel_args + self.pos_args_n + self.vel_args_n + self.acc_args
         if isinstance(self.dt, cs.SX):
             args.append(self.dt)
         if self.dense:
@@ -160,9 +154,7 @@ class pinCasadiModel(cpin.Model):
             #         moto.constr(self.name + "_id", in_arg, self.rnea[:6])]
             if self.use_fwd_dyn:
                 v_next = self.v + self.aba
-                return moto.dense_dynamics(
-                    self.name + "_fd", args, cs.vcat(out + [self.vn - v_next])
-                )
+                return moto.dense_dynamics(self.name + "_fd", args, cs.vcat(out + [self.vn - v_next]))
             else:
                 tau = cs.vcat([cs.SX.zeros(6), self.tq]) if self.is_floating_based else self.tq
                 return moto.dense_dynamics(self.name + "_id", args, cs.vcat(out + [self.rnea - tau * self.dt]))
@@ -173,19 +165,24 @@ class pinCasadiModel(cpin.Model):
                 args = self.pos_args + self.vel_args + self.acc_args + self.active_foot + self.f_f + [self.dt]
                 to_add.append(moto.constr(self.name + "_fb_id", args, self.rnea_base))
             return to_add
+
     def make_ee_pos_constr(self):
         self.r_des = moto.params("r_des", 3, default_val=np.zeros(3))
         self.quat_des = moto.params("quat_des", 4, default_val=np.array([0.0, 0.0, 0.0, 1.0]))
         ee_des = cpin.XYZQUATToSE3(cs.vcat([self.r_des, self.quat_des]))
         ee_pos = self.data.oMf[self.ee_id]
-        # return moto.constr("ee_constr", self.pos_args + [self.r_des, self.quat_des], cpin.log6(ee_pos.inverse() * ee_des).np)
+        # return moto.constr(
+        #     "ee_constr", self.pos_args + [self.r_des, self.quat_des], cpin.log6(ee_pos.inverse() * ee_des).np
+        # )
         res = cpin.log6(ee_pos.inverse() * ee_des).np
-        return moto.constr("ee_constr_ineq", self.pos_args + [self.r_des, self.quat_des], cs.vcat([res, -res])).as_ineq()
-        # W_ee_cost = moto.params("W_ee_cost", 1, default_val=4.0)
+        # return moto.constr("ee_constr_ineq", self.pos_args + [self.r_des, self.quat_des], cs.vcat([res, -res])).as_ineq()
+        W_ee_cost = moto.params("W_ee_cost", 1, default_val=4.0)
         # ee_lifted = moto.inputs("ee_lifted", 6, default_val=np.zeros(6))
-        # return moto.cost("ee_cost", self.pos_args + [self.r_des, self.quat_des, W_ee_cost], W_ee_cost * cs.sumsqr(cpin.log6(ee_pos.inverse() * ee_des).np)).as_terminal()
-        # return [moto.cost("ee_cost_lifted", [ee_lifted, W_ee_cost], W_ee_cost * cs.sumsqr(ee_lifted)), 
-        #         moto.constr("ee_constr_lifted", self.pos_args + [self.r_des, self.quat_des, ee_lifted], ee_lifted - cpin.log6(ee_pos.inverse() * ee_des).np)]
+        return moto.cost("ee_cost", self.pos_args + [self.r_des, self.quat_des, W_ee_cost], W_ee_cost * cs.sumsqr(res)).set_gauss_newton().as_terminal()
+        # return [
+        #     moto.cost("ee_cost_lifted", [ee_lifted, W_ee_cost], W_ee_cost * cs.sumsqr(ee_lifted)).as_terminal(),
+        #     moto.constr("ee_constr_lifted", self.pos_args + [self.r_des, self.quat_des, ee_lifted], ee_lifted - res),
+        # ]
 
     def make_joint_limit_constr(self):
         q_min = self.fmodel.lowerPositionLimit[-self.nj :]
@@ -210,16 +207,13 @@ class pinCasadiModel(cpin.Model):
         q_nom_res = self.q_stack - self.q_nom
         if self.is_floating_based:
             state_cost = (
-                100.0 * cs.sumsqr(q_nom_res[:self.nqb])
-                + 1 * cs.sumsqr(q_nom_res[self.nqb:])
+                100.0 * cs.sumsqr(q_nom_res[: self.nqb])
+                + 1 * cs.sumsqr(q_nom_res[self.nqb :])
                 + 1.0 * cs.sumsqr(self.v_stack[:6])
                 + 0.01 * cs.sumsqr(self.v_stack[6:])
             )
         else:
-            state_cost = (
-                0.1 * cs.sumsqr(q_nom_res)
-                + 0.1 * cs.sumsqr(self.v_stack)
-            )
+            state_cost = 0.1 * cs.sumsqr(q_nom_res) + 0.1 * cs.sumsqr(self.v_stack)
         state_args = self.pos_args + self.vel_args
         cost = moto.cost("c", state_args + [self.q_nom], state_cost).set_diag_hess()
         if terminal:
@@ -270,9 +264,36 @@ g = sqp.graph
 n0 = g.set_head(g.add(sqp.create_node(prob)))
 n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
 g.add_edge(n0, n1, N_horizon)
+cfg = [
+    [
+        -0.4413381175136468,
+        -0.3681474968347521,
+        0.5048906263414011,
+        -0.3459516731344637,
+        -0.012699514214883486,
+        0.9256556113790925,
+        0.1527018379606805,
+    ],
+    [
+        -0.39183453679515345,
+        2.7132996805605147,
+        2.7068577763863484,
+        1.3882845155376211,
+        -1.3553245206176137,
+        1.498755302649343,
+    ],
+]
 
-n1.data.value[model.r_des] = np.array([0.4, 0.4, 0.4])
-n1.data.value[model.quat_des] = np.array([0.0, 0.0, 0.0, 1.0])
+n1.data.value[model.r_des] = np.array(cfg[0][:3])
+n1.data.value[model.quat_des] = np.array(cfg[0][3:7])
+
+
+def set_initial_state(data: moto.sqp.data_type):
+    data.value[model.q] = np.array(cfg[1])
+    data.value[model.qn] = np.array(cfg[1])
+
+
+sqp.apply_forward(set_initial_state)
 
 sqp.settings.mu = 1
 # sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
@@ -319,6 +340,7 @@ sqp.apply_forward(get_sym)
 if display:
 
     import time
+
     data = model.fmodel.createData()
     while True:
         for i in range(len(q_res)):

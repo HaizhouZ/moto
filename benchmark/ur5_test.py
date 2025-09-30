@@ -302,9 +302,9 @@ for (idx_cfg, cfg) in tqdm(enumerate(config), total=len(config)):
     # sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
     sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
     sqp.settings.ipm_conditional_corrector = True
-    sqp.settings.prim_tol = 1e-4
-    sqp.settings.dual_tol = 1e-4
-    sqp.settings.comp_tol = 1e-4
+    sqp.settings.prim_tol = 1e-3
+    sqp.settings.dual_tol = 1e-3
+    sqp.settings.comp_tol = 1e-3
 
     start = time.perf_counter()
     info = sqp.update(100, verbose=False)
@@ -316,6 +316,7 @@ for (idx_cfg, cfg) in tqdm(enumerate(config), total=len(config)):
         {
             "label": "",
             "config": idx_cfg,
+            "config_data": cfg,
             "solved": info.solved,
             "num_iter": info.num_iter,
             "time": tim,
