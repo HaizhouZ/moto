@@ -4,8 +4,8 @@
 #include <moto/utils/field_conversion.hpp>
 #include <numeric>
 
-// #define ENABLE_TIMED_BLOCK
-// #define SHOW_DETAIL_TIMING
+#define ENABLE_TIMED_BLOCK
+#define SHOW_DETAIL_TIMING
 #include <moto/utils/timed_block.hpp>
 
 

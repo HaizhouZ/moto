@@ -9,6 +9,17 @@ void register_submodule_codegen(nb::module_ &m) {
     //     .def("wait_until_finished", &utils::cs_codegen::worker::wait_until_finished,
     //          "Wait until the code generation task is finished.");
     nb::class_<utils::cs_codegen::job_list>(m, "codegen_job_list")
+        .def(nb::init<>())
+        .def("add", [](utils::cs_codegen::job_list &self, utils::cs_codegen::job_list::job_type &&w) { return self.add(std::move(w)); },
+             nb::arg("job"), "Add a job to the job list.")
+        .def("add", [](utils::cs_codegen::job_list &self, utils::cs_codegen::job_list &&other) { return self.add(std::move(other)); },
+             nb::arg("other"), "Add another job list to this job list.")
+        .def("add_callback", &utils::cs_codegen::job_list::template add_callback<std::function<void()>>,
+             nb::arg("callback"), "Add a callback to be executed after each job.")
+        .def("add_callback", &utils::cs_codegen::job_list::template add_callback<std::function<void(size_t)>>,
+             nb::arg("callback"), "Add a callback to be executed after each job with the job index.")
+        .def("add_finish_callback", &utils::cs_codegen::job_list::template add_finish_callback<std::function<void()>>,
+             nb::arg("callback"), "Add a callback to be executed after all jobs are finished.")
         .def("wait_until_finished", &utils::cs_codegen::job_list::wait_until_finished,
              "Wait until all code generation tasks in the list are finished.");
     nb::class_<utils::cs_codegen::task>(m, "codegen_task")

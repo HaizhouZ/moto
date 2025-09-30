@@ -8,7 +8,6 @@
 #include <moto/ocp/problem.hpp>
 
 namespace moto {
-static bool impl_func_gen_delegated_ = false; ///< true if the codegen is delegated to @ref moto::func_codegen
 
 func_approx_data_ptr_t generic_func::create_approx_data(sym_data &primal, merit_data &raw, shared_data &shared) const {
     if (field() - __dyn >= field::num_func)
@@ -92,71 +91,7 @@ void generic_func::set_from_casadi(const var_inarg_list &in_args, const cs::SX &
  * @brief Code generation helper for functions
  *
  */
-struct func_codegen {
-    void make_codegen_task(generic_func *f);
-
-    static auto &get() {
-        static func_codegen instance; ///< static instance of the codegen helper
-        return instance;
-    } ///< get the singleton instance
-
-  private:
-    std::mutex queue_mtx_;             //, terminate_mtx_;
-    std::condition_variable queue_cv_; //, terminate_cv_;
-    utils::cs_codegen::job_list job_buffer_;
-    bool terminated_ = false; ///< flag to terminate the server thread
-    std::thread server_;
-
-    void add_job(utils::cs_codegen::job_list &&w) {
-        std::lock_guard<std::mutex> lock(queue_mtx_);
-        job_buffer_.add(std::move(w));
-        queue_cv_.notify_one();
-    } ///< add a job to the codegen worker
-    func_codegen() {
-        server_ = std::thread([this]() {
-            server(); ///< start the server thread
-        });
-        server_.detach(); ///< detach the server thread
-    }
-    ~func_codegen() {
-        {
-            std::lock_guard<std::mutex> lock(queue_mtx_);
-            terminated_ = true;     ///< set the termination flag
-            queue_cv_.notify_one(); ///< notify the server to terminate}
-        }
-        // std::unique_lock<std::mutex> lock(terminate_mtx_);
-        // terminate_cv_.wait(lock, [this] { return terminated_ == false; });
-    } ///< destructor to clean up the server thread
-    void server() {
-        size_t n_threads = omp_get_max_threads();
-        std::mutex thread_mtx_;
-        std::condition_variable thread_cv_;
-        while (true) {
-            std::unique_lock<std::mutex> lock(queue_mtx_);
-            queue_cv_.wait(lock, [this] { return !job_buffer_.jobs.empty() || terminated_; });
-            if (terminated_) {
-                terminated_ = false;
-                break; ///< exit the loop if terminated
-            }
-            auto jobs = std::move(job_buffer_.jobs);
-            job_buffer_.jobs.clear();
-            lock.unlock();
-            for (auto &w : jobs) {
-                std::unique_lock<std::mutex> thread_lock(thread_mtx_);
-                thread_cv_.wait(thread_lock, [&n_threads] { return n_threads > 0; });
-                n_threads--;
-                std::thread([&, w = std::move(w)]() mutable {
-                    w();
-                    std::lock_guard<std::mutex> thread_lock(thread_mtx_);
-                    n_threads++;
-                    thread_cv_.notify_one(); ///< notify the server that the job is done
-                }).detach();
-            }
-        }
-        // std::lock_guard<std::mutex> lock(terminate_mtx_);
-        // terminate_cv_.notify_one();
-    } ///< daemon to wait for codegen jobs
-};
+void make_codegen_task(generic_func *f);
 
 generic_func generic_func::share(bool copy_args, const var_inarg_list &skip_copy_args) const {
     if (!wait_until_ready())
@@ -181,10 +116,8 @@ generic_func generic_func::share(bool copy_args, const var_inarg_list &skip_copy
             s_new->name() = s.name() + "_copy";
             if (bool(s.dual()) && has_arg(s.dual())) {
                 skip_copy[sym_uid_idx_.at(s.dual()->uid())] = true;
-                auto s_dual = s.dual()->clone();
-                s_dual->name() = s.dual()->name() + "_copy";
-                s_new->dual() = s_dual;
-                s_dual->dual() = s_new;
+                auto s_dual = s.dual();
+                s_dual->name() += "_copy";
             }
             f.substitute(s, s_new);
         }
@@ -226,7 +159,27 @@ void generic_func::finalize_impl() {
         hess_sp_.assign(in_args_.size(), std::vector<sparsity>(in_args_.size(), default_hess_sp_));
     }
     if (gen_.task_ && !gen_.task_->sx_output.is_empty()) {
-        func_codegen::get().make_codegen_task(this);
+        utils::cs_codegen::task &t = *gen_.task_;
+        t.func_name = name_;
+        t.sx_inputs = in_args_;
+        t.gen_eval = order_ >= approx_order::zero;
+        t.gen_jacobian = order_ >= approx_order::first;
+        t.gen_hessian = order_ >= approx_order::second;
+        t.append_value = field_ == __cost;
+        t.append_jac = field_ == __cost;
+        t.hess_sp = &hess_sp_;
+        t.verbose = false;
+        t.force_recompile = false;
+        t.keep_generated_src = true;
+        // constexpr std::string_view debug_compile_flag = "-g -O0 -march=native";
+        // t.jac_compile_flag = debug_compile_flag;
+        // t.hess_compile_flag = debug_compile_flag;
+        utils::cs_codegen::server::add_job(
+            std::move(utils::cs_codegen::generate_and_compile(t)
+                          .add_finish_callback([this]() {
+                              load_external_impl(); ///< load the generated code
+                              set_ready_status(true);
+                          })));
     } else {
         set_ready_status(true); ///< set the ready status
     }
@@ -337,37 +290,6 @@ generic_func::gen_info::~gen_info() {
     }
 }
 
-void func_codegen::make_codegen_task(generic_func *f) {
-    utils::cs_codegen::task &t = *f->gen_.task_;
-    t.func_name = f->name_;
-    t.sx_inputs = f->in_args_;
-    t.gen_eval = f->order_ >= approx_order::zero;
-    t.gen_jacobian = f->order_ >= approx_order::first;
-    t.gen_hessian = f->order_ >= approx_order::second;
-    t.append_value = f->field_ == __cost;
-    t.append_jac = f->field_ == __cost;
-    t.hess_sp = &f->hess_sp_;
-    t.verbose = false;
-    t.force_recompile = false;
-    t.keep_generated_src = true;
-    // constexpr std::string_view debug_compile_flag = "-g -O0 -march=native";
-    // t.jac_compile_flag = debug_compile_flag;
-    // t.hess_compile_flag = debug_compile_flag;
-    auto workers = utils::cs_codegen::generate_and_compile(std::move(t));
-    decltype(workers) workers_set_ready_status;
-    std::shared_ptr<std::atomic<size_t>> n_jobs = std::make_shared<std::atomic<size_t>>(workers.jobs.size());
-    for (auto &w : workers.jobs) {
-        if (w) {
-            workers_set_ready_status.add([w = std::move(w), n_jobs, f]() mutable {
-                w(); ///< execute the codegen job
-                (*n_jobs)--;
-                if (*n_jobs == 0) {
-                    f->load_external_impl(); ///< load the generated code
-                    f->set_ready_status(true);
-                }
-            });
-        }
-    }
-    add_job(std::move(workers_set_ready_status));
+void make_codegen_task(generic_func *f) {
 }
 } // namespace moto

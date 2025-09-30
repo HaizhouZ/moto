@@ -70,7 +70,6 @@ class generic_func : public expr {
 
     std::unordered_map<size_t, size_t> sym_uid_idx_;
 
-    friend class func_codegen;
     friend class func_arg_map;
     friend class func_approx_data;
 

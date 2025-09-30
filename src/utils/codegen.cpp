@@ -490,7 +490,7 @@ void task::finalize(job_list &jobs_) {
     }
 }
 // Public entry point to start code generation
-job_list generate_and_compile(task &&_task) {
+job_list generate_and_compile(task &_task) {
     job_list jobs_tmp;
     _task.finalize(jobs_tmp);
     if (_task.extra_task) {
@@ -510,6 +510,36 @@ job_list generate_and_compile(task &&_task) {
 //     impl::jobs_.jobs.clear();
 //     std::cout << "All code generation completed." << std::endl;
 // }
+
+void server::routine() {
+    size_t n_threads = omp_get_max_threads();
+    std::mutex thread_mtx_;
+    std::condition_variable thread_cv_;
+    while (true) {
+        std::unique_lock<std::mutex> lock(queue_mtx_);
+        queue_cv_.wait(lock, [this] { return !job_buffer_.jobs.empty() || terminated_; });
+        if (terminated_) {
+            terminated_ = false;
+            break; ///< exit the loop if terminated
+        }
+        auto jobs = std::move(job_buffer_.jobs);
+        job_buffer_.jobs.clear();
+        lock.unlock();
+        for (auto &w : jobs) {
+            std::unique_lock<std::mutex> thread_lock(thread_mtx_);
+            thread_cv_.wait(thread_lock, [&n_threads] { return n_threads > 0; });
+            n_threads--;
+            std::thread([&, w = std::move(w)]() mutable {
+                w();
+                std::lock_guard<std::mutex> thread_lock(thread_mtx_);
+                n_threads++;
+                thread_cv_.notify_one(); ///< notify the server that the job is done
+            }).detach();
+        }
+    }
+    // std::lock_guard<std::mutex> lock(terminate_mtx_);
+    // terminate_cv_.notify_one();
+} ///< daemon to wait for codegen jobs
 } // namespace cs_codegen
 } // namespace utils
 } // namespace moto

@@ -3,6 +3,7 @@
 
 #include <casadi/casadi.hpp>
 #include <moto/core/expr.hpp>
+#include <moto/utils/func_traits.hpp>
 
 namespace moto {
 class sym;
@@ -59,8 +60,6 @@ class sym : public expr, public cs::SX {
      */
     sym(const std::string &name, size_t dim, field_t type, default_val_t default_val = default_val_none_t());
 
-    std::function<void(vector_ref, vector_ref, vector_ref, scalar_t)> integrator_;
-
   public:
     sym(sym &&rhs) = default;            ///< move constructor
     sym &operator=(sym &&rhs) = default; ///< move assignment operator
@@ -74,11 +73,26 @@ class sym : public expr, public cs::SX {
 
     void set_default_value(const default_val_t &default_val); ///< set the default value of the symbolic variable
 
-    void integrate(vector_ref x, vector_ref dx, vector_ref out, scalar_t alpha = 1.0) const {
-        integrator_(x, dx, out, alpha);
+    virtual cs::SX symbolic_integrate(const cs::SX &x, const cs::SX &dx) const {
+        return x + dx;
     } ///< integrate the variable by dx with step size alpha
 
-    PROPERTY(integrator)                                        ///< integrator function
+    virtual cs::SX symbolic_difference(const cs::SX &x1, const cs::SX &x0) const {
+        return x1 - x0;
+    } ///< compute the difference between two variables x1 - x0
+    /// @brief integrate the variable by dx with step size alpha
+    virtual void integrate(vector_ref x, vector_ref dx, vector_ref out, scalar_t alpha = 1.0) const;
+
+    /// @brief compute the difference between two variables x1 - x0
+    virtual void difference(vector_ref x1, vector_ref x0, vector_ref out) const;
+
+  protected:
+    using integrate_type = utils::func_traits<decltype(&sym::integrate)>::std_func_type;
+    std::shared_ptr<integrate_type> integrator_; ///< integrator function
+    using difference_type = utils::func_traits<decltype(&sym::difference)>::std_func_type;
+    std::shared_ptr<difference_type> differencer_; ///< differencer function
+
+  public:
     auto get_next_name() const { return name_ + next_suffix_; } ///< get the name of the next state variable
     /// @brief make a symbolic input
     static var inputs(const std::string &name, size_t dim, default_val_t default_val = default_val_none_t()) {
@@ -125,7 +139,18 @@ class sym : public expr, public cs::SX {
         return sym(name, dim, field, default_val);
     } ///< make a symbolic primitive
 
-    var clone() const { return var(sym(*this)); } ///< clone the symbolic variable
+    /// clone the symbolic variable
+    virtual var clone() const;
+
+    template <typename derived = sym>
+        requires std::is_base_of_v<sym, std::remove_cvref_t<derived>>
+    var clone_states() const {
+        auto s = var(derived(*this));
+        auto d = var(derived(dual_));
+        s->dual_ = d;
+        d->dual_ = s;
+        return s;
+    }
 };
 inline sym *var::operator->() const {
     return static_cast<sym *>(base::operator->());

@@ -42,6 +42,8 @@ struct null_init_map : public Base {
 };
 using aligned_map_t = null_init_map<matrix>;
 using aligned_vector_map_t = null_init_map<vector>;
+using unaligned_map_t = null_init_map<matrix, false>;
+using unaligned_vector_map_t = null_init_map<vector, false>;
 
 #define def_ptr(name) typedef std::shared_ptr<name> name##_ptr_t
 #define def_raw_ptr(name) typedef name *name##_ptr_t

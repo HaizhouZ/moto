@@ -18,6 +18,7 @@ struct func_traits<R(Args...)> {
     static constexpr size_t arg_num = sizeof...(Args);
     template <size_t i>
     using arg_type = std::tuple_element_t<i, arg_types>;
+    using std_func_type = std::function<R(Args...)>;
 };
 
 // Function pointers R(*)(Args...)
