@@ -60,6 +60,9 @@ class sym : public expr, public cs::SX {
      */
     sym(const std::string &name, size_t dim, field_t type, default_val_t default_val = default_val_none_t());
 
+    bool has_non_trivial_integration_ = false; ///< whether the symbolic variable has non-trivial integration
+    bool has_non_trivial_difference_ = false;  ///< whether the symbolic variable has non-trivial difference
+
   public:
     sym(sym &&rhs) = default;            ///< move constructor
     sym &operator=(sym &&rhs) = default; ///< move assignment operator
@@ -70,6 +73,9 @@ class sym : public expr, public cs::SX {
 
     PROPERTY(default_value) ///< default value of the symbolic variable
     PROPERTY(dual)          ///< dual variable, only used for state variables
+
+    CONST_PROPERTY(has_non_trivial_integration) ///< whether the symbolic variable has non-trivial integration
+    CONST_PROPERTY(has_non_trivial_difference)  ///< whether the symbolic variable has non-trivial difference
 
     void set_default_value(const default_val_t &default_val); ///< set the default value of the symbolic variable
 

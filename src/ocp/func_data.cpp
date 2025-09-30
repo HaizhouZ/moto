@@ -55,9 +55,11 @@ void sym::finalize_impl() {
         if (!integrator_) { // maybe set by derived class
             auto dx = sym::usr_var(name_ + "dx", tdim_);
             auto step = sym::usr_var(name_ + "stepsize", 1);
-            auto out = symbolic_integrate(*this, dx * step);                    // dimension is dim_
-            if (tdim_ != dim_ ||                                                // if not equal, should not call default integrate
+            auto out = symbolic_integrate(*this, dx * step);                                    // dimension is dim_
+            if (tdim_ != dim_ ||                                                                // if not equal, should not call default integrate
                 !cs::SX::simplify(out - sym::symbolic_integrate(*this, dx * step)).is_zero()) { // if not default, generate function
+                has_non_trivial_integration_ = true;
+                dual_->has_non_trivial_integration_ = true;
                 utils::cs_codegen::task int_gen_task;
                 int_gen_task.func_name = name_ + "_integrate";
                 int_gen_task.sx_inputs = {*this, dx, step};
@@ -82,6 +84,8 @@ void sym::finalize_impl() {
                 throw std::runtime_error(fmt::format("difference function output dimension mismatch for sym {} in field {}, expected {}, got {}",
                                                      name(), field::name(field_), tdim_, out.size1()));
             if (!cs::SX::simplify(out - sym::symbolic_difference(x1, x0)).is_zero()) { // if not default, generate function
+                has_non_trivial_difference_ = true;
+                dual_->has_non_trivial_difference_ = true;
                 utils::cs_codegen::task diff_gen_task;
                 diff_gen_task.func_name = name_ + "_difference";
                 diff_gen_task.sx_inputs = {x1, x0};

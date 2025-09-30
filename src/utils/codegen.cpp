@@ -320,17 +320,29 @@ void task::finalize(job_list &jobs_) {
         if (s.field() == __p)
             excluded.insert(s.uid());
     std::map<size_t, cs::SX> external_jac;
-    for (auto &[in_arg, jac] : ext_jac)
+    for (auto &[in_arg, jac] : ext_jac) {
+        if (jac.columns() != in_arg->tdim() || jac.rows() != sx_output.rows())
+            throw std::runtime_error(fmt::format("Jacobian dimension mismatch for sym {} in field {}, expected ({}, {}), got ({}, {})",
+                                                 in_arg->name(), in_arg->field(), sx_output.rows(), in_arg->tdim(), jac.rows(), jac.columns()));
         external_jac[in_arg->uid()] = std::move(jac);
+    }
 
     std::map<std::pair<size_t, size_t>, cs::SX> external_hess;
     for (auto &[in_arg0, in_arg1, hess] : ext_hess) {
         size_t uid0 = in_arg0->uid();
         size_t uid1 = in_arg1->uid();
         if (uid0 < uid1) {
+            if (hess.rows() != in_arg0->tdim() || hess.columns() != in_arg1->tdim())
+                throw std::runtime_error(fmt::format("Hessian dimension mismatch for syms {} (field {}) and {} (field {}), expected ({}, {}), got ({}, {})",
+                                                     in_arg0->name(), in_arg0->field(), in_arg1->name(), in_arg1->field(),
+                                                     in_arg0->tdim(), in_arg1->tdim(), hess.rows(), hess.columns()));
             external_hess[{uid0, uid1}] = std::move(hess);
         } else {
-            external_hess[{uid1, uid0}] = std::move(hess);
+            if (hess.rows() != in_arg1->tdim() || hess.columns() != in_arg0->tdim())
+                throw std::runtime_error(fmt::format("Hessian dimension mismatch for syms {} (field {}) and {} (field {}), expected ({}, {}), got ({}, {})",
+                                                     in_arg1->name(), in_arg1->field(), in_arg0->name(), in_arg0->field(),
+                                                     in_arg1->tdim(), in_arg0->tdim(), hess.rows(), hess.columns()));
+            external_hess[{uid1, uid0}] = hess.T();
         }
     }
     if (!ext_jac.empty())
@@ -346,6 +358,13 @@ void task::finalize(job_list &jobs_) {
         merit_jac_for_hess = true;
     }
 
+    auto get_dstep_ds = [](const sym &s) -> cs::SX {
+        /// @todo : this assumes affine dependence on step size, which may not be true for all cases (i.e., hessian wrt step size will be zero)
+        /// for example if the integration is s + step ^ 2, the jacobian will contain step which is not an input to the function (is it necessary?)
+        auto step = cs::SX::sym(s.name() + "_step", s.tdim());
+        return cs::SX::jacobian(s.symbolic_integrate(s, step), step);
+    };
+
     std::vector<cs::SX> jacs;
     std::vector<cs::SX> jacs_copy;
     // generate jacobian
@@ -356,7 +375,11 @@ void task::finalize(job_list &jobs_) {
                     jacs.push_back(external_jac[s.uid()]);
                     continue;
                 }
-                jacs.push_back(cs::SX::jacobian(sx_output, s));
+                if (s.has_non_trivial_integration()) {
+                    // get jacobian wrt step (variation)
+                    auto j = cs::SX::mtimes(cs::SX::jacobian(sx_output, s), get_dstep_ds(s));
+                } else
+                    jacs.push_back(cs::SX::jacobian(sx_output, s));
             } else
                 jacs.push_back(cs::SX());
         }
@@ -368,6 +391,7 @@ void task::finalize(job_list &jobs_) {
                     throw std::runtime_error("Cannot compute hessian when multiple jacobian outputs are specified.");
             } else {
                 if (check_jac_ad) {
+                    /// @warning not applicable to nontrivial integration
                     std::vector<cs::SX> sx_inputs_cs;
                     std::vector<cs::SX> jac_ad;
                     for (sym &e : sx_inputs) {
@@ -414,8 +438,7 @@ void task::finalize(job_list &jobs_) {
     std::vector<std::vector<cs::SX>> hess;
     if (gen_hessian) {
         hess.resize(sx_inputs.size());
-        // use AD of vjp to compute hessian
-
+        // use AD of vjp to compute hessian if merit_jac_for_hess is true
         auto lbd = merit_jac_for_hess ? cs::SX::sym(func_name + "_lbd", sx_output.rows()) : cs::SX();
         for (size_t idx_i = 0; idx_i < sx_inputs.size(); ++idx_i) {
             sym &i = sx_inputs[idx_i];
@@ -456,6 +479,8 @@ void task::finalize(job_list &jobs_) {
                     if (hess_sp != nullptr)
                         (*hess_sp)[idx_i][idx_j] = sparsity::unknown; // no hessian
                     continue;
+                } else if (j.has_non_trivial_integration()) { // apply integration
+                    hess[idx_i][idx_j] = cs::SX::mtimes(hess[idx_i][idx_j], get_dstep_ds(j));
                 }
                 if (hess[idx_i][idx_j].is_square() && hess[idx_i][idx_j].sparsity().is_diag()) {
                     bool is_eye = false;
