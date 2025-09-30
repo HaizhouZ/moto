@@ -23,7 +23,7 @@ set(MOTO_COMPILE_OPTS -march=native -fPIC -Wno-interference-size)
 set(MOTO_COMPILE_DEFS MOTO_USE_OMP)
 set(MOTO_COMPILE_FEATURES cxx_std_20)
 
-option(BUILD_MULTIBODY "Build multibody module" OFF)
+option(BUILD_MULTIBODY "Build multibody module" ON)
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
 
@@ -80,8 +80,8 @@ if (BUILD_MULTIBODY MATCHES ON)
   add_library(moto_multibody SHARED ${MB_SRC_FILES})
   add_project_dependency(pinocchio REQUIRED)
   target_add_deps(moto_multibody)
-  target_compile_definitions(moto_multibody PUBLIC MOTO_WITH_PINOCCHIO COAL_DISABLE_HPP_FCL_WARNINGS)
-  target_link_libraries(moto_multibody PUBLIC ${PROJECT_NAME} pinocchio::pinocchio_parsers)
+  # target_compile_definitions(moto_multibody PUBLIC MOTO_WITH_PINOCCHIO COAL_DISABLE_HPP_FCL_WARNINGS)
+  # target_link_libraries(moto_multibody PUBLIC ${PROJECT_NAME} pinocchio::pinocchio_parsers)
   list(APPEND PLUGIN_LIBS moto_multibody)
 endif()
 

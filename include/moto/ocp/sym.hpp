@@ -15,7 +15,7 @@ struct var : public shared_expr, public cs::SX {
     sym *operator->() const; ///< convert to sym
     var() = default;         ///< default constructor, will create a not-a-number symbolic variable
     template <typename T, typename T_ = std::remove_cvref_t<T>>
-        requires std::is_same_v<sym, T_>
+        requires std::is_base_of_v<sym, T_>
     var(T &&rhs) noexcept : base(std::forward<T>(rhs)), cs::SX((sym &)*this) {}
     var(var &&rhs) noexcept : base(std::move(rhs)), cs::SX(static_cast<cs::SX &&>(rhs)) {}
     var(const std::reference_wrapper<sym> &rhs) noexcept : var((const sym &)rhs) {}
@@ -151,8 +151,8 @@ class sym : public expr, public cs::SX {
     template <typename derived = sym>
         requires std::is_base_of_v<sym, std::remove_cvref_t<derived>>
     var clone_states() const {
-        auto s = var(derived(*this));
-        auto d = var(derived(dual_));
+        auto s = var(derived((const derived &)*this));
+        auto d = var(derived((const derived &)dual_));
         s->dual_ = d;
         d->dual_ = s;
         return s;

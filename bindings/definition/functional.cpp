@@ -112,16 +112,25 @@ void register_submodule_functional(nb::module_ &m) {
         .def("finalize", [](shared_expr &self, bool block_until_ready) { self->finalize(block_until_ready); }, nb::arg("block_until_ready") = true)
         .def("wait_until_ready", [](shared_expr &self) { return self->wait_until_ready(); })
         .def_prop_ro("finalized", [](expr &self) { return self.finalized(); })
-        .def_prop_rw("default_active_status",
-                    [](expr &self) { return self.default_active_status(); },
-                    [](expr &self, bool value) { self.default_active_status() = value; })
+        .def_prop_rw("default_active_status", [](expr &self) { return self.default_active_status(); }, [](expr &self, bool value) { self.default_active_status() = value; })
         .def("__bool__", &shared_expr::operator bool);
 
     nb::class_<var, shared_expr>(m, "var")
         .def("__str__", [](const var &v) { return fmt::format("var(name='{}', dim={}, field={}, uid={})",
                                                               v->name(), v->dim(), v->field(), v->uid()); })
         .def_prop_rw("default_value", [](var &self) { return self->default_value(); }, [](var &self, const sym::default_val_t &value) { self->set_default_value(value); })
-        .def("to_sx", [](var &v) { return (cs::SX &)static_cast<sym &>(v); }, nb::rv_policy::reference_internal);
+        .def("to_sx", [](var &v) { return (cs::SX &)static_cast<sym &>(v); }, nb::rv_policy::reference_internal)
+        .def("clone", [](const var &self) { return self->clone(); })
+        .def("symbolic_integrate", [](const var &self, const cs::SX &x, const cs::SX &dx) { return self->symbolic_integrate(x, dx); }, nb::arg("x"), nb::arg("dx"))
+        .def("symbolic_difference", [](const var &self, const cs::SX &x1, const cs::SX &x0) { return self->symbolic_difference(x1, x0); }, nb::arg("x1"), nb::arg("x0"), "difference from x0 to x1, i.e., x1 - x0")
+        .def("integrate", [](const var &self, moto::vector_ref x, moto::vector_ref dx, moto::scalar_t alpha) { 
+            vector tmp(self->dim());
+            self->integrate(x, dx, tmp, alpha);
+            return tmp; }, nb::arg("x"), nb::arg("dx"), nb::arg("alpha") = 1.0)
+        .def("difference", [](const var &self, moto::vector_ref x1, moto::vector_ref x0) { 
+            vector tmp(self->dim());
+            self->difference(x1, x0, tmp);
+            return tmp; }, nb::arg("x1"), nb::arg("x0"));
 
     m.def(
         "create_sym",
@@ -168,17 +177,9 @@ void register_submodule_functional(nb::module_ &m) {
         .def("enable_if_all", [](func &self, const expr_inarg_list &args) { self->enable_if_all(args); }, nb::arg("args"))
         .def("disable_if_any", [](func &self, const expr_inarg_list &args) { self->disable_if_any(args); }, nb::arg("args"))
         .def("enable_if_any", [](func &self, const expr_inarg_list &args) { self->enable_if_any(args); }, nb::arg("args"))
-        .def(
-            "add_argument",
-            [](func &self, const py_var_wrapper &v) { self->add_argument((var &)v); },
-            nb::arg("in"))
-        .def(
-            "add_arguments",
-            [](func &self, const var_inarg_list &args) { self->add_arguments(args); })
-        .def(
-            "create_approx_data",
-            [](func &self, sym_data &primal, merit_data &raw, shared_data &shared) { return self->create_approx_data(primal, raw, shared); },
-            nb::arg("primal"), nb::arg("raw"), nb::arg("shared"));
+        .def("add_argument", [](func &self, const py_var_wrapper &v) { self->add_argument((var &)v); }, nb::arg("in"))
+        .def("add_arguments", [](func &self, const var_inarg_list &args) { self->add_arguments(args); })
+        .def("create_approx_data", [](func &self, sym_data &primal, merit_data &raw, shared_data &shared) { return self->create_approx_data(primal, raw, shared); }, nb::arg("primal"), nb::arg("raw"), nb::arg("shared"));
 
     nb::class_<constr, func>(m, "constr")
         .def(
