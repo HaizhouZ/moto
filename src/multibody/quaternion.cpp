@@ -16,7 +16,7 @@ cs::SX quaternion::inverse(const cs::SX &q) {
     return cs::SX::vertcat(std::vector{-q(0), -q(1), -q(2), q(3)});
 }
 /// @brief identity quaternion [0, 0, 0, 1]
-cs::SX symbolic_identity() {
+cs::SX quaternion::symbolic_identity() {
     static auto id = cs::SX::vertcat(std::vector{cs::SX::zeros(3), cs::SX(1.)});
     return id;
 }

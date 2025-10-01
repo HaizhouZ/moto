@@ -70,6 +70,7 @@ class sym : public expr, public cs::SX {
     using expr::dim;
     using expr::name; ///< name of the symbolic variable
     using expr::operator bool;
+    using expr::dep;
 
     PROPERTY(default_value) ///< default value of the symbolic variable
     PROPERTY(dual)          ///< dual variable, only used for state variables
@@ -98,6 +99,13 @@ class sym : public expr, public cs::SX {
     using difference_type = utils::func_traits<decltype(&sym::difference)>::std_func_type;
     std::shared_ptr<difference_type> differencer_; ///< differencer function
 
+    static void setup_states(const var &x, const var &y) { ///< setup the dual state variables
+        x->dual_ = y;
+        y->dual_ = x;
+        y->dep().clear();
+        y->add_dep(x);
+    }
+
   public:
     auto get_next_name() const { return name_ + next_suffix_; } ///< get the name of the next state variable
     /// @brief make a symbolic input
@@ -112,12 +120,12 @@ class sym : public expr, public cs::SX {
     static auto states(const std::string &name, size_t dim, default_val_t default_val = default_val_none_t()) {
         auto temp = var(sym(name, dim, __x, default_val));
         auto next = var(sym(temp->get_next_name(), dim, __y, default_val));
-        temp->dual_ = next;
-        next->dual_ = temp;
+        setup_states(temp, next);
         return std::make_pair(std::move(temp), std::move(next));
     }
     static auto state(const std::string &name, size_t dim, default_val_t default_val = default_val_none_t()) {
         auto [x, y] = states(name, dim, default_val);
+        setup_states(x, y);
         return x;
     }
     const var &next() const {
@@ -146,18 +154,29 @@ class sym : public expr, public cs::SX {
     } ///< make a symbolic primitive
 
     /// clone the symbolic variable
-    virtual var clone() const;
+    virtual var clone(const std::string &name) const;
 
+  protected:
+    /// clone the state variable and its dual state
     template <typename derived = sym>
         requires std::is_base_of_v<sym, std::remove_cvref_t<derived>>
-    var clone_states() const {
-        auto s = var(derived((const derived &)*this));
-        auto d = var(derived((const derived &)dual_));
-        s->dual_ = d;
-        d->dual_ = s;
+    var clone_states(const std::string &name) const {
+        var s, d; // new state and its dual
+        if (field_ == __x) {
+            s = derived((const derived &)*this);
+            d = derived((const derived &)dual_);
+        } else if (field_ == __y) {
+            return dual_->clone_states<derived>(name);
+        } else {
+            throw std::runtime_error("clone_states can only be used with state variables");
+        }
+        setup_states(s, d);
+        s->name() = name;
+        d->name() = s->get_next_name();
         return s;
     }
 };
+
 inline sym *var::operator->() const {
     return static_cast<sym *>(base::operator->());
 }

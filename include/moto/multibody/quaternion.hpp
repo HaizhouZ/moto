@@ -31,15 +31,24 @@ struct quaternion : public sym {
     /// logarithm map from unit quaternion to R^3
     static cs::SX log3(const cs::SX &q, scalar_t tolerance = 1e-12);
     /// @brief quaternion integration using exponential map
-    cs::SX symbolic_integrate(const cs::SX &q, const cs::SX &dq) const;
+    cs::SX symbolic_integrate(const cs::SX &q, const cs::SX &dq) const override final;
     /// @brief quaternion difference using logarithm map q1 \ominus q0 = log(q0^{-1} * q1)
-    cs::SX symbolic_difference(const cs::SX &q1, const cs::SX &q0) const;
+    cs::SX symbolic_difference(const cs::SX &q1, const cs::SX &q0) const override final;
     /// clone the quaternion symbolic variable
-    var clone() const override final { return clone_states<quaternion>(); }
+    var clone(const std::string &name) const override final { return clone_states<quaternion>(name); }
     /// create a new quaternion symbolic variable
-    static var create(const std::string &name) {
-        static quaternion base("quat_base", __x);
-        return base.clone();
+    static std::pair<var, var> create(const std::string &name) {
+        static var base, base_n;
+        if (!bool(base)) {
+            // for all quats to share the same int/diff implementation
+            base = quaternion("quat_base", __x);
+            base_n = quaternion(base->get_next_name(), __y);
+            setup_states(base, base_n);
+            base_n->finalize(true);
+        }
+        // create a new instance
+        auto tmp = base->clone(name);
+        return {tmp, tmp->dual()};
     }
 };
 } // namespace multibody

@@ -112,12 +112,9 @@ generic_func generic_func::share(bool copy_args, const var_inarg_list &skip_copy
         for (sym &s : in_args_) {
             if (skip_copy[idx++])
                 continue;
-            auto s_new = s.clone();
-            s_new->name() = s.name() + "_copy";
+            auto s_new = s.clone(s.name() + "_copy");
             if (bool(s.dual()) && has_arg(s.dual())) {
                 skip_copy[sym_uid_idx_.at(s.dual()->uid())] = true;
-                auto s_dual = s.dual();
-                s_dual->name() += "_copy";
             }
             f.substitute(s, s_new);
         }

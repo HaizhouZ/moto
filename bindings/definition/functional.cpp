@@ -120,7 +120,7 @@ void register_submodule_functional(nb::module_ &m) {
                                                               v->name(), v->dim(), v->field(), v->uid()); })
         .def_prop_rw("default_value", [](var &self) { return self->default_value(); }, [](var &self, const sym::default_val_t &value) { self->set_default_value(value); })
         .def("to_sx", [](var &v) { return (cs::SX &)static_cast<sym &>(v); }, nb::rv_policy::reference_internal)
-        .def("clone", [](const var &self) { return self->clone(); })
+        .def("clone", [](const var &self, const std::string& name) { return self->clone(name); })
         .def("symbolic_integrate", [](const var &self, const cs::SX &x, const cs::SX &dx) { return self->symbolic_integrate(x, dx); }, nb::arg("x"), nb::arg("dx"))
         .def("symbolic_difference", [](const var &self, const cs::SX &x1, const cs::SX &x0) { return self->symbolic_difference(x1, x0); }, nb::arg("x1"), nb::arg("x0"), "difference from x0 to x1, i.e., x1 - x0")
         .def("integrate", [](const var &self, moto::vector_ref x, moto::vector_ref dx, moto::scalar_t alpha) { 
@@ -128,7 +128,7 @@ void register_submodule_functional(nb::module_ &m) {
             self->integrate(x, dx, tmp, alpha);
             return tmp; }, nb::arg("x"), nb::arg("dx"), nb::arg("alpha") = 1.0)
         .def("difference", [](const var &self, moto::vector_ref x1, moto::vector_ref x0) { 
-            vector tmp(self->dim());
+            vector tmp(self->tdim());
             self->difference(x1, x0, tmp);
             return tmp; }, nb::arg("x1"), nb::arg("x0"));
 

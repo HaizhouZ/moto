@@ -70,7 +70,7 @@ struct job_list {
 
 struct task {
     std::string func_name;
-    using in_arg_list_t = var_inarg_list;
+    using in_arg_list_t = var_list;
     in_arg_list_t sx_inputs;
     cs::SX sx_output;
     bool gen_eval = true;

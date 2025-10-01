@@ -58,7 +58,7 @@ void expr::set_ready_status(bool ready) {
 
 bool expr::wait_until_ready() const {
     if (!finalized_) {
-        throw std::runtime_error(fmt::format("Expression {} with uid {} is not finalized", name_, uid_));
+        throw std::runtime_error(fmt::format("Expression {} with uid {} is not finalized, cannot call wait_until_ready", name_, uid_));
     }
     return async_ready_status_->wait_until_ready(); // return the ready state
 }
