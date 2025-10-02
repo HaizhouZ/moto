@@ -11,17 +11,9 @@ def sym(name: str = None, dim: int = None, field: field = field.field_undefined,
     This class extends the `moto.sym_impl` and `cs::SX` classes to provide
     symbolic variables with additional functionality specific to the moto framework.
     """
-    sym_base: var = base if base is not None else create_sym(name, dim, field, default_val)
-    s = cs.SX(get_sym_sx(sym_base))
-    s.sym_base: var = sym_base
-    s.name = lambda : s.sym_base.name
-    s.dim = lambda : s.sym_base.dim
-    s.field = lambda : s.sym_base.field
-    s.uid = lambda : s.sym_base.uid
-    s.use_count = lambda : s.sym_base.use_count
-    def set_default_val(v: np.ndarray | float):
-        s.sym_base.default_value = v
-    s.default_value = set_default_val
+    sym_handle: var = base if base is not None else create_sym(name, dim, field, default_val)
+    s = cs.SX(get_sym_sx(sym_handle))
+    s.sym_handle: var = sym_handle
     s.__str__ = lambda : f'sym(uid={s.uid}, name="{s.name}", dim={s.dim()}, field={s.field})'
     return s
 

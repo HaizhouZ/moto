@@ -4,9 +4,10 @@
 #include <moto/ocp/pre_comp.hpp>
 #include <moto/ocp/sym.hpp>
 #include <moto/ocp/usr_func.hpp>
+#include <type_cast.hpp>
+
 #include <nanobind/stl/function.h>
 #include <nanobind/stl/variant.h>
-#include <type_cast.hpp>
 
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
 
@@ -14,18 +15,18 @@ namespace moto {
 shared_expr &cast_to_shared_expr(const nb::handle &h) {
     if (nb::isinstance<moto::shared_expr>(h)) {
         return nb::cast<moto::shared_expr &>(h);
-    } else if (nb::hasattr(h, "sym_base")) {
-        return nb::cast<moto::var &>(h.attr("sym_base"));
+    } else if (nb::hasattr(h, "sym_handle")) {
+        return nb::cast<moto::var_alias &>(h.attr("sym_handle"));
     } else {
         nb::print("Unsupported type for cast_to_var: ", h);
         throw std::runtime_error("Unsupported type for cast_to_shared_expr");
     }
 }
 var &cast_to_var(const nb::handle &h) {
-    if (nb::isinstance<moto::var>(h)) {
-        return nb::cast<moto::var &>(h);
-    } else if (nb::hasattr(h, "sym_base")) {
-        return nb::cast<moto::var &>(h.attr("sym_base"));
+    if (nb::isinstance<moto::var_alias>(h)) {
+        return nb::cast<moto::var_alias &>(h);
+    } else if (nb::hasattr(h, "sym_handle")) {
+        return nb::cast<moto::var_alias &>(h.attr("sym_handle"));
     } else {
         nb::print("Unsupported type for cast_to_var: ", h);
         throw std::runtime_error("Unsupported type for cast_to_var");
@@ -34,8 +35,6 @@ var &cast_to_var(const nb::handle &h) {
 func &cast_to_func(const nb::handle &h) {
     if (nb::isinstance<moto::func>(h)) {
         return nb::cast<moto::func &>(h);
-    } else if (nb::hasattr(h, "sym_base")) {
-        return nb::cast<moto::func &>(h.attr("sym_base"));
     } else {
         nb::print("Unsupported type for cast_to_func: ", h);
         throw std::runtime_error("Unsupported type for cast_to_func");
@@ -98,6 +97,7 @@ void export_order_with_magic(nb::module_ &m, const std::string &python_name) {
 void register_submodule_functional(nb::module_ &m) {
     using namespace moto;
     export_order_with_magic(m, "approx_order");
+
     nb::class_<shared_expr>(m, "shared_expr")
         .def("__bool__", &shared_expr::operator bool)
         .def("__str__", [](const shared_expr &self) {
@@ -109,46 +109,44 @@ void register_submodule_functional(nb::module_ &m) {
         .def_prop_rw("field", [](shared_expr &self) { return self->field(); }, [](shared_expr &self, const field_t &value) { self->field() = value; })
         .def_prop_rw("dim", [](shared_expr &self) { return self->dim(); }, [](shared_expr &self, const size_t &value) { self->dim() = value; })
         .def_prop_ro("uid", [](shared_expr &self) { return self->uid(); })
-        .def("finalize", [](shared_expr &self, bool block_until_ready) { self->finalize(block_until_ready); }, nb::arg("block_until_ready") = true)
+        .def("finalize", [](shared_expr &self, bool block_until_ready) { return self->finalize(block_until_ready); }, nb::arg("block_until_ready") = true)
         .def("wait_until_ready", [](shared_expr &self) { return self->wait_until_ready(); })
-        .def_prop_ro("finalized", [](expr &self) { return self.finalized(); })
-        .def_prop_rw("default_active_status", [](expr &self) { return self.default_active_status(); }, [](expr &self, bool value) { self.default_active_status() = value; })
+        .def_prop_ro("finalized", [](shared_expr &self) { return self->finalized(); })
+        .def_prop_rw("default_active_status", [](shared_expr &self) { return self->default_active_status(); }, [](shared_expr &self, bool value) { self->default_active_status() = value; })
         .def("__bool__", &shared_expr::operator bool);
 
-    nb::class_<var, shared_expr>(m, "var")
-        .def("__str__", [](const var &v) { return fmt::format("var(name='{}', dim={}, field={}, uid={})",
-                                                              v->name(), v->dim(), v->field(), v->uid()); })
-        .def_prop_rw("default_value", [](var &self) { return self->default_value(); }, [](var &self, const sym::default_val_t &value) { self->set_default_value(value); })
-        .def("to_sx", [](var &v) { return (cs::SX &)static_cast<sym &>(v); }, nb::rv_policy::reference_internal)
-        .def("clone", [](const var &self, const std::string& name) { return self->clone(name); })
-        .def("symbolic_integrate", [](const var &self, const cs::SX &x, const cs::SX &dx) { return self->symbolic_integrate(x, dx); }, nb::arg("x"), nb::arg("dx"))
-        .def("symbolic_difference", [](const var &self, const cs::SX &x1, const cs::SX &x0) { return self->symbolic_difference(x1, x0); }, nb::arg("x1"), nb::arg("x0"), "difference from x0 to x1, i.e., x1 - x0")
-        .def("integrate", [](const var &self, moto::vector_ref x, moto::vector_ref dx, moto::scalar_t alpha) { 
+    nb::class_<var_alias, shared_expr>(m, "var")
+        .def(nb::init<var_alias &&>(), nb::arg("var_alias"))
+        .def("__str__", [](const var_alias &v) { return fmt::format("var_alias(name='{}', dim={}, field={}, uid={})",
+                                                                    v->name(), v->dim(), v->field(), v->uid()); })
+        .def_prop_rw("default_value", [](var_alias &self) { return self->default_value(); }, [](var_alias &self, const sym::default_val_t &value) { self->set_default_value(value); })
+        .def_prop_ro("sx", [](var_alias &v) { return (cs::SX &)static_cast<sym &>(v); }, nb::rv_policy::reference_internal)
+        .def("clone", [](const var_alias &self, const std::string &name) { return self->clone(name); })
+        .def("symbolic_integrate", [](const var_alias &self, const cs::SX &x, const cs::SX &dx) { return self->symbolic_integrate(x, dx); }, nb::arg("x"), nb::arg("dx"))
+        .def("symbolic_difference", [](const var_alias &self, const cs::SX &x1, const cs::SX &x0) { return self->symbolic_difference(x1, x0); }, nb::arg("x1"), nb::arg("x0"), "difference from x0 to x1, i.e., x1 - x0")
+        .def("integrate", [](const var_alias &self, moto::vector_ref x, moto::vector_ref dx, moto::scalar_t alpha) { 
             vector tmp(self->dim());
             self->integrate(x, dx, tmp, alpha);
             return tmp; }, nb::arg("x"), nb::arg("dx"), nb::arg("alpha") = 1.0)
-        .def("difference", [](const var &self, moto::vector_ref x1, moto::vector_ref x0) { 
+        .def("difference", [](const var_alias &self, moto::vector_ref x1, moto::vector_ref x0) { 
             vector tmp(self->tdim());
             self->difference(x1, x0, tmp);
             return tmp; }, nb::arg("x1"), nb::arg("x0"));
 
-    m.def(
-        "create_sym",
-        [](const std::string &name, size_t dim, field_t field, sym::default_val_t default_val) { return var(sym::symbol(name, dim, field, default_val)); },
-        nb::arg("name"), nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined, nb::arg("default_val") = nb::none());
-    m.def("get_sym_sx", [](var &&s) {
-        auto &ex = static_cast<sym &>(s);
-        return cs::SX(ex); }, nb::arg("s"));
-    m.def(
-        "create_states", [](const std::string &name, size_t dim, sym::default_val_t default_val = sym::default_val_none_t()) {
-        auto&& [x, y] = sym::states(name, dim, default_val);
-        return std::make_pair(var(std::move(x)), var(std::move(y))); },
-        nb::arg("name"), nb::arg("dim") = dim_tbd, nb::arg("default_val") = nb::none());
-    m.def("print_all_sx", [](var_inarg_list &&s) {
-        for (sym &ex : s) {
-            std::cout << ex.name() << ": " << ex << '\n';
-        }
-    });
+    nb::class_<sym>(m, "sym")
+        .def_static("symbol", &sym::symbol, nb::arg("name"), nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined, nb::arg("default_val") = nb::none())
+        .def_static("states", &sym::states, nb::arg("name"), nb::arg("dim") = dim_tbd, nb::arg("default_val") = nb::none())
+        .def_static("inputs", &sym::inputs, nb::arg("name"), nb::arg("dim") = dim_tbd, nb::arg("default_val") = nb::none())
+        .def_static("params", &sym::params, nb::arg("name"), nb::arg("dim") = dim_tbd, nb::arg("default_val") = nb::none())
+        .def_static("create", [](const nb::handle &h) {
+            auto &v = nb::cast<moto::var_alias &>(h);
+            nb::object py_cs_module = nb::module_::import_("casadi");
+            nb::object py_cs_sx = py_cs_module.attr("SX")((cs::SX &)v);
+            nb::setattr(py_cs_sx, "sym_handle", h);
+            // nb::print(py_cs_sx.attr("sym_handle"));
+            return py_cs_sx.release();
+            // return py_cs_sx;
+        });
 
     using func_callback_t = std::function<void(func_approx_data &)>;
 
@@ -173,7 +171,6 @@ void register_submodule_functional(nb::module_ &m) {
              [](const func &f) { return fmt::format("func(name='{}', uid={}, order={}, dim={}, field={})",
                                                     f->name(), f->uid(), f->order(), f->dim(), f->field()); })
         .def("clone", [](const func &self) { return self->clone(); })
-        .def("finalize", [](func &self, bool block_until_ready) { self->finalize(block_until_ready); }, nb::arg("block_until_ready") = true)
         .def("enable_if_all", [](func &self, const expr_inarg_list &args) { self->enable_if_all(args); }, nb::arg("args"))
         .def("disable_if_any", [](func &self, const expr_inarg_list &args) { self->disable_if_any(args); }, nb::arg("args"))
         .def("enable_if_any", [](func &self, const expr_inarg_list &args) { self->enable_if_any(args); }, nb::arg("args"))

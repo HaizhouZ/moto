@@ -6,7 +6,6 @@ import pinocchio.casadi as cpin
 
 # from example_robot_data import load
 
-
 urdf = "/home/harper/Documents/moto/rsc/go2_description/urdf/box_description.urdf"
 # root_joint = pin.JointModelComposite()
 # root_joint.addJoint(pin.JointModelTranslation())
@@ -18,7 +17,7 @@ model = cpin.Model(r_model)  # casadi model
 
 q, qn = moto.quaternion.create('box_quat')
 
-qn.finalize()
+qn.sym_handle.finalize()
 
 from scipy.spatial.transform.rotation import Rotation as R
 
@@ -28,11 +27,11 @@ for _ in range(n_trials):
     q0 = R.random().as_quat()
     # print("q0", q0)
     w = np.random.random(3)
-    q1 = qn.integrate(q0, w, dt)
+    q1 = qn.sym_handle.integrate(q0, w, dt)
     gt = pin.integrate(r_model, q0, w * dt)
     if not np.allclose(q1, gt, atol=1e-8):
         raise RuntimeError("mismatch")
-    w_diff = qn.difference(q1, q0) / dt
+    w_diff = qn.sym_handle.difference(q1, q0) / dt
     if not np.allclose(w_diff, w, atol=1e-8):
         raise RuntimeError("mismatch difference")
     # print("q1", q1)

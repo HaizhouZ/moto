@@ -130,6 +130,10 @@ struct type_caster<moto::shifted_array<Entry, Size, shift>> {
 #include <moto/ocp/impl/func.hpp>
 
 namespace moto {
+struct var_alias : public var {
+    using var::var;
+};
+// using var_alias = var;
 shared_expr &cast_to_shared_expr(const nb::handle &h);
 var &cast_to_var(const nb::handle &h);
 func &cast_to_func(const nb::handle &h);
@@ -154,7 +158,7 @@ template <>
 struct type_caster<moto::expr_inarg_list> {
     NB_TYPE_CASTER(moto::expr_inarg_list, io_name(NB_TYPING_SEQUENCE, NB_TYPING_LIST) +
                                               const_name("[") +
-                                              make_caster<moto::var>::Name +
+                                              make_caster<moto::var_alias>::Name +
                                               const_name(" | ") +
                                               make_caster<moto::func>::Name +
                                               const_name(" | casadi.SX]"))
@@ -226,6 +230,24 @@ struct type_caster<moto::py_shared_expr_wrapper> {
     bool from_python(handle src, uint8_t flags, void *ptr) {
         value = std::move(moto::py_shared_expr_wrapper(moto::cast_to_shared_expr(src)));
         return true;
+    }
+};
+template <>
+struct type_caster<moto::var> {
+    NB_TYPE_CASTER(moto::var, const_name("casadi.SX"));
+    bool from_python(handle src, uint8_t flags, void *ptr) {
+        try {
+            value = std::move(moto::var(moto::cast_to_var(src)));
+        } catch (const std::exception &e) {
+            fmt::print("Failed to cast to moto.var: {}\n", e.what());
+            return false;
+        }
+        return true;
+    }
+    static nb::handle from_cpp(const moto::var &src, rv_policy policy, cleanup_list *cleanup) {
+        object py_cs_module = nb::module_::import_("moto");
+        object py_cs_var = py_cs_module.attr("sym").attr("create")(moto::var_alias(src));
+        return py_cs_var.release();
     }
 };
 } // namespace detail
