@@ -234,7 +234,7 @@ struct type_caster<moto::py_shared_expr_wrapper> {
 };
 template <>
 struct type_caster<moto::var> {
-    NB_TYPE_CASTER(moto::var, const_name("casadi.SX"));
+    NB_TYPE_CASTER(moto::var, const_name("moto.var"));
     bool from_python(handle src, uint8_t flags, void *ptr) {
         try {
             value = std::move(moto::var(moto::cast_to_var(src)));

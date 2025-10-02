@@ -115,7 +115,7 @@ void register_submodule_functional(nb::module_ &m) {
         .def_prop_rw("default_active_status", [](shared_expr &self) { return self->default_active_status(); }, [](shared_expr &self, bool value) { self->default_active_status() = value; })
         .def("__bool__", &shared_expr::operator bool);
 
-    nb::class_<var_alias, shared_expr>(m, "var")
+    nb::class_<var_alias, shared_expr>(m, "var_alias")
         .def(nb::init<var_alias &&>(), nb::arg("var_alias"))
         .def("__str__", [](const var_alias &v) { return fmt::format("var_alias(name='{}', dim={}, field={}, uid={})",
                                                                     v->name(), v->dim(), v->field(), v->uid()); })
@@ -134,23 +134,27 @@ void register_submodule_functional(nb::module_ &m) {
             return tmp; }, nb::arg("x1"), nb::arg("x0"));
 
     nb::class_<sym>(m, "sym")
-        .def_static("symbol", &sym::symbol, nb::arg("name"), nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined, nb::arg("default_val") = nb::none())
-        .def_static("states", &sym::states, nb::arg("name"), nb::arg("dim") = dim_tbd, nb::arg("default_val") = nb::none())
-        .def_static("inputs", &sym::inputs, nb::arg("name"), nb::arg("dim") = dim_tbd, nb::arg("default_val") = nb::none())
-        .def_static("params", &sym::params, nb::arg("name"), nb::arg("dim") = dim_tbd, nb::arg("default_val") = nb::none())
+        .def_static("symbol", &sym::symbol, nb::arg("name"), nb::arg("dim") = 1, nb::arg("field") = field_t::__undefined, nb::arg("default_val") = nb::none())
+        .def_static("states", &sym::states, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
+        .def_static("inputs", &sym::inputs, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
+        .def_static("params", &sym::params, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
         .def_static("create", [](const nb::handle &h) {
             auto &v = nb::cast<moto::var_alias &>(h);
             nb::object py_cs_module = nb::module_::import_("casadi");
             nb::object py_cs_sx = py_cs_module.attr("SX")((cs::SX &)v);
             nb::setattr(py_cs_sx, "sym_handle", h);
-            // nb::print(py_cs_sx.attr("sym_handle"));
             return py_cs_sx.release();
-            // return py_cs_sx;
         });
 
     using func_callback_t = std::function<void(func_approx_data &)>;
 
     nb::class_<func, shared_expr>(m, "func")
+        .def_prop_ro("in_args", [](func &self) { 
+            std::vector<var_alias> args;
+            for (sym &v : self->in_args())
+                args.emplace_back(v);
+            return args; })
+        .def_prop_ro("num_args", [](func &self, field_t f) { return self->arg_num(f); })
         .def_prop_rw(
             "value",
             [](func &self) { return self->value; },

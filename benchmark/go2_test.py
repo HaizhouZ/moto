@@ -51,19 +51,19 @@ class pinCasadiModel(cpin.Model):
 
         if dense:
             # make_primal
-            self.q, self.qn = moto.states(name + "_q", self.nq)
+            self.q, self.qn = moto.sym.states(name + "_q", self.nq)
             if q_nom is not None:
                 assert q_nom.shape == (self.nq,), "q_nom has wrong shape"
                 self.q.default_value(q_nom)
                 self.qn.default_value(q_nom)
-            self.v, self.vn = moto.states(name + "_v", self.nv)
-            # self.aj = moto.inputs(name + "_aj", self.nj)
-            # self.a = moto.inputs(name + "_a", self.nv)
+            self.v, self.vn = moto.sym.states(name + "_v", self.nv)
+            # self.aj = moto.sym.inputs(name + "_aj", self.nj)
+            # self.a = moto.sym.inputs(name + "_a", self.nv)
             # self.aj = self.a[-self.nj :]
             # self.ab = (self.vn - self.v)[:6] / dt
             self.a = (self.vn - self.v) / dt
             # self.a = cs.vcat([self.ab, self.aj]) if self.is_floating_based else self.aj
-            self.tq = moto.inputs(name + "_tq", self.nj)
+            self.tq = moto.sym.inputs(name + "_tq", self.nj)
 
             # implicit euler
             def implicit_euler():
@@ -134,11 +134,11 @@ class pinCasadiModel(cpin.Model):
         self.foot_jacs = [
             cpin.getFrameJacobian(self, self.data, f, pin.LOCAL_WORLD_ALIGNED)[:3, :] for f in self.foot_idx
         ]
-        # self.active_foot = [moto.params(f"af_{f}", 1, default_val=1) for f in foot_frames]  # active foot indicator
-        self.k_f = moto.params("k_f", default_val=100)  # kinematics constraint gain
-        self.z_clip = moto.params("z_c", 1, default_val=0.05)  # minimum height for the foot to be considered in contact
+        # self.active_foot = [moto.sym.params(f"af_{f}", 1, default_val=1) for f in foot_frames]  # active foot indicator
+        self.k_f = moto.sym.params("k_f", default_val=100)  # kinematics constraint gain
+        self.z_clip = moto.sym.params("z_c", 1, default_val=0.05)  # minimum height for the foot to be considered in contact
 
-        self.f_f = [moto.inputs(f"f_{f}", 3, default_val=np.array([0.0, 0.0, 0.5])) for f in foot_frames]
+        self.f_f = [moto.sym.inputs(f"f_{f}", 3, default_val=np.array([0.0, 0.0, 0.5])) for f in foot_frames]
         self.F_f = [self.foot_jacs[i].T @ self.f_f[i] for i in range(len(foot_frames))]
 
         self.kin_constr = [self.make_foot_kin_constr(i) for i in range(len(foot_frames))]
@@ -155,10 +155,10 @@ class pinCasadiModel(cpin.Model):
 
         self.dyn = self.make_dynamics()
 
-        self.mu = moto.params("mu", default_val=0.7)  # friction coefficient
+        self.mu = moto.sym.params("mu", default_val=0.7)  # friction coefficient
         self.fric = [self.make_fric_cone(i, f) for i, f in enumerate(self.f_f)]
 
-        self.q_nom = moto.params("q_nom", self.nq, default_val=q_nom if q_nom is not None else np.zeros(self.nq))
+        self.q_nom = moto.sym.params("q_nom", self.nq, default_val=q_nom if q_nom is not None else np.zeros(self.nq))
 
     def make_dynamics(self):
         args = self.pos_args + self.vel_args + self.pos_args_n + self.vel_args_n + [*self.f_f] + self.acc_args
@@ -240,13 +240,13 @@ class pinCasadiModel(cpin.Model):
 
     def add_dt_constr_and_cost(self, prob: moto.ocp, dt_nom: moto.sym):
         if isinstance(self.dt, cs.SX):
-            dt_bound = moto.params("dt_bound", 2, default_val=np.array([1e-4, 5e-2]))  # bound on dt
+            dt_bound = moto.sym.params("dt_bound", 2, default_val=np.array([1e-4, 5e-2]))  # bound on dt
             dt_constr = moto.constr(
                 "dt", [self.dt, dt_bound], cs.vcat([dt_bound[0] - self.dt, self.dt - dt_bound[1]])
             ).as_ineq()
             # dt_constr = moto.constr("dt_fix", [self.dt], self.dt - 2e-2)
             prob.add(dt_constr)
-            W_dt = moto.params("W_dt", 1, default_val=1e8)
+            W_dt = moto.sym.params("W_dt", 1, default_val=1e8)
             timing_cost = moto.cost("c_t", [self.dt, dt_nom, W_dt], W_dt * cs.sumsqr(self.dt - dt_nom))
             prob.add(timing_cost)
 
@@ -275,9 +275,9 @@ class pinCasadiModel(cpin.Model):
         return moto.cost("c_u", input_args, input_cost)
 
     def make_foot_lift_cost(self, lifted: bool = True):
-        self.z_f_lift_d = moto.params("z_f_lift_d", 1, default_val=0.07)  # desired foot lift height
+        self.z_f_lift_d = moto.sym.params("z_f_lift_d", 1, default_val=0.07)  # desired foot lift height
         if lifted:
-            self.z_f_d = moto.inputs("z_f_d", 4, default_val=0.0)  # desired foot height when in contact
+            self.z_f_d = moto.sym.inputs("z_f_d", 4, default_val=0.0)  # desired foot height when in contact
             foot_lift_constr = moto.constr("foot_lift_constr", self.pos_args + [self.z_f_d], (self.z_f - self.z_f_d))
             foot_lift_cost = moto.cost(
                 "c_z",
@@ -296,8 +296,8 @@ class pinCasadiModel(cpin.Model):
             return foot_lift_cost
 
 
-# dt = moto.inputs("dt", 1, default_val=0.02)
-dt_nom = moto.params("dt_nom", 1, default_val=0.02)
+# dt = moto.sym.inputs("dt", 1, default_val=0.02)
+dt_nom = moto.sym.params("dt_nom", 1, default_val=0.02)
 dt = 0.02
 display = True
 go2 = load("go2", display=True, verbose=True)

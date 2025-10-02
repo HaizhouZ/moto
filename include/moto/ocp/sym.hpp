@@ -109,21 +109,21 @@ class sym : public expr, public cs::SX {
   public:
     auto get_next_name() const { return name_ + next_suffix_; } ///< get the name of the next state variable
     /// @brief make a symbolic input
-    static var inputs(const std::string &name, size_t dim, default_val_t default_val = default_val_none_t()) {
+    static var inputs(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
         return sym(name, dim, __u, default_val);
     }
     /// @brief make a symbolic parameter
-    static var params(const std::string &name, size_t dim, default_val_t default_val = default_val_none_t()) {
+    static var params(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
         return sym(name, dim, __p, default_val);
     }
     /// @brief make a pair of symbolic state
-    static auto states(const std::string &name, size_t dim, default_val_t default_val = default_val_none_t()) {
+    static auto states(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
         auto temp = var(sym(name, dim, __x, default_val));
         auto next = var(sym(temp->get_next_name(), dim, __y, default_val));
         setup_states(temp, next);
         return std::make_pair(std::move(temp), std::move(next));
     }
-    static auto state(const std::string &name, size_t dim, default_val_t default_val = default_val_none_t()) {
+    static auto state(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
         auto [x, y] = states(name, dim, default_val);
         setup_states(x, y);
         return x;
@@ -145,11 +145,11 @@ class sym : public expr, public cs::SX {
         return dual_;
     }
 
-    static var usr_var(const std::string &name, size_t dim, default_val_t default_val = default_val_none_t()) {
+    static var usr_var(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
         return sym(name, dim, __usr_var, default_val);
     } ///< make a user defined variable
 
-    static var symbol(const std::string &name, size_t dim, field_t field, default_val_t default_val = default_val_none_t()) {
+    static var symbol(const std::string &name, size_t dim = 1, field_t field = field_t::__undefined, default_val_t default_val = default_val_none_t()) {
         return sym(name, dim, field, default_val);
     } ///< make a symbolic primitive
 

@@ -50,7 +50,7 @@ install(TARGETS ${PYTHON_MODULE_NAME}
         LIBRARY DESTINATION ${PYTHON_SITE}/${PROJECT_NAME})
 
 foreach(dir IN LISTS BINDING_SUBDIRS)
-        file(GLOB TOP_PY_FILES "${dir}/*.py")
+        file(GLOB TOP_PY_FILES "${dir}/*.py" "${dir}/*.pyi")
         get_filename_component(DIR_NAME ${dir} NAME)
         install(FILES ${TOP_PY_FILES}
                 DESTINATION ${PYTHON_SITE}/${PROJECT_NAME}/${DIR_NAME})

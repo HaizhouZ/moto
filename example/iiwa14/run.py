@@ -41,19 +41,19 @@ class pinCasadiModel(cpin.Model):
 
         if dense:
             # make_primal
-            self.q, self.qn = moto.states(name + "_q", self.nq)
+            self.q, self.qn = moto.sym.states(name + "_q", self.nq)
             if q_nom is not None:
                 assert q_nom.shape == (self.nq,), "q_nom has wrong shape"
                 self.q.default_value(q_nom)
                 self.qn.default_value(q_nom)
-            self.v, self.vn = moto.states(name + "_v", self.nv)
-            # self.aj = moto.inputs(name + "_aj", self.nj)
-            # self.a = moto.inputs(name + "_a", self.nv)
+            self.v, self.vn = moto.sym.states(name + "_v", self.nv)
+            # self.aj = moto.sym.inputs(name + "_aj", self.nj)
+            # self.a = moto.sym.inputs(name + "_a", self.nv)
             # self.aj = self.a[-self.nj :]
             # self.ab = (self.vn - self.v)[:6] / dt
             self.a = (self.vn - self.v) / dt
             # self.a = cs.vcat([self.ab, self.aj]) if self.is_floating_based else self.aj
-            self.tq = moto.inputs(name + "_tq", self.nj)
+            self.tq = moto.sym.inputs(name + "_tq", self.nj)
 
             # implicit euler
             def implicit_euler():
@@ -128,7 +128,7 @@ class pinCasadiModel(cpin.Model):
 
         self.dyn = self.make_dynamics()
 
-        self.q_nom = moto.params("q_nom", self.nq, default_val=q_nom if q_nom is not None else np.zeros(self.nq))
+        self.q_nom = moto.sym.params("q_nom", self.nq, default_val=q_nom if q_nom is not None else np.zeros(self.nq))
         q_min = model.lowerPositionLimit[-self.nj :]
         q_max = model.upperPositionLimit[-self.nj :]
         v_lim = model.velocityLimit[-self.nj :]
@@ -167,8 +167,8 @@ class pinCasadiModel(cpin.Model):
             return to_add
 
     def make_ee_pos_constr(self):
-        self.r_des = moto.params("r_des", 3, default_val=np.zeros(3))
-        self.quat_des = moto.params("quat_des", 4, default_val=np.array([0.0, 0.0, 0.0, 1.0]))
+        self.r_des = moto.sym.params("r_des", 3, default_val=np.zeros(3))
+        self.quat_des = moto.sym.params("quat_des", 4, default_val=np.array([0.0, 0.0, 0.0, 1.0]))
         ee_des = cpin.XYZQUATToSE3(cs.vcat([self.r_des, self.quat_des]))
         ee_pos = self.data.oMf[self.ee_id]
         # return moto.constr(
@@ -176,8 +176,8 @@ class pinCasadiModel(cpin.Model):
         # )
         res = cpin.log6(ee_pos.inverse() * ee_des).np
         # return moto.constr("ee_constr_ineq", self.pos_args + [self.r_des, self.quat_des], cs.vcat([res, -res])).as_ineq()
-        W_ee_cost = moto.params("W_ee_cost", 1, default_val=4.0)
-        # ee_lifted = moto.inputs("ee_lifted", 6, default_val=np.zeros(6))
+        W_ee_cost = moto.sym.params("W_ee_cost", 1, default_val=4.0)
+        # ee_lifted = moto.sym.inputs("ee_lifted", 6, default_val=np.zeros(6))
         return moto.cost("ee_cost", self.pos_args + [self.r_des, self.quat_des, W_ee_cost], W_ee_cost * cs.sumsqr(res)).set_gauss_newton().as_terminal()
         # return [
         #     moto.cost("ee_cost_lifted", [ee_lifted, W_ee_cost], W_ee_cost * cs.sumsqr(ee_lifted)).as_terminal(),
@@ -229,8 +229,8 @@ class pinCasadiModel(cpin.Model):
         return moto.cost("c_u", input_args, input_cost).set_diag_hess()
 
 
-# dt = moto.inputs("dt", 1, default_val=0.02)
-dt_nom = moto.params("dt_nom", 1, default_val=0.02)
+# dt = moto.sym.inputs("dt", 1, default_val=0.02)
+dt_nom = moto.sym.params("dt_nom", 1, default_val=0.02)
 dt = 0.02
 display = True
 ur5 = load("ur5_limited", display=display, verbose=True)
