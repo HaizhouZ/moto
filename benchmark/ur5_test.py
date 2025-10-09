@@ -13,8 +13,10 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--output_file", type=str)
 parser.add_argument("--config", type=str)
 parser.add_argument("--soft", action="store_true")
+parser.add_argument("--cost", action="store_true")
 
 args = parser.parse_args()
+
 
 class pinCasadiModel(cpin.Model):
     def __init__(
@@ -53,8 +55,8 @@ class pinCasadiModel(cpin.Model):
             self.q, self.qn = moto.sym.states(name + "_q", self.nq)
             if q_nom is not None:
                 assert q_nom.shape == (self.nq,), "q_nom has wrong shape"
-                self.q.default_value(q_nom)
-                self.qn.default_value(q_nom)
+                self.q.sym_handle.default_value = q_nom
+                self.qn.sym_handle.default_value = q_nom
             self.v, self.vn = moto.sym.states(name + "_v", self.nv)
             # self.aj = moto.sym.inputs(name + "_aj", self.nj)
             # self.a = moto.sym.inputs(name + "_a", self.nv)
@@ -108,8 +110,8 @@ class pinCasadiModel(cpin.Model):
                     name, semi_implicit=True
                 )
                 if q_nom is not None:
-                    self.quat.default_value = q_nom[3:self.nqb]
-                    self.quatn.default_value = q_nom[3:self.nqb]
+                    self.quat.default_value = q_nom[3 : self.nqb]
+                    self.quatn.default_value = q_nom[3 : self.nqb]
                 else:
                     self.quat.default_value = np.array([0.0, 0.0, 0.0, 1.0])
                     self.quatn.default_value = np.array([0.0, 0.0, 0.0, 1.0])
@@ -128,7 +130,7 @@ class pinCasadiModel(cpin.Model):
 
         cpin.forwardKinematics(self, self.data, self.q_stack, self.v_stack)
         cpin.updateFramePlacements(self, self.data)
-        
+
         if self.use_fwd_dyn:
             tau = cs.vcat([cs.SX.zeros(6), self.tq]) if self.is_floating_based else self.tq
             self.aba = cpin.aba(self, self.data, self.q_stack, self.v_stack, tau) * dt
@@ -148,13 +150,7 @@ class pinCasadiModel(cpin.Model):
         self.v_lim = v_lim
 
     def make_dynamics(self):
-        args = (
-            self.pos_args
-            + self.vel_args
-            + self.pos_args_n
-            + self.vel_args_n
-            + self.acc_args
-        )
+        args = self.pos_args + self.vel_args + self.pos_args_n + self.vel_args_n + self.acc_args
         if isinstance(self.dt, cs.SX):
             args.append(self.dt)
         if self.dense:
@@ -169,9 +165,7 @@ class pinCasadiModel(cpin.Model):
             #         moto.constr(self.name + "_id", in_arg, self.rnea[:6])]
             if self.use_fwd_dyn:
                 v_next = self.v + self.aba
-                return moto.dense_dynamics(
-                    self.name + "_fd", args, cs.vcat(out + [self.vn - v_next])
-                )
+                return moto.dense_dynamics(self.name + "_fd", args, cs.vcat(out + [self.vn - v_next]))
             else:
                 tau = cs.vcat([cs.SX.zeros(6), self.tq]) if self.is_floating_based else self.tq
                 return moto.dense_dynamics(self.name + "_id", args, cs.vcat(out + [self.rnea - tau * self.dt]))
@@ -182,21 +176,29 @@ class pinCasadiModel(cpin.Model):
                 args = self.pos_args + self.vel_args + self.acc_args + self.active_foot + self.f_f + [self.dt]
                 to_add.append(moto.constr(self.name + "_fb_id", args, self.rnea_base))
             return to_add
-    def make_ee_pos_constr(self, soft: bool = False):
+
+    def make_ee_pos_constr(self, soft: bool = False, cost: bool = False):
         self.r_des = moto.sym.params("r_des", 3, default_val=np.zeros(3))
         self.quat_des = moto.sym.params("quat_des", 4, default_val=np.array([0.0, 0.0, 0.0, 1.0]))
         ee_des = cpin.XYZQUATToSE3(cs.vcat([self.r_des, self.quat_des]))
         ee_pos = self.data.oMf[self.ee_id]
+        res = cpin.log6(ee_des.inverse() * ee_pos).np
+        if cost:
+            if not hasattr(self, "W_ee_cost"):
+                self.W_ee_cost = moto.sym.params(
+                    "W_ee_cost", 6, default_val=np.array([40.0, 40.0, 40.0, 0.0, 0.0, 0.0])
+                )
+            return (
+                moto.cost("ee_cost", self.pos_args + [self.r_des, self.quat_des], res)
+                .set_gauss_newton(self.W_ee_cost)
+                .as_terminal()
+            )
         if not soft:
-            return moto.constr("ee_constr", self.pos_args + [self.r_des, self.quat_des], cpin.log6(ee_pos.inverse() * ee_des).np)
+            return moto.constr("ee_constr", self.pos_args + [self.r_des, self.quat_des], res)
         else:
-            res = cpin.log6(ee_pos.inverse() * ee_des).np
-            return moto.constr("ee_constr_ineq", self.pos_args + [self.r_des, self.quat_des], cs.vcat([res, -res])).as_ineq()
-        # W_ee_cost = moto.sym.params("W_ee_cost", 1, default_val=4.0)
-        # ee_lifted = moto.sym.inputs("ee_lifted", 6, default_val=np.zeros(6))
-        # return moto.cost("ee_cost", self.pos_args + [self.r_des, self.quat_des, W_ee_cost], W_ee_cost * cs.sumsqr(cpin.log6(ee_pos.inverse() * ee_des).np)).as_terminal()
-        # return [moto.cost("ee_cost_lifted", [ee_lifted, W_ee_cost], W_ee_cost * cs.sumsqr(ee_lifted)), 
-        #         moto.constr("ee_constr_lifted", self.pos_args + [self.r_des, self.quat_des, ee_lifted], ee_lifted - cpin.log6(ee_pos.inverse() * ee_des).np)]
+            return moto.constr(
+                "ee_constr_ineq", self.pos_args + [self.r_des, self.quat_des], cs.vcat([res, -res])
+            ).as_ineq()
 
     def make_joint_limit_constr(self):
         q_min = self.fmodel.lowerPositionLimit[-self.nj :]
@@ -221,16 +223,13 @@ class pinCasadiModel(cpin.Model):
         q_nom_res = self.q_stack - self.q_nom
         if self.is_floating_based:
             state_cost = (
-                100.0 * cs.sumsqr(q_nom_res[:self.nqb])
-                + 1 * cs.sumsqr(q_nom_res[self.nqb:])
+                100.0 * cs.sumsqr(q_nom_res[: self.nqb])
+                + 1 * cs.sumsqr(q_nom_res[self.nqb :])
                 + 1.0 * cs.sumsqr(self.v_stack[:6])
                 + 0.01 * cs.sumsqr(self.v_stack[6:])
             )
         else:
-            state_cost = (
-                0.1 * cs.sumsqr(q_nom_res)
-                + 0.1 * cs.sumsqr(self.v_stack)
-            )
+            state_cost = 0.1 * cs.sumsqr(q_nom_res) + 0.1 * cs.sumsqr(self.v_stack)
         state_args = self.pos_args + self.vel_args
         cost = moto.cost("c", state_args + [self.q_nom], state_cost).set_diag_hess()
         if terminal:
@@ -258,13 +257,13 @@ model = pinCasadiModel(model, dt=dt, q_nom=q_d, dense=True, use_fwd_dyn=False)
 
 prob = moto.ocp.create()
 prob.add(model.dyn)
-# prob.add(model.make_tq_limit_constr())
-# prob.add(model.make_joint_limit_constr())
+prob.add(model.make_tq_limit_constr())
+prob.add(model.make_joint_limit_constr())
 prob.add(model.get_state_cost())
 prob.add(model.get_input_cost())
 
 prob_term = prob.clone()
-prob_term.add(model.make_ee_pos_constr(soft=args.soft))
+prob_term.add(model.make_ee_pos_constr(soft=args.soft, cost=args.cost))
 prob_term.add(model.get_state_cost(terminal=True))
 
 prob.print_summary()
@@ -281,7 +280,7 @@ with open(args.config, "r") as f:
 from tqdm import tqdm
 import time
 
-for (idx_cfg, cfg) in tqdm(enumerate(config), total=len(config)):
+for idx_cfg, cfg in tqdm(enumerate(config), total=len(config)):
 
     sqp = moto.sqp(n_job=10)
     g = sqp.graph
@@ -291,11 +290,13 @@ for (idx_cfg, cfg) in tqdm(enumerate(config), total=len(config)):
 
     n1.data.value[model.r_des] = np.array(cfg[0][:3])
     n1.data.value[model.quat_des] = np.array(cfg[0][3:7])
+    if args.cost:
+        n1.data.value[model.W_ee_cost] = np.ones(6) * 1e3
 
     def set_initial_state(data: moto.sqp.data_type):
         data.value[model.q] = np.array(cfg[1])
         data.value[model.qn] = np.array(cfg[1])
-    
+
     sqp.apply_forward(set_initial_state)
 
     sqp.settings.mu = 1

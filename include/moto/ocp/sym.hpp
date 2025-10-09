@@ -12,6 +12,7 @@ struct var : public shared_expr, public cs::SX {
   public:
     using base = shared_expr;
     using sym = moto::sym;
+    bool operator !() const { return !bool(*this); } ///< logical NOT operator
     sym *operator->() const; ///< convert to sym
     var() = default;         ///< default constructor, will create a not-a-number symbolic variable
     template <typename T, typename T_ = std::remove_cvref_t<T>>

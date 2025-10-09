@@ -63,9 +63,10 @@ class generic_func : public expr {
 
     mutable std::unordered_map<size_t, ocpwise_info> ocpwise_info_map_;
 
+    std::set<size_t> skip_unused_arg_check_;     ///< set of argument uids to skip unused check
     std::vector<sparsity> jac_sp_;               ///< jacobian sparsity for each arg
     std::vector<std::vector<sparsity>> hess_sp_; ///< hessian sparsity for each pair of args
-
+    
     sparsity default_hess_sp_ = sparsity::dense;
 
     std::unordered_map<size_t, size_t> sym_uid_idx_;
@@ -174,6 +175,8 @@ class generic_func : public expr {
                  std::is_same_v<shared_expr, std::remove_cvref_t<T>> ||
                  std::is_same_v<sym, std::remove_cvref_t<T>>
     void add_argument(T &&in) {
+        if (std::find(in_args_.begin(), in_args_.end(), in) != in_args_.end())
+            return;
         auto &s = in_args_.emplace_back(std::forward<T>(in));
         add_dep(s);
     }

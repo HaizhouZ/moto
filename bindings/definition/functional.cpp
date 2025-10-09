@@ -210,7 +210,7 @@ void register_submodule_functional(nb::module_ &m) {
         .def(
             "as_terminal",
             [](cost &self) { return self.as_terminal(); }, nb::rv_policy::move)
-        .def("set_gauss_newton", [](cost &self) { return self.set_gauss_newton(); }, nb::rv_policy::move)
+        .def("set_gauss_newton", [](cost &self, const py_var_wrapper &v) { return self.set_gauss_newton((const var &)v); }, nb::rv_policy::move)
         .def("clone", [](const cost &self) { return self->clone(); });
 
     // nb::class_<custom_func, func>(m, "custom_func")

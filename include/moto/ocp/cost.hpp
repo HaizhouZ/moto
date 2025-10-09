@@ -8,8 +8,8 @@ struct cost : public func {
     cost(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
          approx_order order = approx_order::second);
     cost &set_diag_hess();
-    cost &as_terminal(); ///< convert to terminal cost
-    cost &set_gauss_newton(); ///< convert to convex-over-nonlinear cost
+    cost &as_terminal();                       ///< convert to terminal cost
+    cost &set_gauss_newton(const var &weight); ///< convert to convex-over-nonlinear cost
     generic_cost *operator->() const;
 };
 /**
@@ -24,7 +24,7 @@ class generic_cost : public generic_func {
     } finalize_hint_;
 
     void finalize_impl() override;
-
+    var gn_weight_; ///< weight for gauss-newton cost
     friend struct cost;
     using wrapper_type = cost;
 
@@ -40,4 +40,4 @@ class generic_cost : public generic_func {
 generic_cost *cost::operator->() const {
     return static_cast<generic_cost *>(func::operator->());
 } ///< convert to generic_cost
-} // namespace moto  
+} // namespace moto

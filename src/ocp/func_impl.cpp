@@ -128,7 +128,7 @@ void generic_func::finalize_impl() {
         auto &out = gen_.task_->sx_output;
         std::vector<size_t> unused_args;
         for (const sym &s : in_args_) {
-            if (!cs::SX::depends_on(out, s)) {
+            if (!cs::SX::depends_on(out, s) && !skip_unused_arg_check_.contains(s.uid())) {
                 unused_args.push_back(s.uid());
             }
         }

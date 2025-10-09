@@ -298,12 +298,11 @@ void run(
 
 void task::finalize(job_list &jobs_) {
     std::string full_func_name = prefix.empty() ? func_name : prefix + "_" + func_name;
-
     if (gen_eval)
         jobs_.add(std::bind(&impl::run,
                             full_func_name,
                             sx_inputs,
-                            std::vector{sx_output},
+                            std::vector{!gauss_newton ? sx_output : 0.5 * cs::SX::dot(sx_output, sx_output * weight_gn)},
                             output_dir,
                             eval_compile_flag,
                             force_recompile,
@@ -353,7 +352,7 @@ void task::finalize(job_list &jobs_) {
 
     assert(sx_output.columns() == 1);
 
-    if (sx_output.rows() > 1 && ext_hess.empty() && gen_hessian) {
+    if (sx_output.rows() > 1 && ext_hess.empty() && gen_hessian && !gauss_newton) {
         // will use jacobian to compute vjp->hessian
         merit_jac_for_hess = true;
     }
@@ -378,8 +377,10 @@ void task::finalize(job_list &jobs_) {
                 if (s.has_non_trivial_integration()) {
                     // get jacobian wrt step (variation)
                     auto j = cs::SX::mtimes(cs::SX::jacobian(sx_output, s), get_dstep_ds(s));
-                } else
+                    jacs.push_back(j);
+                } else {
                     jacs.push_back(cs::SX::jacobian(sx_output, s));
+                }
             } else
                 jacs.push_back(cs::SX());
         }
@@ -402,9 +403,16 @@ void task::finalize(job_list &jobs_) {
                 }
                 if (gen_hessian && !merit_jac_for_hess) {
                     // if we are generating hessian, we need to copy jacs
-                    if (gen_jacobian)
+                    if (gen_jacobian) {
                         jacs_copy = jacs;
-                    else
+                        if (gauss_newton) {
+                            for (auto &jac : jacs) {
+                                if (jac.is_empty())
+                                    continue;
+                                jac = cs::SX::mtimes((weight_gn * sx_output).T(), jac);
+                            }
+                        }
+                    } else
                         jacs_copy = std::move(jacs);
                 }
             }
@@ -422,14 +430,14 @@ void task::finalize(job_list &jobs_) {
         }
     }
 
-    if (gn_hessian) {
+    if (gauss_newton) {
         for (size_t i : range(sx_inputs.size())) {
             for (size_t j : range(i, sx_inputs.size())) {
                 sym &s = sx_inputs[i];
                 sym &t = sx_inputs[j];
                 if (excluded.contains(s.uid()) or excluded.contains(t.uid()))
                     continue;
-                external_hess[{s.uid(), t.uid()}] = cs::SX::mtimes(jacs_copy[i].T(), jacs_copy[j]); // + cs::SX::diag(cs::SX::ones(jacs_copy[i].columns())) * 100;
+                external_hess[{s.uid(), t.uid()}] = cs::SX::mtimes(jacs_copy[i].T(), cs::SX::mtimes(cs::SX::diag(weight_gn), jacs_copy[j]));
             }
         }
     }
@@ -457,10 +465,10 @@ void task::finalize(job_list &jobs_) {
                 if (!merit_jac_for_hess) {
                     if (external_hess.contains({i.uid(), j.uid()})) {
                         hess[idx_i][idx_j] = external_hess[{i.uid(), j.uid()}];
-                        continue;
+                        goto HESS_SETUP_SPARSITY;
                     } else if (external_hess.contains({j.uid(), i.uid()})) {
                         hess[idx_i][idx_j] = external_hess[{j.uid(), i.uid()}].T();
-                        continue;
+                        goto HESS_SETUP_SPARSITY;
                     }
                 } else if (i.field() == j.field() and idx_i > idx_j) {
                     // for i,j in same field, just copy
@@ -474,6 +482,7 @@ void task::finalize(job_list &jobs_) {
                 } else {
                     hess[idx_i][idx_j] = cs::SX::sparsify(cs::SX::jacobian(jacs_copy[idx_i], j));
                 }
+            HESS_SETUP_SPARSITY:
                 if (hess[idx_i][idx_j].is_zero()) {
                     hess[idx_i][idx_j] = cs::SX();
                     if (hess_sp != nullptr)
@@ -491,6 +500,9 @@ void task::finalize(job_list &jobs_) {
                         hess[idx_i][idx_j] = cs::SX::ones(hess[idx_i][idx_j].rows());
                     if (hess_sp != nullptr)
                         (*hess_sp)[idx_i][idx_j] = is_eye ? sparsity::eye : sparsity::diag;
+                } else {
+                    if (hess_sp != nullptr)
+                        (*hess_sp)[idx_i][idx_j] = sparsity::dense;
                 }
             }
         }

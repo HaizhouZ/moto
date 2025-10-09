@@ -23,9 +23,16 @@ void generic_cost::finalize_impl() {
         }
     }
     if (finalize_hint_.gauss_newton) {
+        if (!gn_weight_) {
+            throw std::runtime_error(fmt::format("cost {} gauss-newton weight not set. Did you provide a non-scalar output ?", name_));
+        }
+        add_argument(gn_weight_);
+        skip_unused_arg_check_.insert(gn_weight_->uid());
         if (gen_.task_) {
-            gen_.task_->gn_hessian = true;
+            gen_.task_->gauss_newton = true;
+            gen_.task_->weight_gn = gn_weight_;
         } else {
+            /// @todo use gn_weight_ to scale the hessian
             hessian = [](func_approx_data &d) {
                 // Gauss-Newton approximation: H ≈ J^T * J
                 for (size_t i = 0; i < d.merit_hess_.size(); i++) {
@@ -49,7 +56,11 @@ cost::cost(const std::string &name, approx_order order)
 
 cost::cost(const std::string &name, const var_inarg_list &in_args, const cs::SX &out, approx_order order)
     : func(generic_cost(name, in_args, out, order, __cost)) {
-    assert(out.is_scalar() && "cost output must be a scalar");
+    // assert(out.is_scalar() && "cost output must be a scalar");
+    if (out.is_scalar()) {
+    } else {
+        (*this)->finalize_hint_.gauss_newton = true;
+    }
 }
 
 cost &cost::set_diag_hess() {
@@ -63,7 +74,8 @@ cost &cost::as_terminal() {
     return (*this);
 }
 
-cost &cost::set_gauss_newton() {
+cost &cost::set_gauss_newton(const var &weight) {
+    (*this)->gn_weight_ = weight;
     (*this)->finalize_hint_.gauss_newton = true;
     return (*this);
 }

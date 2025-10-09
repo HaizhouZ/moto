@@ -44,8 +44,8 @@ class pinCasadiModel(cpin.Model):
             self.q, self.qn = moto.sym.states(name + "_q", self.nq)
             if q_nom is not None:
                 assert q_nom.shape == (self.nq,), "q_nom has wrong shape"
-                self.q.default_value(q_nom)
-                self.qn.default_value(q_nom)
+                self.q.sym_handle.default_value = q_nom
+                self.qn.sym_handle.default_value = q_nom
             self.v, self.vn = moto.sym.states(name + "_v", self.nv)
             # self.aj = moto.sym.inputs(name + "_aj", self.nj)
             # self.a = moto.sym.inputs(name + "_a", self.nv)
@@ -118,6 +118,7 @@ class pinCasadiModel(cpin.Model):
             self.vel_args_n = [self.vn_lin] if not self.is_floating_based else [self.vn_lin, self.wn]
 
         cpin.forwardKinematics(self, self.data, self.q_stack, self.v_stack)
+        cpin.computeJointJacobians(self, self.data, self.q_stack)
         cpin.updateFramePlacements(self, self.data)
 
         if self.use_fwd_dyn:
@@ -167,20 +168,34 @@ class pinCasadiModel(cpin.Model):
             return to_add
 
     def make_ee_pos_constr(self):
-        self.r_des = moto.sym.params("r_des", 3, default_val=np.zeros(3))
-        self.quat_des = moto.sym.params("quat_des", 4, default_val=np.array([0.0, 0.0, 0.0, 1.0]))
+        if not hasattr(self, "r_des"):
+            self.r_des = moto.sym.params("r_des", 3, default_val=np.zeros(3))
+            self.quat_des = moto.sym.params("quat_des", 4, default_val=np.array([0.0, 0.0, 0.0, 1.0]))
         ee_des = cpin.XYZQUATToSE3(cs.vcat([self.r_des, self.quat_des]))
         ee_pos = self.data.oMf[self.ee_id]
         # return moto.constr(
         #     "ee_constr", self.pos_args + [self.r_des, self.quat_des], cpin.log6(ee_pos.inverse() * ee_des).np
         # )
-        res = cpin.log6(ee_pos.inverse() * ee_des).np
+        res = cpin.log6(ee_des.inverse() * ee_pos).np
+        # res = cs.vcat([ee_pos.translation - ee_des.translation, cpin.log3(ee_des.rotation.T @ ee_pos.rotation)])
         # return moto.constr("ee_constr_ineq", self.pos_args + [self.r_des, self.quat_des], cs.vcat([res, -res])).as_ineq()
-        W_ee_cost = moto.sym.params("W_ee_cost", 1, default_val=4.0)
-        # ee_lifted = moto.sym.inputs("ee_lifted", 6, default_val=np.zeros(6))
-        return moto.cost("ee_cost", self.pos_args + [self.r_des, self.quat_des, W_ee_cost], W_ee_cost * cs.sumsqr(res)).set_gauss_newton().as_terminal()
+        if not hasattr(self, "W_ee_cost"):
+            self.W_ee_cost = moto.sym.params("W_ee_cost", 6, default_val=np.array([40.0, 40.0, 40.0, 0.0, 0.0, 0.0]))
+        ee_lifted = moto.sym.inputs("ee_lifted", 6, default_val=np.zeros(6))
+        return (
+            moto.cost(
+                # "ee_cost", self.pos_args + [self.r_des, self.quat_des, self.W_ee_cost], cs.sumsqr(self.W_ee_cost * res)
+                "ee_cost",
+                self.pos_args + [self.r_des, self.quat_des],
+                res,
+            )
+            .set_gauss_newton(self.W_ee_cost)
+            .as_terminal()
+        )
         # return [
-        #     moto.cost("ee_cost_lifted", [ee_lifted, W_ee_cost], W_ee_cost * cs.sumsqr(ee_lifted)).as_terminal(),
+        #     moto.cost(
+        #         "ee_cost_lifted", [ee_lifted, self.W_ee_cost], 0.5 * cs.sumsqr(cs.sqrt(self.W_ee_cost) * ee_lifted)
+        #     ),  # .as_terminal(),
         #     moto.constr("ee_constr_lifted", self.pos_args + [self.r_des, self.quat_des, ee_lifted], ee_lifted - res),
         # ]
 
@@ -283,14 +298,22 @@ cfg = [
         1.498755302649343,
     ],
 ]
+cfg = [
+    [0.4, 0.4, 0.4, 0.0, 0.0, 0.0, 1.0],
+    [0.0] * 6,
+]
 
 n1.data.value[model.r_des] = np.array(cfg[0][:3])
 n1.data.value[model.quat_des] = np.array(cfg[0][3:7])
+n1.data.value[model.W_ee_cost] = np.ones(6) * 1e6
 
 
 def set_initial_state(data: moto.sqp.data_type):
     data.value[model.q] = np.array(cfg[1])
     data.value[model.qn] = np.array(cfg[1])
+    # data.value[model.r_des] = np.array(cfg[0][:3])
+    # data.value[model.quat_des] = np.array(cfg[0][3:7])
+    # data.value[model.W_ee_cost] = np.ones(6) * 4
 
 
 sqp.apply_forward(set_initial_state)
@@ -300,17 +323,9 @@ sqp.settings.mu = 1
 sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
 # sqp.settings.mu_method = moto.sqp.adaptive_mu_t.quality_function_based
 sqp.settings.ipm_conditional_corrector = True
-sqp.settings.prim_tol = 1e-4
-sqp.settings.dual_tol = 1e-4
-sqp.settings.comp_tol = 1e-4
-
-# setup gait
-steps = 4
-nodes_per_step = 20
-total_gait_steps = steps * nodes_per_step
-stance_length = int(N_horizon - total_gait_steps) / 2
-step = 0
-node_idx = 0
+sqp.settings.prim_tol = 1e-3
+sqp.settings.dual_tol = 1e-3
+sqp.settings.comp_tol = 1e-3
 
 import time
 
@@ -336,6 +351,14 @@ def get_sym(node: moto.sqp.data_type):
 
 
 sqp.apply_forward(get_sym)
+
+# compute the final end-effector position error
+fdata = model.fmodel.createData()
+pin.forwardKinematics(model.fmodel, fdata, q_res[-1])
+pin.updateFramePlacements(model.fmodel, fdata)
+eef = fdata.oMf[model.ee_id]
+eef_des = pin.XYZQUATToSE3(cfg[0])
+print("final ee pos err:", pin.log6(eef_des.inverse() * eef).np)
 
 if display:
 
