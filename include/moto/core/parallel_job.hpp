@@ -28,10 +28,12 @@ inline size_t get_num_threads() {
  * @param callback
  */
 template <typename callback_t, bool reverse_block = true>
-inline void parallel_for(size_t start, size_t stop, callback_t &&callback, size_t n_jobs = MAX_THREADS) {
+inline void parallel_for(size_t start, size_t stop, callback_t &&callback,
+                         size_t n_jobs = MAX_THREADS, bool no_except = false) {
 
     size_t n_threads = n_jobs;
     size_t chunk_size = (stop - start + n_threads - 1) / n_threads;
+    bool except_caught = false;
     // try {
 #ifdef MOTO_USE_OMP
     omp_set_num_threads(n_threads);
@@ -45,14 +47,27 @@ inline void parallel_for(size_t start, size_t stop, callback_t &&callback, size_
             begin = j * chunk_size;
         size_t end = std::min(begin + chunk_size, stop); // Ensure bounds are within _nodes size
         for (size_t i = begin; i < end; ++i) {
-            // for (size_t i = end-1; i >= begin && i < end; i--) {
-            if constexpr (std::invocable<callback_t, size_t>)
-                callback(i);
-            else if constexpr (std::invocable<callback_t, size_t, size_t>)
-                callback(j, i); // pass thread id as second argument
+            auto call = [&]() {
+                if constexpr (std::invocable<callback_t, size_t>)
+                    callback(i);
+                else if constexpr (std::invocable<callback_t, size_t, size_t>)
+                    callback(j, i); // pass thread id as second argument
+                else
+                    static_assert(false, "callback must be invocable with size_t or [size_t, size_t]");
+            };
+            if (!no_except)
+                call();
             else
-                static_assert(false, "callback must be invocable with size_t or [size_t, size_t]");
+                try {
+                    call();
+                } catch (const std::exception &e) {
+                    fmt::print("Exception in parallel_for inner loop: {}\n", e.what());
+                    except_caught = true;
+                }
         }
+    }
+    if (except_caught) { /// @warning not complete
+        throw std::runtime_error("Exception caught in parallel_for");
     }
     // } catch (...) {
     //     throw;
@@ -60,11 +75,12 @@ inline void parallel_for(size_t start, size_t stop, callback_t &&callback, size_
 }
 
 template <typename callback_t>
-inline void sequential_for(size_t start, size_t stop, callback_t &&callback, size_t n_jobs = MAX_THREADS) {
+inline void sequential_for(size_t start, size_t stop, callback_t &&callback,
+                           size_t n_jobs = MAX_THREADS, bool no_except = false) {
 
     size_t n_threads = n_jobs;
     size_t chunk_size = (stop - start + n_threads - 1) / n_threads;
-    // try {
+    bool except_caught = false;
 #ifdef MOTO_USE_OMP
     omp_set_num_threads(n_threads);
 #pragma omp parallel for ordered schedule(static, 1)
@@ -76,17 +92,30 @@ inline void sequential_for(size_t start, size_t stop, callback_t &&callback, siz
 #pragma omp ordered
 #endif
         for (size_t i = begin; i < end; ++i) {
-            if constexpr (std::invocable<callback_t, size_t>)
-                callback(i);
-            else if constexpr (std::invocable<callback_t, size_t, size_t>)
-                callback(j, i); // pass thread id as second argument
+            if (except_caught)
+                break;
+            auto call = [&]() {
+                if constexpr (std::invocable<callback_t, size_t>)
+                    callback(i);
+                else if constexpr (std::invocable<callback_t, size_t, size_t>)
+                    callback(j, i); // pass thread id as second argument
+                else
+                    static_assert(false, "callback must be invocable with size_t or [size_t, size_t]");
+            };
+            if (!no_except)
+                call();
             else
-                static_assert(false, "callback must be invocable with size_t or [size_t, size_t]");
+                try {
+                    call();
+                } catch (const std::exception &e) {
+                    fmt::print("Exception in sequential_for inner loop: {}\n", e.what());
+                    except_caught = true;
+                }
         }
     }
-    // } catch (...) {
-    //     throw;
-    // }
+    if (except_caught) { /// @warning not complete
+        throw std::runtime_error("Exception caught in sequential_for");
+    }
 }
 
 } // namespace moto

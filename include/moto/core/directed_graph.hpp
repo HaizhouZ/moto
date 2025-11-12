@@ -103,6 +103,7 @@ class directed_graph {
         binary_view_.reserve(100 * n_jobs);
     }
     size_t &n_jobs() { return n_jobs_; }                ///< get the number of jobs
+    bool &no_except() { return no_except_; }            ///< get the no_except flag
     directed_graph(const directed_graph &rhs) = delete; ///< copy constructor is deleted
     /**
      * @brief add an edge from start node to end node with a given length
@@ -357,12 +358,12 @@ class directed_graph {
             parallel_for(
                 0, unary_in_.size(),
                 [&callback, this](size_t tid, size_t i) { callback(tid, unary_in_[i]); },
-                n_jobs_);
+                n_jobs_, no_except_);
         } else if constexpr (is_unary) {
             parallel_for(
                 0, unary_in_.size(),
                 [&callback, this](size_t i) { callback(unary_in_[i]); },
-                n_jobs_);
+                n_jobs_, no_except_);
         } else {
             static_assert(false, "Callback function arity not supported in for_each_parallel()");
         }
@@ -385,14 +386,14 @@ class directed_graph {
                     sequential_for(
                         0, unary_view_.size(),
                         [&callback, this](size_t tid, size_t i) { callback(tid, unary_view_[i]); },
-                        n_jobs_);
+                        n_jobs_, no_except_);
                 }
             } else {
                 while (unary_view_.update()) {
                     sequential_for(
                         0, unary_view_.size(),
                         [&callback, this](size_t i) { callback(unary_view_[i]); },
-                        n_jobs_);
+                        n_jobs_, no_except_);
                 }
             }
         } else if constexpr (is_binary || is_binary_with_tid) {
@@ -407,17 +408,17 @@ class directed_graph {
                         callback(tid, binary_view_[i].first, binary_view_[i].second);
                     };
                     if constexpr (parallel)
-                        parallel_for(0, binary_view_.size(), job, n_jobs_);
+                        parallel_for(0, binary_view_.size(), job, n_jobs_, no_except_);
                     else
-                        sequential_for(0, binary_view_.size(), job, n_jobs_);
+                        sequential_for(0, binary_view_.size(), job, n_jobs_, no_except_);
                 } else {
                     auto job = [&callback, this](size_t i) {
                         callback(binary_view_[i].first, binary_view_[i].second);
                     };
                     if constexpr (parallel)
-                        parallel_for(0, binary_view_.size(), job, n_jobs_);
+                        parallel_for(0, binary_view_.size(), job, n_jobs_, no_except_);
                     else
-                        sequential_for(0, binary_view_.size(), job, n_jobs_);
+                        sequential_for(0, binary_view_.size(), job, n_jobs_, no_except_);
                 }
             }
         } else {
@@ -452,6 +453,7 @@ class directed_graph {
 
   private:
     size_t n_jobs_ = MAX_THREADS; ///< number of jobs to run in parallel
+    bool no_except_ = false;      ///< true if exceptions in parallel jobs are suppressed
     node *head_ = nullptr;        /// < head node of the graph, i.e., the first node in the graph
     /// @todo: multiple tail
     node *tail_ = nullptr;  ///< tail node of the graph, i.e., the last node in the graph

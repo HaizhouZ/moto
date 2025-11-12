@@ -244,6 +244,13 @@ class pinCasadiModel(cpin.Model):
         return moto.cost("c_u", input_args, input_cost).set_diag_hess()
 
 
+    def get_dt_reg(self, dt_nom):
+        if not isinstance(self.dt, cs.SX):
+            raise ValueError("dt is not a symbolic variable")
+        W_dt = moto.sym.params("W_dt", 1, default_val=1e3)
+        return [moto.cost("dt_reg", [self.dt, dt_nom, W_dt], W_dt * (self.dt - dt_nom) ** 2),
+                moto.constr("dt_bound", [self.dt], cs.vcat([self.dt - 0.1, 1e-2 - self.dt])).as_ineq()]
+
 # dt = moto.sym.inputs("dt", 1, default_val=0.02)
 dt_nom = moto.sym.params("dt_nom", 1, default_val=0.02)
 dt = 0.02
@@ -262,6 +269,7 @@ prob.add(model.make_tq_limit_constr())
 prob.add(model.make_joint_limit_constr())
 prob.add(model.get_state_cost())
 prob.add(model.get_input_cost())
+# prob.add(model.get_dt_reg(dt_nom))
 
 prob_term = prob.clone()
 prob_term.add(model.make_ee_pos_constr())
@@ -274,49 +282,46 @@ print("--" * 15)
 
 N_horizon = 50
 
-sqp = moto.sqp(n_job=1)
+sqp = moto.sqp(n_job=4)
 g = sqp.graph
 n0 = g.set_head(g.add(sqp.create_node(prob)))
 n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
 g.add_edge(n0, n1, N_horizon)
 cfg = [
     [
-        -0.4413381175136468,
-        -0.3681474968347521,
-        0.5048906263414011,
-        -0.3459516731344637,
-        -0.012699514214883486,
-        0.9256556113790925,
-        0.1527018379606805,
+        -0.009276185803816728,
+        0.42909599835235623,
+        0.28253248550723115,
+        0.17861190199600196,
+        0.5963352898187627,
+        -0.45337258300016947,
+        -0.6379148152895473,
     ],
     [
-        -0.39183453679515345,
-        2.7132996805605147,
-        2.7068577763863484,
-        1.3882845155376211,
-        -1.3553245206176137,
-        1.498755302649343,
+        -1.0353259602498186,
+        1.6853362490730008,
+        -1.396282671965237,
+        0.3391032332830033,
+        -0.14201851163862678,
+        0.8097199009868228,
     ],
-]
-cfg = [
-    [0.4, 0.4, 0.4, 0.0, 0.0, 0.0, 1.0],
-    [0.0] * 6,
+    # [0.] * 6,
 ]
 
 n1.data.value[model.r_des] = np.array(cfg[0][:3])
 n1.data.value[model.quat_des] = np.array(cfg[0][3:7])
-n1.data.value[model.W_ee_cost] = np.ones(6) * 1e6
+n1.data.value[model.W_ee_cost] = np.ones(6) * 1e8
 
 
 def set_initial_state(data: moto.sqp.data_type):
     data.value[model.q] = np.array(cfg[1])
-    data.value[model.qn] = np.array(cfg[1])
+    # data.value[model.qn] = np.array(cfg[1])
     # data.value[model.r_des] = np.array(cfg[0][:3])
     # data.value[model.quat_des] = np.array(cfg[0][3:7])
     # data.value[model.W_ee_cost] = np.ones(6) * 4
 
-
-sqp.apply_forward(set_initial_state)
+set_initial_state(n0.data)
+# sqp.apply_forward(set_initial_state)
 
 sqp.settings.mu = 1
 # sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing

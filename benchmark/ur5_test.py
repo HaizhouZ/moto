@@ -306,6 +306,8 @@ for idx_cfg, cfg in tqdm(enumerate(config), total=len(config)):
     sqp.settings.prim_tol = 1e-3
     sqp.settings.dual_tol = 1e-3
     sqp.settings.comp_tol = 1e-3
+    sqp.settings.max_rf_iters = 2
+    sqp.settings.no_except = True
 
     start = time.perf_counter()
     info = sqp.update(100, verbose=False)

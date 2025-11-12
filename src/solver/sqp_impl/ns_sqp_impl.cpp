@@ -8,7 +8,6 @@
 #define SHOW_DETAIL_TIMING
 #include <moto/utils/timed_block.hpp>
 
-
 namespace moto {
 ns_sqp::kkt_info ns_sqp::initialize() {
     if (settings.verbose)
@@ -48,6 +47,7 @@ void ns_sqp::finalize_correction(data *d) {
 
 ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
     settings.verbose = verbose;
+    graph_.no_except() = settings.no_except;
     settings.n_worker = graph_.n_jobs();
     kkt_last = initialize();
     ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -176,9 +176,13 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             }
             // });
         }
-    } catch (const std::exception &e) {
-        // if (verbose)
-        fmt::print("Exception caught during SQP iterations: {}\n", e.what());
+    } catch (...) {
+        if (settings.no_except) {
+            if (settings.verbose)
+                fmt::print("Exception caught during SQP iterations. Terminating.\n");
+        } else {
+            throw;
+        }
     }
     return kkt_last;
 }

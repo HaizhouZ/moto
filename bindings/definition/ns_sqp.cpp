@@ -37,6 +37,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("use_iterative_refinement", &ns_sqp::settings_t::use_iterative_refinement, "Whether to use iterative refinement")
         .def_rw("max_ls_steps", &ns_sqp::settings_t::max_ls_steps, "Maximum number of line search steps")
         .def_rw("use_line_search", &ns_sqp::settings_t::use_line_search, "Whether to use line search")
+        .def_rw("no_except", &ns_sqp::settings_t::no_except, "Whether to suppress exceptions in parallel jobs")
         .def_rw("warm_start_ipm", &ns_sqp::settings_t::warm_start_ipm, "Whether to warm start the IPM solver")
         .def_rw("prim_tol", &ns_sqp::settings_t::prim_tol, "Primal feasibility tolerance")
         .def_rw("dual_tol", &ns_sqp::settings_t::dual_tol, "Dual feasibility tolerance")

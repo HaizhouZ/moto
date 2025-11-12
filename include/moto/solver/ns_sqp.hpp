@@ -30,6 +30,8 @@ struct ns_sqp {
         bool use_iterative_refinement = true; ///< whether to use iterative refinement
 
         bool warm_start_ipm = false; ///< whether to warm start the IPM solver
+        
+        bool no_except = false;
 
       private:
         friend class ns_sqp;
