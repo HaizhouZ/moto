@@ -34,7 +34,7 @@ class generic_cost : public generic_func {
 
     PROPERTY(finalize_hint)
 
-    DEF_FUNC_CLONE;
+    DEF_DEFAULT_CLONE(generic_cost)
 };
 
 generic_cost *cost::operator->() const {

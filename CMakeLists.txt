@@ -24,7 +24,7 @@ set(MOTO_COMPILE_DEFS MOTO_USE_OMP)
 set(MOTO_COMPILE_FEATURES cxx_std_20)
 
 option(BUILD_MULTIBODY "Build multibody module" ON)
-
+set(BUILD_MULTIBODY OFF CACHE BOOL "Build multibody module")
 option(USE_MIMALLOC "Use mimalloc" OFF)
 
 if(USE_MIMALLOC MATCHES ON)
@@ -61,7 +61,7 @@ list(APPEND MOTO_DEP_LIBS
 
 include(cmake/subObjectHelpers.cmake)
 
-file(GLOB_RECURSE SRC_FILES src/core/*.cpp src/ocp/*.cpp src/utils/*.cpp src/solver/*.cpp src/spmm/*.cpp)
+file(GLOB_RECURSE SRC_FILES src/core/*.cpp src/ocp/*.cpp)# src/utils/*.cpp src/solver/*.cpp src/spmm/*.cpp)
 
 add_library(${PROJECT_NAME} SHARED ${SRC_FILES})
 target_add_deps(${PROJECT_NAME})
@@ -74,21 +74,21 @@ set_source_files_properties(${RELEASE_FILE_LIST} PROPERTIES
 
 set(PLUGIN_LIBS "")
 
-if (BUILD_MULTIBODY MATCHES ON)
-  message(STATUS "Building multibody module")
-  file(GLOB_RECURSE MB_SRC_FILES src/multibody/*.cpp)
-  add_library(moto_multibody SHARED ${MB_SRC_FILES})
-  # add_project_dependency(pinocchio REQUIRED)
-  target_add_deps(moto_multibody)
-  # target_compile_definitions(moto_multibody PUBLIC MOTO_WITH_PINOCCHIO COAL_DISABLE_HPP_FCL_WARNINGS)
-  # target_link_libraries(moto_multibody PUBLIC ${PROJECT_NAME} pinocchio::pinocchio_parsers)
-  list(APPEND PLUGIN_LIBS moto_multibody)
-endif()
+# if (BUILD_MULTIBODY MATCHES ON)
+#   message(STATUS "Building multibody module")
+#   file(GLOB_RECURSE MB_SRC_FILES src/multibody/*.cpp)
+#   add_library(moto_multibody SHARED ${MB_SRC_FILES})
+#   # add_project_dependency(pinocchio REQUIRED)
+#   target_add_deps(moto_multibody)
+#   # target_compile_definitions(moto_multibody PUBLIC MOTO_WITH_PINOCCHIO COAL_DISABLE_HPP_FCL_WARNINGS)
+#   # target_link_libraries(moto_multibody PUBLIC ${PROJECT_NAME} pinocchio::pinocchio_parsers)
+#   list(APPEND PLUGIN_LIBS moto_multibody)
+# endif()
 
 include(cmake/installHelpers.cmake)
 
 # add_subdirectory(example)
-add_subdirectory(bindings)
+# add_subdirectory(bindings)
 
 include(CTest)
 enable_testing()

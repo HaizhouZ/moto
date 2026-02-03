@@ -8,25 +8,17 @@
 namespace moto {
 class sym;
 namespace cs = casadi;
-struct var : public shared_expr, public cs::SX {
+struct var : public utils::shared<sym>, public cs::SX {
   public:
-    using base = shared_expr;
     using sym = moto::sym;
-    bool operator !() const { return !bool(*this); } ///< logical NOT operator
-    sym *operator->() const; ///< convert to sym
-    var() = default;         ///< default constructor, will create a not-a-number symbolic variable
-    template <typename T, typename T_ = std::remove_cvref_t<T>>
-        requires std::is_base_of_v<sym, T_>
-    var(T &&rhs) noexcept : base(std::forward<T>(rhs)), cs::SX((sym &)*this) {}
-    var(var &&rhs) noexcept : base(std::move(rhs)), cs::SX(static_cast<cs::SX &&>(rhs)) {}
-    var(const std::reference_wrapper<sym> &rhs) noexcept : var((const sym &)rhs) {}
-    var(const var &) = default;                ///< copy constructor
-    var &operator=(const var &) = default;     ///< copy assignment operator
-    var &operator=(var &&) noexcept = default; ///< move assignment operator
+    using base = utils::shared<sym>;
+    using base::base;
+    using base::get;
+    using base::operator->;
+    using base::operator bool;
+    using base::operator!;
+    inline friend bool operator==(const var &lhs, const var &rhs) noexcept;
 };
-inline bool operator==(const var &lhs, const var &rhs) {
-    return lhs.operator->() == rhs.operator->();
-} ///< equality operator
 /**
  * @brief pointer wrapper of symbolic expressions like primal variables or parameters
  */
@@ -47,9 +39,6 @@ class sym : public expr, public cs::SX {
 
     sym(const sym &rhs) = default;            ///< copy constructor
     sym &operator=(const sym &rhs) = default; ///< copy assignment operator
-
-    friend class shared_expr; ///< allow shared_expr to access private members
-    friend class var;         ///< allow var to access private members
 
     sym() = default; ///< default constructor, will create a not-a-number symbolic variable
     /**
@@ -72,6 +61,10 @@ class sym : public expr, public cs::SX {
     using expr::name; ///< name of the symbolic variable
     using expr::operator bool;
     using expr::dep;
+
+    friend bool operator==(const sym &lhs, const sym &rhs) noexcept {
+        return operator==(lhs, rhs);
+    }
 
     PROPERTY(default_value) ///< default value of the symbolic variable
     PROPERTY(dual)          ///< dual variable, only used for state variables
@@ -178,10 +171,6 @@ class sym : public expr, public cs::SX {
     }
 };
 
-inline sym *var::operator->() const {
-    return static_cast<sym *>(base::operator->());
-}
-
 struct var_inarg_list; ///< forward declaration
 struct var_list : public std::vector<var> {
     using std::vector<var>::vector; ///< inherit constructors from std::vector
@@ -204,6 +193,9 @@ inline var_list::var_list(const var_inarg_list &v) {
         this->emplace_back(i.get());
     }
 } ///< construct from var_inarg_list
+inline bool operator==(const var &lhs, const var &rhs) noexcept {
+    return *lhs == *rhs; // use sym's operator==
+}
 } // namespace moto
 
 #endif // MOTO_OCP_SYM_HPP

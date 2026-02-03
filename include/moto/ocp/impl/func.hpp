@@ -13,16 +13,7 @@ namespace cs_codegen {
 struct task;
 }
 } // namespace utils
-struct func : public shared_expr {
-    using base = shared_expr;
-    using base::base;
-    generic_func *operator->() const; ///< convert to generic_func
-    template <typename T>
-        requires std::is_base_of_v<generic_func, std::remove_cvref_t<T>>
-    T &as() const {
-        return static_cast<T &>(*this);
-    } ///< convert to derived type
-};
+using func = utils::shared<generic_func>;
 /**
  * @brief approximation class for generic functions
  * @todo: change to differentiable for precompute
@@ -85,11 +76,6 @@ class generic_func : public expr {
 
     generic_func(const generic_func &) = default;
     generic_func &operator=(const generic_func &) = default;
-
-    friend class shared_expr; ///< allow shared_expr to access private members
-    friend class func;
-
-    using wrapper_type = func;
 
     generic_func() = default;
 
@@ -172,7 +158,6 @@ class generic_func : public expr {
     /// @param in argument to add, must be one of var, sym, or shared_expr
     template <typename T>
         requires std::is_same_v<var, std::remove_cvref_t<T>> ||
-                 std::is_same_v<shared_expr, std::remove_cvref_t<T>> ||
                  std::is_same_v<sym, std::remove_cvref_t<T>>
     void add_argument(T &&in) {
         if (std::find(in_args_.begin(), in_args_.end(), in) != in_args_.end())
@@ -221,17 +206,8 @@ class generic_func : public expr {
     std::function<void(func_approx_data &)> jacobian; ///< jacobian callback
     std::function<void(func_approx_data &)> hessian;  ///< hessian callback
 
-#define DEF_FUNC_CLONE                                                                                       \
-    wrapper_type clone() const {                                                                             \
-        assert(uid_.is_valid() && "cannot clone a null function");                                           \
-        return wrapper_type(std::shared_ptr<generic_func>(new std::remove_cvref_t<decltype(*this)>(*this))); \
-    }
-
-    DEF_FUNC_CLONE;
+    DEF_DEFAULT_CLONE(generic_func)
 };
-inline generic_func *func::operator->() const {
-    return static_cast<generic_func *>(base::operator->());
-} ///< convert to generic_func
 
 } // namespace moto
 

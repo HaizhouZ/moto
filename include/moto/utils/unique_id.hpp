@@ -7,6 +7,7 @@ namespace moto {
 namespace utils {
 /// @brief thread-safe unique id generator for a given type
 /// @tparam T
+/// @note default uid value is invalid, set_inc() must be called to assign a new uid
 template <typename T>
 class unique_id {
   private:
@@ -23,7 +24,7 @@ class unique_id {
     /// move constructor, assigns a new uid
     unique_id(unique_id &&rhs) noexcept : uid_(rhs.uid_) { rhs.uid_ = uid_max; }
     unique_id &operator=(const unique_id &rhs) {
-        if (this != &rhs) {
+        if (this != &rhs) { /// avoid self-assignment
             uid_ = max_uid++;
         }
         return *this;

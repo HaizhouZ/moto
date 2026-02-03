@@ -98,15 +98,4 @@ void generic_constr::finalize_impl() {
     generic_func::finalize_impl();
     assert(field_ >= __dyn && field_ - __dyn < field::num_constr);
 }
-constr::constr(const std::string &name, approx_order order, size_t dim, field_t field)
-    : func(generic_constr(name, order, dim, field)) {
-} ///< create a generic constraint with name and dimension
-constr::constr(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
-               approx_order order, field_t field)
-    : func(generic_constr(name, in_args, out, order, field)) {
-    assert(out.size2() == 1 && "generic_constr output cols must be 1");
-}
-generic_constr *constr::operator->() const {
-    return static_cast<generic_constr *>(base::operator->());
-} ///< access the generic_func interface
 } // namespace moto

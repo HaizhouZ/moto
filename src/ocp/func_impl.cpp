@@ -100,7 +100,8 @@ generic_func generic_func::share(bool copy_args, const var_inarg_list &skip_copy
     generic_func f(*this);
     gen_.copy_task = true;
     f.finalized_ = true;                               // keep finalized
-    f.async_ready_status_ = this->async_ready_status_; // share the async status
+    /// @todo make remapping
+    // f.async_ready_status_ = this->async_ready_status_; // share the async status
     if (copy_args) {
         bool skip_copy[in_args_.size()] = {false};
         for (const sym &s : skip_copy_args) {

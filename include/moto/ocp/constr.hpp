@@ -9,27 +9,22 @@
 namespace moto {
 class generic_constr; ///< forward declaration
 
-struct constr : public func {
-    using func::func; ///< inherit base constructor
-    constr(const std::string &name, approx_order order, size_t dim = dim_tbd, field_t field = __undefined);
-    constr(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
-           approx_order order = approx_order::first, field_t field = __undefined);
-    generic_constr *operator->() const;
+struct constr : public utils::shared<generic_constr> {
+    using base = utils::shared<generic_constr>;
+    using base::base; ///< inherit base constructor
     /**
      * @brief set the constraint as soft equality constraint in-place
      * @return constr& *this
      */
-    template <typename derived = generic_constr, typename base = generic_constr>
-        requires(std::derived_from<derived, generic_constr> &&
-                 std::derived_from<base, generic_constr>)
+    template <typename derived = generic_constr>
+        requires(std::derived_from<derived, generic_constr>)
     constr &as_soft();
     /**
      * @brief set the constraint as inequality constraint in-place
      * @return constr& *this
      */
-    template <typename derived = generic_constr, typename base = generic_constr>
-        requires(std::derived_from<derived, generic_constr> &&
-                 std::derived_from<base, generic_constr>)
+    template <typename derived = generic_constr>
+        requires(std::derived_from<derived, generic_constr>)
     constr &as_ineq();
     // @brief set the constraint as inequality constraint with a specific type
     constr &as_ineq(std::string_view type_name);
@@ -76,10 +71,6 @@ class generic_constr : public generic_func {
     /// @note will set the field (if unset) based on the field hint and substitute __x to __y for pure-state constraints
     void finalize_impl() override;
 
-    friend class constr;
-
-    using wrapper_type = constr;
-
   public:
     void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const override {
         data.as<approx_data>().ls_cfg = &ws_data->as<solver::linesearch_config>();
@@ -121,21 +112,19 @@ class generic_constr : public generic_func {
      * @return func_approx_data_ptr_t
      */
     OVERLOAD_CREATE_APPROX_DATA(generic_constr);
-    DEF_FUNC_CLONE;
+    DEF_DEFAULT_CLONE(generic_constr);
 };
 
-template <typename derived, typename base>
-    requires(std::derived_from<derived, generic_constr>) && (std::derived_from<base, generic_constr>)
+template <typename derived>
+    requires(std::derived_from<derived, generic_constr>)
 constr &constr::as_soft() {
-    (*this)->field_hint_.is_soft = true;
     reset(new derived(std::move(static_cast<base &>(*this))));
     return *this;
 }
 
-template <typename derived, typename base>
-    requires(std::derived_from<derived, generic_constr>) && (std::derived_from<base, generic_constr>)
+template <typename derived>
+    requires(std::derived_from<derived, generic_constr>)
 constr &constr::as_ineq() {
-    (*this)->field_hint_.is_eq = false;
     reset(new derived(std::move(static_cast<base &>(*this))));
     return *this;
 }
