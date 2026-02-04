@@ -9,13 +9,13 @@ void register_submodule_node_data(nb::module_ &m) {
     auto ocp_handle =
         nb::class_<ocp>(m, "ocp")
             .def("add", [](ocp &self, expr_inarg_list &&exprs) { self.add(exprs); }, nb::arg("exprs"), "Add a list of expressions to the OCP problem")
-            .def("add", [](ocp &self, const py_shared_expr_wrapper &ex) { self.add((shared_expr &)ex); }, nb::arg("ex"), "Add an expression to the OCP problem")
+            .def("add", [](ocp &self, py_expr_inarg_wrapper ex) { self.add((expr&)ex); }, nb::arg("ex"), "Add an expression to the OCP problem")
             .def_static("create", &ocp::create, "Create a new OCP problem")
             .def("clone", [](ocp &self, ocp::active_status_config &&config) { return self.clone(config); }, "Clone the OCP problem")
             .def("clone", [](ocp &self) { return self.clone(); }, "Clone the OCP problem")
             .def("dim", [](ocp &self, field_t field) { return self.dim(field); }, nb::arg("field"), "Get the dimension of the field")
             //    .def("exprs", [](ocp &self, field_t field) { return expr_inarg_list(self.exprs<shared_expr>(field)); }, nb::arg("field"), "Get the expressions in the field")
-            .def("exprs", [](ocp &self, field_t field) -> auto & { return static_cast<const std::vector<shared_expr> &>(self.exprs(field)); }, nb::arg("field"), "Get the expressions in the field", nb::rv_policy::reference_internal)
+            .def("exprs", [](ocp &self, field_t field) -> const auto & { return static_cast<const std::vector<shared_expr> &>(self.exprs(field)); }, nb::arg("field"), "Get the expressions in the field", nb::rv_policy::reference_internal)
             .def_prop_ro("uid", &ocp::uid, "Get the unique identifier of the OCP problem")
             .def("wait_until_ready", &ocp::wait_until_ready, "Wait until all expressions in the OCP problem are ready")
             .def("update_active_status", &ocp::update_active_status, nb::arg("config"), nb::arg("update_sub_probs") = true, "Update the active status of the OCP problem based on the provided configuration")
@@ -31,9 +31,9 @@ void register_submodule_node_data(nb::module_ &m) {
     nb::class_<sym_data>(m, "sym_data")
         .def(nb::init<ocp *>(), nb::arg("prob"), "Constructor for sym_data with OCP problem")
         .def_prop_ro("prob", [](sym_data &self) -> ocp & { return *self.prob_; })
-        .def("__getitem__", [](sym_data &self, const py_var_wrapper &s) -> auto { return self[s]; })
+        .def("__getitem__", [](sym_data &self, py_var_inarg_wrapper s) -> auto { return self[s]; })
         .def("print", &sym_data::print, "Print the symbolic data")
-        .def("__setitem__", [](sym_data &self, const py_var_wrapper &s, std::variant<vector_ref, scalar_t> d) { 
+        .def("__setitem__", [](sym_data &self, py_var_inarg_wrapper s, std::variant<vector_ref, scalar_t> d) {
             if (std::holds_alternative<vector_ref>(d)) {
                 self[s] = std::get<vector_ref>(d);
             } else if (std::holds_alternative<scalar_t>(d)) {
@@ -74,15 +74,15 @@ void register_submodule_node_data(nb::module_ &m) {
 
     nb::class_<func_arg_map>(m, "func_arg_map")
         .def_prop_ro("prob", [](func_arg_map &self) -> auto & { return *self.problem(); })
-        .def("__getitem__", [](func_arg_map &self, const py_var_wrapper &s) { return self[s]; })
-        .def("__setitem__", [](func_arg_map &self, const py_var_wrapper &s, vector_ref d) { self[s] = d; })
+        .def("__getitem__", [](func_arg_map &self, py_var_inarg_wrapper s) { return self[(sym &)s]; })
+        .def("__setitem__", [](func_arg_map &self, py_var_inarg_wrapper s, vector_ref d) { self[(sym &)s] = d; })
         .def(nb::init<sym_data &, shared_data &, const func &>(), nb::arg("primal"), nb::arg("shared"), nb::arg("f"),
              "Constructor for func_arg_map with sym_data and shared_data");
 
     nb::class_<func_approx_data, func_arg_map>(m, "func_approx_data")
         .def_prop_ro("prob", [](func_approx_data &self) -> auto & { return *self.problem(); })
-        .def("__getitem__", [](func_approx_data &self, const py_var_wrapper &s) { return self[s]; })
-        .def("__setitem__", [](func_approx_data &self, const py_var_wrapper &s, vector_ref d) { self[s] = d; })
+        .def("__getitem__", [](func_approx_data &self, py_var_inarg_wrapper s) { return self[(sym &)s]; })
+        .def("__setitem__", [](func_approx_data &self, py_var_inarg_wrapper s, vector_ref d) { self[(sym &)s] = d; })
         .def(nb::init<sym_data &, merit_data &, shared_data &, const func &>(), nb::arg("primal"), nb::arg("raw"), nb::arg("shared"), nb::arg("f"),
              "Constructor for func_approx_data with sym_data, merit_data and shared_data")
         .def("setup_hessian", &func_approx_data::setup_hessian, "Setup hessian from raw approximation data")
@@ -91,7 +91,7 @@ void register_submodule_node_data(nb::module_ &m) {
         // .def_rw("hess", &func_approx_data::hess_, "Hessian matrix references for merit, 2-D indexed by input arguments")
         .def(
             "jac",
-            [](func_approx_data &self, const py_var_wrapper &in) -> auto { return self.jac(in); },
+            [](func_approx_data &self, py_var_inarg_wrapper in) -> auto { return self.jac((sym &)in); },
             "Get the jacobian reference for the input variable")
-        .def("set_jac", [](func_approx_data &self, const py_var_wrapper &in, Eigen::Ref<const matrix> rhs) { self.jac(in) = rhs; });
+        .def("set_jac", [](func_approx_data &self, py_var_inarg_wrapper in, Eigen::Ref<const matrix> rhs) { self.jac((sym &)in) = rhs; });
 }

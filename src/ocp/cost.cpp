@@ -51,15 +51,15 @@ void generic_cost::finalize_impl() {
     return;
 }
 
-cost::cost(const std::string &name, approx_order order)
-    : func(generic_cost(name, order, 1, __cost)) {}
+generic_cost::generic_cost(const std::string &name, approx_order order)
+    : generic_func(name, order, 1, __cost) {}
 
-cost::cost(const std::string &name, const var_inarg_list &in_args, const cs::SX &out, approx_order order)
-    : func(generic_cost(name, in_args, out, order, __cost)) {
+generic_cost::generic_cost(const std::string &name, const var_inarg_list &in_args, const cs::SX &out, approx_order order)
+    : generic_func(name, in_args, out, order, __cost) {
     // assert(out.is_scalar() && "cost output must be a scalar");
     if (out.is_scalar()) {
     } else {
-        (*this)->finalize_hint_.gauss_newton = true;
+        finalize_hint_.gauss_newton = true;
     }
 }
 

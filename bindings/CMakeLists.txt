@@ -11,12 +11,15 @@ endif()
 find_package(Python 3.8 COMPONENTS Interpreter ${DEV_MODULE} REQUIRED)
 
 execute_process(
-        COMMAND "${PYTHON_EXECUTABLE}" -c "if True:
-            import sysconfig
-            print(sysconfig.get_paths()[\"purelib\"])"
+        COMMAND "python" -c "
+import sysconfig
+print(sysconfig.get_paths()[\"purelib\"])"
         OUTPUT_VARIABLE PYTHON_SITE
         OUTPUT_STRIP_TRAILING_WHITESPACE)
 message("-- python site is ${PYTHON_SITE}")
+if("${PYTHON_SITE}" STREQUAL "")
+    message(FATAL_ERROR "Could not determine python site-packages directory")
+endif()
 
 execute_process(
   COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir

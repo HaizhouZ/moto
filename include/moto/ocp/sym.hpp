@@ -40,7 +40,14 @@ class sym : public expr, public cs::SX {
     sym(const sym &rhs) = default;            ///< copy constructor
     sym &operator=(const sym &rhs) = default; ///< copy assignment operator
 
-    sym() = default; ///< default constructor, will create a not-a-number symbolic variable
+    bool has_non_trivial_integration_ = false; ///< whether the symbolic variable has non-trivial integration
+    bool has_non_trivial_difference_ = false;  ///< whether the symbolic variable has non-trivial difference
+
+  public:
+    sym() = default;                     ///< default constructor, will create a not-a-number symbolic variable
+    sym(sym &&rhs) = default;            ///< move constructor
+    sym &operator=(sym &&rhs) = default; ///< move assignment operator
+
     /**
      * @brief Construct a new sym object
      *
@@ -50,20 +57,13 @@ class sym : public expr, public cs::SX {
      */
     sym(const std::string &name, size_t dim, field_t type, default_val_t default_val = default_val_none_t());
 
-    bool has_non_trivial_integration_ = false; ///< whether the symbolic variable has non-trivial integration
-    bool has_non_trivial_difference_ = false;  ///< whether the symbolic variable has non-trivial difference
-
-  public:
-    sym(sym &&rhs) = default;            ///< move constructor
-    sym &operator=(sym &&rhs) = default; ///< move assignment operator
-
     using expr::dim;
     using expr::name; ///< name of the symbolic variable
     using expr::operator bool;
     using expr::dep;
 
     friend bool operator==(const sym &lhs, const sym &rhs) noexcept {
-        return operator==(lhs, rhs);
+        return operator==((const expr &)lhs, (const expr &)rhs);
     }
 
     PROPERTY(default_value) ///< default value of the symbolic variable
@@ -104,16 +104,16 @@ class sym : public expr, public cs::SX {
     auto get_next_name() const { return name_ + next_suffix_; } ///< get the name of the next state variable
     /// @brief make a symbolic input
     static var inputs(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
-        return sym(name, dim, __u, default_val);
+        return std::make_shared<sym>(name, dim, __u, default_val);
     }
     /// @brief make a symbolic parameter
     static var params(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
-        return sym(name, dim, __p, default_val);
+        return std::make_shared<sym>(name, dim, __p, default_val);
     }
     /// @brief make a pair of symbolic state
     static auto states(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
-        auto temp = var(sym(name, dim, __x, default_val));
-        auto next = var(sym(temp->get_next_name(), dim, __y, default_val));
+        auto temp = var(std::make_shared<sym>(name, dim, __x, default_val));
+        auto next = var(std::make_shared<sym>(temp->get_next_name(), dim, __y, default_val));
         setup_states(temp, next);
         return std::make_pair(std::move(temp), std::move(next));
     }
@@ -140,11 +140,11 @@ class sym : public expr, public cs::SX {
     }
 
     static var usr_var(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
-        return sym(name, dim, __usr_var, default_val);
+        return std::make_shared<sym>(name, dim, __usr_var, default_val);
     } ///< make a user defined variable
 
     static var symbol(const std::string &name, size_t dim = 1, field_t field = field_t::__undefined, default_val_t default_val = default_val_none_t()) {
-        return sym(name, dim, field, default_val);
+        return std::make_shared<sym>(name, dim, field, default_val);
     } ///< make a symbolic primitive
 
     /// clone the symbolic variable
@@ -157,8 +157,8 @@ class sym : public expr, public cs::SX {
     var clone_states(const std::string &name) const {
         var s, d; // new state and its dual
         if (field_ == __x) {
-            s = derived((const derived &)*this);
-            d = derived((const derived &)dual_);
+            s = var(new derived((const derived &)*this));
+            d = var(new derived((const derived &)dual_));
         } else if (field_ == __y) {
             return dual_->clone_states<derived>(name);
         } else {

@@ -1,13 +1,11 @@
-import moto
 import casadi as cs
+import moto
 
 class var(cs.SX):
-    '''
-    This is a placeholder class to represent a symbolic variable
-    that combines the functionality of `moto.var` and `casadi.SX`.
-    It is intended to be used in type annotations and does not
-    implement any actual functionality.
-    '''
-
+    def __init__(self, s: moto.sym):
+        super().__init__(s.sx)
+        self.__sym__ = s
+    
     @property
-    def sym_handle(self) -> moto.var_alias: ...
+    def sym(self) -> moto.sym:
+        return self.__sym__

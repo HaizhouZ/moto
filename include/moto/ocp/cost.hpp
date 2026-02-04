@@ -4,9 +4,7 @@ namespace moto {
 class generic_cost;
 struct cost : public func {
     using func::func; ///< inherit base constructor
-    cost(const std::string &name, approx_order order = approx_order::second);
-    cost(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
-         approx_order order = approx_order::second);
+
     cost &set_diag_hess();
     cost &as_terminal();                       ///< convert to terminal cost
     cost &set_gauss_newton(const var &weight); ///< convert to convex-over-nonlinear cost
@@ -28,10 +26,15 @@ class generic_cost : public generic_func {
     friend struct cost;
     using wrapper_type = cost;
 
-  public:
+    
+    public:
     using base = generic_func;
     using base::base; ///< inherit base constructor
-
+    
+    generic_cost(const std::string &name, approx_order order = approx_order::second);
+    generic_cost(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
+                 approx_order order = approx_order::second);
+                 
     PROPERTY(finalize_hint)
 
     DEF_DEFAULT_CLONE(generic_cost)

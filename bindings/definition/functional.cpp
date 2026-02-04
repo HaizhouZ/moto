@@ -12,24 +12,14 @@
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
 
 namespace moto {
-shared_expr &cast_to_shared_expr(const nb::handle &h) {
-    if (nb::isinstance<moto::shared_expr>(h)) {
-        return nb::cast<moto::shared_expr &>(h);
-    } else if (nb::hasattr(h, "sym_handle")) {
-        return nb::cast<moto::var_alias &>(h.attr("sym_handle"));
+expr *get_expr_ptr(const nb::handle &h) {
+    if (nb::isinstance<moto::expr>(h)) {
+        return &nb::cast<moto::expr &>(h);
+    } else if (nb::hasattr(h, "__sym__")) {
+        return &static_cast<expr &>(nb::cast<moto::sym &>(h.attr("__sym__")));
     } else {
         nb::print("Unsupported type for cast_to_var: ", h);
         throw std::runtime_error("Unsupported type for cast_to_shared_expr");
-    }
-}
-var &cast_to_var(const nb::handle &h) {
-    if (nb::isinstance<moto::var_alias>(h)) {
-        return nb::cast<moto::var_alias &>(h);
-    } else if (nb::hasattr(h, "sym_handle")) {
-        return nb::cast<moto::var_alias &>(h.attr("sym_handle"));
-    } else {
-        nb::print("Unsupported type for cast_to_var: ", h);
-        throw std::runtime_error("Unsupported type for cast_to_var");
     }
 }
 func &cast_to_func(const nb::handle &h) {
@@ -45,8 +35,8 @@ namespace nanobind {
 namespace detail {
 template <>
 struct type_caster<moto::var_inarg_list> {
-    NB_TYPE_CASTER(moto::var_inarg_list, io_name(NB_TYPING_SEQUENCE, NB_TYPING_LIST) + const_name("[") +
-                                             make_caster<moto::var>::Name + const_name(" | casadi.SX") +
+    NB_TYPE_CASTER(moto::var_inarg_list, io_name("collections.abc.Sequence", "list") + const_name("[") +
+                                             make_caster<moto::var>::Name +
                                              const_name("]"))
 
     list_caster<std::vector<handle>, handle> list_cast;
@@ -59,7 +49,8 @@ struct type_caster<moto::var_inarg_list> {
         value.clear();
         for (auto &ex : l) {
             try {
-                value.push_back(moto::cast_to_var(ex));
+                moto::expr* ptr = moto::get_expr_ptr(ex);
+                value.emplace_back(static_cast<moto::sym &>(*ptr));
             } catch (const std::exception &e) {
                 fmt::print("Failed to cast to var: {}\n", e.what());
                 return false;
@@ -98,120 +89,106 @@ void register_submodule_functional(nb::module_ &m) {
     using namespace moto;
     export_order_with_magic(m, "approx_order");
 
-    nb::class_<shared_expr>(m, "shared_expr")
-        .def("__bool__", &shared_expr::operator bool)
-        .def("__str__", [](const shared_expr &self) {
-            return fmt::format("shared_expr({:p}, name={}, uid={}, dim={}, field={}, use_count={})",
-                               static_cast<const void *>(&self), self->name(), self->uid(), self->dim(), self->field(), self.use_count());
+    // nb::class_<shared_expr>(m, "shared_expr");
+
+    nb::class_<expr>(m, "expr")
+        .def("__bool__", &expr::operator bool)
+        .def("__str__", [](const expr &self) {
+            return fmt::format("expr({:p}, name={}, uid={}, dim={}, field={})",
+                               static_cast<const void *>(&self), self.name(), self.uid(), self.dim(), self.field());
         })
-        .def_prop_ro("use_count", &shared_expr::use_count)
-        .def_prop_rw("name", [](shared_expr &self) { return self->name(); }, [](shared_expr &self, const std::string &value) { self->name() = value; })
-        .def_prop_rw("field", [](shared_expr &self) { return self->field(); }, [](shared_expr &self, const field_t &value) { self->field() = value; })
-        .def_prop_rw("dim", [](shared_expr &self) { return self->dim(); }, [](shared_expr &self, const size_t &value) { self->dim() = value; })
-        .def_prop_ro("uid", [](shared_expr &self) { return self->uid(); })
-        .def("finalize", [](shared_expr &self, bool block_until_ready) { return self->finalize(block_until_ready); }, nb::arg("block_until_ready") = true)
-        .def("wait_until_ready", [](shared_expr &self) { return self->wait_until_ready(); })
-        .def_prop_ro("finalized", [](shared_expr &self) { return self->finalized(); })
-        .def_prop_rw("default_active_status", [](shared_expr &self) { return self->default_active_status(); }, [](shared_expr &self, bool value) { self->default_active_status() = value; })
-        .def("__bool__", &shared_expr::operator bool);
+        .def_prop_rw("name", &expr::__get_name, &expr::__set_name)
+        .def_prop_rw("field", &expr::__get_field, &expr::__set_field)
+        .def_prop_rw("dim", &expr::__get_dim, &expr::__set_dim)
+        .def_prop_ro("uid", [](const expr &self) { return size_t(self.uid()); })
+        .def("finalize", [](expr &self, bool block_until_ready) { return self.finalize(block_until_ready); }, nb::arg("block_until_ready") = true)
+        .def("wait_until_ready", [](expr &self) { return self.wait_until_ready(); })
+        .def_prop_ro("finalized", &expr::__get_finalized)
+        .def_prop_rw("tdim", &expr::__get_tdim, &expr::__set_tdim)
+        .def_prop_rw("default_active_status", &expr::__get_default_active_status, &expr::__set_default_active_status);
 
-    nb::class_<var_alias, shared_expr>(m, "var_alias")
-        .def(nb::init<var_alias &&>(), nb::arg("var_alias"))
-        .def("__str__", [](const var_alias &v) { return fmt::format("var_alias(name='{}', dim={}, field={}, uid={})",
-                                                                    v->name(), v->dim(), v->field(), v->uid()); })
-        .def_prop_rw("default_value", [](var_alias &self) { return self->default_value(); }, [](var_alias &self, const sym::default_val_t &value) { self->set_default_value(value); })
-        .def_prop_ro("sx", [](var_alias &v) { return (cs::SX &)static_cast<sym &>(v); }, nb::rv_policy::reference_internal)
-        .def("clone", [](const var_alias &self, const std::string &name) { return self->clone(name); })
-        .def("symbolic_integrate", [](const var_alias &self, const cs::SX &x, const cs::SX &dx) { return self->symbolic_integrate(x, dx); }, nb::arg("x"), nb::arg("dx"))
-        .def("symbolic_difference", [](const var_alias &self, const cs::SX &x1, const cs::SX &x0) { return self->symbolic_difference(x1, x0); }, nb::arg("x1"), nb::arg("x0"), "difference from x0 to x1, i.e., x1 - x0")
-        .def("integrate", [](const var_alias &self, moto::vector_ref x, moto::vector_ref dx, moto::scalar_t alpha) { 
-            vector tmp(self->dim());
-            self->integrate(x, dx, tmp, alpha);
+    nb::class_<sym, expr>(m, "sym")
+        .def("__str__", [](const sym &v) { return fmt::format("sym(name='{}', dim={}, field={}, uid={})",
+                                                              v.name(), v.dim(), v.field(), v.uid()); })
+        .def_prop_rw("default_value", &sym::__get_default_value, &sym::__set_default_value)
+        .def_prop_ro("sx", [](sym &v) { return (cs::SX &)v; }, nb::rv_policy::reference_internal)
+        .def("clone", [](const sym &self, const std::string &name) { return self.clone(name); })
+        .def("symbolic_integrate", [](const sym &self, const cs::SX &x, const cs::SX &dx) { return self.symbolic_integrate(x, dx); }, nb::arg("x"), nb::arg("dx"))
+        .def("symbolic_difference", [](const sym &self, const cs::SX &x1, const cs::SX &x0) { return self.symbolic_difference(x1, x0); }, nb::arg("x1"), nb::arg("x0"), "difference from x0 to x1, i.e., x1 - x0")
+        .def("integrate", [](const sym &self, moto::vector_ref x, moto::vector_ref dx, moto::scalar_t alpha) { 
+            vector tmp(self.dim());
+            self.integrate(x, dx, tmp, alpha);
             return tmp; }, nb::arg("x"), nb::arg("dx"), nb::arg("alpha") = 1.0)
-        .def("difference", [](const var_alias &self, moto::vector_ref x1, moto::vector_ref x0) { 
-            vector tmp(self->tdim());
-            self->difference(x1, x0, tmp);
-            return tmp; }, nb::arg("x1"), nb::arg("x0"));
-
-    nb::class_<sym>(m, "sym")
+        .def("difference", [](const sym &self, moto::vector_ref x1, moto::vector_ref x0) { 
+            vector tmp(self.tdim());
+            self.difference(x1, x0, tmp);
+            return tmp; }, nb::arg("x1"), nb::arg("x0"))
         .def_static("symbol", &sym::symbol, nb::arg("name"), nb::arg("dim") = 1, nb::arg("field") = field_t::__undefined, nb::arg("default_val") = nb::none())
         .def_static("states", &sym::states, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
         .def_static("inputs", &sym::inputs, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
-        .def_static("params", &sym::params, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
-        .def_static("create", [](const nb::handle &h) {
-            auto &v = nb::cast<moto::var_alias &>(h);
-            nb::object py_cs_module = nb::module_::import_("casadi");
-            nb::object py_cs_sx = py_cs_module.attr("SX")((cs::SX &)v);
-            nb::setattr(py_cs_sx, "sym_handle", h);
-            return py_cs_sx.release();
-        });
+        .def_static("params", &sym::params, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none());
 
     using func_callback_t = std::function<void(func_approx_data &)>;
 
-    nb::class_<func, shared_expr>(m, "func")
-        .def_prop_ro("in_args", [](func &self) { 
-            std::vector<var_alias> args;
-            for (sym &v : self->in_args())
-                args.emplace_back(v);
-            return args; })
-        .def_prop_ro("num_args", [](func &self, field_t f) { return self->arg_num(f); })
-        .def_prop_rw(
-            "value",
-            [](func &self) { return self->value; },
-            [](func &self, const func_callback_t &v) { self->value = v; })
-        .def_prop_rw(
-            "jacobian",
-            [](func &self) { return self->jacobian; },
-            [](func &self, const func_callback_t &v) { self->jacobian = v; })
-        .def_prop_rw(
-            "hessian",
-            [](func &self) { return self->hessian; },
-            [](func &self, const func_callback_t &v) { self->hessian = v; })
-        .def_prop_rw(
-            "order",
-            [](func &self) { return self->order(); },
-            [](func &self, const approx_order &value) { self->order() = value; })
-        .def("__str__",
-             [](const func &f) { return fmt::format("func(name='{}', uid={}, order={}, dim={}, field={})",
-                                                    f->name(), f->uid(), f->order(), f->dim(), f->field()); })
-        .def("clone", [](const func &self) { return self->clone(); })
-        .def("enable_if_all", [](func &self, const expr_inarg_list &args) { self->enable_if_all(args); }, nb::arg("args"))
-        .def("disable_if_any", [](func &self, const expr_inarg_list &args) { self->disable_if_any(args); }, nb::arg("args"))
-        .def("enable_if_any", [](func &self, const expr_inarg_list &args) { self->enable_if_any(args); }, nb::arg("args"))
-        .def("add_argument", [](func &self, const py_var_wrapper &v) { self->add_argument((var &)v); }, nb::arg("in"))
-        .def("add_arguments", [](func &self, const var_inarg_list &args) { self->add_arguments(args); })
-        .def("create_approx_data", [](func &self, sym_data &primal, merit_data &raw, shared_data &shared) { return self->create_approx_data(primal, raw, shared); }, nb::arg("primal"), nb::arg("raw"), nb::arg("shared"));
+    nb::class_<generic_func, expr>(m, "func")
+        .def_prop_ro("in_args", [](generic_func &self) -> auto & { return static_cast<const std::vector<var> &>(self.in_args()); }, nb::rv_policy::reference_internal)
+        .def_prop_ro("num_args", [](generic_func &self, field_t f) { return self.arg_num(f); })
+        .def_rw("value", &generic_func::value)
+        .def_rw("jacobian", &generic_func::jacobian)
+        .def_rw("hessian", &generic_func::hessian)
+        .def_prop_rw("order", &generic_func::__get_order, &generic_func::__set_order)
+        .def("__str__", [](const generic_func &f) { return fmt::format("func(name='{}', uid={}, order={}, dim={}, field={})",
+                                                                       f.name(), f.uid(), f.order(), f.dim(), f.field()); })
+        .def("clone", [](const generic_func &self) { return self.clone(); })
+        .def("enable_if_all", [](generic_func &self, const expr_inarg_list &args) { self.enable_if_all(args); }, nb::arg("args"))
+        .def("disable_if_any", [](generic_func &self, const expr_inarg_list &args) { self.disable_if_any(args); }, nb::arg("args"))
+        .def("enable_if_any", [](generic_func &self, const expr_inarg_list &args) { self.enable_if_any(args); }, nb::arg("args"))
+        .def("add_argument", [](generic_func &self, py_var_inarg_wrapper v) { self.add_argument((sym &)v); }, nb::arg("in"))
+        .def("add_arguments", [](generic_func &self, const var_inarg_list &args) { self.add_arguments(args); })
+        .def("create_approx_data", [](generic_func &self, sym_data &primal, merit_data &raw, shared_data &shared) { return self.create_approx_data(primal, raw, shared); }, nb::arg("primal"), nb::arg("raw"), nb::arg("shared"));
 
-    nb::class_<constr, func>(m, "constr")
-        .def(
-            nb::init<const std::string &, const var_inarg_list &, const cs::SX &, approx_order, field_t>(),
+    nb::class_<generic_constr, generic_func>(m, "constr")
+        .def_static(
+            "create",
+            [](const std::string &name, const var_inarg_list &args, const cs::SX &out, approx_order order, field_t field) {
+                return std::make_shared<generic_constr>(name, args, out, order, field);
+            },
             nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("order") = approx_order::first, nb::arg("field") = field_t::__undefined)
-        .def(
-            nb::init<const std::string &, approx_order, size_t, field_t>(),
-            nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined)
-        .def("clone", [](const constr &self) { return self->clone(); })
-        .def(
-            "as_eq",
-            [](constr &self, bool soft) { return self.as_soft(); },
-            nb::arg("soft") = false, nb::rv_policy::move)
-        .def(
-            "as_ineq",
-            [](constr &self, const std::string &type_name) { return self.as_ineq(type_name); },
-            nb::arg("type_name") = "ipm", nb::rv_policy::move);
+        .def_static(
+            "create",
+            [](const std::string &name, approx_order order, size_t dim, field_t field) {
+                return std::make_shared<generic_constr>(name, order, dim, field);
+            },
+            nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined);
+    // .def("clone", [](const generic_constr &self) { return std::make_shared<generic_constr>(self.clone()); });
+    // .def(
+    //     "as_eq",
+    //     [](generic_constr &self, bool soft) { return self.as_soft(); },
+    //     nb::arg("soft") = false, nb::rv_policy::move)
+    // .def(
+    //     "as_ineq",
+    //     [](generic_constr &self, const std::string &type_name) { return self.as_ineq(type_name); },
+    //     nb::arg("type_name") = "ipm", nb::rv_policy::move);
 
-    nb::class_<cost, func>(m, "cost")
-        .def(
-            nb::init<const std::string &, const var_inarg_list &, const cs::SX &, approx_order>(),
+    nb::class_<generic_cost, generic_func>(m, "cost")
+        .def_static(
+            "create",
+            [](const std::string &name, const var_inarg_list &args, const cs::SX &out, approx_order order) {
+                return std::make_shared<generic_cost>(name, args, out, order);
+            },
             nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("order") = approx_order::second)
-        .def(
-            nb::init<const std::string &, approx_order>(),
-            nb::arg("name"), nb::arg("order") = approx_order::second)
-        .def("set_diag_hess", &cost::set_diag_hess, nb::rv_policy::move)
-        .def(
-            "as_terminal",
-            [](cost &self) { return self.as_terminal(); }, nb::rv_policy::move)
-        .def("set_gauss_newton", [](cost &self, const py_var_wrapper &v) { return self.set_gauss_newton((const var &)v); }, nb::rv_policy::move)
-        .def("clone", [](const cost &self) { return self->clone(); });
+        .def_static(
+            "create",
+            [](const std::string &name, approx_order order) {
+                return std::make_shared<generic_cost>(name, order);
+            },
+            nb::arg("name"), nb::arg("order") = approx_order::second);
+    // .def("set_diag_hess", &generic_cost::set_diag_hess, nb::rv_policy::move)
+    // .def(
+    //     "as_terminal",
+    //     [](generic_cost &self) { return self.as_terminal(); }, nb::rv_policy::move)
+    // .def("set_gauss_newton", [](generic_cost &self, const py_var_inarg_wrapper &v) { return self.set_gauss_newton((const var &)v); }, nb::rv_policy::move)
+    // .def("clone", [](const generic_cost &self) { return self->clone(); });
 
     // nb::class_<custom_func, func>(m, "custom_func")
     //     .def_prop_rw(
@@ -236,11 +213,11 @@ void register_submodule_functional(nb::module_ &m) {
     //         nb::init<const std::string &>(),
     //         nb::arg("name") = "pre_compute");
 
-    nb::class_<dense_dynamics, func>(m, "dense_dynamics")
-        .def(
-            nb::init<const std::string &, const var_inarg_list &, const cs::SX &, approx_order>(),
-            nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("order") = approx_order::first)
-        .def(
-            nb::init<const std::string &, approx_order, size_t>(),
-            nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd);
+    // nb::class_<dense_dynamics, func>(m, "dense_dynamics")
+    //     .def(
+    //         nb::init<const std::string &, const var_inarg_list &, const cs::SX &, approx_order>(),
+    //         nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("order") = approx_order::first)
+    //     .def(
+    //         nb::init<const std::string &, approx_order, size_t>(),
+    //         nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd);
 }

@@ -26,7 +26,9 @@ constexpr size_t dim_tbd = 0;
 
 #define PROPERTY(mem_name)                   \
     auto &mem_name() { return mem_name##_; } \
-    const auto &mem_name() const { return mem_name##_; }
+    const auto &mem_name() const { return mem_name##_; } \
+    void __set_##mem_name(const decltype(mem_name##_) &value) { mem_name##_ = value; }\
+    const auto &__get_##mem_name() const { return mem_name##_; }
 
 class ocp;
 /**
