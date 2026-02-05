@@ -78,10 +78,10 @@ void generic_func::substitute(const sym &arg, const sym &rhs) {
 }
 
 void generic_func::set_from_casadi(const var_inarg_list &in_args, const cs::SX &out) {
-    add_arguments(in_args);
     if (gen_.task_)
-        throw std::runtime_error(fmt::format("func {} already has an expression set", name_));
+        throw std::runtime_error(fmt::format("func {} already has a casadi codegen task", name_));
     else {
+        add_arguments(in_args);
         gen_.task_ = new gen_info::task_type();
         gen_.task_->sx_output = out;
     }

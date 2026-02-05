@@ -10,6 +10,8 @@ int main() {
     using namespace moto;
     auto default_value = (vector(3) << 0.1, 0.2, 0.3).finished();
     auto u = moto::sym::inputs("u", 3, default_value);
+    std::cout << u << std::endl;
+    cs::SX::sin(u);
     // REQUIRE(u->name() == "u");
     // REQUIRE(u->dim() == 3);
     // REQUIRE(u->field() == __u);

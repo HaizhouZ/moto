@@ -73,23 +73,12 @@ void export_order_with_magic(nb::module_ &m, const std::string &python_name) {
     enum_binder.export_values(); // Makes enum members accessible like MyEnum.MEMBER
 }
 
-#undef DEF_IMPL_GETTER
-#define DEF_IMPL_GETTER(cls)                                                     \
-    def("get_impl", [](cls &self) {                                              \
-        return std::format("{:p}", static_cast<const void *>(&self.get_impl())); \
-    })
-
-#define DEF_REF_AS(cls) \
-    def("as_" #cls, [](const shared_expr &self) -> cls & { return static_cast<cls &>(self); }, nb::rv_policy::reference_internal)
-
-#define DEF_REF_ATTR(name, cls) \
-    def_prop_rw(name, [](cls &self) { return self->name(); }, [](cls &self, const std::string &value) { self->name() = value; })
+#define DEF_CLONE_FUNC(cls) \
+    def("clone", [](const cls &self) { return std::shared_ptr<cls>(static_cast<cls*>(self.clone())); }) 
 
 void register_submodule_functional(nb::module_ &m) {
     using namespace moto;
     export_order_with_magic(m, "approx_order");
-
-    // nb::class_<shared_expr>(m, "shared_expr");
 
     nb::class_<expr>(m, "expr")
         .def("__bool__", &expr::operator bool)
@@ -139,12 +128,12 @@ void register_submodule_functional(nb::module_ &m) {
         .def_prop_rw("order", &generic_func::__get_order, &generic_func::__set_order)
         .def("__str__", [](const generic_func &f) { return fmt::format("func(name='{}', uid={}, order={}, dim={}, field={})",
                                                                        f.name(), f.uid(), f.order(), f.dim(), f.field()); })
-        .def("clone", [](const generic_func &self) { return self.clone(); })
         .def("enable_if_all", [](generic_func &self, const expr_inarg_list &args) { self.enable_if_all(args); }, nb::arg("args"))
         .def("disable_if_any", [](generic_func &self, const expr_inarg_list &args) { self.disable_if_any(args); }, nb::arg("args"))
         .def("enable_if_any", [](generic_func &self, const expr_inarg_list &args) { self.enable_if_any(args); }, nb::arg("args"))
         .def("add_argument", [](generic_func &self, py_var_inarg_wrapper v) { self.add_argument((sym &)v); }, nb::arg("in"))
         .def("add_arguments", [](generic_func &self, const var_inarg_list &args) { self.add_arguments(args); })
+        .DEF_CLONE_FUNC(generic_func)
         .def("create_approx_data", [](generic_func &self, sym_data &primal, merit_data &raw, shared_data &shared) { return self.create_approx_data(primal, raw, shared); }, nb::arg("primal"), nb::arg("raw"), nb::arg("shared"));
 
     nb::class_<generic_constr, generic_func>(m, "constr")
@@ -159,7 +148,8 @@ void register_submodule_functional(nb::module_ &m) {
             [](const std::string &name, approx_order order, size_t dim, field_t field) {
                 return std::make_shared<generic_constr>(name, order, dim, field);
             },
-            nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined);
+            nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined)
+        .DEF_CLONE_FUNC(generic_constr);
     // .def("clone", [](const generic_constr &self) { return std::make_shared<generic_constr>(self.clone()); });
     // .def(
     //     "as_eq",
@@ -182,7 +172,8 @@ void register_submodule_functional(nb::module_ &m) {
             [](const std::string &name, approx_order order) {
                 return std::make_shared<generic_cost>(name, order);
             },
-            nb::arg("name"), nb::arg("order") = approx_order::second);
+            nb::arg("name"), nb::arg("order") = approx_order::second)
+        .DEF_CLONE_FUNC(generic_cost);
     // .def("set_diag_hess", &generic_cost::set_diag_hess, nb::rv_policy::move)
     // .def(
     //     "as_terminal",

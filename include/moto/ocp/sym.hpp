@@ -12,12 +12,16 @@ struct var : public utils::shared<sym>, public cs::SX {
   public:
     using sym = moto::sym;
     using base = utils::shared<sym>;
-    using base::base;
     using base::get;
     using base::operator->;
     using base::operator bool;
     using base::operator!;
     inline friend bool operator==(const var &lhs, const var &rhs) noexcept;
+    var() = default; ///< default constructor
+    // forwarding constructors
+    template <typename... Args>
+        requires std::constructible_from<utils::shared<sym>, Args...>
+    var(Args &&...args) : base(std::forward<Args>(args)...), cs::SX((sym &)*this) {}
 };
 /**
  * @brief pointer wrapper of symbolic expressions like primal variables or parameters

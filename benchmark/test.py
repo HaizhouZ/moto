@@ -21,8 +21,10 @@ del prob2
 print([u.__sym__])
 print(u2.__sym__)
 print("-----")
-f = moto.constr.create("f", [u, b], u + b,moto.approx_order_first, moto.field_u)
-z = moto.sym.params("z", 2, np.array([5.0, 10.0]))
+z = moto.sym.params("z", 3, np.array([5.0, 10.0, 15.0]))
+f = moto.constr.create("f", [u, b], z * (u + b), moto.approx_order_first, moto.field_eq_xu)
 f.add_argument(z)
 print(f.uid)
 print(f.in_args)
+
+f.finalize()

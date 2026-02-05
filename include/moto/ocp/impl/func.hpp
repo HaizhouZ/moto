@@ -161,7 +161,7 @@ class generic_func : public expr {
                  std::is_same_v<sym, std::remove_cvref_t<T>>
     void add_argument(T &&in) {
         if (std::find(in_args_.begin(), in_args_.end(), in) != in_args_.end())
-            return;
+            return; // already exists
         auto &s = in_args_.emplace_back(std::forward<T>(in));
         add_dep(s);
     }
