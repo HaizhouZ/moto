@@ -80,6 +80,7 @@ class shared : public std::shared_ptr<T> {
 
     /// @brief constructor by value @warning: U must be derived from enable_shared_from_this<...>
     /// @note it will remove the const qualifier from U if any
+    /// @warning rhs must be held by a shared_ptr, otherwise it will throw std::bad_weak_ptr
     template <shareable U, typename value_type = typename shared_type<U>::value>
     shared(U &&rhs)
         : shared(

@@ -140,12 +140,12 @@ struct func_traits<R (Class::*)(Args...) const noexcept> : func_traits<R(Args...
 
 // C++20 concept to check if a type is callable
 template <typename T>
-concept Callable = requires(T t) {
+concept callable = requires(T t) {
     &std::decay_t<T>::operator();
 };
 
 // Lambda and callable objects - using C++20 concepts for better SFINAE
-template <Callable T>
+template <callable T>
     requires(!std::is_function_v<T> &&
              !std::is_member_function_pointer_v<T> &&
              !std::is_function_v<std::remove_pointer_t<T>>)

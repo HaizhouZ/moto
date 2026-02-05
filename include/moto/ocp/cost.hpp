@@ -2,14 +2,7 @@
 
 namespace moto {
 class generic_cost;
-struct cost : public func {
-    using func::func; ///< inherit base constructor
-
-    cost &set_diag_hess();
-    cost &as_terminal();                       ///< convert to terminal cost
-    cost &set_gauss_newton(const var &weight); ///< convert to convex-over-nonlinear cost
-    generic_cost *operator->() const;
-};
+using cost = utils::shared<generic_cost>;
 /**
  * @brief simple cost implementation
  *
@@ -38,9 +31,11 @@ class generic_cost : public generic_func {
     PROPERTY(finalize_hint)
 
     DEF_DEFAULT_CLONE(generic_cost)
+
+
+    generic_cost* set_diag_hess();
+    generic_cost* as_terminal();                       ///< convert to terminal cost
+    generic_cost* set_gauss_newton(const var &weight); ///< convert to convex-over-nonlinear cost
 };
 
-generic_cost *cost::operator->() const {
-    return static_cast<generic_cost *>(func::operator->());
-} ///< convert to generic_cost
 } // namespace moto

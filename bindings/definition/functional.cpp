@@ -49,7 +49,7 @@ struct type_caster<moto::var_inarg_list> {
         value.clear();
         for (auto &ex : l) {
             try {
-                moto::expr* ptr = moto::get_expr_ptr(ex);
+                moto::expr *ptr = moto::get_expr_ptr(ex);
                 value.emplace_back(static_cast<moto::sym &>(*ptr));
             } catch (const std::exception &e) {
                 fmt::print("Failed to cast to var: {}\n", e.what());
@@ -73,8 +73,10 @@ void export_order_with_magic(nb::module_ &m, const std::string &python_name) {
     enum_binder.export_values(); // Makes enum members accessible like MyEnum.MEMBER
 }
 
+#define TO_SHARED_PTR(cls, ptr) std::shared_ptr<cls>(static_cast<cls *>(ptr))
+
 #define DEF_CLONE_FUNC(cls) \
-    def("clone", [](const cls &self) { return std::shared_ptr<cls>(static_cast<cls*>(self.clone())); }) 
+    def("clone", [](const cls &self) { return TO_SHARED_PTR(cls, self.clone()); })
 
 void register_submodule_functional(nb::module_ &m) {
     using namespace moto;
@@ -149,16 +151,11 @@ void register_submodule_functional(nb::module_ &m) {
                 return std::make_shared<generic_constr>(name, order, dim, field);
             },
             nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined)
-        .DEF_CLONE_FUNC(generic_constr);
-    // .def("clone", [](const generic_constr &self) { return std::make_shared<generic_constr>(self.clone()); });
-    // .def(
-    //     "as_eq",
-    //     [](generic_constr &self, bool soft) { return self.as_soft(); },
-    //     nb::arg("soft") = false, nb::rv_policy::move)
-    // .def(
-    //     "as_ineq",
-    //     [](generic_constr &self, const std::string &type_name) { return self.as_ineq(type_name); },
-    //     nb::arg("type_name") = "ipm", nb::rv_policy::move);
+        .DEF_CLONE_FUNC(generic_constr)
+        .def(
+            "as_ineq",
+            [](generic_constr &self, const std::string &type_name) { return TO_SHARED_PTR(generic_constr, self.as_ineq(type_name)); },
+            nb::arg("type_name") = "ipm");
 
     nb::class_<generic_cost, generic_func>(m, "cost")
         .def_static(
@@ -173,13 +170,13 @@ void register_submodule_functional(nb::module_ &m) {
                 return std::make_shared<generic_cost>(name, order);
             },
             nb::arg("name"), nb::arg("order") = approx_order::second)
-        .DEF_CLONE_FUNC(generic_cost);
-    // .def("set_diag_hess", &generic_cost::set_diag_hess, nb::rv_policy::move)
-    // .def(
-    //     "as_terminal",
-    //     [](generic_cost &self) { return self.as_terminal(); }, nb::rv_policy::move)
-    // .def("set_gauss_newton", [](generic_cost &self, const py_var_inarg_wrapper &v) { return self.set_gauss_newton((const var &)v); }, nb::rv_policy::move)
-    // .def("clone", [](const generic_cost &self) { return self->clone(); });
+        .DEF_CLONE_FUNC(generic_cost)
+        .def("set_diag_hess",
+             [](generic_cost &self) { return TO_SHARED_PTR(generic_cost, self.set_diag_hess()); })
+        .def("as_terminal",
+             [](generic_cost &self) { return TO_SHARED_PTR(generic_cost, self.as_terminal()); })
+        .def("set_gauss_newton",
+             [](generic_cost &self, const py_var_inarg_wrapper &v) { return TO_SHARED_PTR(generic_cost, self.set_gauss_newton((const var &)v)); });
 
     // nb::class_<custom_func, func>(m, "custom_func")
     //     .def_prop_rw(

@@ -8,6 +8,10 @@
 namespace moto {
 class sym;
 namespace cs = casadi;
+/**
+ * @brief pointer wrapper of symbolic expressions like primal variables or parameters
+ * @note inherits from cs::SX for easy symbolic operations
+ */
 struct var : public utils::shared<sym>, public cs::SX {
   public:
     using sym = moto::sym;
@@ -176,6 +180,7 @@ class sym : public expr, public cs::SX {
 };
 
 struct var_inarg_list; ///< forward declaration
+/// @brief list of symbolic expressions
 struct var_list : public std::vector<var> {
     using std::vector<var>::vector; ///< inherit constructors from std::vector
     var_list(const var_inarg_list &v);
@@ -199,7 +204,7 @@ inline var_list::var_list(const var_inarg_list &v) {
 } ///< construct from var_inarg_list
 inline bool operator==(const var &lhs, const var &rhs) noexcept {
     return *lhs == *rhs; // use sym's operator==
-}
+} ///< operator== for var
 } // namespace moto
 
 #endif // MOTO_OCP_SYM_HPP

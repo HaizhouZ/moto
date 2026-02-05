@@ -13,7 +13,7 @@ namespace cs_codegen {
 struct task;
 }
 } // namespace utils
-using func = utils::shared<generic_func>;
+using func = utils::shared<generic_func>; ///< shared pointer type for generic_func
 /**
  * @brief approximation class for generic functions
  * @todo: change to differentiable for precompute
@@ -57,7 +57,7 @@ class generic_func : public expr {
     std::set<size_t> skip_unused_arg_check_;     ///< set of argument uids to skip unused check
     std::vector<sparsity> jac_sp_;               ///< jacobian sparsity for each arg
     std::vector<std::vector<sparsity>> hess_sp_; ///< hessian sparsity for each pair of args
-    
+
     sparsity default_hess_sp_ = sparsity::dense;
 
     std::unordered_map<size_t, size_t> sym_uid_idx_;

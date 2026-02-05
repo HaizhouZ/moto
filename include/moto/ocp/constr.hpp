@@ -7,28 +7,8 @@
 #include <moto/utils/optional_boolean.hpp>
 
 namespace moto {
-class generic_constr; ///< forward declaration
-
-struct constr : public utils::shared<generic_constr> {
-    using base = utils::shared<generic_constr>;
-    using base::base; ///< inherit base constructor
-    /**
-     * @brief set the constraint as soft equality constraint in-place
-     * @return constr& *this
-     */
-    template <typename derived = generic_constr>
-        requires(std::derived_from<derived, generic_constr>)
-    constr &as_soft();
-    /**
-     * @brief set the constraint as inequality constraint in-place
-     * @return constr& *this
-     */
-    template <typename derived = generic_constr>
-        requires(std::derived_from<derived, generic_constr>)
-    constr &as_ineq();
-    // @brief set the constraint as inequality constraint with a specific type
-    constr &as_ineq(std::string_view type_name);
-};
+class generic_constr;                         ///< forward declaration
+using constr = utils::shared<generic_constr>; ///< generic constr holder
 /**
  * @brief constraint approximation with multipliers (and slack variables)
  */
@@ -98,7 +78,7 @@ class generic_constr : public generic_func {
         data_base d(func_approx_data(primal, raw, shared, *this));
         return new data_derived(std::move(d));
     }
-#define OVERLOAD_CREATE_APPROX_DATA(derived)                                                                                \
+#define OVERLOAD_CREATE_APPROX_DATA(derived)                                                                           \
     func_approx_data_ptr_t create_approx_data(sym_data &primal, merit_data &raw, shared_data &shared) const override { \
         return func_approx_data_ptr_t(make_approx<derived>(primal, raw, shared));                                      \
     }
@@ -113,21 +93,10 @@ class generic_constr : public generic_func {
      */
     OVERLOAD_CREATE_APPROX_DATA(generic_constr);
     DEF_DEFAULT_CLONE(generic_constr);
+
+    // @brief set the constraint as inequality constraint with a specific type
+    generic_constr *as_ineq(std::string_view type_name);
 };
-
-template <typename derived>
-    requires(std::derived_from<derived, generic_constr>)
-constr &constr::as_soft() {
-    reset(new derived(std::move(static_cast<base &>(*this))));
-    return *this;
-}
-
-template <typename derived>
-    requires(std::derived_from<derived, generic_constr>)
-constr &constr::as_ineq() {
-    reset(new derived(std::move(static_cast<base &>(*this))));
-    return *this;
-}
 } // namespace moto
 
 #endif // MOTO_CONSTR_IMPL_HPP
