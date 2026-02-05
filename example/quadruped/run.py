@@ -206,13 +206,13 @@ class pinCasadiModel(cpin.Model):
         vj = self.v[-self.nj :]
         return moto.constr(
             "q_limit", [self.q, self.v], cs.vcat([q_min - qj, qj - q_max, vj - v_lim, -vj - v_lim])
-        ).as_ineq()
+        ).cast_ineq()
 
     def make_tq_limit_constr(self):
         tq_limit = model.effortLimit[-self.nj :]
         in_arg = [self.tq]
         # in_arg = self.pos_args + self.vel_args + self.acc_args + [*self.active_foot, *self.f_f] + ([self.dt] if isinstance(self.dt, cs.SX) else [])
-        return moto.constr("tq_limit", in_arg, cs.vcat([self.tq - tq_limit, -self.tq - tq_limit])).as_ineq()
+        return moto.constr("tq_limit", in_arg, cs.vcat([self.tq - tq_limit, -self.tq - tq_limit])).cast_ineq()
 
     def make_fric_cone(self, i, f: moto.var):
         cone = cs.vcat(
@@ -224,7 +224,7 @@ class pinCasadiModel(cpin.Model):
             ]
         )
         # cone = f[0] - self.mu * cs.sqrt(cs.sumsqr(f[1:]) + 1e-9)
-        c = moto.constr(f"fric_{foot_frames[i]}", [f, self.mu], cone).as_ineq()
+        c = moto.constr(f"fric_{foot_frames[i]}", [f, self.mu], cone).cast_ineq()
         return c
 
     def add_dt_constr_and_cost(self, prob: moto.ocp, dt_nom: moto.var):
@@ -232,7 +232,7 @@ class pinCasadiModel(cpin.Model):
             dt_bound = moto.sym.params("dt_bound", 2, default_val=np.array([1e-4, 5e-2]))  # bound on dt
             dt_constr = moto.constr(
                 "dt", [self.dt, dt_bound], cs.vcat([dt_bound[0] - self.dt, self.dt - dt_bound[1]])
-            ).as_ineq()
+            ).cast_ineq()
             # dt_constr = moto.constr("dt_fix", [self.dt], self.dt - 2e-2)
             prob.add(dt_constr)
             W_dt = moto.sym.params("W_dt", 1, default_val=1e8)

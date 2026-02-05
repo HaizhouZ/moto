@@ -54,11 +54,11 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
     //// main loop
     try {
         for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
-            bool has_ineq = false;
+            bool hcast_ineq = false;
             // check if there is any inequality constraint using only the key nodes
             for (data &n : graph_.nodes()) {
                 if (n.problem().dim(__ineq_x) > 0 || n.problem().dim(__ineq_xu) > 0) {
-                    has_ineq = true;
+                    hcast_ineq = true;
                     break;
                 }
             }
@@ -82,7 +82,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
 
             bool finalize_dual = true;
 
-            if (has_ineq && settings.ipm_enable_affine_step()) { // compute the affine step, no need to finalize dual step
+            if (hcast_ineq && settings.ipm_enable_affine_step()) { // compute the affine step, no need to finalize dual step
                 settings.ipm_start_predictor_computation();
                 finalize_dual = false; // do not finalize dual step
             }
@@ -96,7 +96,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             detail_timed_block_end("finalize_newton_step");
             detail_timed_block_start("corrector_step");
             finalize_ls_bound_and_set_to_max();
-            if (has_ineq && settings.ipm_enable_affine_step()) {
+            if (hcast_ineq && settings.ipm_enable_affine_step()) {
                 // line search with max bounds
                 graph_.for_each_parallel([this](size_t tid, data *d) {
                     solver::ineq_soft::finalize_predictor_step(d, &setting_per_thread[tid]);
@@ -129,7 +129,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             }
             detail_timed_block_end("corrector_step");
             // iterative refinement
-            if (has_ineq && settings.use_iterative_refinement) {
+            if (hcast_ineq && settings.use_iterative_refinement) {
                 iterative_refinement();
             }
             /// @todo: update the line search stepsize?
@@ -164,7 +164,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             kkt_trial.ls_steps = ls.step_cnt;
             kkt_last = kkt_trial;
             if (verbose)
-                print_stats(i_iter, kkt_last, has_ineq);
+                print_stats(i_iter, kkt_last, hcast_ineq);
 
             if (kkt_last.inf_dual_res < settings.dual_tol &&
                 kkt_last.inf_prim_res < settings.prim_tol &&

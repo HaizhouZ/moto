@@ -198,7 +198,7 @@ class pinCasadiModel(cpin.Model):
         else:
             return moto.constr(
                 "ee_constr_ineq", self.pos_args + [self.r_des, self.quat_des], cs.vcat([res, -res])
-            ).as_ineq()
+            ).cast_ineq()
 
     def make_joint_limit_constr(self):
         q_min = self.fmodel.lowerPositionLimit[-self.nj :]
@@ -211,13 +211,13 @@ class pinCasadiModel(cpin.Model):
         self.v_lim = v_lim
         return moto.constr(
             "q_limit", [self.q, self.v], cs.vcat([q_min - qj, qj - q_max, vj - v_lim, -vj - v_lim])
-        ).as_ineq()
+        ).cast_ineq()
 
     def make_tq_limit_constr(self):
         tq_limit = model.effortLimit[-self.nj :]
         in_arg = [self.tq]
         # in_arg = self.pos_args + self.vel_args + self.acc_args + [*self.active_foot, *self.f_f] + ([self.dt] if isinstance(self.dt, cs.SX) else [])
-        return moto.constr("tq_limit", in_arg, cs.vcat([self.tq - tq_limit, -self.tq - tq_limit])).as_ineq()
+        return moto.constr("tq_limit", in_arg, cs.vcat([self.tq - tq_limit, -self.tq - tq_limit])).cast_ineq()
 
     def get_state_cost(self, terminal: bool = False):
         q_nom_res = self.q_stack - self.q_nom

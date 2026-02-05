@@ -34,6 +34,9 @@ expr::expr(const expr &rhs)
 bool expr::finalize(bool block_until_ready) {
     // fmt::print("finalizing expr {} uid {} field {}\n", name_, uid_, field::name(field_));
     // fmt::print("dim {} finalized {}\n", dim_, finalized_);
+    if (!*this) {
+        throw std::runtime_error(fmt::format("cannot finalize null expr"));
+    }
     for (auto &d : dep_) {
         if (!d->finalize(block_until_ready)) {
             throw std::runtime_error(fmt::format("cannot finalize dependency expr {} uid {} of expr {} uid {}", d->name(), d->uid(), name_, uid_));

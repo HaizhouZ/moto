@@ -94,8 +94,8 @@ class generic_constr : public generic_func {
     OVERLOAD_CREATE_APPROX_DATA(generic_constr);
     DEF_DEFAULT_CLONE(generic_constr);
 
-    // @brief set the constraint as inequality constraint with a specific type
-    generic_constr *as_ineq(std::string_view type_name);
+    // @brief make an inequality constraint from this constraint by moving
+    generic_constr *cast_ineq(std::string_view type_name);
 };
 } // namespace moto
 

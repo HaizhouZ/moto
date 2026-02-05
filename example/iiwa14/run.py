@@ -178,7 +178,7 @@ class pinCasadiModel(cpin.Model):
         # )
         res = cpin.log6(ee_des.inverse() * ee_pos).np
         # res = cs.vcat([ee_pos.translation - ee_des.translation, cpin.log3(ee_des.rotation.T @ ee_pos.rotation)])
-        # return moto.constr("ee_constr_ineq", self.pos_args + [self.r_des, self.quat_des], cs.vcat([res, -res])).as_ineq()
+        # return moto.constr("ee_constr_ineq", self.pos_args + [self.r_des, self.quat_des], cs.vcat([res, -res])).cast_ineq()
         if not hasattr(self, "W_ee_cost"):
             self.W_ee_cost = moto.sym.params("W_ee_cost", 6, default_val=np.array([40.0, 40.0, 40.0, 0.0, 0.0, 0.0]))
         ee_lifted = moto.sym.inputs("ee_lifted", 6, default_val=np.zeros(6))
@@ -210,13 +210,13 @@ class pinCasadiModel(cpin.Model):
         self.v_lim = v_lim
         return moto.constr(
             "q_limit", [self.q, self.v], cs.vcat([q_min - qj, qj - q_max, vj - v_lim, -vj - v_lim])
-        ).as_ineq()
+        ).cast_ineq()
 
     def make_tq_limit_constr(self):
         tq_limit = model.effortLimit[-self.nj :]
         in_arg = [self.tq]
         # in_arg = self.pos_args + self.vel_args + self.acc_args + [*self.active_foot, *self.f_f] + ([self.dt] if isinstance(self.dt, cs.SX) else [])
-        return moto.constr("tq_limit", in_arg, cs.vcat([self.tq - tq_limit, -self.tq - tq_limit])).as_ineq()
+        return moto.constr("tq_limit", in_arg, cs.vcat([self.tq - tq_limit, -self.tq - tq_limit])).cast_ineq()
 
     def get_state_cost(self, terminal: bool = False):
         q_nom_res = self.q_stack - self.q_nom
@@ -249,7 +249,7 @@ class pinCasadiModel(cpin.Model):
             raise ValueError("dt is not a symbolic variable")
         W_dt = moto.sym.params("W_dt", 1, default_val=1e3)
         return [moto.cost("dt_reg", [self.dt, dt_nom, W_dt], W_dt * (self.dt - dt_nom) ** 2),
-                moto.constr("dt_bound", [self.dt], cs.vcat([self.dt - 0.1, 1e-2 - self.dt])).as_ineq()]
+                moto.constr("dt_bound", [self.dt], cs.vcat([self.dt - 0.1, 1e-2 - self.dt])).cast_ineq()]
 
 # dt = moto.sym.inputs("dt", 1, default_val=0.02)
 dt_nom = moto.sym.params("dt_nom", 1, default_val=0.02)

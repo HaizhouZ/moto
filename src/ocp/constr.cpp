@@ -51,7 +51,7 @@ void generic_constr::finalize_impl() {
         // make this long enough so that people will not easily remove the const :D
         auto &_field = field_;
         if (field_hint_.is_eq == utils::optional_bool::Unset) {
-            throw std::runtime_error(fmt::format("generic_constr {} eq/ineq hint unset, please set it using as_eq_ or as_ineq_", name_));
+            throw std::runtime_error(fmt::format("generic_constr {} eq/ineq hint unset, please set it using as_eq_ or cast_ineq_", name_));
         }
         if (field_hint_.is_eq) {
             if (has_[__u] && !has_[__y])

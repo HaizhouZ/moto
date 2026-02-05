@@ -19,8 +19,8 @@ TEST_CASE("exprOwnership") {
     auto [a, b] = sym::states("a", 3);
     auto c = constr("a_plus_b", {a, b}, a + b, approx_order::first);
     c->finalize();
-    auto p = c.as_ineq<test_ineq>();
+    auto p = c.cast_ineq<test_ineq>();
     assert(p->finalized());
-    auto ip = p->clone().as_ineq<test_ineq>();
+    auto ip = p->clone().cast_ineq<test_ineq>();
     assert(!ip->finalized());
 }

@@ -15,16 +15,31 @@ print(prob.exprs(moto.field_u))
 # print(prob2.exprs(moto.field_u))
 print("---")
 u2 = moto.var(prob.exprs(moto.field_u)[0])
-del prob
+# del prob
 del prob2
 
 print([u.__sym__])
 print(u2.__sym__)
 print("-----")
 z = moto.sym.params("z", 3, np.array([5.0, 10.0, 15.0]))
-f = moto.constr.create("f", [u, b], z * (u + b), moto.approx_order_first, moto.field_eq_xu)
+f = moto.constr.create("f", [u, b], z * (u + b), moto.approx_order_first)
 f.add_argument(z)
 print(f.uid)
 print(f.in_args)
 
+f = f.cast_ineq()
+
 f.finalize()
+
+print("------")
+c = moto.cost.create("c", [u, b], (u - b).T @ (u - b))
+print("Step1")
+c.set_diag_hess()
+print("Step2")
+c.finalize()
+
+prob.add([f, c])
+prob.wait_until_ready()
+print("Problem ready")
+
+print(f.uid)

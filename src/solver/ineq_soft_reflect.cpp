@@ -22,9 +22,9 @@ std::map<std::string, decltype(ineq_bind_constructor<generic_constr>()), std::le
 };
 } // namespace details
 
-generic_constr *generic_constr::as_ineq(std::string_view type_name) {
-    auto it = detials::ineq_derived_registry.find(type_name);
-    if (it != detials::ineq_derived_registry.end()) {
+generic_constr *generic_constr::cast_ineq(std::string_view type_name) {
+    auto it = details::ineq_derived_registry.find(type_name);
+    if (it != details::ineq_derived_registry.end()) {
         return it->second(*this);
     } else
         throw std::runtime_error("Unknown inequality constraint type: " + std::string(type_name));

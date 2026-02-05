@@ -152,10 +152,10 @@ struct srbd_dynamics {
                                     -f(0) - mu * f(2),
                                     -f(1) - mu * f(2)});
         };
-        return {constr("fric_r", {f_r}, make_fric_cone(f_r)).as_ineq<ipm>(), constr("fric_l", {f_l}, make_fric_cone(f_l)).as_ineq<ipm>()};
+        return {constr("fric_r", {f_r}, make_fric_cone(f_r)).cast_ineq<ipm>(), constr("fric_l", {f_l}, make_fric_cone(f_l)).cast_ineq<ipm>()};
     }
     expr_list foot_loc_constr() {
-        return {constr("foot_overlap", {r_l, r_r}, cs::SX::sumsqr(r_l - r_r) - 0.16).as_ineq<ipm>()}; // 4cm foot
+        return {constr("foot_overlap", {r_l, r_r}, cs::SX::sumsqr(r_l - r_r) - 0.16).cast_ineq<ipm>()}; // 4cm foot
     }
     expr_list stance_foot_constr() {
         return {constr("stance_u",

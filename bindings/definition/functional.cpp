@@ -153,8 +153,8 @@ void register_submodule_functional(nb::module_ &m) {
             nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined)
         .DEF_CLONE_FUNC(generic_constr)
         .def(
-            "as_ineq",
-            [](generic_constr &self, const std::string &type_name) { return TO_SHARED_PTR(generic_constr, self.as_ineq(type_name)); },
+            "cast_ineq",
+            [](generic_constr &self, const std::string &type_name) { return TO_SHARED_PTR(generic_constr, self.cast_ineq(type_name)); },
             nb::arg("type_name") = "ipm");
 
     nb::class_<generic_cost, generic_func>(m, "cost")
@@ -172,11 +172,11 @@ void register_submodule_functional(nb::module_ &m) {
             nb::arg("name"), nb::arg("order") = approx_order::second)
         .DEF_CLONE_FUNC(generic_cost)
         .def("set_diag_hess",
-             [](generic_cost &self) { return TO_SHARED_PTR(generic_cost, self.set_diag_hess()); })
+             [](generic_cost &self) { return self.set_diag_hess(); })
         .def("as_terminal",
-             [](generic_cost &self) { return TO_SHARED_PTR(generic_cost, self.as_terminal()); })
+             [](generic_cost &self) { return self.as_terminal(); })
         .def("set_gauss_newton",
-             [](generic_cost &self, const py_var_inarg_wrapper &v) { return TO_SHARED_PTR(generic_cost, self.set_gauss_newton((const var &)v)); });
+             [](generic_cost &self, const py_var_inarg_wrapper &v) { return self.set_gauss_newton((const var &)v); });
 
     // nb::class_<custom_func, func>(m, "custom_func")
     //     .def_prop_rw(

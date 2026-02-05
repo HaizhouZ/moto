@@ -99,7 +99,7 @@ struct ns_sqp {
     /// print statistics header
     void print_stat_header();
     /// print statistics for the current iteration
-    void print_stats(int i_iter, const kkt_info &info, bool has_ineq);
+    void print_stats(int i_iter, const kkt_info &info, bool hcast_ineq);
     /// compute the kkt information of the current solution
     kkt_info compute_kkt_info();
     void iterative_refinement();

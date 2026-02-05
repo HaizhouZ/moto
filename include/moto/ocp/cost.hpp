@@ -16,26 +16,22 @@ class generic_cost : public generic_func {
 
     void finalize_impl() override;
     var gn_weight_; ///< weight for gauss-newton cost
-    friend struct cost;
-    using wrapper_type = cost;
 
-    
-    public:
+  public:
     using base = generic_func;
     using base::base; ///< inherit base constructor
-    
+
     generic_cost(const std::string &name, approx_order order = approx_order::second);
     generic_cost(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
                  approx_order order = approx_order::second);
-                 
+
     PROPERTY(finalize_hint)
 
     DEF_DEFAULT_CLONE(generic_cost)
 
-
-    generic_cost* set_diag_hess();
-    generic_cost* as_terminal();                       ///< convert to terminal cost
-    generic_cost* set_gauss_newton(const var &weight); ///< convert to convex-over-nonlinear cost
+    generic_cost *set_diag_hess();                     ///< set hessian to be diagonal
+    generic_cost *as_terminal();                       ///< set to terminal cost
+    generic_cost *set_gauss_newton(const var &weight); ///< set to convex-over-nonlinear cost
 };
 
 } // namespace moto
