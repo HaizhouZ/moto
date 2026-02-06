@@ -93,10 +93,10 @@ class generic_func : public expr {
     } ///< guard access to field-based members
 
   public:
-    generic_func(const std::string &name, approx_order order, size_t dim, field_t field)
+    generic_func(const std::string &name, approx_order order, size_t dim, field_t field = __undefined)
         : expr(name, dim, field), order_(order), info_(std::make_unique<info>()) {}
     generic_func(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
-                 approx_order order, field_t field)
+                 approx_order order, field_t field = __undefined)
         : generic_func(name, order, (size_t)out.size1(), field) {
         assert(out.size2() == 1 && "generic_constr output cols must be 1");
         set_from_casadi(in_args, out);

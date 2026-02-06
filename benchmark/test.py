@@ -39,7 +39,17 @@ print("Step2")
 c.finalize()
 
 prob.add([f, c])
-prob.wait_until_ready()
-print("Problem ready")
 
 print(f.uid)
+
+print("-------------")
+
+x, xn = moto.sym.states("x", 3)
+
+d = moto.dense_dynamics.create("d", [x, u, xn], xn - (x + u), moto.approx_order_first)
+
+prob.add(d)
+
+
+prob.wait_until_ready()
+print("Problem ready")

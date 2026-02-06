@@ -201,11 +201,18 @@ void register_submodule_functional(nb::module_ &m) {
     //         nb::init<const std::string &>(),
     //         nb::arg("name") = "pre_compute");
 
-    // nb::class_<dense_dynamics, func>(m, "dense_dynamics")
-    //     .def(
-    //         nb::init<const std::string &, const var_inarg_list &, const cs::SX &, approx_order>(),
-    //         nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("order") = approx_order::first)
-    //     .def(
-    //         nb::init<const std::string &, approx_order, size_t>(),
-    //         nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd);
+    nb::class_<dense_dynamics, generic_constr>(m, "dense_dynamics")
+        .def_static(
+            "create",
+            [](const std::string &name, const var_inarg_list &args, const cs::SX &out, approx_order order) {
+                return std::make_shared<dense_dynamics>(name, args, out, order);
+            },
+            nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("order") = approx_order::first)
+        .def_static(
+            "create",
+            [](const std::string &name, approx_order order, size_t dim) {
+                return std::make_shared<dense_dynamics>(name, order, dim);
+            },
+            nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd)
+        .def("mark_shared_inputs", &dense_dynamics::mark_shared_inputs, nb::arg("shared_inputs"));
 }
