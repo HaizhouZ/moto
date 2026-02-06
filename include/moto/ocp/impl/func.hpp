@@ -43,23 +43,29 @@ class generic_func : public expr {
     expr_list enable_if_any_deps_;  // if any of these args are active, the function is enabled
 
     struct info : public utils::clone_base<info> {
-        array_type<var_list, primal_fields> arg_by_field_{};
-        array_type<size_t, primal_fields> arg_dim_{};
-        array_type<size_t, primal_fields> arg_tdim_{};
-        array_type<size_t, primal_fields> arg_num_{};
+        array_type<var_list, primal_fields> arg_by_field_;
+        array_type<size_t, primal_fields> arg_dim_;
+        array_type<size_t, primal_fields> arg_tdim_;
+        array_type<size_t, primal_fields> arg_num_;
 
         DEF_DEFAULT_CLONE(info);
 
         using holder = utils::unique<info>;
     };
-    
-    info::holder info_; ///< cached info for the function
-    
-    mutable std::unordered_map<size_t, info::holder> ocpwise_info_map_;
 
-    /// @brief setup the ocpwise info for a given ocp, 
+    info::holder info_; ///< cached info for the function
+
+    using ocpwise_info_map_type = std::unordered_map<size_t, info::holder>;
+    /// @brief ocp-specific info holder, will be setup when accessing active args/dims for the first time
+    /// @note use clone = false so that upon copying, a new unintialized map will be created
+    using ocpwise_info_holder = utils::unique<ocpwise_info_map_type, false>;
+    /// map from ocp uid to ocp-specific info
+    ocpwise_info_holder ocpwise_info_map_;
+
+    /// @brief setup the ocpwise info for a given ocp,
     /// will be called when accessing active args/dims for the first time
-    void setup_ocpwise_info(const ocp *prob) const;
+    /// @return true if the info is setup for the ocp, false if the info already exists
+    virtual bool setup_ocpwise_info(const ocp *prob) const;
 
     std::set<size_t> skip_unused_arg_check_;     ///< set of argument uids to skip unused check
     std::vector<sparsity> jac_sp_;               ///< jacobian sparsity for each arg
@@ -87,14 +93,18 @@ class generic_func : public expr {
 
     generic_func() = default;
 
-    void field_access_guard(field_t field) const {
+    void field_write_guard(field_t field = __undefined) const {
+        assert(!finalized_ && "cannot modify function after finalized");
+    } ///< guard modification to field-based members
+
+    void field_read_guard(field_t field) const {
         assert(finalized_ && "function not finalized");
         assert(in_field(field, primal_fields) && "field out of range");
     } ///< guard access to field-based members
 
   public:
     generic_func(const std::string &name, approx_order order, size_t dim, field_t field = __undefined)
-        : expr(name, dim, field), order_(order), info_(std::make_unique<info>()) {}
+        : expr(name, dim, field), order_(order) {}
     generic_func(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
                  approx_order order, field_t field = __undefined)
         : generic_func(name, order, (size_t)out.size1(), field) {
@@ -119,10 +129,13 @@ class generic_func : public expr {
     const auto &jac_sparsity() const { return jac_sp_; }   ///< get the jacobian sparsity patterns
     const auto &hess_sparsity() const { return hess_sp_; } ///< get the hessian sparsity patterns
 
-    void set_default_hess_sparsity(sparsity sp) { default_hess_sp_ = sp; }
+    void set_default_hess_sparsity(sparsity sp) {
+        field_write_guard();
+        default_hess_sp_ = sp;
+    }
 
     const auto &in_args(field_t field) const {
-        field_access_guard(field);
+        field_read_guard(field);
         return info_->arg_by_field_[field];
     } ///< get the input arguments for a given field
 
@@ -136,27 +149,27 @@ class generic_func : public expr {
     size_t active_num(field_t f, const ocp *prob) const;
 
     auto arg_num(field_t field) const {
-        field_access_guard(field);
+        field_read_guard(field);
         return info_->arg_by_field_[field].size();
     } ///< get the number of arguments for a given field
 
     auto arg_dim(field_t field) const {
-        field_access_guard(field);
+        field_read_guard(field);
         return info_->arg_dim_[field];
     } ///< get the dimension of the argument for a given field
 
     auto arg_tdim(field_t field) const {
-        field_access_guard(field);
+        field_read_guard(field);
         return info_->arg_tdim_[field];
     } ///< get the tangent dimension of the argument for a given field
 
     bool has_arg(const sym &s) const {
-        field_access_guard(s.field());
+        field_read_guard(s.field());
         return sym_uid_idx_.contains(s.uid());
     } ///< check if the function has argument for a given field
 
     size_t arg_idx(const sym &s) const {
-        field_access_guard(s.field());
+        field_read_guard(s.field());
         return sym_uid_idx_.at(s.uid());
     } ///< get the index of the argument for a given symbol
 
@@ -166,6 +179,7 @@ class generic_func : public expr {
         requires std::is_same_v<var, std::remove_cvref_t<T>> ||
                  std::is_same_v<sym, std::remove_cvref_t<T>>
     void add_argument(T &&in) {
+        field_write_guard(((const sym &)in).field());
         if (std::find(in_args_.begin(), in_args_.end(), in) != in_args_.end())
             return; // already exists
         auto &s = in_args_.emplace_back(std::forward<T>(in));
@@ -204,6 +218,7 @@ class generic_func : public expr {
     /// @brief load external function implementation from shared library
     /// @param path path to the shared library, default is "gen"
     void load_external(const std::string &path = "gen") {
+        field_write_guard();
         load_external_impl(path);
     }
     /// --- Callbacks for function evaluation ---

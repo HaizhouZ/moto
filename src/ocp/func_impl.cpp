@@ -183,13 +183,12 @@ void generic_func::finalize_impl() {
     }
     finalized_ = true;
 }
-void generic_func::setup_ocpwise_info(const ocp *prob) const {
-    if (ocpwise_info_map_.contains(prob->uid()))
-        return;
-    auto &tmp = *ocpwise_info_map_
-                     .insert(
-                         {prob->uid(),
-                          info::holder(std::make_unique<info>())})
+bool generic_func::setup_ocpwise_info(const ocp *prob) const {
+    if (ocpwise_info_map_->contains(prob->uid()))
+        return false;
+    auto &tmp = *ocpwise_info_map_->insert(
+                                      {prob->uid(),
+                                       info::holder(std::make_unique<info>())})
                      .first->second;
     // setup
     for (auto &arg : in_args_) {
@@ -201,26 +200,27 @@ void generic_func::setup_ocpwise_info(const ocp *prob) const {
             tmp.arg_num_[f]++;
         }
     }
+    return true;
 }
 const var_list &generic_func::active_args(field_t f, const ocp *prob) const {
-    field_access_guard(f);
+    field_read_guard(f);
     setup_ocpwise_info(prob);
-    return ocpwise_info_map_.at(prob->uid())->arg_by_field_[f];
+    return ocpwise_info_map_->at(prob->uid())->arg_by_field_[f];
 }
 size_t generic_func::active_dim(field_t f, const ocp *prob) const {
-    field_access_guard(f);
+    field_read_guard(f);
     setup_ocpwise_info(prob);
-    return ocpwise_info_map_.at(prob->uid())->arg_dim_[f];
+    return ocpwise_info_map_->at(prob->uid())->arg_dim_[f];
 }
 size_t generic_func::active_tdim(field_t f, const ocp *prob) const {
-    field_access_guard(f);
+    field_read_guard(f);
     setup_ocpwise_info(prob);
-    return ocpwise_info_map_.at(prob->uid())->arg_tdim_[f];
+    return ocpwise_info_map_->at(prob->uid())->arg_tdim_[f];
 }
 size_t generic_func::active_num(field_t f, const ocp *prob) const {
-    field_access_guard(f);
+    field_read_guard(f);
     setup_ocpwise_info(prob);
-    return ocpwise_info_map_.at(prob->uid())->arg_num_[f];
+    return ocpwise_info_map_->at(prob->uid())->arg_num_[f];
 }
 const bool generic_func::check_enable(ocp *prob) const {
     if (disable_if_any_deps_.empty() && enable_if_all_deps_.empty() && enable_if_any_deps_.empty())
@@ -253,18 +253,21 @@ CHECK_DONE:
     return pass_check;
 }
 void generic_func::enable_if_all(const expr_inarg_list &args) {
+    field_write_guard();
     if (enable_if_any_deps_.size() > 0) {
         throw std::runtime_error("Cannot use enable_if_all together with enable_if_any");
     }
     enable_if_all_deps_.insert(enable_if_all_deps_.end(), args.begin(), args.end());
 }
 void generic_func::disable_if_any(const expr_inarg_list &args) {
+    field_write_guard();
     if (enable_if_any_deps_.size() > 0) {
         throw std::runtime_error("Cannot use disable_if_any together with enable_if_any");
     }
     disable_if_any_deps_.insert(disable_if_any_deps_.end(), args.begin(), args.end());
 }
 void generic_func::enable_if_any(const expr_inarg_list &args) {
+    field_write_guard();
     if (enable_if_all_deps_.size() > 0) {
         throw std::runtime_error("Cannot use enable_if_any together with enable_if_all");
     }

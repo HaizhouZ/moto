@@ -44,7 +44,7 @@ class ocp {
 
     void set_dim_and_idx();
     void finalize();
-    inline void field_access_guard() const {
+    inline void field_read_guard() const {
         assert(finalized_ && "Cannot access before the problem is finalized. "
                              "Please call finalize() before accessing expressions.");
     }
@@ -63,19 +63,19 @@ class ocp {
     const auto &exprs(size_t f) const { return expr_.at(f); }
     /// @brief getter for position of expr in its field, by uid
     const auto &pos(const expr &ex) const {
-        field_access_guard();
+        field_read_guard();
         return pos_by_uid_.at(ex.uid());
     }
     /// @brief getter for dimension of field f
     size_t dim(size_t f) const {
-        field_access_guard();
+        field_read_guard();
         return dim_.at(f);
     }
     /// @brief getter for num of exprs in field f
     size_t num(size_t f) const { return expr_[f].size(); }
     /// @brief getter for tangent space dimension of field f
     size_t tdim(size_t f) const {
-        field_access_guard();
+        field_read_guard();
         return tdim_.at(f);
     }
     /// @brief check if expr is in the problem
@@ -125,7 +125,7 @@ class ocp {
      */
     size_t get_expr_start(const expr &ex) const {
         try {
-            field_access_guard();
+            field_read_guard();
             return flatten_idx_.at(ex.uid());
         } catch (const std::exception &e) {
             throw std::runtime_error(fmt::format("expr {} uid {} cannot be found", ex.name(), ex.uid()));
@@ -134,7 +134,7 @@ class ocp {
 
     size_t get_expr_start_tangent(const expr &ex) const {
         try {
-            field_access_guard();
+            field_read_guard();
             return flatten_tidx_.at(ex.uid());
         } catch (const std::exception &e) {
             throw std::runtime_error(fmt::format("expr {} uid {} cannot be found", ex.name(), ex.uid()));

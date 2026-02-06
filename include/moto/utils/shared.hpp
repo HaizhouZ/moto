@@ -123,7 +123,7 @@ class shared : public std::shared_ptr<T> {
         return this->get() != nullptr;
     }
 
-    bool operator !() const noexcept {
+    bool operator!() const noexcept {
         return !this->operator bool();
     }
 
@@ -141,5 +141,9 @@ class shared : public std::shared_ptr<T> {
     }
 };
 } // namespace utils
+template <typename T>
+inline std::string format_as(const utils::shared<T> &e) {
+    return format_as(*e);
+}
 } // namespace moto
 #endif // MOTO_UTILS_SHARED_HPP

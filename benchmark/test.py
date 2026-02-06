@@ -46,10 +46,17 @@ print("-------------")
 
 x, xn = moto.sym.states("x", 3)
 
-d = moto.dense_dynamics.create("d", [x, u, xn], xn - (x + u), moto.approx_order_first)
+u2 = moto.sym.inputs("u2", 3)
+d = moto.dense_dynamics.create(
+    "d", [x, u, u2, xn], xn - (x + u) * u2, moto.approx_order_first
+)
 
+d.mark_shared_inputs([u])
+print("------------")
 prob.add(d)
-
 
 prob.wait_until_ready()
 print("Problem ready")
+
+print(d.active_dim_exclusive_inputs(prob))
+print(d.active_num_shared_inputs(prob))

@@ -12,6 +12,7 @@ class expr; // forward declaration of expr
 using shared_expr = utils::shared<expr>; ///< shared pointer type for expr
 
 struct expr_inarg_list; ///< forward declaration
+
 /// @brief list of expressions, used for storing expressions in a vector
 struct expr_list : public std::vector<shared_expr> {
     using std::vector<shared_expr>::vector; ///< inherit constructors from std::vector
@@ -130,7 +131,11 @@ class expr : public std::enable_shared_from_this<expr>, public utils::clone_base
     } ///< equality operator by comparing uids
 
     DEF_DEFAULT_CLONE(expr)
+
 };
+
+std::string format_as(const expr &e); ///< format an expression as a string for debugging
+
 /// @brief list of expressions, used for function arguments
 struct expr_inarg_list : public std::vector<std::reference_wrapper<expr>> {
     using std::vector<std::reference_wrapper<expr>>::vector; ///< inherit constructors from std::vector

@@ -8,6 +8,8 @@ namespace utils {
 template <typename T>
 struct func_traits {
     static constexpr size_t arg_num = size_t(-1); ///< number of arguments
+    using return_type = void; ///< return type
+    using arg_types = void;   ///< tuple of argument types
 };
 
 // Primary template for function types R(Args...)

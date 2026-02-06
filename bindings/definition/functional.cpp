@@ -9,6 +9,8 @@
 #include <nanobind/stl/function.h>
 #include <nanobind/stl/variant.h>
 
+#include <moto/ocp/problem.hpp>
+
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
 
 namespace moto {
@@ -135,6 +137,10 @@ void register_submodule_functional(nb::module_ &m) {
         .def("enable_if_any", [](generic_func &self, const expr_inarg_list &args) { self.enable_if_any(args); }, nb::arg("args"))
         .def("add_argument", [](generic_func &self, py_var_inarg_wrapper v) { self.add_argument((sym &)v); }, nb::arg("in"))
         .def("add_arguments", [](generic_func &self, const var_inarg_list &args) { self.add_arguments(args); })
+        .def("active_dim", &generic_func::active_dim)
+        .def("active_num", &generic_func::active_num)
+        .def("active_tdim", &generic_func::active_tdim)
+        .def("active_args", &generic_func::active_args)
         .DEF_CLONE_FUNC(generic_func)
         .def("create_approx_data", [](generic_func &self, sym_data &primal, merit_data &raw, shared_data &shared) { return self.create_approx_data(primal, raw, shared); }, nb::arg("primal"), nb::arg("raw"), nb::arg("shared"));
 
@@ -214,5 +220,9 @@ void register_submodule_functional(nb::module_ &m) {
                 return std::make_shared<dense_dynamics>(name, order, dim);
             },
             nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd)
+        .def("active_dim_exclusive_inputs", &dense_dynamics::active_dim_exclusive_inputs, nb::arg("prob"))
+        .def("active_dim_shared_inputs", &dense_dynamics::active_dim_shared_inputs, nb::arg("prob"))
+        .def("active_num_exclusive_inputs", &dense_dynamics::active_num_exclusive_inputs, nb::arg("prob"))
+        .def("active_num_shared_inputs", &dense_dynamics::active_num_shared_inputs, nb::arg("prob"))
         .def("mark_shared_inputs", &dense_dynamics::mark_shared_inputs, nb::arg("shared_inputs"));
 }

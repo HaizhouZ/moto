@@ -1,8 +1,8 @@
 // #include <Eigen/LU>
+#include <fmt/ranges.h>
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
 #include <moto/ocp/problem.hpp>
 #include <moto/utils/blasfeo_factorizer/blasfeo_lu.hpp>
-
 namespace moto {
 
 dense_dynamics::approx_data::~approx_data() {
@@ -31,13 +31,13 @@ dense_dynamics::approx_data::approx_data(generic_constr::approx_data &&rhs)
     proj_f_x_.reset(p_x);
     // setup f_u_exclusive_ and proj_f_u_exclusive_
     auto &first_u_arg = func_.active_args(__u, &prob)[0];
-    auto jac_u = approx_->jac_[__u].insert(f_st, prob.get_expr_start_tangent(first_u_arg), func_.dim(), func_.active_dim(__u, &prob), sparsity::dense);
+    auto jac_u = approx_->jac_[__u].insert(f_st, prob.get_expr_start_tangent(first_u_arg), func_.dim(), dyn.active_dim_exclusive_inputs(&prob), sparsity::dense);
     f_u_exclusive_.reset(jac_u);
-    auto p_u = dyn_proj_->proj_f_u_.insert(f_st, prob.get_expr_start_tangent(first_u_arg), func_.dim(), func_.active_dim(__u, &prob), sparsity::dense);
+    auto p_u = dyn_proj_->proj_f_u_.insert(f_st, prob.get_expr_start_tangent(first_u_arg), func_.dim(), dyn.active_dim_exclusive_inputs(&prob), sparsity::dense);
     proj_f_u_exclusive_.reset(p_u);
     // allocate f_u and proj_f_u_
-    f_u_shared_.reserve(func_.active_dim(__u, &prob));
-    proj_f_u_shared_.reserve(func_.active_dim(__u, &prob));
+    f_u_shared_.reserve(dyn.active_dim_shared_inputs(&prob));
+    proj_f_u_shared_.reserve(dyn.active_dim_shared_inputs(&prob));
     size_t u_col_offset = 0;
     for (const sym &arg : in_args) {
         auto f = arg.field();
@@ -95,9 +95,8 @@ void dense_dynamics::substitute(const sym &arg, const sym &rhs) {
 }
 
 void dense_dynamics::finalize_impl() {
+    // reset info for recomputating exclusive/shared input counts and dims
     info_.reset(new info(std::move(*info_)));
-    // for copying consistency
-    get_info().dim_shared_inputs_ = 0;
     // handle reordering of shared inputs
     var_list tmp; // buffer for args to move
     tmp.reserve(shared_inputs_.size());
@@ -120,9 +119,9 @@ void dense_dynamics::finalize_impl() {
     tmp.clear();
     for (var &s : shared_inputs_) {
         if (has_arg(s)) {
-            tmp.emplace_back(std::move(s));
             get_info().dim_shared_inputs_ += s->dim();
             shared_inputs_indices_.erase(s->uid());
+            tmp.emplace_back(std::move(s));
         }
     }
     shared_inputs_.swap(tmp);
@@ -133,6 +132,7 @@ void dense_dynamics::finalize_impl() {
 }
 
 void dense_dynamics::mark_shared_inputs(const var_inarg_list &args) {
+    field_write_guard();
     for (const sym &arg : args) {
         if (arg.field() == __u) {
             shared_inputs_.push_back(arg);
@@ -143,5 +143,43 @@ void dense_dynamics::mark_shared_inputs(const var_inarg_list &args) {
                             "but got sym var {} uid {} of field {}",
                             arg.name(), arg.uid(), arg.field()));
     }
+}
+
+#define access_ocp_info(var_name) \
+    field_read_guard(__u);        \
+    setup_ocpwise_info(prob);     \
+    return get_info().var_name
+
+size_t dense_dynamics::active_dim_exclusive_inputs(const ocp *prob) const {
+    access_ocp_info(dim_exclusive_inputs_);
+}
+size_t dense_dynamics::active_dim_shared_inputs(const ocp *prob) const {
+    access_ocp_info(dim_shared_inputs_);
+}
+size_t dense_dynamics::active_num_exclusive_inputs(const ocp *prob) const {
+    access_ocp_info(num_exclusive_inputs_);
+}
+size_t dense_dynamics::active_num_shared_inputs(const ocp *prob) const {
+    access_ocp_info(num_shared_inputs_);
+}
+bool dense_dynamics::setup_ocpwise_info(const ocp *prob) const {
+    if (generic_func::setup_ocpwise_info(prob)) {
+        auto &_info = ocpwise_info_map_->at(prob->uid()).replace([](generic_func::info &old) {
+            return new info(std::move(old));
+        });
+        // compute the number and dimension of exclusive/shared inputs
+        _info.num_shared_inputs_ = 0;
+        _info.dim_shared_inputs_ = 0;
+        for (const sym &s : shared_inputs_) {
+            if (prob->is_active(s)) {
+                _info.num_shared_inputs_++;
+                _info.dim_shared_inputs_ += s.dim();
+            }
+        }
+        _info.num_exclusive_inputs_ = _info.arg_num_[__u] - _info.num_shared_inputs_;
+        _info.dim_exclusive_inputs_ = _info.arg_dim_[__u] - _info.dim_shared_inputs_;
+        return true;
+    } else
+        return false;
 }
 } // namespace moto

@@ -52,6 +52,10 @@ class dense_dynamics : public generic_dynamics {
         return shared_inputs_indices_.contains(s.uid());
     } ///< check if an input variable is shared
 
+    size_t active_dim_exclusive_inputs(const ocp *prob) const;
+    size_t active_dim_shared_inputs(const ocp *prob) const;
+    size_t active_num_exclusive_inputs(const ocp *prob) const;
+    size_t active_num_shared_inputs(const ocp *prob) const;
   private:
     struct info : public generic_func::info {
         size_t num_exclusive_inputs_ = 0; ///< number of exclusive input variables (i.e., not shared)
@@ -59,9 +63,9 @@ class dense_dynamics : public generic_dynamics {
         size_t dim_exclusive_inputs_ = 0; ///< dimension of exclusive input variables
         size_t dim_shared_inputs_ = 0;    ///< dimension of shared input variables
         using generic_func::info::info;
-        /// @brief move constructor
+        /// @brief move constructor, leave the reset to default after move
         info(generic_func::info &&rhs) : generic_func::info(std::move(rhs)) {}
-        DEF_DEFAULT_CLONE(info);
+        /// @note no clone for now
     };
     info &get_info() const { return (info &)(info_); } ///< get info
     var_list shared_inputs_;
@@ -71,6 +75,8 @@ class dense_dynamics : public generic_dynamics {
     void finalize_impl() override;
     /// @brief override substitute to handle shared inputs
     void substitute(const sym &arg, const sym &rhs) override;
+    /// @brief setup ocpwise info, will compute the num and dim of exclusive/shared inputs for the problem
+    bool setup_ocpwise_info(const ocp *prob) const override;
 };
 } // namespace moto
 

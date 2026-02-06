@@ -9,7 +9,7 @@ void register_submodule_node_data(nb::module_ &m) {
     auto ocp_handle =
         nb::class_<ocp>(m, "ocp")
             .def("add", [](ocp &self, expr_inarg_list &&exprs) { self.add(exprs); }, nb::arg("exprs"), "Add a list of expressions to the OCP problem")
-            .def("add", [](ocp &self, py_expr_inarg_wrapper ex) { self.add((expr&)ex); }, nb::arg("ex"), "Add an expression to the OCP problem")
+            .def("add", [](ocp &self, py_expr_inarg_wrapper ex) { self.add((expr &)ex); }, nb::arg("ex"), "Add an expression to the OCP problem")
             .def_static("create", &ocp::create, "Create a new OCP problem")
             .def("clone", [](ocp &self, ocp::active_status_config &&config) { return self.clone(config); }, "Clone the OCP problem")
             .def("clone", [](ocp &self) { return self.clone(); }, "Clone the OCP problem")
@@ -19,6 +19,7 @@ void register_submodule_node_data(nb::module_ &m) {
             .def_prop_ro("uid", &ocp::uid, "Get the unique identifier of the OCP problem")
             .def("wait_until_ready", &ocp::wait_until_ready, "Wait until all expressions in the OCP problem are ready")
             .def("update_active_status", &ocp::update_active_status, nb::arg("config"), nb::arg("update_sub_probs") = true, "Update the active status of the OCP problem based on the provided configuration")
+            .def("is_active", &ocp::is_active, nb::arg("arg"), nb::arg("include_sub_prob") = true, "Check if a given argument is active in the OCP problem")
             .def("print_summary", &ocp::print_summary, "Print a summary of the OCP problem");
 
     nb::class_<ocp::active_status_config>(ocp_handle, "active_status_config")

@@ -31,6 +31,10 @@ expr::expr(const expr &rhs)
     fmt::print("Copying expr {} with uid {} to new uid {}\n", rhs.name_, rhs.uid_, uid_);
 } ///< copy constructor
 
+std::string format_as(const expr &e) {
+    return fmt::format("expr(name={}, uid={}, dim={}, field={})", e.name(), e.uid(), e.dim(), e.field());
+}
+
 bool expr::finalize(bool block_until_ready) {
     // fmt::print("finalizing expr {} uid {} field {}\n", name_, uid_, field::name(field_));
     // fmt::print("dim {} finalized {}\n", dim_, finalized_);

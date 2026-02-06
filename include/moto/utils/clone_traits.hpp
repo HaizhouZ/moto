@@ -13,7 +13,7 @@ template <typename T>
 struct clone_base {
     clone_base() = default;
     using clone_ptr = clone_base *;
-    virtual clone_ptr clone() const = 0; ///< clone the object
+    virtual clone_ptr clone() const { return nullptr; }; ///< clone the object
     virtual ~clone_base() = default;
 };
 
