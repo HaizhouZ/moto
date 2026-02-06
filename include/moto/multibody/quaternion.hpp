@@ -41,8 +41,8 @@ struct quaternion : public sym {
         static var base, base_n;
         if (!bool(base)) {
             // for all quats to share the same int/diff implementation
-            base = quaternion("quat_base", __x);
-            base_n = quaternion(base->get_next_name(), __y);
+            base.reset(new quaternion("quat_base", __x));
+            base_n.reset(new quaternion(base->get_next_name(), __y));
             setup_states(base, base_n);
             base_n->finalize(true);
         }

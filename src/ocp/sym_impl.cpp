@@ -11,7 +11,7 @@ sym::sym(const std::string &name, size_t dim, field_t type, default_val_t defaul
 }
 var sym::clone(const std::string &name) const {
     if (field_ != __x && field_ != __y)
-        return var(sym(*this));
+        return var(new sym(*this));
     else { // clone also dual
         return clone_states<sym>(name);
     }
