@@ -68,13 +68,13 @@ void generic_func::substitute(const sym &arg, const sym &rhs) {
     if (gen_.task_) {
         gen_.task_->sx_output = cs::SX::substitute(gen_.task_->sx_output, arg, rhs);
     }
-    auto in_arg_it = std::find_if(in_args_.begin(), in_args_.end(),
-                                  [&arg](const sym &s) { return s.uid() == arg.uid(); });
+    auto in_arg_it = std::ranges::find(in_args_, arg, &var::operator*);
     if (in_arg_it == in_args_.end())
         throw std::runtime_error(fmt::format("func {} substitute failed: argument to replace not found", name_));
-    auto in_arg_pos = in_arg_it - in_args_.begin();
-    in_args_.at(in_arg_pos) = rhs; // update the in_args_ to point to the new sym
-    dep_.at(in_arg_pos) = rhs;     // update the dep_ to point to the new sym
+    // update the in_args_ to point to the new sym
+    *in_arg_it = rhs;
+    // update the dep_ to point to the new sym
+    std::ranges::replace(dep_, arg, rhs, &shared_expr::operator*);
 }
 
 void generic_func::set_from_casadi(const var_inarg_list &in_args, const cs::SX &out) {
@@ -99,7 +99,7 @@ generic_func generic_func::share(bool copy_args, const var_inarg_list &skip_copy
     gen_.copy_task = false;
     generic_func f(*this);
     gen_.copy_task = true;
-    f.finalized_ = true;                               // keep finalized
+    f.finalized_ = true; // keep finalized
     /// @todo make remapping
     // f.async_ready_status_ = this->async_ready_status_; // share the async status
     if (copy_args) {
@@ -141,10 +141,10 @@ void generic_func::finalize_impl() {
     for (auto &s : in_args_) {
         auto f = s->field();
         if (in_field(f, primal_fields)) {
-            arg_dim_[f] += s->dim();
-            arg_tdim_[f] += s->tdim();
-            arg_num_[f]++;
-            arg_by_field_[f].emplace_back(s);
+            info_->arg_dim_[f] += s->dim();
+            info_->arg_tdim_[f] += s->tdim();
+            info_->arg_num_[f]++;
+            info_->arg_by_field_[f].emplace_back(s);
         }
         sym_uid_idx_[s->uid()] = sym_uid_idx_.size();
     }
@@ -186,37 +186,41 @@ void generic_func::finalize_impl() {
 void generic_func::setup_ocpwise_info(const ocp *prob) const {
     if (ocpwise_info_map_.contains(prob->uid()))
         return;
-    ocpwise_info info;
+    auto &tmp = *ocpwise_info_map_
+                     .insert(
+                         {prob->uid(),
+                          info::holder(std::make_unique<info>())})
+                     .first->second;
+    // setup
     for (auto &arg : in_args_) {
         auto f = arg->field();
         if (prob->is_active(arg) && f < field::num_prim) {
-            info.arg_by_field_[f].emplace_back(arg);
-            info.arg_dim_[f] += arg->dim();
-            info.arg_tdim_[f] += arg->tdim();
-            info.arg_num_[f]++;
+            tmp.arg_by_field_[f].emplace_back(arg);
+            tmp.arg_dim_[f] += arg->dim();
+            tmp.arg_tdim_[f] += arg->tdim();
+            tmp.arg_num_[f]++;
         }
     }
-    ocpwise_info_map_[prob->uid()] = info;
 }
 const var_list &generic_func::active_args(field_t f, const ocp *prob) const {
     field_access_guard(f);
     setup_ocpwise_info(prob);
-    return ocpwise_info_map_.at(prob->uid()).arg_by_field_[f];
+    return ocpwise_info_map_.at(prob->uid())->arg_by_field_[f];
 }
 size_t generic_func::active_dim(field_t f, const ocp *prob) const {
     field_access_guard(f);
     setup_ocpwise_info(prob);
-    return ocpwise_info_map_.at(prob->uid()).arg_dim_[f];
+    return ocpwise_info_map_.at(prob->uid())->arg_dim_[f];
 }
 size_t generic_func::active_tdim(field_t f, const ocp *prob) const {
     field_access_guard(f);
     setup_ocpwise_info(prob);
-    return ocpwise_info_map_.at(prob->uid()).arg_tdim_[f];
+    return ocpwise_info_map_.at(prob->uid())->arg_tdim_[f];
 }
 size_t generic_func::active_num(field_t f, const ocp *prob) const {
     field_access_guard(f);
     setup_ocpwise_info(prob);
-    return ocpwise_info_map_.at(prob->uid()).arg_num_[f];
+    return ocpwise_info_map_.at(prob->uid())->arg_num_[f];
 }
 const bool generic_func::check_enable(ocp *prob) const {
     if (disable_if_any_deps_.empty() && enable_if_all_deps_.empty() && enable_if_any_deps_.empty())

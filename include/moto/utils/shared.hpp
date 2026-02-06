@@ -1,6 +1,8 @@
-#include <concepts>
+#ifndef MOTO_UTILS_SHARED_HPP
+#define MOTO_UTILS_SHARED_HPP
 #include <functional>
 #include <memory>
+#include <moto/utils/clone_traits.hpp>
 
 namespace moto {
 namespace utils {
@@ -22,25 +24,11 @@ concept shareable = requires(std::unwrap_ref_decay_t<T> a) {
     { a.shared_from_this() } -> is_shared_ptr;
 };
 
+/// @brief trait to extract the value type of a shareable type
 template <shareable T>
 struct shared_type {
     using value = decltype(std::declval<std::unwrap_ref_decay_t<T>>().shared_from_this())::element_type;
 };
-
-struct cloneable {
-    cloneable() = default;
-    virtual cloneable *clone() const = 0; ///< clone the object
-    virtual ~cloneable() = default;
-};
-
-#define DEF_DEFAULT_CLONE(cls) \
-    cloneable *clone() const override { return new cls(*this); } ///< default clone implementation
-
-template <typename T, typename U>
-concept lineaged =
-    std::is_base_of_v<std::remove_cvref_t<T>, std::remove_cvref_t<U>> ||
-    std::is_base_of_v<std::remove_cvref_t<U>, std::remove_cvref_t<T>> ||
-    std::is_same_v<T, U>;
 
 template <typename T>
 class shared : public std::shared_ptr<T> {
@@ -141,7 +129,7 @@ class shared : public std::shared_ptr<T> {
 
     /// @brief clone the object pointed to @return shared<T> to the cloned object
     shared<T> clone() const {
-        static_assert(std::is_base_of_v<cloneable, T>, "T must be derived from cloneable to use clone()");
+        static_assert(is_clonable<T>, "Type T must be clonable to use clone()");
         if (!bool(*this)) {
             throw std::runtime_error("Cannot clone null object");
         }
@@ -154,3 +142,4 @@ class shared : public std::shared_ptr<T> {
 };
 } // namespace utils
 } // namespace moto
+#endif // MOTO_UTILS_SHARED_HPP

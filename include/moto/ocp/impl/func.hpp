@@ -4,6 +4,7 @@
 #include <moto/core/workspace_data.hpp>
 #include <moto/ocp/impl/func_data.hpp>
 #include <moto/utils/movable_ptr.hpp>
+#include <moto/utils/unique.hpp>
 
 namespace moto {
 class func_codegen;
@@ -40,19 +41,25 @@ class generic_func : public expr {
     expr_list enable_if_all_deps_;  // if all these args are active, the function is enabled
     expr_list disable_if_any_deps_; // if any of these args are active, the function is disabled
     expr_list enable_if_any_deps_;  // if any of these args are active, the function is enabled
-    array_type<var_list, primal_fields> arg_by_field_{};
-    array_type<size_t, primal_fields> arg_dim_{};
-    array_type<size_t, primal_fields> arg_tdim_{};
-    array_type<size_t, primal_fields> arg_num_{};
 
-    struct ocpwise_info {
+    struct info : public utils::clone_base<info> {
         array_type<var_list, primal_fields> arg_by_field_{};
         array_type<size_t, primal_fields> arg_dim_{};
         array_type<size_t, primal_fields> arg_tdim_{};
         array_type<size_t, primal_fields> arg_num_{};
-    };
 
-    mutable std::unordered_map<size_t, ocpwise_info> ocpwise_info_map_;
+        DEF_DEFAULT_CLONE(info);
+
+        using holder = utils::unique<info>;
+    };
+    
+    info::holder info_; ///< cached info for the function
+    
+    mutable std::unordered_map<size_t, info::holder> ocpwise_info_map_;
+
+    /// @brief setup the ocpwise info for a given ocp, 
+    /// will be called when accessing active args/dims for the first time
+    void setup_ocpwise_info(const ocp *prob) const;
 
     std::set<size_t> skip_unused_arg_check_;     ///< set of argument uids to skip unused check
     std::vector<sparsity> jac_sp_;               ///< jacobian sparsity for each arg
@@ -65,7 +72,8 @@ class generic_func : public expr {
     friend class func_arg_map;
     friend class func_approx_data;
 
-    void substitute(const sym &arg, const sym &rhs);
+    /// @brief substitute arg with rhs in the function (order preserved)
+    virtual void substitute(const sym &arg, const sym &rhs);
     void set_from_casadi(const var_inarg_list &in_args, const cs::SX &out);
 
     virtual void finalize_impl() override;
@@ -84,11 +92,9 @@ class generic_func : public expr {
         assert(in_field(field, primal_fields) && "field out of range");
     } ///< guard access to field-based members
 
-    void setup_ocpwise_info(const ocp *prob) const;
-
   public:
     generic_func(const std::string &name, approx_order order, size_t dim, field_t field)
-        : expr(name, dim, field), order_(order) {}
+        : expr(name, dim, field), order_(order), info_(std::make_unique<info>()) {}
     generic_func(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
                  approx_order order, field_t field)
         : generic_func(name, order, (size_t)out.size1(), field) {
@@ -117,7 +123,7 @@ class generic_func : public expr {
 
     const auto &in_args(field_t field) const {
         field_access_guard(field);
-        return arg_by_field_[field];
+        return info_->arg_by_field_[field];
     } ///< get the input arguments for a given field
 
     /// get the active arguments for a given field
@@ -131,17 +137,17 @@ class generic_func : public expr {
 
     auto arg_num(field_t field) const {
         field_access_guard(field);
-        return arg_by_field_[field].size();
+        return info_->arg_by_field_[field].size();
     } ///< get the number of arguments for a given field
 
     auto arg_dim(field_t field) const {
         field_access_guard(field);
-        return arg_dim_[field];
+        return info_->arg_dim_[field];
     } ///< get the dimension of the argument for a given field
 
     auto arg_tdim(field_t field) const {
         field_access_guard(field);
-        return arg_tdim_[field];
+        return info_->arg_tdim_[field];
     } ///< get the tangent dimension of the argument for a given field
 
     bool has_arg(const sym &s) const {

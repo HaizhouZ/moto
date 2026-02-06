@@ -17,15 +17,19 @@ bool ocp::add_impl(expr &ex) {
             if (ex.field() == __dyn && !allow_inconsistent_dynamics_)
                 for (auto f : {__x, __y})
                     for (const generic_dynamics &dyn : expr_[__dyn]) {
-                        auto it = std::find_first_of(dep.begin(), dep.end(),
-                                                     dyn.in_args(f).begin(), dyn.in_args(f).end());
+                        auto it = std::ranges::find_if(dep, [&](const sym &s) { return dyn.has_arg(s); });
                         if (it != dep.end()) {
-                            throw std::runtime_error(fmt::format("Dynamics {} arg {} uid {} in {} found in {}",
-                                                                 ex.name(), (*it)->name(), (*it)->uid(), f, dyn.name()));
+                            throw std::runtime_error(
+                                fmt::format("Dynamics {} arg {} uid {} in {} found in dynamics {}. "
+                                            "Overlapping state variables in dynamics is not allowed to avoid inconsistency."
+                                            " If you want to allow this, set allow_inconsistent_dynamics to true.",
+                                            ex.name(),
+                                            (*it)->name(), (*it)->uid(), f, dyn.name()));
                         }
                     }
             add(dep);
         }
+        finalized_ = false; // need to reset finalized to allow adding more expr, will be set to true in finalize()
         if (ex.default_active_status()) {
             uids_.insert(_uid);
             expr_[ex.field()].emplace_back(ex);
@@ -33,11 +37,7 @@ bool ocp::add_impl(expr &ex) {
             disabled_uids_.insert(_uid);
             disabled_expr_[ex.field()].emplace_back(ex);
         }
-        finalized_ = false;
         ex.add_to_ocp_callback(this);
-        if (ex.field() == __dyn && automatic_reorder_primal_) {
-            maintain_order(ex);
-        }
         return true;
     }
     return false;
@@ -46,20 +46,24 @@ bool ocp::contains(const expr &ex, bool include_sub_prob) const {
     return uids_.contains(ex.uid()) ||
            disabled_uids_.contains(ex.uid()) ||
            pruned_uids_.contains(ex.uid()) ||
-           (include_sub_prob && std::any_of(sub_probs_.begin(),
-                                            sub_probs_.end(),
-                                            [&](const ocp_ptr_t &p) { return p->contains(ex, true); }));
+           (include_sub_prob &&
+            std::any_of(sub_probs_.begin(),
+                        sub_probs_.end(),
+                        [&](const ocp_ptr_t &p) { return p->contains(ex, true); }));
 }
 bool ocp::is_active(const expr &ex, bool include_sub_prob) const {
     return uids_.contains(ex.uid()) ||
-           (include_sub_prob && std::any_of(sub_probs_.begin(),
-                                            sub_probs_.end(),
-                                            [&](const ocp_ptr_t &p) { return p->is_active(ex, true); }));
+           (include_sub_prob &&
+            std::any_of(sub_probs_.begin(),
+                        sub_probs_.end(),
+                        [&](const ocp_ptr_t &p) { return p->is_active(ex, true); }));
 }
 void ocp::finalize() {
     static std::mutex finalize_mutex_;
     std::lock_guard lock(finalize_mutex_);
     if (!finalized_) {
+        if (expr_[__dyn].size() > 0 && automatic_reorder_primal_)
+            maintain_order();
         this->set_dim_and_idx();
         this->finalized_ = true;
     }
@@ -68,45 +72,50 @@ void ocp::set_dim_and_idx() {
     for (size_t i = 0; i < field::num; i++) {
         dim_[i] = 0;
         if (i < field::num_prim)
-            tdim_[i] = 0;
+            tdim_[i] = 0; // only primal fields have tangent space dimension
         size_t cur = 0, idx = 0, tcur = 0;
-        for (expr &ex : expr_[i]) {
+        // assign data index and position for each expression,
+        // also calculate total dimension for each field
+        for (const expr &ex : expr_[i]) {
             dim_[i] += ex.dim();
-            d_idx_[ex.uid()] = cur;
+            flatten_idx_[ex.uid()] = cur;
             cur += ex.dim();
             if (i < field::num_prim) {
                 tdim_[i] += ex.tdim();
-                d_idx_tangent_[ex.uid()] = tcur;
+                flatten_tidx_[ex.uid()] = tcur;
                 tcur += ex.tdim();
             }
             pos_by_uid_[ex.uid()] = idx++;
         }
     }
 }
-void ocp::maintain_order(expr &ex) {
-    /// @todo sort the dynamics according to dependencies
-    if (ex.field() == __dyn) {
-        auto &dyns = exprs(__dyn);
-        for (auto f : {__x, __y}) {
-            expr_list tmp;
-            auto &exprs = expr_[f];
-            tmp.reserve(exprs.size());
-            for (const generic_func &dyn : dyns) {
-                for (const expr &arg : dyn.in_args(f)) {
-                    auto it = std::find(exprs.begin(), exprs.end(), arg);
-                    if (it == exprs.end())
-                        throw std::runtime_error(fmt::format("order maintenance failure: Dynamics {} arg {} uid {} not found in field {}",
-                                                             dyn.name(), arg.name(), arg.uid(), f));
-                    tmp.emplace_back(std::move(*it));
-                }
+void ocp::maintain_order() {
+    expr_list tmp;
+    for (auto f : {__x, __y}) {
+        auto &syms = expr_[f];
+        tmp.reserve(syms.size());
+        for (const generic_func &dyn : exprs(__dyn)) {
+            for (const expr &arg : dyn.in_args(f)) {
+                auto it = std::ranges::find(syms, arg, &shared_expr::operator*);
+                // auto it = std::ranges::find_if(syms, [&](const sym &s) { return s == arg; });
+                if (it == syms.end())
+                    throw std::runtime_error(fmt::format(
+                        "order maintenance failure: "
+                        "Dynamics {} arg {} uid {} not found in field {}",
+                        dyn.name(), arg.name(), arg.uid(), f));
+                tmp.emplace_back(std::move(*it));
             }
-            std::erase_if(exprs, [&tmp](const shared_expr &e) { return !bool(e); });
-            if (!exprs.empty()) {
-                throw std::runtime_error(fmt::format("order maintenance failure: field {} has exprs not in dynamics args", field::name(f)));
-                tmp.insert(tmp.end(), exprs.begin(), exprs.end());
-            }
-            exprs = std::move(tmp);
         }
+        // remove duplicates moved to tmp
+        std::erase_if(syms, [&](auto &&e) { return !e; });
+        if (!syms.empty()) {
+            // state variables not belonging to any dynamics are forbidden
+            throw std::runtime_error(fmt::format(
+                "order maintenance failure: "
+                " field {} has exprs not in dynamics args",
+                f));
+        }
+        syms.swap(tmp); // now syms is in the order of dynamics args
     }
 }
 void ocp::print_summary() {
@@ -116,7 +125,7 @@ void ocp::print_summary() {
     for (size_t i = 0; i < field::num; i++) {
         if (exprs(i).size() > 0) {
             fmt::print("field : {}, \ttotal dim {}\n",
-                       field::name(static_cast<field_t>(i)),
+                       static_cast<field_t>(i),
                        dim(i));
             for (const auto &expr : exprs(i)) {
                 fmt::print(" - {} uid {} dim: {}\n", expr->name(), expr->uid(), expr->dim());
@@ -129,8 +138,9 @@ void ocp::wait_until_ready() {
     for (const auto &f : expr_) {
         for (const auto &e : f) {
             if (!e->wait_until_ready()) {
-                throw std::runtime_error(fmt::format("Expression {} with uid {} failed to be ready",
-                                                     e->name(), e->uid()));
+                throw std::runtime_error(fmt::format(
+                    "Expression {} with uid {} failed to be ready",
+                    e->name(), e->uid()));
             }
         }
     }

@@ -21,16 +21,18 @@ class ocp {
     ocp() { uid_.set_inc(); };     // default constructor
     ocp(const ocp &rhs) = default; // copy constructor
     bool add_impl(expr &);
-    void maintain_order(expr &);
+    /// @brief maintain the order of primal variables by dynamics, 
+    /// required by block-matrix coputation
+    void maintain_order();
     static size_t max_uid; ///< uid used to index global expressions
     bool finalized_ = false;
     utils::unique_id<ocp> uid_;
     /// collection of all expressions in the problem
     std::array<expr_list, field::num> expr_, disabled_expr_, pruned_expr_;
     /// data index of expr in serialized vector, by uid
-    std::unordered_map<size_t, size_t> d_idx_;
+    std::unordered_map<size_t, size_t> flatten_idx_;
     /// data index of tagent space var of expr in serialized vector, by uid
-    std::unordered_map<size_t, size_t> d_idx_tangent_;
+    std::unordered_map<size_t, size_t> flatten_tidx_;
     /// position of expr in expr_ e.g., no. xxx, by uid
     std::unordered_map<size_t, size_t> pos_by_uid_;
     /// dimension of each field
@@ -42,28 +44,49 @@ class ocp {
 
     void set_dim_and_idx();
     void finalize();
-
-  public:
-    CONST_PROPERTY(uid);                                                       ///< getter for uid
-    const auto &exprs(size_t f) const { return expr_.at(f); }                  ///< getter for expr_
-    const auto &pos(const expr &ex) const { return pos_by_uid_.at(ex.uid()); } ///< getter for pos_by_uid_
-    size_t dim(size_t f) const { return dim_.at(f); }                          ///< getter for dim_
-    size_t num(size_t f) const { return expr_[f].size(); }                     ///< getter for num of exprs in field f
-    size_t tdim(size_t f) const { return tdim_.at(f); }                        ///< getter for tdim_
-    /// check if expr is in the problem
-    bool contains(const expr &ex, bool include_sub_prob = true) const;
-    /// check if expr is active in the problem
-    bool is_active(const expr &ex, bool include_sub_prob = true) const;
-    void wait_until_ready();
-
-    void print_summary();
-
+    inline void field_access_guard() const {
+        assert(finalized_ && "Cannot access before the problem is finalized. "
+                             "Please call finalize() before accessing expressions.");
+    }
+    /// @brief get data pointer for expr in the serialized vector
     scalar_t *get_data_ptr(scalar_t *data, const expr &ex) const {
         return data + get_expr_start(ex);
     }
-    scalar_t *get_data_ptr(scalar_t *data, const expr &ex, size_t offset) const {
-        return data + get_expr_start(ex) * offset;
+    /// @deprecated, use get_data_ptr instead
+    // scalar_t *get_data_ptr(scalar_t *data, const expr &ex, size_t offset) const {
+    //     return data + get_expr_start(ex) * offset;
+    // }
+
+  public:
+    CONST_PROPERTY(uid); ///< getter for uid
+    /// @brief getter for enabled expressions in field f
+    const auto &exprs(size_t f) const { return expr_.at(f); }
+    /// @brief getter for position of expr in its field, by uid
+    const auto &pos(const expr &ex) const {
+        field_access_guard();
+        return pos_by_uid_.at(ex.uid());
     }
+    /// @brief getter for dimension of field f
+    size_t dim(size_t f) const {
+        field_access_guard();
+        return dim_.at(f);
+    }
+    /// @brief getter for num of exprs in field f
+    size_t num(size_t f) const { return expr_[f].size(); }
+    /// @brief getter for tangent space dimension of field f
+    size_t tdim(size_t f) const {
+        field_access_guard();
+        return tdim_.at(f);
+    }
+    /// @brief check if expr is in the problem
+    bool contains(const expr &ex, bool include_sub_prob = true) const;
+    /// @brief check if expr is active in the problem
+    bool is_active(const expr &ex, bool include_sub_prob = true) const;
+    /// @brief wait until all expressions in the problem are ready, throw if any expression fails to be ready
+    void wait_until_ready();
+    /// @brief print a summary of the problem
+    void print_summary();
+
     vector_ref extract(vector_ref data, const expr &ex) const {
         return data.segment(get_expr_start(ex), ex.dim());
     }
@@ -102,7 +125,8 @@ class ocp {
      */
     size_t get_expr_start(const expr &ex) const {
         try {
-            return d_idx_.at(ex.uid());
+            field_access_guard();
+            return flatten_idx_.at(ex.uid());
         } catch (const std::exception &e) {
             throw std::runtime_error(fmt::format("expr {} uid {} cannot be found", ex.name(), ex.uid()));
         }
@@ -110,7 +134,8 @@ class ocp {
 
     size_t get_expr_start_tangent(const expr &ex) const {
         try {
-            return d_idx_tangent_.at(ex.uid());
+            field_access_guard();
+            return flatten_tidx_.at(ex.uid());
         } catch (const std::exception &e) {
             throw std::runtime_error(fmt::format("expr {} uid {} cannot be found", ex.name(), ex.uid()));
         }

@@ -34,7 +34,7 @@ class ocp;
 /**
  * @brief general expression base class (now merged with impl)
  */
-class expr : public std::enable_shared_from_this<expr>, public utils::cloneable {
+class expr : public std::enable_shared_from_this<expr>, public utils::clone_base<expr> {
   public:
     static size_t max_uid; /// < uid used to index global expressions
 
