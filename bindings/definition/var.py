@@ -30,3 +30,37 @@ class var(cs.SX):
     
     def finalize(self):
         self.__sym__.finalize()
+
+    @property
+    def name(self):
+        return self.__sym__.name
+    
+
+    @property
+    def dim(self):
+        return self.__sym__.dim
+    
+    @property
+    def tdim(self):
+        return self.__sym__.tdim
+    
+    @tdim.setter
+    def tdim(self, val):
+        self.__sym__.tdim = val
+
+    @property
+    def default_val(self):
+        return self.__sym__.default_val
+    
+    @default_val.setter
+    def default_val(self, val):
+        self.__sym__.default_val = val
+
+    @property
+    def uid(self):
+        return self.__sym__.uid
+    
+    @property
+    def sx(self):
+        return self.__sym__.sx
+    

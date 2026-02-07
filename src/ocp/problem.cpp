@@ -33,7 +33,9 @@ bool ocp::add_impl(expr &ex) {
         if (ex.default_active_status()) {
             uids_.insert(_uid);
             expr_[ex.field()].emplace_back(ex);
+            fmt::println("add {}", ex);
         } else { // add to disabled list
+            fmt::println("disable {}", ex);
             disabled_uids_.insert(_uid);
             disabled_expr_[ex.field()].emplace_back(ex);
         }
@@ -96,8 +98,7 @@ void ocp::maintain_order() {
         tmp.reserve(syms.size());
         for (const generic_func &dyn : exprs(__dyn)) {
             for (const expr &arg : dyn.in_args(f)) {
-                auto it = std::ranges::find(syms, arg, &shared_expr::operator*);
-                // auto it = std::ranges::find_if(syms, [&](const sym &s) { return s == arg; });
+                auto it = std::find(syms.begin(), syms.end(), arg);
                 if (it == syms.end())
                     throw std::runtime_error(fmt::format(
                         "order maintenance failure: "
@@ -124,11 +125,12 @@ void ocp::print_summary() {
     fmt::print("problem uid {}\n", uid_);
     for (size_t i = 0; i < field::num; i++) {
         if (exprs(i).size() > 0) {
-            fmt::print("field : {}, \ttotal dim {}\n",
+            fmt::print("field : {}, \ttotal dim {}, \ttotal tdim {}\n",
                        static_cast<field_t>(i),
-                       dim(i));
+                       dim(i), i < field::num_prim ? tdim(i) : 0);
             for (const auto &expr : exprs(i)) {
-                fmt::print(" - {} uid {} dim: {}\n", expr->name(), expr->uid(), expr->dim());
+                fmt::print(" - {} uid {} dim: {} tdim: {}\n",
+                           expr->name(), expr->uid(), expr->dim(), expr->tdim());
             }
         }
     }
@@ -178,8 +180,7 @@ void ocp::update_active_status(const active_status_config &config, bool update_s
         auto &exprs = expr_[f];
         auto &target_list = from_pruned ? pruned_expr_[f] : disabled_expr_[f];
         auto &target_uids = from_pruned ? pruned_uids_ : disabled_uids_;
-        auto it = std::find_if(target_list.begin(), target_list.end(),
-                               [&ex](const shared_expr &e) { return e->uid() == ex.uid(); });
+        auto it = std::find(target_list.begin(), target_list.end(), ex);
         if (it != target_list.end()) {
             exprs.emplace_back(*it);
             uids_.insert(ex.uid());
@@ -261,8 +262,7 @@ ITER_START:
     for (auto f : all_func_fields) {
         for (const expr &e : to_delete[f]) {
             delete_expr(e, true);
-            if (std::find_if(config.activate_list.begin(), config.activate_list.end(),
-                             [&e](const expr &active) { return active.uid() == e.uid(); }) != config.activate_list.end()) {
+            if (std::find(config.activate_list.begin(), config.activate_list.end(), e) != config.activate_list.end()) {
                 throw std::runtime_error(fmt::format("func {} uid {} pruned but also in activate_list",
                                                      e.name(), e.uid()));
             }
@@ -270,8 +270,7 @@ ITER_START:
         }
         for (const expr &e : to_re_enable[f]) {
             re_enable_expr(e, true);
-            if (std::find_if(config.deactivate_list.begin(), config.deactivate_list.end(),
-                             [&e](const expr &deactivate) { return deactivate.uid() == e.uid(); }) != config.deactivate_list.end()) {
+            if (std::find(config.deactivate_list.begin(), config.deactivate_list.end(), e) != config.deactivate_list.end()) {
                 throw std::runtime_error(fmt::format("func {} uid {} re-enabled but also in deactivate_list",
                                                      e.name(), e.uid()));
             }

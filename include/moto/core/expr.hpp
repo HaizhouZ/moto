@@ -8,14 +8,15 @@
 #include <moto/utils/unique_id.hpp>
 
 namespace moto {
-class expr; // forward declaration of expr
+class expr;                              // forward declaration of expr
 using shared_expr = utils::shared<expr>; ///< shared pointer type for expr
 
 struct expr_inarg_list; ///< forward declaration
 
 /// @brief list of expressions, used for storing expressions in a vector
 struct expr_list : public std::vector<shared_expr> {
-    using std::vector<shared_expr>::vector; ///< inherit constructors from std::vector
+    using base = std::vector<shared_expr>;
+    using base::base; ///< inherit constructors from list_of_shared
     /// constructor from a vector of reference wrappers
     expr_list(const expr_inarg_list &exprs);
 };
@@ -25,10 +26,10 @@ constexpr size_t dim_tbd = 0;
 #define CONST_PROPERTY(mem_name) \
     const auto &mem_name() const { return mem_name##_; }
 
-#define PROPERTY(mem_name)                   \
-    auto &mem_name() { return mem_name##_; } \
-    const auto &mem_name() const { return mem_name##_; } \
-    void __set_##mem_name(const decltype(mem_name##_) &value) { mem_name##_ = value; }\
+#define PROPERTY(mem_name)                                                             \
+    auto &mem_name() { return mem_name##_; }                                           \
+    const auto &mem_name() const { return mem_name##_; }                               \
+    void __set_##mem_name(const decltype(mem_name##_) &value) { mem_name##_ = value; } \
     const auto &__get_##mem_name() const { return mem_name##_; }
 
 class ocp;
@@ -126,12 +127,11 @@ class expr : public std::enable_shared_from_this<expr>, public utils::clone_base
 
     virtual bool wait_until_ready() const; ///< wait until the expression is ready
 
-    friend bool operator ==(const expr &lhs, const expr &rhs) noexcept{
+    friend bool operator==(const expr &lhs, const expr &rhs) noexcept {
         return lhs.uid_ == rhs.uid_;
     } ///< equality operator by comparing uids
 
     DEF_DEFAULT_CLONE(expr)
-
 };
 
 std::string format_as(const expr &e); ///< format an expression as a string for debugging

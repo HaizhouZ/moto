@@ -16,6 +16,8 @@ merit_data::merit_data(ocp *prob) : prob_(prob) {
             approx_[i].v_.setZero();
             for (auto f : primal_fields) {
                 approx_[i].jac_[f].resize(dim, prob_->tdim(f));
+                // fmt::println("prob {} merit_data: approx jacobian for constr field {} w.r.t. primal field {} has dim {}x{}",
+                //              prob_->uid(), field::name(i), field::name(f), dim, prob_->tdim(f));
             }
         }
         // dual variables

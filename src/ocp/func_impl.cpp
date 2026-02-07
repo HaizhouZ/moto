@@ -68,13 +68,13 @@ void generic_func::substitute(const sym &arg, const sym &rhs) {
     if (gen_.task_) {
         gen_.task_->sx_output = cs::SX::substitute(gen_.task_->sx_output, arg, rhs);
     }
-    auto in_arg_it = std::ranges::find(in_args_, arg, &var::operator*);
+    auto in_arg_it = std::find(in_args_.begin(), in_args_.end(), arg);
     if (in_arg_it == in_args_.end())
         throw std::runtime_error(fmt::format("func {} substitute failed: argument to replace not found", name_));
     // update the in_args_ to point to the new sym
     *in_arg_it = rhs;
     // update the dep_ to point to the new sym
-    std::ranges::replace(dep_, arg, rhs, &shared_expr::operator*);
+    std::replace(dep_.begin(), dep_.end(), arg, rhs);
 }
 
 void generic_func::set_from_casadi(const var_inarg_list &in_args, const cs::SX &out) {
@@ -190,6 +190,7 @@ bool generic_func::setup_ocpwise_info(const ocp *prob) const {
                                       {prob->uid(),
                                        info::holder(std::make_unique<info>())})
                      .first->second;
+    // fmt::println("Setting up ocpwise info for func {} in prob uid {}", name(), prob->uid());
     // setup
     for (auto &arg : in_args_) {
         auto f = arg->field();
@@ -200,6 +201,11 @@ bool generic_func::setup_ocpwise_info(const ocp *prob) const {
             tmp.arg_num_[f]++;
         }
     }
+    // fmt::println(" - active args by field:");
+    // for (size_t f : primal_fields) {
+    //     fmt::println("   - field {}: num {}, dim {}, tdim {}, args {}",
+    //                  f, tmp.arg_num_[f], tmp.arg_dim_[f], tmp.arg_tdim_[f], tmp.arg_by_field_[f]);
+    // }
     return true;
 }
 const var_list &generic_func::active_args(field_t f, const ocp *prob) const {

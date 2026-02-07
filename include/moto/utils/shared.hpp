@@ -137,7 +137,7 @@ class shared : public std::shared_ptr<T> {
     }
     /// @brief equality operator by comparing the underlying objects
     friend bool operator==(const shared &lhs, const T &rhs) noexcept {
-        return *(lhs.get()) == rhs;
+        return lhs && *(lhs.get()) == rhs;
     }
 };
 } // namespace utils

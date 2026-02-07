@@ -1,5 +1,4 @@
 // #include <Eigen/LU>
-#include <fmt/ranges.h>
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
 #include <moto/ocp/problem.hpp>
 #include <moto/utils/blasfeo_factorizer/blasfeo_lu.hpp>
@@ -88,7 +87,7 @@ void dense_dynamics::substitute(const sym &arg, const sym &rhs) {
     generic_dynamics::substitute(arg, rhs);
     // update shared inputs
     if (input_shared(arg)) {
-        std::ranges::replace(shared_inputs_, arg, rhs, &var::operator*);
+        std::replace(shared_inputs_.begin(), shared_inputs_.end(), arg, rhs);
         shared_inputs_indices_.erase(arg.uid());
         shared_inputs_indices_.insert(rhs.uid());
     }
@@ -101,7 +100,7 @@ void dense_dynamics::finalize_impl() {
     var_list tmp; // buffer for args to move
     tmp.reserve(shared_inputs_.size());
     for (const sym &s : shared_inputs_) {
-        auto it = std::ranges::find(in_args_, s, &var::operator*);
+        auto it = std::find(in_args_.begin(), in_args_.end(), s);
         if (it != in_args_.end()) {
             // move the shared input to the back of the arg list
             tmp.emplace_back(std::move(*it));
@@ -148,7 +147,7 @@ void dense_dynamics::mark_shared_inputs(const var_inarg_list &args) {
 #define access_ocp_info(var_name) \
     field_read_guard(__u);        \
     setup_ocpwise_info(prob);     \
-    return get_info().var_name
+    return ((info &)*ocpwise_info_map_->at(prob->uid())).var_name
 
 size_t dense_dynamics::active_dim_exclusive_inputs(const ocp *prob) const {
     access_ocp_info(dim_exclusive_inputs_);
@@ -178,6 +177,10 @@ bool dense_dynamics::setup_ocpwise_info(const ocp *prob) const {
         }
         _info.num_exclusive_inputs_ = _info.arg_num_[__u] - _info.num_shared_inputs_;
         _info.dim_exclusive_inputs_ = _info.arg_dim_[__u] - _info.dim_shared_inputs_;
+        // fmt::println("Setup ocpwise info for dense_dynamics func {} in prob uid {}: num_exclusive_inputs {}, dim_exclusive_inputs {}, num_shared_inputs {}, dim_shared_inputs {}",
+        //              name(), prob->uid(),
+        //              _info.num_exclusive_inputs_, _info.dim_exclusive_inputs_,
+        //              _info.num_shared_inputs_, _info.dim_shared_inputs_);
         return true;
     } else
         return false;

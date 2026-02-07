@@ -182,7 +182,8 @@ class sym : public expr, public cs::SX {
 struct var_inarg_list; ///< forward declaration
 /// @brief list of symbolic expressions
 struct var_list : public std::vector<var> {
-    using std::vector<var>::vector; ///< inherit constructors from std::vector
+    using base = std::vector<var>;
+    using base::base; ///< inherit constructors
     var_list(const var_inarg_list &v);
 }; ///< list of symbolic expressions
 
@@ -190,7 +191,7 @@ struct var_inarg_list : public std::vector<std::reference_wrapper<sym>> {
     using std::vector<std::reference_wrapper<sym>>::vector; ///< inherit constructors from std::vector
     var_inarg_list(const var_list &v) {
         this->reserve(v.size());
-        for (const auto &i : v) {
+        for (sym &i : v) {
             this->emplace_back(i);
         }
     } ///< construct from var_list

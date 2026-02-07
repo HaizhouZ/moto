@@ -39,83 +39,50 @@ class pinCasadiModel(cpin.Model):
         if self.nq - self.nv == 1:
             self.nqb = 7
 
-        if dense:
-            # make_primal
-            self.q, self.qn = moto.sym.states(name + "_q", self.nq)
-            if q_nom is not None:
-                assert q_nom.shape == (self.nq,), "q_nom has wrong shape"
-                self.q.sym_handle.default_value = q_nom
-                self.qn.sym_handle.default_value = q_nom
-            self.v, self.vn = moto.sym.states(name + "_v", self.nv)
-            # self.aj = moto.sym.inputs(name + "_aj", self.nj)
-            # self.a = moto.sym.inputs(name + "_a", self.nv)
-            # self.aj = self.a[-self.nj :]
-            # self.ab = (self.vn - self.v)[:6] / dt
-            self.a = (self.vn - self.v) / dt
-            # self.a = cs.vcat([self.ab, self.aj]) if self.is_floating_based else self.aj
-            self.tq = moto.sym.inputs(name + "_tq", self.nj)
+        
+        # make_primal
+        self.q, self.qn = moto.sym.states(name + "_q", self.nq)
+        if q_nom is not None:
+            assert q_nom.shape == (self.nq,), "q_nom has wrong shape"
+            self.q.default_value = q_nom
+            self.qn.default_value = q_nom
+        self.v, self.vn = moto.sym.states(name + "_v", self.nv)
+        # self.aj = moto.sym.inputs(name + "_aj", self.nj)
+        # self.a = moto.sym.inputs(name + "_a", self.nv)
+        # self.aj = self.a[-self.nj :]
+        # self.ab = (self.vn - self.v)[:6] / dt
+        self.a = (self.vn - self.v) / dt
+        # self.a = cs.vcat([self.ab, self.aj]) if self.is_floating_based else self.aj
+        self.tq = moto.sym.inputs(name + "_tq", self.nj)
 
-            # implicit euler
-            def implicit_euler():
-                q_next = cpin.integrate(self, self.q, self.vn * dt)
-                # v_next = self.v[-self.nj :] + self.aj * dt
-                # v_next = self.v + self.a * dt
-                # return moto.dense_dynamics(
-                #     name + "_euler",
-                #     [self.q, self.v, self.qn, self.vn, self.a, dt],
-                #     cs.vcat([self.qn - q_next, self.vn - v_next]),
-                # )
-                # return cs.vcat([self.qn - q_next, self.vn[-self.nj :] - v_next])
-                # return cs.vcat([self.qn - q_next, self.vn - v_next])
-                return cs.vcat([self.qn - q_next])
+        # implicit euler
+        def implicit_euler():
+            q_next = cpin.integrate(self, self.q.sx, self.vn * dt)
+            # v_next = self.v[-self.nj :] + self.aj * dt
+            # v_next = self.v + self.a * dt
+            # return moto.dense_dynamics(
+            #     name + "_euler",
+            #     [self.q, self.v, self.qn, self.vn, self.a, dt],
+            #     cs.vcat([self.qn - q_next, self.vn - v_next]),
+            # )
+            # return cs.vcat([self.qn - q_next, self.vn[-self.nj :] - v_next])
+            # return cs.vcat([self.qn - q_next, self.vn - v_next])
+            return cs.vcat([self.qn - q_next])
 
-            self.joint_euler = implicit_euler()
-            # self.ntq = model.nv - 6 if self.is_floating_based else model.nv
-            self.q_stack = self.q
-            self.v_stack = self.v
-            self.qn_stack = self.qn
-            self.vn_stack = self.vn
-            self.a_stack = self.a
-            self.pos_args = [self.q]
-            self.vel_args = [self.v]
-            # self.acc_args = [self.aj]
-            # self.acc_args = [self.a]
-            self.acc_args = [self.tq]
-            self.pos_args_n = [self.qn]
-            self.vel_args_n = [self.vn]
-        else:
-            self.euler = moto.euler_integrator(name + "_euler")
-            self.euler.set_dt(dt)
-            self.q_lin, self.qn_lin, self.v_lin, self.vn_lin, self.a_lin = self.euler.create_2nd_ord_lin(
-                name, self.nv - (3 if self.is_floating_based else 0), semi_implicit=True
-            )
-            if q_nom is not None:
-                assert q_nom.shape == (self.nq,), "q_nom has wrong shape"
-                q_nom_lin = np.concatenate((q_nom[:3], q_nom[-self.nj :])) if self.is_floating_based else q_nom
-                self.q_lin.default_value = q_nom_lin
-                self.qn_lin.default_value = q_nom_lin
-            if self.is_floating_based:
-                self.quat, self.quatn, self.w, self.wn, self.dw = self.euler.create_2nd_ord_ang(
-                    name, semi_implicit=True
-                )
-                if q_nom is not None:
-                    self.quat.default_value = q_nom[3 : self.nqb]
-                    self.quatn.default_value = q_nom[3 : self.nqb]
-                else:
-                    self.quat.default_value = np.array([0.0, 0.0, 0.0, 1.0])
-                    self.quatn.default_value = np.array([0.0, 0.0, 0.0, 1.0])
-                self.q_stack = cs.vcat([self.q_lin.to_sx()[:3], self.quat.to_sx(), self.q_lin.to_sx()[-self.nj :]])
-                self.v_stack = cs.vcat([self.v_lin.to_sx()[:3], self.w.to_sx(), self.v_lin.to_sx()[-self.nj :]])
-                self.qn_stack = cs.vcat([self.qn_lin.to_sx()[:3], self.quatn.to_sx(), self.qn_lin.to_sx()[-self.nj :]])
-                self.vn_stack = cs.vcat([self.vn_lin.to_sx()[:3], self.wn.to_sx(), self.vn_lin.to_sx()[-self.nj :]])
-                self.a_stack = cs.vcat([self.a_lin.to_sx()[:3], self.dw.to_sx(), self.a_lin.to_sx()[-self.nj :]])
-                self.quat_args = [self.quat, self.quatn, self.w, self.wn, self.dw]
-
-            self.pos_args = [self.q_lin] if not self.is_floating_based else [self.q_lin, self.quat]
-            self.vel_args = [self.v_lin] if not self.is_floating_based else [self.v_lin, self.w]
-            self.acc_args = [self.a_lin] if not self.is_floating_based else [self.a_lin, self.dw]
-            self.pos_args_n = [self.qn_lin] if not self.is_floating_based else [self.qn_lin, self.quatn]
-            self.vel_args_n = [self.vn_lin] if not self.is_floating_based else [self.vn_lin, self.wn]
+        self.joint_euler = implicit_euler()
+        # self.ntq = model.nv - 6 if self.is_floating_based else model.nv
+        self.q_stack = self.q.sx
+        self.v_stack = self.v.sx
+        self.qn_stack = self.qn.sx
+        self.vn_stack = self.vn.sx
+        self.a_stack = self.a
+        self.pos_args = [self.q]
+        self.vel_args = [self.v]
+        # self.acc_args = [self.aj]
+        # self.acc_args = [self.a]
+        self.acc_args = [self.tq]
+        self.pos_args_n = [self.qn]
+        self.vel_args_n = [self.vn]
 
         cpin.forwardKinematics(self, self.data, self.q_stack, self.v_stack)
         cpin.computeJointJacobians(self, self.data)
@@ -153,29 +120,22 @@ class pinCasadiModel(cpin.Model):
         args = self.pos_args + self.vel_args + self.pos_args_n + self.vel_args_n + [*self.f_f] + self.acc_args
         if isinstance(self.dt, cs.SX):
             args.append(self.dt)
-        if self.dense:
-            out = [self.joint_euler]
-            # out = [self.qn - cpin.integrate(self, self.q, self.vn * self.dt), self.vn - self.v - self.aba * self.dt]
+        out = [self.joint_euler]
+        # out = [self.qn - cpin.integrate(self, self.q, self.vn * self.dt), self.vn - self.v - self.aba * self.dt]
 
-            # if self.is_floating_based:
-            # out.append(self.rnea_base)
-            # return moto.dense_dynamics(self.name + "_fb_id", args, cs.vcat(out))
-            in_arg = self.pos_args + self.vel_args + self.acc_args + [*self.f_f]
-            # return [moto.dense_dynamics(self.name + "_euler", args, cs.vcat(out)),
-            #         moto.constr(self.name + "_id", in_arg, self.rnea[:6])]
-            if self.use_fwd_dyn:
-                v_next = self.v + self.aba
-                return moto.dense_dynamics(self.name + "_fd", args, cs.vcat(out + [self.vn - v_next]))
-            else:
-                tau = cs.vcat([cs.SX.zeros(6), self.tq]) if self.is_floating_based else self.tq
-                return moto.dense_dynamics(self.name + "_id", args, cs.vcat(out + [self.rnea - tau * self.dt]))
-            # return moto.dense_dynamics(self.name + "_fb_fd", args, cs.vcat(out))
+        # if self.is_floating_based:
+        # out.append(self.rnea_base)
+        # return moto.dense_dynamics(self.name + "_fb_id", args, cs.vcat(out))
+        in_arg = self.pos_args + self.vel_args + self.acc_args + [*self.f_f]
+        # return [moto.dense_dynamics(self.name + "_euler", args, cs.vcat(out)),
+        #         moto.constr(self.name + "_id", in_arg, self.rnea[:6])]
+        if self.use_fwd_dyn:
+            v_next = self.v + self.aba
+            return moto.dense_dynamics.create(self.name + "_fd", args, cs.vcat(out + [self.vn - v_next]))
         else:
-            to_add = [self.euler]
-            if self.is_floating_based:
-                args = self.pos_args + self.vel_args + self.acc_args + self.f_f + [self.dt]
-                to_add.append(moto.constr(self.name + "_fb_id", args, self.rnea_base))
-            return to_add
+            tau = cs.vcat([cs.SX.zeros(6), self.tq]) if self.is_floating_based else self.tq
+            return moto.dense_dynamics.create(self.name + "_id", args, cs.vcat(out + [self.rnea - tau * self.dt]))
+        # return moto.dense_dynamics(self.name + "_fb_fd", args, cs.vcat(out))
 
     def make_foot_kin_constr(self, i: int):
 
@@ -183,7 +143,7 @@ class pinCasadiModel(cpin.Model):
         self.v_f = cs.hcat(
             [cpin.getFrameVelocity(self, self.data, f, pin.LOCAL_WORLD_ALIGNED).linear for f in self.foot_idx]
         )
-        c = moto.constr(
+        c = moto.constr.create(
             f"kin_{self.foot_frames[i]}",
             self.pos_args + self.vel_args + [self.k_f, self.z_clip],
             # [self.q, k_f, *active_foot, z_clip],
@@ -204,7 +164,7 @@ class pinCasadiModel(cpin.Model):
         print("v_lim:", v_lim)
         qj = self.q[-self.nj :]
         vj = self.v[-self.nj :]
-        return moto.constr(
+        return moto.constr.create(
             "q_limit", [self.q, self.v], cs.vcat([q_min - qj, qj - q_max, vj - v_lim, -vj - v_lim])
         ).cast_ineq()
 
@@ -212,7 +172,7 @@ class pinCasadiModel(cpin.Model):
         tq_limit = model.effortLimit[-self.nj :]
         in_arg = [self.tq]
         # in_arg = self.pos_args + self.vel_args + self.acc_args + [*self.active_foot, *self.f_f] + ([self.dt] if isinstance(self.dt, cs.SX) else [])
-        return moto.constr("tq_limit", in_arg, cs.vcat([self.tq - tq_limit, -self.tq - tq_limit])).cast_ineq()
+        return moto.constr.create("tq_limit", in_arg, cs.vcat([self.tq - tq_limit, -self.tq - tq_limit])).cast_ineq()
 
     def make_fric_cone(self, i, f: moto.var):
         cone = cs.vcat(
@@ -224,19 +184,19 @@ class pinCasadiModel(cpin.Model):
             ]
         )
         # cone = f[0] - self.mu * cs.sqrt(cs.sumsqr(f[1:]) + 1e-9)
-        c = moto.constr(f"fric_{foot_frames[i]}", [f, self.mu], cone).cast_ineq()
+        c = moto.constr.create(f"fric_{self.foot_frames[i]}", [f, self.mu], cone).cast_ineq()
         return c
 
     def add_dt_constr_and_cost(self, prob: moto.ocp, dt_nom: moto.var):
         if isinstance(self.dt, cs.SX):
             dt_bound = moto.sym.params("dt_bound", 2, default_val=np.array([1e-4, 5e-2]))  # bound on dt
-            dt_constr = moto.constr(
+            dt_constr = moto.constr.create(
                 "dt", [self.dt, dt_bound], cs.vcat([dt_bound[0] - self.dt, self.dt - dt_bound[1]])
             ).cast_ineq()
             # dt_constr = moto.constr("dt_fix", [self.dt], self.dt - 2e-2)
             prob.add(dt_constr)
             W_dt = moto.sym.params("W_dt", 1, default_val=1e8)
-            timing_cost = moto.cost("c_t", [self.dt, dt_nom, W_dt], W_dt * cs.sumsqr(self.dt - dt_nom))
+            timing_cost = moto.cost.create("c_t", [self.dt, dt_nom, W_dt], W_dt * cs.sumsqr(self.dt - dt_nom))
             prob.add(timing_cost)
 
     def get_state_cost(self, terminal: bool = False):
@@ -248,27 +208,22 @@ class pinCasadiModel(cpin.Model):
             + 0.01 * cs.sumsqr(self.v_stack[6:])
         )
         state_args = self.pos_args + self.vel_args
-        cost = moto.cost("c", state_args + [self.q_nom], state_cost)
+        cost = moto.cost.create("c", state_args + [self.q_nom], state_cost)
         if terminal:
             return cost.as_terminal()
         return cost
 
     def get_input_cost(self):
         input_args = self.acc_args + [*self.f_f]
-        if self.dense:
-            # input_cost = 1e-4 * cs.sumsqr(self.aj) + 1e-3 * cs.sumsqr(cs.vcat(self.f_f))
-            # input_cost = 1e-4 * cs.sumsqr(self.a) + 1e-3 * cs.sumsqr(cs.vcat(self.f_f))
-            input_cost = 1e-6 * cs.sumsqr(self.tq) + 1e-3 * cs.sumsqr(cs.vcat(self.f_f))
-        else:
-            input_cost = 1e-4 * cs.sumsqr(self.a_stack) + 1e-3 * cs.sumsqr(cs.vcat(self.f_f))
-        return moto.cost("c_u", input_args, input_cost)
+        input_cost = 1e-6 * cs.sumsqr(self.tq) + 1e-3 * cs.sumsqr(cs.vcat(self.f_f))
+        return moto.cost.create("c_u", input_args, input_cost)
 
     def make_foot_lift_cost(self, lifted: bool = True):
         self.z_f_lift_d = moto.sym.params("z_f_lift_d", 1, default_val=0.07)  # desired foot lift height
         if lifted:
             self.z_f_d = moto.sym.inputs("z_f_d", 4, default_val=0.0)  # desired foot height when in contact
-            foot_lift_constr = moto.constr("foot_lift_constr", self.pos_args + [self.z_f_d], (self.z_f - self.z_f_d))
-            foot_lift_cost = moto.cost(
+            foot_lift_constr = moto.constr.create("foot_lift_constr", self.pos_args + [self.z_f_d], (self.z_f - self.z_f_d))
+            foot_lift_cost = moto.cost.create(
                 "c_z",
                 [self.z_f_d, self.z_f_lift_d],
                 100 * cs.sumsqr((self.z_f_d - self.z_f_lift_d)),
@@ -365,6 +320,7 @@ def create_phase_problem(step):
 
 
 for step in range(steps):
+    print(f"Creating phase problem for step {step}")
     np = g.add(sqp.create_node(create_phase_problem(step + 1)))
     np.data.prob.print_summary()
     if step == 0:
