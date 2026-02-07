@@ -33,9 +33,7 @@ bool ocp::add_impl(expr &ex) {
         if (ex.default_active_status()) {
             uids_.insert(_uid);
             expr_[ex.field()].emplace_back(ex);
-            fmt::println("add {}", ex);
         } else { // add to disabled list
-            fmt::println("disable {}", ex);
             disabled_uids_.insert(_uid);
             disabled_expr_[ex.field()].emplace_back(ex);
         }
