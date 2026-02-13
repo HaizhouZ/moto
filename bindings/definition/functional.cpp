@@ -13,6 +13,8 @@
 
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
 
+#include <enum_export.hpp>
+
 namespace moto {
 expr *get_expr_ptr(const nb::handle &h) {
     if (nb::isinstance<moto::expr>(h)) {
@@ -65,15 +67,6 @@ struct type_caster<moto::var_inarg_list> {
 } // namespace detail
 } // namespace nanobind
 
-void export_order_with_magic(nb::module_ &m, const std::string &python_name) {
-    nb::enum_<moto::approx_order> enum_binder(m, python_name.c_str());
-
-    // Iterate over all enum values provided by magic_enum
-    for (auto [value, name] : magic_enum::enum_entries<moto::approx_order>()) {
-        enum_binder.value(("approx_order_" + std::string(name)).c_str(), value);
-    }
-    enum_binder.export_values(); // Makes enum members accessible like MyEnum.MEMBER
-}
 
 #define TO_SHARED_PTR(cls, ptr) std::shared_ptr<cls>(static_cast<cls *>(ptr))
 
@@ -82,7 +75,7 @@ void export_order_with_magic(nb::module_ &m, const std::string &python_name) {
 
 void register_submodule_functional(nb::module_ &m) {
     using namespace moto;
-    export_order_with_magic(m, "approx_order");
+    export_enum<moto::approx_order>(m);
 
     nb::class_<expr>(m, "expr")
         .def("__bool__", &expr::operator bool)
@@ -182,7 +175,7 @@ void register_submodule_functional(nb::module_ &m) {
         .def("as_terminal",
              [](generic_cost &self) { return self.as_terminal(); })
         .def("set_gauss_newton",
-             [](generic_cost &self, const py_var_inarg_wrapper &v) { return self.set_gauss_newton((const var &)v); });
+             [](generic_cost &self, const py_var_inarg_wrapper &v) { return self.set_gauss_newton(var((sym &)v)); });
 
     // nb::class_<custom_func, func>(m, "custom_func")
     //     .def_prop_rw(

@@ -5,6 +5,8 @@
 
 #include <nanobind/stl/bind_vector.h>
 #include <nanobind/stl/optional.h>
+
+#include <enum_export.hpp>
 using namespace moto;
 using graph_type = decltype(ns_sqp::graph_);
 using binary_func_type = std::function<void(ns_sqp::data *, ns_sqp::data *)>;
@@ -21,24 +23,42 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_prop_ro("graph", [](ns_sqp &self) -> auto & { return self.graph_; })
         .def("update", [](ns_sqp &self, size_t n_iter, bool verbose) {
             nb::gil_scoped_release rel;
-            return self.update(n_iter, verbose);
-        }, nb::arg("n_iter") = 1, nb::arg("verbose") = true, "Update the SQP solver for a given number of iterations")
+            return self.update(n_iter, verbose); }, nb::arg("n_iter") = 1, nb::arg("verbose") = true, "Update the SQP solver for a given number of iterations")
         .def_rw("settings", &ns_sqp::settings, "Get the settings of the SQP solver")
         .def("create_node", &ns_sqp::create_node, nb::arg("formulation"), nb::rv_policy::reference, "Create a new node in the SQP graph with the given OCP problem formulation");
 
+    nb::class_<ns_sqp::ipm_setting>(sqp, "ipm_setting")
+        .def_rw("mu0", &ns_sqp::ipm_setting::mu0, "Initial barrier parameter for the IPM solver")
+        .def_rw("warm_start", &ns_sqp::ipm_setting::warm_start, "Whether to warm start the IPM solver")
+        .def_rw("mu_method", &ns_sqp::ipm_setting::mu_method, "Adaptive mu method for the IPM solver")
+        .def_rw("mu_monotone_fraction_threshold", &ns_sqp::ipm_setting::mu_monotone_fraction_threshold, "Threshold for monotone decrease of mu (smaller is more likely to use monotone decrease)")
+        .def_rw("mu_monotone_factor", &ns_sqp::ipm_setting::mu_monotone_factor, "Factor for monotone decrease of mu (smaller -> faster decrease)")
+        .def_rw("globalization", &ns_sqp::ipm_setting::globalization, "Whether to use globalization in the IPM solver");
+
+    nb::class_<ns_sqp::iterative_refinement_setting> rf_setting(sqp, "iterative_refinement_setting");
+    rf_setting.def_rw("enabled", &ns_sqp::iterative_refinement_setting::enabled, "Whether to use iterative refinement")
+        .def_rw("max_iters", &ns_sqp::iterative_refinement_setting::max_iters, "Maximum number of iterative refinement iterations")
+        .def_rw("prim_res_tol", &ns_sqp::iterative_refinement_setting::prim_res_tol, "Primal residual tolerance for iterative refinement")
+        .def_rw("dual_res_tol", &ns_sqp::iterative_refinement_setting::dual_res_tol, "Dual residual tolerance for iterative refinement");
+
+    nb::class_<ns_sqp::linesearch_setting> ls_setting(sqp, "linesearch_setting");
+    ls_setting.def_rw("enabled", &ns_sqp::linesearch_setting::enabled, "Whether to use line search")
+        .def_rw("max_steps", &ns_sqp::linesearch_setting::max_steps, "Maximum number of line search steps")
+        .def_rw("failure_backup", &ns_sqp::linesearch_setting::failure_backup, "Line search failure backup strategy")
+        .def_rw("primal_gamma", &ns_sqp::linesearch_setting::primal_gamma, "Primal improvement requirement for the filter (higher is stricter)")
+        .def_rw("dual_gamma", &ns_sqp::linesearch_setting::dual_gamma, "Dual improvement requirement for the filter (higher is stricter)")
+        .def_rw("enable_dual_cut", &ns_sqp::linesearch_setting::enable_dual_cut, "Whether to enable the strict cut for dual residual when primal residual is small")
+        .def_rw("eta", &ns_sqp::linesearch_setting::eta, "Elasticity coefficient for the dual cut when primal residual is small, used to relax the dual cut as line search step increases")
+        .def_rw("dual_cut_coeff", &ns_sqp::linesearch_setting::dual_cut_coeff, "Cut threshold for dual residual when primal residual is small (higher is looser)");
+    moto::export_enum<ns_sqp::linesearch_setting::failure_backup_strategy>(ls_setting);
+
     nb::class_<ns_sqp::settings_t>(sqp, "settings_type")
-        .def_rw("mu", &ns_sqp::settings_t::mu, "Barrier parameter for the IPM solver")
-        .def_rw("mu_method", &ns_sqp::settings_t::mu_method, "Adaptive mu method for the IPM solver")
+        .def_ro("mu", &ns_sqp::settings_t::mu, "Barrier parameter for the IPM solver")
         .def_rw("ipm_conditional_corrector", &ns_sqp::settings_t::ipm_conditional_corrector, "Whether to use conditional corrector in the IPM solver")
-        .def_rw("adaptive_mu_allowed", &ns_sqp::settings_t::adaptive_mu_allowed, "Whether to adapt mu during line search")
-        .def_rw("mu0", &ns_sqp::settings_t::mu0, "Initial barrier parameter for the IPM solver")
-        .def_rw("use_mu_globalization", &ns_sqp::settings_t::use_mu_globalization, "Whether to use mu globalization")
-        .def_rw("max_rf_iters", &ns_sqp::settings_t::max_rf_iters, "Maximum number of iterative refinement iterations")
-        .def_rw("use_iterative_refinement", &ns_sqp::settings_t::use_iterative_refinement, "Whether to use iterative refinement")
-        .def_rw("max_ls_steps", &ns_sqp::settings_t::max_ls_steps, "Maximum number of line search steps")
-        .def_rw("use_line_search", &ns_sqp::settings_t::use_line_search, "Whether to use line search")
+        .def_rw("ipm", &ns_sqp::settings_t::ipm, "IPM settings")
+        .def_rw("rf", &ns_sqp::settings_t::rf, "Iterative refinement settings")
+        .def_rw("ls", &ns_sqp::settings_t::ls, "Line search settings")
         .def_rw("no_except", &ns_sqp::settings_t::no_except, "Whether to suppress exceptions in parallel jobs")
-        .def_rw("warm_start_ipm", &ns_sqp::settings_t::warm_start_ipm, "Whether to warm start the IPM solver")
         .def_rw("prim_tol", &ns_sqp::settings_t::prim_tol, "Primal feasibility tolerance")
         .def_rw("dual_tol", &ns_sqp::settings_t::dual_tol, "Dual feasibility tolerance")
         .def_rw("comp_tol", &ns_sqp::settings_t::comp_tol, "Complementarity feasibility tolerance");

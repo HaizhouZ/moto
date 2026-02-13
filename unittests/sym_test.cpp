@@ -12,6 +12,10 @@ int main() {
     auto u = moto::sym::inputs("u", 3, default_value);
     std::cout << u << std::endl;
     cs::SX::sin(u);
+
+    var b = moto::sym::params("b", 3);
+    var c;
+    c = b;
     // REQUIRE(u->name() == "u");
     // REQUIRE(u->dim() == 3);
     // REQUIRE(u->field() == __u);

@@ -48,7 +48,7 @@ void ns_sqp::print_stats(int i_iter, const kkt_info &info, bool hcast_ineq) {
         } else if (item.name == "ls") {
             fmt::print("| {:<{}} |", info.ls_steps < 0 ? "--" : std::to_string(info.ls_steps), item.width);
         } else if (item.name == "ipm_mu") {
-            fmt::print("| {:<{}} |", hcast_ineq ? fmt::format("{:.6e}{}", stats_value[idx_stat], ipm_flags) : "---------", item.width);
+            fmt::print("| {:<{}} |", hcast_ineq ? fmt::format("{:.6e}{}", std::log10(stats_value[idx_stat]), ipm_flags) : "---------", item.width);
         } else {
             fmt::print("| {:<{}.6e} |", stats_value[idx_stat], item.width);
         }
