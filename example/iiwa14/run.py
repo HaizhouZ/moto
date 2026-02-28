@@ -4,7 +4,11 @@ import numpy as np
 import pinocchio as pin
 import pinocchio.casadi as cpin
 
+# from pinocchio.visualize import meshcat_visualizer as pin_meshcat
 from example_robot_data import load
+import meshcat.geometry as mg
+import meshcat.transformations as tf
+import meshcat_shapes as mcs
 
 
 class pinCasadiModel(cpin.Model):
@@ -251,7 +255,7 @@ class pinCasadiModel(cpin.Model):
 # dt = moto.sym.inputs("dt", 1, default_val=0.02)
 dt_nom = moto.sym.params("dt_nom", 1, default_val=0.02)
 dt = 0.02
-display = False
+display = True
 ur5 = load("ur5_limited", display=display, verbose=True)
 q_d = np.copy(ur5.q0)
 # q_d = np.array([0.0, -np.pi / 2, 0.0, -np.pi / 2, 0.0, 0.0])
@@ -285,25 +289,25 @@ n0 = g.set_head(g.add(sqp.create_node(prob)))
 n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
 g.add_edge(n0, n1, N_horizon)
 cfg = [
-    [
-        -0.009276185803816728,
-        0.42909599835235623,
-        0.28253248550723115,
-        0.17861190199600196,
-        0.5963352898187627,
-        -0.45337258300016947,
-        -0.6379148152895473,
-    ],
     # [0.4, 0.4, 0.4, 0.0, 0.0, 0.0, 1.0],
+    # [0.0] * 6,
     [
-        -1.0353259602498186,
-        1.6853362490730008,
-        -1.396282671965237,
-        0.3391032332830033,
-        -0.14201851163862678,
-        0.8097199009868228,
+        0.29330284554440844,
+        -0.4822177449570157,
+        0.35490485263950977,
+        0.685024579972181,
+        -0.4567935245973314,
+        -0.2681559031137524,
+        -0.5001733822837158,
     ],
-    # [0.] * 6,
+    [
+        0.3602555199390869,
+        -0.9113326884740325,
+        -0.28553691838581385,
+        0.36474866340717416,
+        0.06126558758673073,
+        0.8544954685368089,
+    ],
 ]
 
 n1.data.value[model.r_des] = np.array(cfg[0][:3])
@@ -321,13 +325,10 @@ def set_initial_state(data: moto.sqp.data_type):
 
 
 set_initial_state(n0.data)
-# sqp.apply_forward(set_initial_state)
+sqp.apply_forward(set_initial_state)
 
-sqp.settings.mu = 1
-# sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
-sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
-# sqp.settings.mu_method = moto.sqp.adaptive_mu_t.quality_function_based
-sqp.settings.ipm_conditional_corrector = True
+sqp.settings.ipm.mu0 = 1
+sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
 sqp.settings.prim_tol = 1e-3
 sqp.settings.dual_tol = 1e-3
 sqp.settings.comp_tol = 1e-3
@@ -367,6 +368,21 @@ print("final ee pos err:", pin.log6(eef_des.inverse() * eef).np)
 
 if display:
     import time
+    from scipy.spatial.transform.rotation import Rotation as R
+    viz = ur5.viz
+
+    target = mg.Sphere(0.02)
+
+    viz.viewer["/target"].set_object(target)
+    quat = cfg[0][3:7]
+    r = R.from_quat(quat).as_matrix()
+    target_pose = tf.compose_matrix(translate=cfg[0][:3])
+    rot = np.eye(4)
+    rot[:3, :3] = r
+    viz.viewer["/target"].set_transform(target_pose)
+
+    target_frame = mcs.frame(viz.viewer["/frame"])
+    viz.viewer["/frame"].set_transform(target_pose.dot(rot))
 
     data = model.fmodel.createData()
     while True:

@@ -278,15 +278,17 @@ class pinCasadiModel(cpin.Model):
             prob.add(timing_cost)
 
     def get_state_cost(self, terminal: bool = False):
-        q_nom_res = self.q_stack - self.q_nom
+        q_nom_res = cpin.difference(self, self.q.sx, self.q_nom.sx)
         state_cost = (
-            100.0 * cs.sumsqr(q_nom_res[: self.nqb])
-            + 1 * cs.sumsqr(q_nom_res[self.nqb :])
-            + 1.0 * cs.sumsqr(self.v_stack[:6])
+            100.0 * cs.sumsqr(q_nom_res[:3])
+            + 100.0 * cs.sumsqr(q_nom_res[3 : 6])
+            + 1 * cs.sumsqr(q_nom_res[6 :])
+            + 1.0 * cs.sumsqr(self.v_stack[:3])
+            + 1.0 * cs.sumsqr(self.v_stack[3 : 6])
             + 0.01 * cs.sumsqr(self.v_stack[6:])
         )
         state_args = self.pos_args + self.vel_args
-        cost = moto.cost.create("c", state_args + [self.q_nom], state_cost)
+        cost = moto.cost.create("c_mpc", state_args + [self.q_nom], state_cost)
         if terminal:
             return cost.as_terminal()
         return cost
@@ -335,6 +337,7 @@ dt = 0.02
 display = True
 go2 = load("go2", display=display, verbose=True)
 q_d = np.copy(go2.q0)
+q_d[2] -= 0.02
 root_joint = pin.JointModelComposite()
 root_joint.addJoint(pin.JointModelTranslation())
 root_joint.addJoint(pin.JointModelSpherical())
@@ -368,14 +371,7 @@ prob_term.add(model.get_state_cost(terminal=True))
 prob.print_summary()
 print("--" * 15)
 
-N_horizon = 100
-
-# setup gait
-steps = 4
-nodes_per_step = 20
-total_gait_steps = steps * nodes_per_step
-stance_length = int((N_horizon - total_gait_steps) / 2)
-print(f"stance_length: {stance_length}, nodes_per_step: {nodes_per_step}")
+N_horizon = 50
 
 gait = "trot"
 # gait = "hopping"
@@ -386,144 +382,164 @@ gait_setting = {
 sqp = moto.sqp(n_job=10)
 g = sqp.graph
 n0 = g.set_head(g.add(sqp.create_node(prob)))
-
-
-def create_phase_problem(step):
-    constr_to_disable = []
-    for idx, f in enumerate([0, 3, 1, 2]):
-        if step % 2 == 0:
-            if not gait_setting[gait][idx]:
-                constr_to_disable += [model.f_f[f]]
-        else:
-            if gait_setting[gait][idx]:
-                constr_to_disable += [model.f_f[f]]
-    phase_prob = prob.clone(
-        moto.ocp.active_status_config(deactivate_list=constr_to_disable)
-    )
-    return phase_prob
-
-
-for step in range(steps):
-    np = g.add(sqp.create_node(create_phase_problem(step + 1)))
-    np.data.prob.print_summary()
-    if step == 0:
-        g.add_edge(n0, np, stance_length, include_ed=False)
-    else:
-        g.add_edge(n_prev, np, nodes_per_step, include_ed=False)
-    n_prev = np
-
-nstop = g.add(sqp.create_node(prob))
-g.add_edge(n_prev, nstop, nodes_per_step, include_ed=False)
 n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
-g.add_edge(nstop, n1, stance_length)
-# g.add_edge(n0, n1, N_horizon)
-# print(g.flatten_nodes())
+g.add_edge(n0, n1, N_horizon)
 
 sqp.settings.ipm.mu0 = 0.1
 sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
-# sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.monotonic_decrease
-# sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.quality_function_based
 sqp.settings.ipm_conditional_corrector = True
 sqp.settings.prim_tol = 1e-3
 sqp.settings.dual_tol = 1e-3
 sqp.settings.comp_tol = 1e-3
 sqp.settings.rf.max_iters = 2
 
-cfg = [
-    [-0.9595959595959596, -0.6161616161616161],
-    [-0.9595959595959596, 0.31313131313131315],
-]
-step = 0
-node_idx = 0
 
+def stance_ref(data: moto.sqp.data_type):
+    global node_idx, current_time
+    # periodic base pose reference (smooth oscillation + slow drift between cfg waypoints)
+    freq = 1  # Hz
+    phase = 2 * np.pi * freq * (current_time + node_idx * model.dt)
 
-def gait_setup(data: moto.sqp.data_type):
-    global step, node_idx
-    if node_idx >= stance_length and node_idx + stance_length < N_horizon:
-        switch_step = (node_idx - stance_length) % nodes_per_step == 0
-        if switch_step:
-            step += 1
-        for idx, f in enumerate([0, 3, 1, 2]):
-            if step % 2 == 0:
-                if gait == "hopping":
-                    data.value[model.q_nom][2] = 0.5
-            else:
-                ...
-    else:
-        ...
-    if step >= 1 and step <= 2:
-        data.value[model.q_nom][0] = node_idx / N_horizon * cfg[0][0]
-        data.value[model.q_nom][1] = node_idx / N_horizon * cfg[0][1]
-    elif step > 2:
-        data.value[model.q_nom][0] = cfg[0][0] + node_idx / N_horizon * (
-            cfg[1][0] - cfg[0][0]
-        )
-        data.value[model.q_nom][1] = cfg[0][1] + node_idx / N_horizon * (
-            cfg[1][1] - cfg[0][1]
-        )
+    # center and slow drift between the two cfg waypoints over the whole horizon
+    center_x, center_y = 0.0, 0.0
+
+    # oscillation amplitudes
+    amp_xy = 0.05  # meters lateral/longitudinal
+    amp_z = 0.05  # vertical
+
+    # set periodic reference for base x, y
+    data.value[model.q_nom][0] = center_x + amp_xy * np.sin(phase)
+    data.value[model.q_nom][1] = center_y + amp_xy * np.cos(phase)
+
+    # vertical periodic motion: larger for hopping, small bob for walking/trot
+    data.value[model.q_nom][2] = q_d[2] + amp_z * np.sin(2 * phase)
+
     node_idx += 1
 
 
-sqp.apply_forward(gait_setup)
 import time
+import mujoco
+import mujoco.viewer
+
+mj_model = mujoco.MjModel.from_xml_path("example/quadruped/rsc/scene.xml")
+mj_data = mujoco.MjData(mj_model)
+sim_dt = 0.005
+mj_model.opt.timestep = sim_dt
+q_d_mujoco = np.copy(q_d)
+q_d_mujoco[3:7] = np.array(
+    [q_d[6], q_d[3], q_d[4], q_d[5]]
+)  # convert to mujoco quaternion format
+mj_data.qpos[:] = q_d_mujoco
+mujoco.mj_forward(mj_model, mj_data)
 
 cnt = 0
 iters = 0
-start = time.perf_counter()
-# while cnt < 50:
-res = sqp.update(100, verbose=True)
-sqp.settings.ipm.warm_start = True
-cnt += 1
-iters += res.num_iter
-print(f"sqp.update() took {(time.perf_counter() - start) / cnt:.3f} seconds")
-print(f"per iteration took {(time.perf_counter() - start) / iters * 1000:.3f} ms")
+sqp.settings.ipm.warm_start = False
 
-q_res = []
-dt_res = []
+# warm start
 node_idx = 0
+current_time = 0.0
+sqp.apply_forward(stance_ref)
+# n0.data.value[model.k_f] = 0
+nodes = g.flatten_nodes()
+data = go2.model.createData()
+for n in nodes[:10]:
+    for f in model.f_f:
+        n.value[model.k_f] = 0
+assert n0.addr == nodes[0].addr
+sqp.update(100, verbose=True)
+start = time.perf_counter()
+sqp.settings.ipm.warm_start = True
+control_freq = 10  # Hz
+update_interval = int(
+    1 / (control_freq * model.dt)
+)  # number of sim steps between MPC updates
 
-def get_sym(node: moto.sqp.data_type):
-    global node_idx
-    q_res.append(node.value[model.q])
-    if isinstance(dt, float):
-        dt_res.append(dt)
-    else:
-        dt_res.append(node.value[dt])
-    node_idx += 1
-    if node_idx >= N_horizon:
-        q_res.append(node.value[model.qn])
+with mujoco.viewer.launch_passive(mj_model, mj_data) as viewer:
+    while viewer.is_running():
+        loop_start = time.perf_counter()
+        # Update initial state for MPC
+        n0.data.value[model.q] = mj_data.qpos.copy()
+        # convert mujoco quaternion to pinocchio format
+        n0.data.value[model.q][3:7] = np.array(
+            [mj_data.qpos[4], mj_data.qpos[5], mj_data.qpos[6], mj_data.qpos[3]]
+        )
+        print("Current base:", n0.data.value[model.q])
+        n0.data.value[model.v] = mj_data.qvel.copy()
+        print("Current base velocity:", n0.data.value[model.v])
 
+        # Update reference trajectory
+        node_idx = 0
+        current_time = mj_data.time
+        sqp.apply_forward(stance_ref)
+        print(f"Updated reference trajectory for node {node_idx}")
+        # Run MPC iteration
+        mpc_st = time.perf_counter()
+        res = sqp.update(5, verbose=False)
+        mpc_ed = time.perf_counter()
+        print(
+            f"MPC iteration {res.num_iter}, prim_res: {res.inf_prim_res:.3e}, dual res: {res.inf_dual_res:.3e}, timing: {(mpc_ed - mpc_st) * 1000:.3f} ms"
+        )
+        cnt += 1
+        iters += res.num_iter
 
-sqp.apply_forward(get_sym)
+        # Extract and apply control
+        # for n in nodes:
 
-if display:
-    import time
+        print("n0 reaction forces:", [n0.data.value[f] / dt for f in model.f_f])
+        for i, n in enumerate(nodes[0:5]):
+            print(f"n{i} base state:\t\t", n.value[model.q][:7])
+            print(f"n{i} base velocity:\t", n.value[model.v][:6])
+            pin.forwardKinematics(go2.model, data, n.value[model.q], n.value[model.v])
+            pin.updateFramePlacements(go2.model, data)
+            print("foot heights:", [data.oMf[f].translation[2] for f in model.foot_idx])
+            print(
+                "foot velocities:",
+                [
+                    pin.getFrameVelocity(
+                        go2.model, data, f, pin.LOCAL_WORLD_ALIGNED
+                    ).linear
+                    for f in model.foot_idx
+                ],
+            )
+            print("torques:", n.value[model.tq])
+            print(
+                "reaction forces:",
+                [n.value[f] / dt for f in model.f_f],
+            )
+            # check the forward dynamics acceleration
+            # pin.computeJointJacobians(go2.model, data, n.value[model.q])
+            # Jac = [
+            #     pin.getFrameJacobian(go2.model, data, f, pin.LOCAL_WORLD_ALIGNED)[:3, :]
+            #     for f in model.foot_idx
+            # ]
+            # a = pin.aba(
+            #     go2.model,
+            #     data,
+            #     n.value[model.q],
+            #     n.value[model.v],
+            #     np.concatenate([np.zeros(6), n.value[model.tq]])
+            #     + sum(Jac[i].T @ n.value[f] for i, f in enumerate(model.f_f)) / dt,
+            # )
+            # print("forward dyn acc:", a)
 
-    viz = go2.viz
+        step = 0
+        while step < update_interval:
+            current_node_idx = int(step * sim_dt // dt + 1)
+            mj_data.ctrl[:] = nodes[current_node_idx].value[model.tq]
+            qj_mujoco = mj_data.qpos[7:]
+            qj_mpc = nodes[current_node_idx].value[model.q][7:]
+            vj_mujoco = mj_data.qvel[6:]
+            vj_mpc = nodes[current_node_idx].value[model.v][6:]
+            mj_data.ctrl[:] += 50.0 * (qj_mpc - qj_mujoco) + 0.5 * (vj_mpc - vj_mujoco)
+            mujoco.mj_step(mj_model, mj_data)
+            step += 1
+        viewer.sync()
 
-    target = mg.Sphere(0.02)
+        while time.perf_counter() - loop_start < update_interval * sim_dt:
+            pass  # busy wait to maintain real-time control frequency
 
-    color = [0x00FF00, 0xFF0000]
-    for i in range(2):
-        target = mg.Sphere(0.02)
-        mcs.point(viz.viewer[f"/target{i}"], color=color[i], radius=0.04)
-        pose = tf.compose_matrix(translate=cfg[i][:2] + [0.3])
-        viz.viewer[f"/target{i}"].set_transform(pose)
-        mcs.frame(viz.viewer[f"/frame{i}"])
-        viz.viewer[f"/frame{i}"].set_transform(pose)
-
-    while True:
-        for i in range(len(q_res)):
-            start = time.perf_counter()
-            go2.display(q_res[i])
-            if i is not N_horizon:
-                dt_ = dt_res[i]
-                while time.perf_counter() - start < dt_:
-                    pass
-        time.sleep(0.5)
-
-# def print_sym(node: moto.sqp.data_type):
-#     node.sym.print()
-#     node.print_residuals()
-
-# sqp.apply_forward(print_sym, early_stop=20)
+print(f"sqp.update() took {(time.perf_counter() - start) / max(1, cnt):.3f} seconds")
+print(
+    f"per iteration took {(time.perf_counter() - start) / max(1, iters) * 1000:.3f} ms"
+)

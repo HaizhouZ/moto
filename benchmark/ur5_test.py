@@ -276,7 +276,7 @@ from tqdm import tqdm
 import time
 
 for idx_cfg, cfg in tqdm(enumerate(config), total=len(config)):
-    sqp = moto.sqp(n_job=10)
+    sqp = moto.sqp(n_job=4)
     g = sqp.graph
     n0 = g.set_head(g.add(sqp.create_node(prob)))
     n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
