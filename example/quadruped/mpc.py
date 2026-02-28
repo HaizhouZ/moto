@@ -5,9 +5,6 @@ import pinocchio as pin
 import pinocchio.casadi as cpin
 
 from example_robot_data import load
-import meshcat.geometry as mg
-import meshcat.transformations as tf
-import meshcat_shapes as mcs
 
 full = True
 soft = False

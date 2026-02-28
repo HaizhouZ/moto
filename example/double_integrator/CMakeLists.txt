@@ -1,5 +1,0 @@
-add_executable(double_integrator_test src/main.cpp)
-
-
-target_include_directories(double_integrator_test PUBLIC include)
-target_link_libraries(double_integrator_test PUBLIC moto)
