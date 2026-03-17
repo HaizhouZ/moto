@@ -158,7 +158,7 @@ class ocp {
     void update_active_status(const active_status_config &config, bool update_sub_probs = true);
 
   private:
-    bool allow_inconsistent_dynamics_ = false; ///< allow inconsistent dynamics when updating active status
+    bool allow_inconsistent_dynamics_ = false; ///< allow inconsistent dynamics (duplicated states) when updating active status
     bool automatic_reorder_primal_ = true;     ///< automatically reorder primal variables by dynamics
     std::vector<ocp_ptr_t> sub_probs_;         ///< list of sub-problems owned by this problem
   public:
