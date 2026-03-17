@@ -18,13 +18,21 @@ add_project_dependency(nlohmann_json REQUIRED)
 add_project_dependency(OpenSSL REQUIRED)
 add_project_dependency(blasfeo REQUIRED)
 
-set(MOTO_COMPILE_OPTS -march=native -fPIC -Wno-interference-size)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(MOTO_COMPILE_OPTS -fPIC -Wno-interference-size)
 set(MOTO_COMPILE_DEFS MOTO_USE_OMP)
 set(MOTO_COMPILE_FEATURES cxx_std_20)
 
 option(BUILD_MULTIBODY "Build multibody module" ON)
-
+option(WITH_NATIVE_OPT "use -march=native for compilation" OFF)
 option(USE_MIMALLOC "Use mimalloc" OFF)
+
+if (WITH_NATIVE_OPT MATCHES ON)
+  message(STATUS "Using -march=native for compilation")
+  list(APPEND MOTO_COMPILE_OPTS -march=native)
+else()
+  message(STATUS "Not using -march=native for compilation")
+endif()
 
 if(USE_MIMALLOC MATCHES ON)
   message(STATUS "Using mimalloc")
@@ -44,10 +52,15 @@ set(INCLUDE_DIRS
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-
+if(NOT DEFINED ENV{BLASFEO_LIB_DIR})
+    set(BLASFEO_LIB_DIR "/usr/local/lib/libblasfeo.a")
+else()
+    set(BLASFEO_LIB_DIR $ENV{BLASFEO_LIB_DIR})
+endif()
+message("blasfeo directory: ${BLASFEO_LIB_DIR}")
 list(APPEND MOTO_DEP_LIBS
     # OpenBLAS::OpenBLAS 
-    "/usr/local/blasfeo/lib/libblasfeo.a"
+    ${BLASFEO_LIB_DIR}
     casadi::casadi
     Eigen3::Eigen
     magic_enum::magic_enum
