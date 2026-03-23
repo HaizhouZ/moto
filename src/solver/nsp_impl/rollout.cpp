@@ -120,6 +120,9 @@ void generic_solver::compute_kkt_residual(ns_riccati_data *cur) {
     dense->res_stat_[__x].noalias() = d.Q_x_bak.transpose();
     d.Q_xx.times(d.prim_step[__x], dense->res_stat_[__x]);
     f_x.right_T_times(d.dual_step[__dyn], dense->res_stat_[__x]);
+    if (d.ns) {
+        d.dense_->approx_[__eq_x].jac_[__x].right_T_times(d.dual_step[__eq_x], dense->res_stat_[__x]);
+    }
     if (d.nc) {
         d.dense_->approx_[__eq_xu].jac_[__x].right_T_times(d.dual_step[__eq_xu], dense->res_stat_[__x]);
     }

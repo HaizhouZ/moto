@@ -78,9 +78,10 @@ void generic_constr::finalize_impl() {
         try {
             bool pure_x = true;
             for (const sym &arg : in_args_) {
-                if (arg.field() == __y)
+                if (arg.field() == __y) {
                     pure_x = false;
                     break;
+                }
             }
             if (pure_x) {
                 for (sym &arg : in_args_) {
