@@ -44,6 +44,16 @@ void update_ls_bounds(node_data *cur, workspace_data *config) {
         sf.update_ls_bounds(sd, config);
     });
 }
+void backup_trial_state(node_data *cur) {
+    for_each(cur, [](auto &&sf, auto &&sd) {
+        sf.backup_trial_state(sd);
+    });
+}
+void restore_trial_state(node_data *cur) {
+    for_each(cur, [](auto &&sf, auto &&sd) {
+        sf.restore_trial_state(sd);
+    });
+}
 void corrector_step_start(data_base *data) {
     data->first_order_correction_start(
         get_for_each([](auto &&sf, auto &&sd) {

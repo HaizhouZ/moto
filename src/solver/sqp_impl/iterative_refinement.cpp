@@ -63,7 +63,7 @@ void ns_sqp::iterative_refinement() {
         detail_timed_block_end("iterative_refinement_step_finalize");
         detail_timed_block_end("iterative_refinement_step");
         // recompute line search bounds with the corrected newton step
-        settings.as<solver::linesearch_config>().reset();
+        settings.ls.reset();
         for (solver::linesearch_config &s : setting_per_thread) {
             s.reset();
         }

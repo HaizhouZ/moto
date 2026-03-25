@@ -9,14 +9,14 @@ namespace moto {
 void ns_sqp::finalize_ls_bound_and_set_to_max() {
     // merge line search bounds from each thread
     for (solver::linesearch_config &s : setting_per_thread) {
-        settings.primal.merge_from(s.primal);
-        settings.dual.merge_from(s.dual);
+        settings.ls.primal.merge_from(s.primal);
+        settings.ls.dual.merge_from(s.dual);
     }
-    settings.alpha_primal = settings.primal.alpha_max;
-    settings.alpha_dual = settings.dual.alpha_max;
+    settings.ls.alpha_primal = settings.ls.primal.alpha_max;
+    settings.ls.alpha_dual = settings.ls.dual.alpha_max;
     // copy the settings to each worker
     for (solver::linesearch_config &s : setting_per_thread) {
-        s.copy_from(settings);
+        s.copy_from(settings.ls);
     }
 }
 
@@ -68,8 +68,8 @@ void ns_sqp::filter_linesearch(filter_linesearch_data &ls, const kkt_info &kkt) 
         if (kkt.inf_prim_res < ls.best_trial.prim_res || kkt.inf_dual_res < ls.best_trial.dual_res) {
             ls.best_trial.prim_res = kkt.inf_prim_res;
             ls.best_trial.dual_res = kkt.inf_dual_res;
-            ls.best_trial.alpha_primal = settings.alpha_primal;
-            ls.best_trial.alpha_dual = settings.alpha_dual;
+            ls.best_trial.alpha_primal = settings.ls.alpha_primal;
+            ls.best_trial.alpha_dual = settings.ls.alpha_dual;
         }
     };
     const auto print_filter = [&] {
@@ -82,9 +82,9 @@ void ns_sqp::filter_linesearch(filter_linesearch_data &ls, const kkt_info &kkt) 
 
     record_best_trial();
     if (settings.verbose) {
-        fmt::print("  ls step, primal res: {:.3e}, dual res: {:.3e}, alpha_primal: {:.3e}\n", kkt.inf_prim_res, kkt.inf_dual_res, settings.alpha_primal);
+        fmt::print("  ls step, primal res: {:.3e}, dual res: {:.3e}, alpha_primal: {:.3e}\n", kkt.inf_prim_res, kkt.inf_dual_res, settings.ls.alpha_primal);
     }
-    const bool accept = ls.try_step(kkt.inf_prim_res, kkt.inf_dual_res, settings, settings.alpha_primal);
+    const bool accept = ls.try_step(kkt.inf_prim_res, kkt.inf_dual_res, settings, settings.ls.alpha_primal);
 
     if (accept || ls.stop) {
         ls.recompute_approx = false;
@@ -100,13 +100,18 @@ void ns_sqp::filter_linesearch(filter_linesearch_data &ls, const kkt_info &kkt) 
     // fmt::print("  previous res, primal res: {:.3e}, dual res: {:.3e}\n", kkt_last.inf_prim_res, kkt_last.inf_dual_res);
     if (settings.ls.max_steps > ls.step_cnt) {
         ls.step_cnt++;
-        settings.alpha_primal = std::max(
-            settings.alpha_primal - ls.initial_alpha_primal / (settings.ls.max_steps + 1e-8),
+        settings.ls.alpha_primal = std::max(
+            settings.ls.alpha_primal - ls.initial_alpha_primal / (settings.ls.max_steps + 1e-8),
             scalar_t(0.0));
+        if (settings.ls.update_alpha_dual) {
+            settings.ls.alpha_dual = std::max(
+                settings.ls.alpha_dual - ls.initial_alpha_dual / (settings.ls.max_steps + 1e-8),
+                scalar_t(0.0));
+        }
         // settings.alpha_primal = (0.7 * settings.alpha_primal - settings.alpha_primal);
         // settings.alpha_dual = -initial_alpha_dual / (max_ls_steps + 1e-8);
         if (settings.verbose)
-            fmt::print("  ls backtrack, alpha_p: {:.3e}, alpha_d: {:.3e}\n", settings.alpha_primal, settings.alpha_dual);
+            fmt::print("  ls backtrack, alpha_p: {:.3e}, alpha_d: {:.3e}\n", settings.ls.alpha_primal, settings.ls.alpha_dual);
         return;
     }
 
@@ -118,20 +123,21 @@ void ns_sqp::filter_linesearch(filter_linesearch_data &ls, const kkt_info &kkt) 
         }
         ls.enforce_min = true;
         auto scale = std::min(0.01 / ls.initial_alpha_primal, 1.0);
-        settings.alpha_primal = ls.initial_alpha_primal * scale;
+        settings.ls.alpha_primal = ls.initial_alpha_primal * scale;
     } else {
         if (settings.verbose) {
             fmt::print("  ls failed, use best trial and reset ls...\n");
             fmt::print("    best trial primal res: {:.3e}, dual res: {:.3e}, alpha_p: {:.3e}, alpha_d: {:.3e}\n",
                        ls.best_trial.prim_res, ls.best_trial.dual_res, ls.best_trial.alpha_primal, ls.best_trial.alpha_dual);
         }
-        settings.alpha_primal = ls.best_trial.alpha_primal;
-        settings.alpha_dual = ls.best_trial.alpha_dual;
+        settings.ls.alpha_primal = ls.best_trial.alpha_primal;
+        if (settings.ls.update_alpha_dual) {
+            settings.ls.alpha_dual = ls.best_trial.alpha_dual;
+        }
     }
     // auto scale = std::min(0.01 / std::max(initial_alpha_primal, initial_alpha_dual), 1.0);
     // auto scale2 = std::min(0.01 / ls.initial_alpha_dual, 1.0);
     /// @todo: hard constraints use alpha_primal, ipm uses alpha_dual with a backup of multipliers
-    settings.alpha_dual = 0.0;
     // settings.mu = settings.ipm.mu0; // reset mu to initial value when line search fails
     // settings.mu = settings.worker_data.post_aff_comp / settings.worker_data.n_ipm_cstr; // reset mu to the complementarity after affine step when line search fails, this is more aggressive than resetting to mu0 and can help reduce the number of iterations
     // graph_.for_each_parallel(solver::ineq_soft::initialize);

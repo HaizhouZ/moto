@@ -13,7 +13,7 @@ ns_sqp::kkt_info ns_sqp::initialize() {
     if (settings.verbose)
         fmt::print("Initialization for SQP...\n");
     if (!settings.ipm.warm_start)
-        settings.mu = settings.ipm.mu0; // initialize mu before setting up workspace data, as it may be used in the workspace data setup
+        settings.ipm.mu = settings.ipm.mu0; // initialize mu before setting up workspace data, as it may be used in the workspace data setup
     graph_.for_each_parallel([this](data *cur) {
         // setup solver settings
         cur->for_each_constr([this](const generic_func &c, func_approx_data &d) { c.setup_workspace_data(d, &settings); });
@@ -67,7 +67,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                     break;
                 }
             }
-            settings.as<solver::linesearch_config>().reset();
+            settings.ls.reset();
             setting_per_thread.reset(settings.n_worker);
 
             timed_block_start("sqp_single_iter");
@@ -87,8 +87,8 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
 
             bool finalize_dual = true;
 
-            if (has_ineq && settings.ipm_enable_affine_step()) { // compute the affine step, no need to finalize dual step
-                settings.ipm_start_predictor_computation();
+            if (has_ineq && settings.ipm.ipm_enable_affine_step()) { // compute the affine step, no need to finalize dual step
+                settings.ipm.ipm_start_predictor_computation();
                 finalize_dual = false; // do not finalize dual step
             }
             detail_timed_block_start("finalize_newton_step");
@@ -101,19 +101,19 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             detail_timed_block_end("finalize_newton_step");
             detail_timed_block_start("corrector_step");
             finalize_ls_bound_and_set_to_max();
-            if (has_ineq && settings.ipm_enable_affine_step()) {
+            if (has_ineq && settings.ipm.ipm_enable_affine_step()) {
                 // line search with max bounds
                 graph_.for_each_parallel([this](size_t tid, data *d) {
                     solver::ineq_soft::finalize_predictor_step(d, &setting_per_thread[tid]);
                 });
-                settings.ipm_end_predictor_computation(); // ipm affine step computation is done
+                settings.ipm.ipm_end_predictor_computation(); // ipm affine step computation is done
                 // collect worker ipm data
                 solver::ipm_config::worker &main_worker = setting_per_thread[0];
                 for (size_t i : range(settings.n_worker)) {
                     main_worker += setting_per_thread[i];
                 }
                 // adaptive mu update
-                settings.adaptive_mu_update(main_worker);
+                settings.ipm.adaptive_mu_update(main_worker);
                 // use the new mu to update the rhs jacobian
                 graph_.for_each_parallel(solver::ineq_soft::corrector_step_start);
                 // solve the problem again with updated mu
@@ -123,7 +123,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                     finalize_correction(d);
                 });
                 // recompute line search bounds with the corrected newton step
-                settings.as<solver::linesearch_config>().reset();
+                settings.ls.reset();
                 for (solver::linesearch_config &s : setting_per_thread) {
                     s.reset();
                 }
@@ -140,16 +140,18 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             /// @todo: update the line search stepsize?
             // real line search step
             ls.reset_per_iter_data();
-            ls.initial_alpha_primal = settings.alpha_primal;
-            ls.initial_alpha_dual = settings.alpha_dual;
+            ls.initial_alpha_primal = settings.ls.alpha_primal;
+            ls.initial_alpha_dual = settings.ls.alpha_dual;
             ls.best_trial = filter_linesearch_data::trial();
             graph_.for_each_parallel([](data *d) {
                 d->backup_trial_state();
+                solver::ineq_soft::backup_trial_state(d);
             });
         LS_START:
             detail_timed_block_start("line_search_step");
             graph_.for_each_parallel([this](data *d) {
                 d->restore_trial_state();
+                solver::ineq_soft::restore_trial_state(d);
                 riccati_solver_->apply_affine_step(d, &settings);
                 solver::ineq_soft::apply_affine_step(d, &settings);
             });
@@ -185,16 +187,16 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                 break;
             }
 
-            if (has_ineq && *settings.mu_method == solver::ipm_config::monotonic_decrease) {
-                while (kkt_last.inf_prim_res < settings.mu * settings.ipm.mu_monotone_fraction_threshold &&
-                       kkt_last.inf_dual_res < settings.mu * settings.ipm.mu_monotone_fraction_threshold &&
-                       kkt_last.inf_comp_res < settings.mu * settings.ipm.mu_monotone_fraction_threshold) {
-                    settings.mu *= settings.ipm.mu_monotone_factor;
-                    fmt::print("Monotone decrease of mu: new mu = {:.3e}\n", settings.mu);
+            if (has_ineq && settings.ipm.mu_method == solver::ipm_config::monotonic_decrease) {
+                while (kkt_last.inf_prim_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold &&
+                       kkt_last.inf_dual_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold &&
+                       kkt_last.inf_comp_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold) {
+                    settings.ipm.mu *= settings.ipm.mu_monotone_factor;
+                    fmt::print("Monotone decrease of mu: new mu = {:.3e}\n", settings.ipm.mu);
                     ls.points.clear(); // clear the filter to accept the current point
                     // ls.points.push_back({kkt_last.inf_prim_res, kkt_last.inf_dual_res});
                 }
-                settings.mu = std::max(settings.mu, 1e-11); // enforce minimum mu
+                settings.ipm.mu = std::max(settings.ipm.mu, 1e-11); // enforce minimum mu
             }
 
             // });

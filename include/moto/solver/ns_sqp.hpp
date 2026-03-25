@@ -22,7 +22,7 @@ struct ns_sqp {
         scalar_t dual_res_tol = 1e-10; ///< dual residual tolerance for refinement
     };
 
-    struct linesearch_setting {
+    struct linesearch_setting : public solver::linesearch_config {
         bool enabled = true;  ///< whether to use line search
         size_t max_steps = 5; ///< max line search steps
         enum class failure_backup_strategy : size_t {
@@ -36,33 +36,32 @@ struct ns_sqp {
         scalar_t eta = 1e-4;            ///< elasticity coefficient for the dual cut when primal residual is small, used to relax the dual cut as line search step increases
     };
 
-    struct ipm_setting {
+    struct ipm_config : public solver::ipm_config {
         scalar_t mu0 = 1.0;        ///< initial barrier parameter
         bool warm_start = false;   ///< whether to warm start the IPM solver
         bool globalization = true; ///< whether to use IPM globalization
 
         scalar_t mu_monotone_fraction_threshold = 10.0; ///< threshold for monotone decrease of mu, smaller -> more likely to use monotone decrease
-        
-        scalar_t mu_monotone_factor = 0.2; ///< factor for monotonic decrease of mu, smaller -> faster decrease
-
-        solver::ipm_config::adaptive_mu_t mu_method =
-            solver::ipm_config::adaptive_mu_t::mehrotra_predictor_corrector; ///< adaptive mu method
+        scalar_t mu_monotone_factor = 0.2;              ///< factor for monotonic decrease of mu, smaller -> faster decrease
     };
 
-    struct settings_t
-        : public workspace_data_collection<solver::linesearch_config,
-                                           solver::ipm_config> {
+    struct settings_t : public workspace_data_collection<linesearch_setting, ipm_config> {
+        using base = workspace_data_collection<linesearch_setting, ipm_config>;
+        using worker = typename base::worker;
+
+        linesearch_setting &ls;
+        ipm_config &ipm;
+
         double prim_tol = 1e-6; ///< primal feasibility tolerance
         double dual_tol = 1e-4; ///< dual feasibility tolerance
         double comp_tol = 1e-6; ///< complementarity feasibility tolerance
 
         iterative_refinement_setting rf;
-        ipm_setting ipm;
-        linesearch_setting ls;
 
         bool no_except = false;
 
-        settings_t();
+        settings_t()
+            : ls(static_cast<linesearch_setting &>(*this)), ipm(static_cast<ipm_config &>(*this)) {}
 
       private:
         friend class ns_sqp;

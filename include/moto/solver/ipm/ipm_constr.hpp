@@ -21,6 +21,7 @@ class ipm_constr final : public ineq_constr {
         vector g_;                     ///< constraint value
         vector r_s_;                   ///< ipm residuals g + t
         vector slack_;                 ///< slack variables for the constraints
+        vector slack_backup_;          ///< backup of slack variables for line search trials
         vector diag_scaling;           ///< Nesterov-Todd scaling T^{-1} N
         vector diag_scaling_last_;     ///< Nesterov-Todd scaling T^{-1} N
         vector scaled_res_;            ///< residuals after NT scaling (Nr_g - r_s) T^{-1} = T{-1} N r_g + T^{-1} mu
@@ -30,7 +31,7 @@ class ipm_constr final : public ineq_constr {
         vector reg_;
         vector active_;
         vector reg_T_inv_;
-        vector multipler_backup_;
+        vector multiplier_backup_;
         approx_data(base::approx_data &&rhs);
     };
     using base::base;
@@ -61,6 +62,10 @@ class ipm_constr final : public ineq_constr {
     void apply_affine_step(data_map_t &data, workspace_data *cfg) const override final;
     /// @brief update the line search configuration (if necessary)
     void update_ls_bounds(data_map_t &data, workspace_data *cfg) const override final;
+    /// @brief backup the current IPM trial state before a line-search attempt
+    void backup_trial_state(data_map_t &data) const override final;
+    /// @brief restore the backed-up IPM trial state before the next line-search attempt
+    void restore_trial_state(data_map_t &data) const override final;
     /**
      * @brief make the sparse approximation data for the IPM
      * @param primal sym data including states inputs etc

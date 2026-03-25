@@ -64,7 +64,12 @@ class soft_constr : public generic_constr {
     /// @param data data map
     /// @param worker_cfg workspace data pointer to the config to be updated
     virtual void update_ls_bounds(data_map_t &data, workspace_data *worker_cfg) const {}
-
+    /// @brief backup the current line-search trial state
+    /// @param data data map
+    virtual void backup_trial_state(data_map_t &data) const {}
+    /// @brief restore the current line-search trial state
+    /// @param data data map
+    virtual void restore_trial_state(data_map_t &data) const {}
 
     virtual void propagate_jacobian(func_approx_data &data) const = 0;
     virtual void propagate_hessian(func_approx_data &data) const = 0;

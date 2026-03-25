@@ -14,10 +14,9 @@ void generic_solver::apply_affine_step(ns_riccati_data *cur, workspace_data *_cf
         cur->sym_->integrate(f, d.trial_prim_step[f], cfg.alpha_primal);
         // d.trial_prim_step[f] *= cfg.alpha_primal;
     }
+    const scalar_t dual_alpha = cfg.dual_alpha_for_eq();
     for (auto f : hard_constr_fields) {
-        // cur->dense_->dual_[f].noalias() += cfg.alpha_dual * d.trial_dual_step[f];
-        cur->dense_->dual_[f].noalias() += cfg.alpha_primal * d.trial_dual_step[f];
-        // d.trial_dual_step[f] *= cfg.alpha_dual;
+        cur->dense_->dual_[f].noalias() += dual_alpha * d.trial_dual_step[f];
     }
 }
 
