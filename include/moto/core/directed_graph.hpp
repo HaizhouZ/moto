@@ -34,16 +34,13 @@ struct edge_base {
      * @param end end node
      * @param length number of appending nodes between start and end (excluding start and end)
      */
-    edge_base(node *start, node *end, int length)
+    edge_base(node *start, node *end, size_t length)
         : st(start), ed(end) {
         nodes.reserve(length); // reserve space for start and end nodes
         st->out_edges.emplace(this);
         ed->in_edges.emplace(this);
-        if (length > 0) {
-            while (length) {             // exclude ed node
-                nodes.emplace_back(*st); // clone the start node
-                --length;
-            }
+        for (size_t i = 0; i < length; ++i) {
+            nodes.emplace_back(*st); // clone the start node
         }
     }
     ~edge_base() {
@@ -110,14 +107,15 @@ class directed_graph {
      * @ref graph_types::edge
      * @param st start node
      * @param ed end node
-     * @param len length of the edge including start and end nodes
+     * @param len total number of nodes along the edge, including the selected endpoints
      * @return const auto& const reference to the added edge
      */
     void add_edge(node &st, node &ed, size_t len = 2, bool include_st = true, bool include_ed = true) {
-        if (len < 2) {
-            throw std::invalid_argument("Edge length must be no less than 2");
+        const size_t included_nodes = static_cast<size_t>(include_st) + static_cast<size_t>(include_ed);
+        if (len < included_nodes) {
+            throw std::invalid_argument("Edge length is too short for the requested endpoint inclusion");
         }
-        edges_.emplace_back(&st, &ed, len - (include_st + include_ed));
+        edges_.emplace_back(&st, &ed, len - included_nodes);
         // return edges_.back();
     }
 
@@ -306,18 +304,16 @@ class directed_graph {
         void backward_update() {
             this->clear();
             while (!cur_edges_.empty()) {
-                for (size_t i = 0; i < cur_edges_.size(); ++i) {
-                    for (auto e : cur_edges_) {
-                        // edge forward
-                        data_type *cur = e->ed->data_;
-                        for (auto &prev : e->nodes | std::views::reverse) {
-                            this->emplace_back(cur, prev.data_);
-                            cur = prev.data_;
-                        }
-                        this->emplace_back(cur, e->st->data_);
-                        if ((--e->st->out_cnt) == 0 && !e->st->in_edges.empty()) { // append st to the list if no more out edges
-                            next_edges_.insert(next_edges_.end(), e->st->in_edges.begin(), e->st->in_edges.end());
-                        }
+                for (auto e : cur_edges_) {
+                    // edge backward
+                    data_type *cur = e->ed->data_;
+                    for (auto &prev : e->nodes | std::views::reverse) {
+                        this->emplace_back(cur, prev.data_);
+                        cur = prev.data_;
+                    }
+                    this->emplace_back(cur, e->st->data_);
+                    if ((--e->st->out_cnt) == 0 && !e->st->in_edges.empty()) { // append st to the list if no more out edges
+                        next_edges_.insert(next_edges_.end(), e->st->in_edges.begin(), e->st->in_edges.end());
                     }
                 }
                 if (next_edges_.empty() && null_on_end_ && head_) {
