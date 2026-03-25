@@ -18,6 +18,12 @@ struct generic_solver {
      */
     virtual void ns_factorization(ns_riccati_data *cur);
     /**
+     * @brief factorization for the correction step
+     * @details reuses the standard nullspace factorization without merging Jacobian modifications
+     * @param cur current node data
+     */
+    virtual void ns_factorization_correction(ns_riccati_data *cur);
+    /**
      * @brief perform the riccati recursion for the current node
      * @details will update the Q-derivatives and the nullspace data
      * @param cur current node data

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <moto/solver/ns_sqp.hpp>
 // #define ENABLE_TIMED_BLOCK
 #include <moto/utils/timed_block.hpp>
@@ -20,54 +21,83 @@ void ns_sqp::finalize_ls_bound_and_set_to_max() {
     }
 }
 
-void ns_sqp::filter_linesearch_data::update_filter(scalar_t prim_new, scalar_t dual_new, settings_t &settings) {
+void ns_sqp::filter_linesearch_data::update_filter(const kkt_info &current_kkt, settings_t &settings) {
+    if (last_step_was_armijo) {
+        return;
+    }
+
     // only add to the filter if the new point is not dominated by the filter
-    points.erase(std::remove_if(points.begin(), points.end(),
-                                [&](const point &p) {
-                                    return prim_new <= (1 - settings.ls.primal_gamma) * p.prim_res &&
-                                           dual_new <= p.dual_res - settings.ls.dual_gamma * p.prim_res;
-                                }),
+    point current_point = {current_kkt.inf_prim_res, current_kkt.inf_dual_res, current_kkt.objective};
+    points.erase(std::remove_if(
+                     points.begin(), points.end(),
+                     [&](const point &p) {
+                         return current_point.dominate(p, settings);
+                     }),
                  points.end());
-    points.push_back({prim_new, dual_new});
+    points.push_back(current_point);
 }
-bool ns_sqp::filter_linesearch_data::try_step(scalar_t prim_res, scalar_t dual_res, settings_t &settings, scalar_t alpha) {
+bool ns_sqp::filter_linesearch_data::point::dominate(const point &other, const settings_t &settings) const {
+    return prim_res <= (1.0 - settings.ls.primal_gamma) * other.prim_res &&
+           objective <= other.objective - settings.ls.dual_gamma * other.prim_res;
+}
+bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const kkt_info &current_kkt, settings_t &settings) {
 
-    // A point is acceptable only if it is NOT dominated by ANY point in the filter
+    scalar_t inf_prim_res_trial = trial_kkt.inf_prim_res;
+    scalar_t obj_trial = trial_kkt.objective;
+
+    scalar_t inf_prim_res_k = current_kkt.inf_prim_res;
+    scalar_t obj_k = current_kkt.objective;
+
+    point trial_point = {inf_prim_res_trial, trial_kkt.inf_dual_res, obj_trial};
+
+    // reject if the trial point is dominated by any point in the filter
     for (const auto &p : points) {
-        // Check if the trial point falls into the prohibited region of point 'p'
-        // Using Equation (22): Prohibited if (Worse Prim AND Worse Dual)
-        bool worse_prim = prim_res >= (1 - settings.ls.primal_gamma) * p.prim_res;
-        bool worse_dual = dual_res >= p.dual_res - settings.ls.dual_gamma * p.prim_res; // γ_φ * θ(x_k)
-        // bool worse_dual = dual_res >= (1 - settings.ls.dual_gamma) * p.dual_res; // γ_φ * θ(x_k)
-
-        if (prim_res <= settings.prim_tol && settings.ls.enable_dual_cut) { // if primal residual is small, be more lenient on dual residual
-            // worse_dual |= dual_res >= settings.ls.dual_cut_coeff * p.dual_res;
-            scalar_t elastic_coeff = 1.0 - settings.ls.eta * alpha;
-            bool failed_dual_armijo = dual_res >= elastic_coeff * p.dual_res;
-            if (failed_dual_armijo) {
-                if (settings.verbose) {
-                    fmt::print("small prim res, dual_res: {:.3e}, p.dual_res: {:.3e}\n", dual_res, p.dual_res);
-                    fmt::print("    worse dual because of small prim res\n");
-                }
-                return false;
-            }
-        }
-
-        if (worse_prim && worse_dual) {
-            return false; // Point is dominated/prohibited by 'p'!
+        if (p.dominate(trial_point, settings)) {
+            return false;
         }
     }
-    // update_filter(prim_res, dual_res, settings);
-    return true;
-}
-void ns_sqp::filter_linesearch(filter_linesearch_data &ls, const kkt_info &kkt) {
-    // if (!ls.stop && kkt.inf_dual_res > 0.9999 * kkt_last.inf_dual_res &&
-    // kkt.inf_prim_res > 0.9999 * kkt_last.inf_prim_res) {
 
+    // check switching condition
+    bool is_switching = false; // true if in objective decrease mode
+    if (current_kkt.obj_dir_deriv < 0.0 &&
+        inf_prim_res_k <= settings.ls.inf_prim_res_min) {
+        is_switching = true;
+    }
+
+    // sufficient objective decrease condition (Armijo) for switching
+    if (is_switching) {
+        // Armijo condition for the objective
+        scalar_t armijo_target = obj_k +
+                                 settings.ls.armijo_eta * settings.ls.alpha_primal * current_kkt.obj_dir_deriv;
+
+        if (obj_trial <= armijo_target) {
+            last_step_was_armijo = true;
+            return true;
+        }
+    } else { // filter condition for non-switching
+        // Filter condition relative to the CURRENT iterate
+        // pass if the trial point is not dominated by the current
+        point current_point = {inf_prim_res_k, current_kkt.inf_dual_res, obj_k};
+        if (!current_point.dominate(trial_point, settings)) {
+            last_step_was_armijo = false;
+            return true;
+        }
+    }
+
+    return false;
+}
+ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt) {
+    if (ls.step_cnt == 0 && trial_kkt.inf_prim_res < current_kkt.inf_prim_res) {
+        // skip second-order correction if the first trial already shows improvement in primal residual
+        ls.skip_soc = true;
+    }
     const auto record_best_trial = [&] {
-        if (kkt.inf_prim_res < ls.best_trial.prim_res || kkt.inf_dual_res < ls.best_trial.dual_res) {
-            ls.best_trial.prim_res = kkt.inf_prim_res;
-            ls.best_trial.dual_res = kkt.inf_dual_res;
+        bool prim_better = trial_kkt.inf_prim_res < ls.best_trial.prim_res;
+        bool obj_better = trial_kkt.objective < ls.best_trial.objective;
+        if (prim_better || obj_better) {
+            ls.best_trial.prim_res = trial_kkt.inf_prim_res;
+            ls.best_trial.dual_res = trial_kkt.inf_dual_res;
+            ls.best_trial.objective = trial_kkt.objective;
             ls.best_trial.alpha_primal = settings.ls.alpha_primal;
             ls.best_trial.alpha_dual = settings.ls.alpha_dual;
         }
@@ -76,28 +106,38 @@ void ns_sqp::filter_linesearch(filter_linesearch_data &ls, const kkt_info &kkt) 
         if (!settings.verbose)
             return;
         for (size_t i = 0; i < ls.points.size(); ++i) {
-            fmt::print("    filter point {}: primal res: {:.3e}, dual res: {:.3e}\n", i, ls.points[i].prim_res, ls.points[i].dual_res);
+            fmt::print("    filter point {}: primal res: {:.3e}, dual res: {:.3e}, objective: {:.3e}\n", i, ls.points[i].prim_res, ls.points[i].dual_res, ls.points[i].objective);
         }
     };
 
     record_best_trial();
     if (settings.verbose) {
-        fmt::print("  ls step, primal res: {:.3e}, dual res: {:.3e}, alpha_primal: {:.3e}\n", kkt.inf_prim_res, kkt.inf_dual_res, settings.ls.alpha_primal);
+        fmt::print("  ls step, primal res: {:.3e}, objective: {:.3e}, alpha_primal: {:.3e}\n",
+                   trial_kkt.inf_prim_res, trial_kkt.objective, settings.ls.alpha_primal);
     }
-    const bool accept = ls.try_step(kkt.inf_prim_res, kkt.inf_dual_res, settings, settings.ls.alpha_primal);
-
+    const bool accept = ls.try_step(trial_kkt, current_kkt, settings);
+    /// if the point is acceptable or we have already tried enough steps, stop line search and accept the point if acceptable
     if (accept || ls.stop) {
         ls.recompute_approx = false;
         if (accept && !ls.stop) {
-            ls.points.clear(); // clear the filter if the switching condition is met, since we are essentially starting a new line search with a different approximation
-            ls.update_filter(kkt.inf_prim_res, kkt.inf_dual_res, settings);
+            ls.update_filter(current_kkt, settings);
         }
-        return;
+        return accept ? line_search_action::accept : line_search_action::stop;
     }
 
     ls.recompute_approx = true;
-    print_filter();
     // fmt::print("  previous res, primal res: {:.3e}, dual res: {:.3e}\n", kkt_last.inf_prim_res, kkt_last.inf_dual_res);
+    /// try second-order correction before backtracking
+    /// skip if line search started already or first trial already shows improvement in primal residual
+    if (settings.ls.enable_soc && ls.step_cnt == 0 && !ls.skip_soc &&
+        ls.soc_iter_cnt < settings.ls.max_soc_iter) {
+        if (settings.verbose)
+            fmt::print("  ls retry with second-order correction ({}/{})\n", ls.soc_iter_cnt + 1, settings.ls.max_soc_iter);
+        ls.soc_iter_cnt++;
+        return line_search_action::retry_second_order_correction;
+    }
+    print_filter();
+    /// backtrack
     if (settings.ls.max_steps > ls.step_cnt) {
         ls.step_cnt++;
         settings.ls.alpha_primal = std::max(
@@ -112,10 +152,10 @@ void ns_sqp::filter_linesearch(filter_linesearch_data &ls, const kkt_info &kkt) 
         // settings.alpha_dual = -initial_alpha_dual / (max_ls_steps + 1e-8);
         if (settings.verbose)
             fmt::print("  ls backtrack, alpha_p: {:.3e}, alpha_d: {:.3e}\n", settings.ls.alpha_primal, settings.ls.alpha_dual);
-        return;
+        return line_search_action::backtrack;
     }
-
-    ls.stop = true;
+    // line search failed, fallback to backup
+    ls.stop = true; // stop line search, will not try more steps
     if (settings.ls.failure_strategy == linesearch_setting::failure_backup_strategy::min_step) {
         if (settings.verbose) {
             fmt::print("  ls failed, use min primal step and reset ls...\n");
@@ -126,22 +166,29 @@ void ns_sqp::filter_linesearch(filter_linesearch_data &ls, const kkt_info &kkt) 
     } else {
         if (settings.verbose) {
             fmt::print("  ls failed, use best trial and reset ls...\n");
-            fmt::print("    best trial primal res: {:.3e}, dual res: {:.3e}, alpha_p: {:.3e}, alpha_d: {:.3e}\n",
-                       ls.best_trial.prim_res, ls.best_trial.dual_res, ls.best_trial.alpha_primal, ls.best_trial.alpha_dual);
+            fmt::print("    best trial primal res: {:.3e}, dual res: {:.3e}, objective: {:.3e}, alpha_p: {:.3e}, alpha_d: {:.3e}\n",
+                       ls.best_trial.prim_res, ls.best_trial.dual_res, ls.best_trial.objective, ls.best_trial.alpha_primal, ls.best_trial.alpha_dual);
         }
         settings.ls.alpha_primal = ls.best_trial.alpha_primal;
         if (settings.ls.update_alpha_dual) {
             settings.ls.alpha_dual = ls.best_trial.alpha_dual;
         }
     }
-    // auto scale = std::min(0.01 / std::max(initial_alpha_primal, initial_alpha_dual), 1.0);
-    // auto scale2 = std::min(0.01 / ls.initial_alpha_dual, 1.0);
-    /// @todo: hard constraints use alpha_primal, ipm uses alpha_dual with a backup of multipliers
-    // settings.mu = settings.ipm.mu0; // reset mu to initial value when line search fails
-    // settings.mu = settings.worker_data.post_aff_comp / settings.worker_data.n_ipm_cstr; // reset mu to the complementarity after affine step when line search fails, this is more aggressive than resetting to mu0 and can help reduce the number of iterations
-    // graph_.for_each_parallel(solver::ineq_soft::initialize);
     ls.points.clear();
-    ls.recompute_approx = true;
+    return line_search_action::stop;
+}
+
+void ns_sqp::apply_second_order_correction() {
+    graph_.for_each_parallel([](data *d) {
+        d->first_order_correction_start([]() {});
+    });
+    graph_.for_each_parallel(solver_call(&solver_type::ns_factorization_correction));
+
+    correction_step();
+    graph_.for_each_parallel([this](data *d) {
+        d->first_order_correction_end();
+        finalize_correction(d);
+    });
 }
 
 } // namespace moto

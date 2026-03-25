@@ -26,11 +26,11 @@ struct MOTO_ALIGN_NO_SHARING data_base {
     sparse_mat &Q_yx, &Q_yx_mod;
     sparse_mat &Q_yy, &Q_yy_mod;
     matrix V_xx, V_yy;
-    array_type<vector, primal_fields> trial_prim_step; ///< primal (newton) trial step
-    array_type<vector, primal_fields> prim_corr; ///< correction for the primal step
+    array_type<vector, primal_fields> trial_prim_step;      ///< primal (newton) trial step
+    array_type<vector, primal_fields> prim_corr;            ///< correction for the primal step
     array_type<vector, primal_fields> trial_prim_state_bak; ///< backup of the original primal state for line search
 
-    array_type<vector, constr_fields> trial_dual_step; // dual rollout trial step
+    array_type<vector, constr_fields> trial_dual_step;      // dual rollout trial step
     array_type<vector, constr_fields> trial_dual_state_bak; ///< backup of the original dual state for line search
 
     /// @brief create solver data
@@ -43,6 +43,9 @@ struct MOTO_ALIGN_NO_SHARING data_base {
     void swap_jacobian_modification();
     void backup_trial_state();
     void restore_trial_state();
+    /// @brief first-order correction step, will clear the jacobian modification and backup the primal trial state, then call the callback to fill in the jacobian modification, finally swap the modification into the jacobian for later use
+    /// @tparam Callback called after clearing modification, so it should fill in the jacobian modification, can be a lambda or std::function, and should be invocable with either data_base* or void
+    /// @param callback
     template <typename Callback>
     void first_order_correction_start(Callback &&callback) {
         prim_corr[__x].setZero();

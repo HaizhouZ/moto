@@ -15,7 +15,7 @@ void ns_sqp::iterative_refinement() {
     detail_timed_block_start("iterative_refinement");
     while (iter_refine < iter_refine_max) {
         detail_timed_block_start("check_residual");
-        graph_.for_each_parallel(bind(&solver_type::compute_kkt_residual));
+        graph_.for_each_parallel(solver_call(&solver_type::compute_kkt_residual));
         detail_timed_block_end("check_residual");
         struct MOTO_ALIGN_NO_SHARING inf_res_state_worker {
             scalar_t inf_res_stat_u = 0.;

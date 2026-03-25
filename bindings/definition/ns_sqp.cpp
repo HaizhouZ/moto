@@ -41,12 +41,19 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("prim_res_tol", &ns_sqp::iterative_refinement_setting::prim_res_tol, "Primal residual tolerance for iterative refinement")
         .def_rw("dual_res_tol", &ns_sqp::iterative_refinement_setting::dual_res_tol, "Dual residual tolerance for iterative refinement");
 
-    nb::class_<ns_sqp::linesearch_setting> ls_setting(sqp, "linesearch_setting");
+    nb::class_<solver::linesearch_config>(sqp, "linesearch_bounds")
+        .def_rw("update_alpha_dual", &solver::linesearch_config::update_alpha_dual, "Whether to update the dual step size during line search")
+        .def_rw("eq_dual_alpha_source", &solver::linesearch_config::eq_dual_alpha_source, "Source for dual step size for equality constraints")
+        .def_rw("ineq_dual_alpha_source", &solver::linesearch_config::ineq_dual_alpha_source, "Source for dual step size for inequality constraints");
+
+    nb::class_<ns_sqp::linesearch_setting, solver::linesearch_config> ls_setting(sqp, "linesearch_setting");
     ls_setting.def_rw("enabled", &ns_sqp::linesearch_setting::enabled, "Whether to use line search")
         .def_rw("max_steps", &ns_sqp::linesearch_setting::max_steps, "Maximum number of line search steps")
+        .def_rw("enable_soc", &ns_sqp::linesearch_setting::enable_soc, "Whether to try a second-order correction before backtracking")
+        .def_rw("max_soc_iter", &ns_sqp::linesearch_setting::max_soc_iter, "Maximum number of second-order correction retries per SQP iteration")
         .def_rw("failure_strategy", &ns_sqp::linesearch_setting::failure_strategy, "Line search failure backup strategy")
         .def_rw("primal_gamma", &ns_sqp::linesearch_setting::primal_gamma, "Primal improvement requirement for the filter (higher is stricter)")
-        .def_rw("dual_gamma", &ns_sqp::linesearch_setting::dual_gamma, "Dual improvement requirement for the filter (higher is stricter)")
+        .def_rw("dual_gamma", &ns_sqp::linesearch_setting::dual_gamma, "Objective improvement requirement for the filter (higher is stricter)")
         .def_rw("enable_dual_cut", &ns_sqp::linesearch_setting::enable_dual_cut, "Whether to enable the strict cut for dual residual when primal residual is small")
         .def_rw("eta", &ns_sqp::linesearch_setting::eta, "Elasticity coefficient for the dual cut when primal residual is small, used to relax the dual cut as line search step increases")
         .def_rw("dual_cut_coeff", &ns_sqp::linesearch_setting::dual_cut_coeff, "Cut threshold for dual residual when primal residual is small (higher is looser)");

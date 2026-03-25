@@ -36,10 +36,10 @@ ns_sqp::kkt_info ns_sqp::initialize() {
 
 void ns_sqp::correction_step() {
     detail_timed_block_start("riccati_recursion_correction");
-    graph_.apply_backward(bind(&solver_type::riccati_recursion_correction), true);
+    graph_.apply_backward(solver_call(&solver_type::riccati_recursion_correction), true);
     detail_timed_block_end("riccati_recursion_correction");
-    graph_.for_each_parallel(bind(&solver_type::compute_primal_sensitivity_correction));
-    graph_.apply_forward(bind(&solver_type::fwd_linear_rollout_correction), true);
+    graph_.for_each_parallel(solver_call(&solver_type::compute_primal_sensitivity_correction));
+    graph_.apply_forward(solver_call(&solver_type::fwd_linear_rollout_correction), true);
 }
 void ns_sqp::finalize_correction(data *d) {
     riccati_solver_->finalize_newton_step_correction(d);
@@ -72,17 +72,17 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
 
             timed_block_start("sqp_single_iter");
             detail_timed_block_start("ns factorization");
-            graph_.for_each_parallel(bind(&solver_type::ns_factorization));
+            graph_.for_each_parallel(solver_call(&solver_type::ns_factorization));
             detail_timed_block_end("ns factorization");
 
             detail_timed_block_start("riccati_recursion");
-            graph_.apply_backward(bind(&solver_type::riccati_recursion), true);
+            graph_.apply_backward(solver_call(&solver_type::riccati_recursion), true);
             detail_timed_block_end("riccati_recursion");
             detail_timed_block_start("post solve");
-            graph_.for_each_parallel(bind(&solver_type::compute_primal_sensitivity));
+            graph_.for_each_parallel(solver_call(&solver_type::compute_primal_sensitivity));
             detail_timed_block_end("post solve");
             detail_timed_block_start("fwd_linear_rollout");
-            graph_.apply_forward(bind(&solver_type::fwd_linear_rollout), true);
+            graph_.apply_forward(solver_call(&solver_type::fwd_linear_rollout), true);
             detail_timed_block_end("fwd_linear_rollout");
 
             bool finalize_dual = true;
@@ -114,7 +114,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                 }
                 // adaptive mu update
                 settings.ipm.adaptive_mu_update(main_worker);
-                // use the new mu to update the rhs jacobian
+                // use the new mu to update the rhs cost jacobian
                 graph_.for_each_parallel(solver::ineq_soft::corrector_step_start);
                 // solve the problem again with updated mu
                 correction_step();
@@ -157,18 +157,41 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             });
             detail_timed_block_end("line_search_step");
             detail_timed_block_start("update_approx");
-            graph_.for_each_parallel(data::update_approx);
+            graph_.for_each_parallel([](data *d) {
+                d->update_approximation(node_data::update_mode::eval_val);
+            });
             detail_timed_block_end("update_approx");
             detail_timed_block_start("update_res_stat");
             kkt_info kkt_trial = compute_kkt_info();
             detail_timed_block_end("update_res_stat");
-            // basic globalization
+            const auto refresh_accepted_trial = [&] {
+                detail_timed_block_start("update_approx_accepted");
+                graph_.for_each_parallel([](data *d) {
+                    d->update_approximation(node_data::update_mode::eval_derivatives);
+                });
+                kkt_trial = compute_kkt_info();
+                detail_timed_block_end("update_approx_accepted");
+            };
+            line_search_action action = line_search_action::accept;
             if (settings.ls.enabled) {
-                filter_linesearch(ls, kkt_trial);
+                action = filter_linesearch(ls, kkt_trial, kkt_last);
+            }
+            switch (action) {
+            case line_search_action::accept:
+                refresh_accepted_trial();
+                break;
+            case line_search_action::retry_second_order_correction:
+                apply_second_order_correction();
+                goto LS_START;
+            case line_search_action::backtrack:
                 if (ls.recompute_approx) {
                     // need to recompute the approximation
                     goto LS_START;
                 }
+                break;
+            case line_search_action::stop:
+                refresh_accepted_trial();
+                break;
             }
             timed_block_end("sqp_single_iter");
             // print statistics
@@ -228,6 +251,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info() {
                 max_field = f;
                 max_step = n->trial_prim_step[f];
             }
+            kkt.obj_dir_deriv += (n->dense().jac_[f].transpose() * n->trial_prim_step[f]).value();
         }
         for (auto f : constr_fields) {
             if (n->trial_dual_step[f].size() > 0) {
