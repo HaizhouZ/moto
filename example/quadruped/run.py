@@ -383,7 +383,7 @@ gait_setting = {
     "trot": [1, 1, 0, 0],
     "hopping": [0, 0, 0, 0],
 }
-sqp = moto.sqp(n_job=10)
+sqp = moto.sqp(n_job=1)
 g = sqp.graph
 n0 = g.set_head(g.add(sqp.create_node(prob)))
 

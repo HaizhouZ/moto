@@ -53,14 +53,16 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
     // reject if the trial point is dominated by any point in the filter
     for (const auto &p : points) {
         if (p.dominate(trial_point, settings)) {
+            filter_reject_cnt++;
             return false;
         }
     }
+    filter_reject_cnt = 0;
 
     // check switching condition
     bool is_switching = false; // true if in objective decrease mode
-    if (current_kkt.obj_dir_deriv < 0.0 &&
-        inf_prim_res_k <= settings.ls.inf_prim_res_min) {
+    if (current_kkt.obj_ful_step_dec < 0.0 && // note we ignore the other switching condition in IPOPT (too many parameters!)
+        inf_prim_res_k <= constr_vio_min) {
         is_switching = true;
     }
 
@@ -68,7 +70,7 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
     if (is_switching) {
         // Armijo condition for the objective
         scalar_t armijo_target = obj_k +
-                                 settings.ls.armijo_eta * settings.ls.alpha_primal * current_kkt.obj_dir_deriv;
+                                 settings.ls.armijo_dec_frac * settings.ls.alpha_primal * current_kkt.obj_ful_step_dec;
 
         if (obj_trial <= armijo_target) {
             last_step_was_armijo = true;
@@ -115,7 +117,7 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
         fmt::print("  ls step, primal res: {:.3e}, objective: {:.3e}, alpha_primal: {:.3e}\n",
                    trial_kkt.inf_prim_res, trial_kkt.objective, settings.ls.alpha_primal);
     }
-    const bool accept = ls.try_step(trial_kkt, current_kkt, settings);
+    bool accept = ls.try_step(trial_kkt, current_kkt, settings);
     /// if the point is acceptable or we have already tried enough steps, stop line search and accept the point if acceptable
     if (accept || ls.stop) {
         ls.recompute_approx = false;

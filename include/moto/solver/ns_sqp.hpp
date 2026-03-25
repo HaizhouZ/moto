@@ -23,22 +23,19 @@ struct ns_sqp {
     };
 
     struct linesearch_setting : public solver::linesearch_config {
-        bool enabled = true;           ///< whether to use line search
-        size_t max_steps = 5;          ///< max line search steps
-        bool enable_soc = true;        ///< whether to try a second-order correction before backtracking
-        size_t max_soc_iter = 2;       ///< max number of second-order correction retries per SQP iteration
+        bool enabled = true;     ///< whether to use line search
+        size_t max_steps = 5;    ///< max line search steps
+        bool enable_soc = true;  ///< whether to try a second-order correction before backtracking
+        size_t max_soc_iter = 2; ///< max number of second-order correction retries per SQP iteration
         enum class failure_backup_strategy : size_t {
             min_step,   ///< reset to the minimum step size
             best_trial, ///< reset to the best trial so far
         } failure_strategy = failure_backup_strategy::best_trial;
-        scalar_t primal_gamma = 1e-4;   ///< 2-obj filter primal improvement requirement: higher-> stricter
-        scalar_t dual_gamma = 1e-4;     ///< IPOPT-like filter objective improvement requirement: higher-> stricter
-        bool enable_dual_cut = true;    ///< whether to enable the strict cut for dual residual when primal residual is small
-        scalar_t dual_cut_coeff = 0.99; ///< cut threshold for dual residual: higher -> looser
-        scalar_t eta = 1e-4;            ///< elasticity coefficient for the dual cut when primal residual is small, used to relax the dual cut as line search step increases
 
-        scalar_t inf_prim_res_min = 1e-4; ///< Threshold for switching condition
-        scalar_t armijo_eta = 1e-4;       ///< Sufficient decrease tolerance
+        scalar_t primal_gamma = 1e-4;        ///< 2-obj filter primal improvement requirement: higher-> stricter
+        scalar_t dual_gamma = 1e-4;          ///< IPOPT-like filter objective improvement requirement: higher-> stricter
+        scalar_t constr_vio_min_frac = 1e-4; ///< Threshold for switching condition (fraction of initial primal residual), lower than this * initial constraint violation means we are close enough to the feasible region to switch to objective decrease mode in line search
+        scalar_t armijo_dec_frac = 1e-4;     ///< Sufficient decrease tolerance (eta in Armijo condition), smaller -> more strict decrease requirement
     };
 
     struct ipm_config : public solver::ipm_config {
@@ -97,7 +94,7 @@ struct ns_sqp {
         scalar_t inf_comp_res = 0.;  // (inequality) complementarity residual
         scalar_t inf_prim_step = 0.; // infinity norm of the step
         scalar_t inf_dual_step = 0.; // infinity norm of the step
-        scalar_t obj_dir_deriv = 0.; // Directional derivative: ∇φ^T * d
+        scalar_t obj_ful_step_dec = 0.; // full step decrease in objective
     } kkt_last;
     kkt_info update(size_t n_iter, bool verbose = true);
 
@@ -170,8 +167,10 @@ struct ns_sqp {
         };
         struct trial : public point, public solver::linesearch_config {
         } best_trial;
-        std::vector<point> points; ///< filter for accepting line search steps
+        std::vector<point> points;                                             ///< filter for accepting line search steps
+        scalar_t constr_vio_min = std::numeric_limits<scalar_t>::infinity(); ///< constraint violation bound for switching condition in line search
         bool last_step_was_armijo = false;
+        size_t filter_reject_cnt = 0; ///< number of consecutive filter rejections, used for adaptive strategies in line search
         void update_filter(const kkt_info &kkt, settings_t &settings);
         bool try_step(const kkt_info &trial_kkt, const kkt_info &current_kkt, settings_t &settings);
     };

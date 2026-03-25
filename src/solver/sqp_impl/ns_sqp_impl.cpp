@@ -58,6 +58,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
         filter_linesearch_data ls = {
             .points = {{kkt_last.inf_prim_res, kkt_last.inf_dual_res}},
         };
+        ls.constr_vio_min = kkt_last.inf_prim_res * settings.ls.constr_vio_min_frac;
         for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
             bool has_ineq = false;
             // check if there is any inequality constraint using only the key nodes
@@ -251,7 +252,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info() {
                 max_field = f;
                 max_step = n->trial_prim_step[f];
             }
-            kkt.obj_dir_deriv += (n->dense().jac_[f].transpose() * n->trial_prim_step[f]).value();
+            kkt.obj_ful_step_dec += (n->dense().jac_[f].transpose() * n->trial_prim_step[f]).value();
         }
         for (auto f : constr_fields) {
             if (n->trial_dual_step[f].size() > 0) {

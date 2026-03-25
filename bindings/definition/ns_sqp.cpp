@@ -54,9 +54,9 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("failure_strategy", &ns_sqp::linesearch_setting::failure_strategy, "Line search failure backup strategy")
         .def_rw("primal_gamma", &ns_sqp::linesearch_setting::primal_gamma, "Primal improvement requirement for the filter (higher is stricter)")
         .def_rw("dual_gamma", &ns_sqp::linesearch_setting::dual_gamma, "Objective improvement requirement for the filter (higher is stricter)")
-        .def_rw("enable_dual_cut", &ns_sqp::linesearch_setting::enable_dual_cut, "Whether to enable the strict cut for dual residual when primal residual is small")
-        .def_rw("eta", &ns_sqp::linesearch_setting::eta, "Elasticity coefficient for the dual cut when primal residual is small, used to relax the dual cut as line search step increases")
-        .def_rw("dual_cut_coeff", &ns_sqp::linesearch_setting::dual_cut_coeff, "Cut threshold for dual residual when primal residual is small (higher is looser)");
+        .def_rw("constr_vio_min_frac", &ns_sqp::linesearch_setting::constr_vio_min_frac, "Threshold for switching condition (fraction of initial primal residual)")
+        .def_rw("armijo_dec_frac", &ns_sqp::linesearch_setting::armijo_dec_frac, "Sufficient decrease tolerance (eta in Armijo condition), smaller -> more strict decrease requirement");
+        
     moto::export_enum<ns_sqp::linesearch_setting::failure_backup_strategy>(ls_setting);
 
     nb::class_<ns_sqp::settings_t>(sqp, "settings_type")
