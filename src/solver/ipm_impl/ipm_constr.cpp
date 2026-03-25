@@ -163,7 +163,7 @@ void ipm_constr::apply_affine_step(ipm::data_map_t &data, workspace_data *cfg) c
     // d.multiplier_.array() += d.d_multiplier_.array();
     d.slack_.array() += ls_cfg.alpha_primal * d.d_slack_.array();
     // d.multiplier_.array() += std::min(ls_cfg.alpha_primal, ls_cfg.alpha_dual) * d.d_multiplier_.array();
-    d.multiplier_.noalias() = d.multiplier_backup_ + ls_cfg.dual_alpha_for_ineq() * d.d_multiplier_;
+    d.multiplier_.noalias() += ls_cfg.dual_alpha_for_ineq() * d.d_multiplier_;
     if (d.ipm_cfg->ipm_accept_corrector()) {
         d.slack_ = d.slack_.array().max(1e-20);
         d.multiplier_ = d.multiplier_.array().max(1e-20);
