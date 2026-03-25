@@ -44,7 +44,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
     nb::class_<ns_sqp::linesearch_setting> ls_setting(sqp, "linesearch_setting");
     ls_setting.def_rw("enabled", &ns_sqp::linesearch_setting::enabled, "Whether to use line search")
         .def_rw("max_steps", &ns_sqp::linesearch_setting::max_steps, "Maximum number of line search steps")
-        .def_rw("failure_backup", &ns_sqp::linesearch_setting::failure_backup, "Line search failure backup strategy")
+        .def_rw("failure_strategy", &ns_sqp::linesearch_setting::failure_strategy, "Line search failure backup strategy")
         .def_rw("primal_gamma", &ns_sqp::linesearch_setting::primal_gamma, "Primal improvement requirement for the filter (higher is stricter)")
         .def_rw("dual_gamma", &ns_sqp::linesearch_setting::dual_gamma, "Dual improvement requirement for the filter (higher is stricter)")
         .def_rw("enable_dual_cut", &ns_sqp::linesearch_setting::enable_dual_cut, "Whether to enable the strict cut for dual residual when primal residual is small")

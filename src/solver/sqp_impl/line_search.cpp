@@ -116,8 +116,7 @@ void ns_sqp::filter_linesearch(filter_linesearch_data &ls, const kkt_info &kkt) 
     }
 
     ls.stop = true;
-    /// @warning this works only because effective alpha_primal is already 0 (max steps taken)
-    if (settings.ls.failure_backup == linesearch_setting::failure_backup_strategy::min_step) {
+    if (settings.ls.failure_strategy == linesearch_setting::failure_backup_strategy::min_step) {
         if (settings.verbose) {
             fmt::print("  ls failed, use min primal step and reset ls...\n");
         }

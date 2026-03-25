@@ -28,7 +28,7 @@ struct ns_sqp {
         enum class failure_backup_strategy : size_t {
             min_step,   ///< reset to the minimum step size
             best_trial, ///< reset to the best trial so far
-        } failure_backup = failure_backup_strategy::best_trial;
+        } failure_strategy = failure_backup_strategy::best_trial;
         scalar_t primal_gamma = 1e-4;   ///< 2-obj filter primal improvement requirement: higher-> stricter
         scalar_t dual_gamma = 1e-4;     ///< 2-obj filter dual improvement requirement: higher-> stricter
         bool enable_dual_cut = true;    ///< whether to enable the strict cut for dual residual when primal residual is small
@@ -135,6 +135,10 @@ struct ns_sqp {
     kkt_info compute_kkt_info();
     void iterative_refinement();
     void finalize_ls_bound_and_set_to_max();
+    /**
+     * @brief filter line search for the current iteration, will update the line search data and the kkt info of the current solution
+     * @note just for convenient reset
+     */
     struct filter_linesearch_per_iter_data {
         bool recompute_approx = true;
         bool stop = false;        ///< whether to stop the line search
