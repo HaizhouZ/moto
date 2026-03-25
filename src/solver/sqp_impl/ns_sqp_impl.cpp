@@ -142,12 +142,14 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             ls.reset_per_iter_data();
             ls.initial_alpha_primal = settings.alpha_primal;
             ls.initial_alpha_dual = settings.alpha_dual;
-            ls.effective_alpha_primal = ls.initial_alpha_primal;
-            ls.effective_alpha_dual = ls.initial_alpha_dual;
             ls.best_trial = filter_linesearch_data::trial();
+            graph_.for_each_parallel([](data *d) {
+                d->backup_trial_state();
+            });
         LS_START:
             detail_timed_block_start("line_search_step");
             graph_.for_each_parallel([this](data *d) {
+                d->restore_trial_state();
                 riccati_solver_->apply_affine_step(d, &settings);
                 solver::ineq_soft::apply_affine_step(d, &settings);
             });
@@ -219,15 +221,15 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info() {
         // avg_dual_res += n->dense().jac_[__u].cwiseAbs().maxCoeff();
         kkt.inf_comp_res = std::max(kkt.inf_comp_res, n->inf_comp_res_);
         for (auto f : primal_fields) {
-            kkt.inf_prim_step = std::max(kkt.inf_prim_step, n->prim_step[f].cwiseAbs().maxCoeff());
-            if (n->prim_step[f].cwiseAbs().maxCoeff() == kkt.inf_prim_step) {
+            kkt.inf_prim_step = std::max(kkt.inf_prim_step, n->trial_prim_step[f].cwiseAbs().maxCoeff());
+            if (n->trial_prim_step[f].cwiseAbs().maxCoeff() == kkt.inf_prim_step) {
                 max_field = f;
-                max_step = n->prim_step[f];
+                max_step = n->trial_prim_step[f];
             }
         }
         for (auto f : constr_fields) {
-            if (n->dual_step[f].size() > 0) {
-                kkt.inf_dual_step = std::max(kkt.inf_dual_step, n->dual_step[f].cwiseAbs().maxCoeff());
+            if (n->trial_dual_step[f].size() > 0) {
+                kkt.inf_dual_step = std::max(kkt.inf_dual_step, n->trial_dual_step[f].cwiseAbs().maxCoeff());
             }
         }
     }
@@ -261,7 +263,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info() {
                 // fmt::print("state merit jac max inf norm at step {}: {}\n", step, cur->dense().jac_[__y].cwiseAbs().maxCoeff());
             }
             step++;
-            // // fmt::println("prim {}: {}", step, cur->prim_step[__x
+            // // fmt::println("prim {}: {}", step, cur->trial_prim_step[__x
             // // fmt::println("prim {}: {}", step, cur->value(__u).transpose());
             // for (auto f : constr_fields) {
             //     if (cur->dense().dual_[f].size() > 0)

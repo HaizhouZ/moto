@@ -12,14 +12,14 @@ void initialize(node_data *cur) {
         assert(d && "data_base cast failed");
         for (const sym &arg : sf.in_args()) {
             if (arg.field() < field::num_prim && prob->is_active(arg)) {
-                sd.prim_step_.push_back(prob->extract_tangent(d->prim_step[arg.field()], arg));
+                sd.prim_step_.push_back(prob->extract_tangent(d->trial_prim_step[arg.field()], arg));
             } else {
                 static vector empty;
                 sd.prim_step_.emplace_back(empty);
             }
         }
         new (&sd.d_multiplier_) mapped_vector{
-            prob->extract(d->dual_step[sf.field()], sf).data(), Eigen::Index(sf.dim())};
+            prob->extract(d->trial_dual_step[sf.field()], sf).data(), Eigen::Index(sf.dim())};
         sf.initialize(sd);
     });
 }

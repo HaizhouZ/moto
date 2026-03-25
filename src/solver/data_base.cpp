@@ -1,3 +1,4 @@
+#include <moto/ocp/impl/sym_data.hpp>
 #include <moto/solver/data_base.hpp>
 
 // #define ENABLE_TIMED_BLOCK
@@ -24,15 +25,19 @@ data_base::data_base(sym_data *s, merit_data *dense)
     V_yy.resize(ny, ny);
     V_yy.setZero();
     for (auto f : primal_fields) {
-        prim_step[f].resize(dense->jac_[f].size());
-        prim_step[f].setZero();
+        trial_prim_step[f].resize(dense->jac_[f].size());
+        trial_prim_step[f].setZero();
         prim_corr[f].resize(dense->jac_[f].size());
         prim_corr[f].setZero();
+        trial_prim_state_bak[f].resize(dense->jac_[f].size());
+        trial_prim_state_bak[f].setZero();
     }
     // set rollout data for constraints
     for (auto f : constr_fields) {
-        dual_step[f].resize(dense->approx_[f].v_.size());
-        dual_step[f].setZero();
+        trial_dual_step[f].resize(dense->approx_[f].v_.size());
+        trial_dual_step[f].setZero();
+        trial_dual_state_bak[f].resize(dense->approx_[f].v_.size());
+        trial_dual_state_bak[f].setZero();
     }
 }
 void data_base::merge_jacobian_modification() {
@@ -63,6 +68,24 @@ void data_base::merge_jacobian_modification() {
 void data_base::swap_jacobian_modification() {
     for (const auto &field : primal_fields) {
         dense_->jac_[field].swap(dense_->jac_modification_[field]);
+    }
+}
+
+void data_base::backup_trial_state() {
+    for (auto field : primal_fields) {
+        trial_prim_state_bak[field] = sym_->value_[field];
+    }
+    for (auto field : constr_fields) {
+        trial_dual_state_bak[field] = dense_->dual_[field];
+    }
+}
+
+void data_base::restore_trial_state() {
+    for (auto field : primal_fields) {
+        sym_->value_[field] = trial_prim_state_bak[field];
+    }
+    for (auto field : constr_fields) {
+        dense_->dual_[field] = trial_dual_state_bak[field];
     }
 }
 

@@ -143,8 +143,6 @@ struct ns_sqp {
         size_t step_cnt = 0;      ///< current line search step
         scalar_t initial_alpha_primal = 0.;
         scalar_t initial_alpha_dual = 0.;
-        scalar_t effective_alpha_primal = 0.;
-        scalar_t effective_alpha_dual = 0.;
         void reset_per_iter_data() {
             new (this) filter_linesearch_per_iter_data();
         }

@@ -26,10 +26,12 @@ struct MOTO_ALIGN_NO_SHARING data_base {
     sparse_mat &Q_yx, &Q_yx_mod;
     sparse_mat &Q_yy, &Q_yy_mod;
     matrix V_xx, V_yy;
-    array_type<vector, primal_fields> prim_step; ///< primal (newton) step
+    array_type<vector, primal_fields> trial_prim_step; ///< primal (newton) trial step
     array_type<vector, primal_fields> prim_corr; ///< correction for the primal step
+    array_type<vector, primal_fields> trial_prim_state_bak; ///< backup of the original primal state for line search
 
-    array_type<vector, constr_fields> dual_step; // dual rollout
+    array_type<vector, constr_fields> trial_dual_step; // dual rollout trial step
+    array_type<vector, constr_fields> trial_dual_state_bak; ///< backup of the original dual state for line search
 
     /// @brief create solver data
     /// @param sym_ pointer to the symbolic data
@@ -39,6 +41,8 @@ struct MOTO_ALIGN_NO_SHARING data_base {
     data_base(data_base &&rhs) = default;
     void merge_jacobian_modification();
     void swap_jacobian_modification();
+    void backup_trial_state();
+    void restore_trial_state();
     template <typename Callback>
     void first_order_correction_start(Callback &&callback) {
         prim_corr[__x].setZero();
