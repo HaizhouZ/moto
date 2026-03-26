@@ -53,7 +53,7 @@ set(INCLUDE_DIRS
     $<INSTALL_INTERFACE:include>
 )
 if(NOT DEFINED ENV{BLASFEO_LIB_DIR})
-    set(BLASFEO_LIB_DIR "/usr/local/lib/libblasfeo.a")
+    set(BLASFEO_LIB_DIR "/usr/local/blasfeo/lib/libblasfeo.a")
 else()
     set(BLASFEO_LIB_DIR $ENV{BLASFEO_LIB_DIR})
 endif()

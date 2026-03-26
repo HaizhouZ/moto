@@ -29,8 +29,8 @@ struct lcid_solver : ns_riccati::generic_solver {
     void riccati_recursion_correction(ns_riccati_data *cur, ns_riccati_data *prev) override;
     void compute_primal_sensitivity(ns_riccati_data *cur) override;
     void compute_primal_sensitivity_correction(ns_riccati_data *cur) override;
-    void finalize_newton_step(ns_riccati_data *cur, bool finalize_dual) override;
-    void finalize_newton_step_correction(ns_riccati_data *cur) override;
+    void finalize_primal_step(ns_riccati_data *cur, bool finalize_dual) override;
+    void finalize_primal_step_correction(ns_riccati_data *cur) override;
     void finalize_dual_newton_step(ns_riccati_data *cur);
     struct MOTO_ALIGN_NO_SHARING data : public ns_riccati_data::aux_data {
         sparse_mat sp_u_y_K; // [a_y; f_y; tq_y]_K

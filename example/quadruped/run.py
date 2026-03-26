@@ -9,7 +9,7 @@ import meshcat.geometry as mg
 import meshcat.transformations as tf
 import meshcat_shapes as mcs
 
-full = True
+full = False
 soft = False
 
 
@@ -419,7 +419,7 @@ g.add_edge(nstop, n1, stance_length)
 # g.add_edge(n0, n1, N_horizon)
 # print(g.flatten_nodes())
 
-sqp.settings.ipm.mu0 = 0.1
+sqp.settings.ipm.mu0 = 1.0
 sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
 # sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.monotonic_decrease
 # sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.quality_function_based
@@ -428,10 +428,16 @@ sqp.settings.prim_tol = 1e-3
 sqp.settings.dual_tol = 1e-3
 sqp.settings.comp_tol = 1e-3
 sqp.settings.rf.max_iters = 2
-
+sqp.settings.ls.max_soc_iter = 4
+sqp.settings.ls.update_alpha_dual = True
+# cfg = [
+#     [-0.9595959595959596, -0.6161616161616161],
+#     [-0.9595959595959596, 0.31313131313131315],
+# ]
+# trot reduced hard
 cfg = [
-    [-0.9595959595959596, -0.6161616161616161],
-    [-0.9595959595959596, 0.31313131313131315],
+    [-0.8383838383838383, 0.2525252525252526],
+    [-0.4949494949494949, 0.8989898989898992],
 ]
 step = 0
 node_idx = 0
@@ -481,6 +487,7 @@ print(f"per iteration took {(time.perf_counter() - start) / iters * 1000:.3f} ms
 q_res = []
 dt_res = []
 node_idx = 0
+
 
 def get_sym(node: moto.sqp.data_type):
     global node_idx

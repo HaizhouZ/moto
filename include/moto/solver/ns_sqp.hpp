@@ -22,47 +22,48 @@ struct ns_sqp {
         scalar_t dual_res_tol = 1e-10; ///< dual residual tolerance for refinement
     };
 
-    struct linesearch_setting {
-        bool enabled = true;  ///< whether to use line search
-        size_t max_steps = 5; ///< max line search steps
+    struct linesearch_setting : public solver::linesearch_config {
+        bool enabled = true;     ///< whether to use line search
+        size_t max_steps = 5;    ///< max line search steps
+        bool enable_soc = true;  ///< whether to try a second-order correction before backtracking
+        size_t max_soc_iter = 2; ///< max number of second-order correction retries per SQP iteration
         enum class failure_backup_strategy : size_t {
             min_step,   ///< reset to the minimum step size
             best_trial, ///< reset to the best trial so far
-        } failure_backup = failure_backup_strategy::best_trial;
-        scalar_t primal_gamma = 1e-4;   ///< 2-obj filter primal improvement requirement: higher-> stricter
-        scalar_t dual_gamma = 1e-4;     ///< 2-obj filter dual improvement requirement: higher-> stricter
-        bool enable_dual_cut = true;    ///< whether to enable the strict cut for dual residual when primal residual is small
-        scalar_t dual_cut_coeff = 0.99; ///< cut threshold for dual residual: higher -> looser
-        scalar_t eta = 1e-4;            ///< elasticity coefficient for the dual cut when primal residual is small, used to relax the dual cut as line search step increases
+        } failure_strategy = failure_backup_strategy::best_trial;
+
+        scalar_t primal_gamma = 1e-4;        ///< 2-obj filter primal improvement requirement: higher-> stricter
+        scalar_t dual_gamma = 1e-4;          ///< IPOPT-like filter objective improvement requirement: higher-> stricter
+        scalar_t constr_vio_min_frac = 1e-4; ///< Threshold for switching condition (fraction of initial primal residual), lower than this * initial constraint violation means we are close enough to the feasible region to switch to objective decrease mode in line search
+        scalar_t armijo_dec_frac = 1e-4;     ///< Sufficient decrease tolerance (eta in Armijo condition), smaller -> more strict decrease requirement
     };
 
-    struct ipm_setting {
+    struct ipm_config : public solver::ipm_config {
         scalar_t mu0 = 1.0;        ///< initial barrier parameter
         bool warm_start = false;   ///< whether to warm start the IPM solver
         bool globalization = true; ///< whether to use IPM globalization
 
         scalar_t mu_monotone_fraction_threshold = 10.0; ///< threshold for monotone decrease of mu, smaller -> more likely to use monotone decrease
-        
-        scalar_t mu_monotone_factor = 0.2; ///< factor for monotonic decrease of mu, smaller -> faster decrease
-
-        solver::ipm_config::adaptive_mu_t mu_method =
-            solver::ipm_config::adaptive_mu_t::mehrotra_predictor_corrector; ///< adaptive mu method
+        scalar_t mu_monotone_factor = 0.2;              ///< factor for monotonic decrease of mu, smaller -> faster decrease
     };
 
-    struct settings_t
-        : public workspace_data_collection<solver::linesearch_config,
-                                           solver::ipm_config> {
+    struct settings_t : public workspace_data_collection<linesearch_setting, ipm_config> {
+        using base = workspace_data_collection<linesearch_setting, ipm_config>;
+        using worker = typename base::worker;
+
+        linesearch_setting &ls;
+        ipm_config &ipm;
+
         double prim_tol = 1e-6; ///< primal feasibility tolerance
         double dual_tol = 1e-4; ///< dual feasibility tolerance
         double comp_tol = 1e-6; ///< complementarity feasibility tolerance
 
         iterative_refinement_setting rf;
-        ipm_setting ipm;
-        linesearch_setting ls;
 
         bool no_except = false;
 
-        settings_t();
+        settings_t()
+            : ls(static_cast<linesearch_setting &>(*this)), ipm(static_cast<ipm_config &>(*this)) {}
 
       private:
         friend class ns_sqp;
@@ -93,6 +94,7 @@ struct ns_sqp {
         scalar_t inf_comp_res = 0.;  // (inequality) complementarity residual
         scalar_t inf_prim_step = 0.; // infinity norm of the step
         scalar_t inf_dual_step = 0.; // infinity norm of the step
+        scalar_t obj_fullstep_dec = 0.; // full step decrease in objective
     } kkt_last;
     kkt_info update(size_t n_iter, bool verbose = true);
 
@@ -133,18 +135,24 @@ struct ns_sqp {
     /// print statistics for the current iteration
     void print_stats(int i_iter, const kkt_info &info, bool hcast_ineq);
     /// compute the kkt information of the current solution
-    kkt_info compute_kkt_info();
+    kkt_info compute_kkt_info(bool update_dual_res = true);
+    /// perform iterative refinement to improve the solution accuracy, will modify the current solution in place
     void iterative_refinement();
+    /// update the line search bounds with the (probably updated) max value
     void finalize_ls_bound_and_set_to_max();
+    /**
+     * @brief filter line search for the current iteration, will update the line search data and the kkt info of the current solution
+     * @note just for convenient reset
+     */
     struct filter_linesearch_per_iter_data {
         bool recompute_approx = true;
         bool stop = false;        ///< whether to stop the line search
         bool enforce_min = false; ///< whether to enforce the minimum step size
+        size_t soc_iter_cnt = 0;  ///< number of second-order correction attempts in the current SQP iteration
+        bool skip_soc = false;    ///< whether to skip second-order correction
         size_t step_cnt = 0;      ///< current line search step
         scalar_t initial_alpha_primal = 0.;
         scalar_t initial_alpha_dual = 0.;
-        scalar_t effective_alpha_primal = 0.;
-        scalar_t effective_alpha_dual = 0.;
         void reset_per_iter_data() {
             new (this) filter_linesearch_per_iter_data();
         }
@@ -154,18 +162,33 @@ struct ns_sqp {
         struct point {
             scalar_t prim_res = std::numeric_limits<scalar_t>::infinity();
             scalar_t dual_res = std::numeric_limits<scalar_t>::infinity();
+            scalar_t objective = std::numeric_limits<scalar_t>::infinity();
+            bool dominate(const point &other, const settings_t &settings) const;
         };
         struct trial : public point, public solver::linesearch_config {
         } best_trial;
-        std::vector<point> points; ///< filter for accepting line search steps
-        void update_filter(scalar_t prim_new, scalar_t dual_new, settings_t &settings);
-        bool try_step(scalar_t prim_new, scalar_t dual_new, settings_t &settings, scalar_t alpha);
+        std::vector<point> points;                                             ///< filter for accepting line search steps
+        scalar_t constr_vio_min = std::numeric_limits<scalar_t>::infinity(); ///< constraint violation bound for switching condition in line search
+        bool last_step_was_armijo = false;
+        size_t filter_reject_cnt = 0; ///< number of consecutive filter rejections, used for adaptive strategies in line search
+        void update_filter(const kkt_info &kkt, settings_t &settings);
+        bool try_step(const kkt_info &trial_kkt, const kkt_info &current_kkt, settings_t &settings);
     };
 
-    void filter_linesearch(filter_linesearch_data &ls, const kkt_info &kkt);
+    enum class line_search_action {
+        accept,
+        backtrack,
+        retry_second_order_correction,
+        stop,
+    };
+
+    line_search_action filter_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
+    void second_order_correction();
+    void ineq_constr_correction();
+    void ineq_constr_prediction();
     /// initialize the solver before the first iteration or after a reset, returns the initial kkt info
     kkt_info initialize();
-    void correction_step();
+    void post_factorization_correction_step();
     void finalize_correction(data *d);
     /**
      * @brief Bind a callback to the current @ref riccati_solver_ instance
@@ -176,7 +199,7 @@ struct ns_sqp {
      * @note the function can have any number of additional arguments
      */
     template <typename Func>
-    decltype(auto) bind(Func f) {
+    decltype(auto) solver_call(Func f) {
         using arg_type = utils::func_traits<decltype(f)>::arg_types;
         auto make_wrapper = [this, f]<typename... Args>(std::tuple<Args...> *) {
             return [this, f](Args... args) {

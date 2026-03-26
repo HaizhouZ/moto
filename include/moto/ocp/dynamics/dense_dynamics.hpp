@@ -41,7 +41,8 @@ class dense_dynamics : public generic_dynamics {
         return func_approx_data_ptr_t(make_approx<dense_dynamics>(primal, raw, shared));
     }
 
-    void compute_project_derivatives(func_approx_data &data) const override;
+    void compute_project_jacobians(func_approx_data &data) const override;
+    void compute_project_residual(func_approx_data &data) const override;
     void apply_jac_y_inverse_transpose(func_approx_data &data, vector &v, vector &dst) const override;
 
     /// @brief mark the shared inputs in the dynamics

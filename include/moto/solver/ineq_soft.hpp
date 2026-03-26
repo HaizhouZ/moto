@@ -58,6 +58,16 @@ void apply_affine_step(node_data *data, workspace_data *config);
  */
 void update_ls_bounds(node_data *data, workspace_data *config);
 /**
+ * @brief back up the current soft-constraint trial state
+ * @param data data base
+ */
+void backup_trial_state(node_data *data);
+/**
+ * @brief restore the backed-up soft-constraint trial state
+ * @param data data base
+ */
+void restore_trial_state(node_data *data);
+/**
  * @brief prepare for the first-order primal correction and call to apply_corrector_step on each soft constraint
  * @details it will set prim_corr[__x] to zero and swap merit jacobian and its modifcation (as a pre-correction cache),
  * i.e., later solving will use the jacobian modification
