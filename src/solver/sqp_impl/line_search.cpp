@@ -54,6 +54,11 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
     for (const auto &p : points) {
         if (p.dominate(trial_point, settings)) {
             filter_reject_cnt++;
+            if (settings.verbose) {
+                fmt::print("  trial point rejected by filter (primal res: {:.3e}, dual res: {:.3e}, objective: {:.3e}), dominated by filter point (primal res: {:.3e}, dual res: {:.3e}, objective: {:.3e})\n",
+                           trial_point.prim_res, trial_point.dual_res, trial_point.objective,
+                           p.prim_res, p.dual_res, p.objective);
+            }
             return false;
         }
     }
@@ -61,7 +66,12 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
 
     // check switching condition
     bool is_switching = false; // true if in objective decrease mode
-    if (current_kkt.obj_fullstep_dec < 0.0 && // note we ignore the other switching condition in IPOPT (too many parameters!)
+    // IPOPT switching condition: objective decrease must be large enough relative to constraint violation
+    // (s_phi, s_theta from IPOPT paper, Section 3.3)
+    bool switching_condition =
+        current_kkt.obj_fullstep_dec < 0.0 &&
+        std::pow(-current_kkt.obj_fullstep_dec, settings.ls.s_phi) >= std::pow(current_kkt.inf_prim_res, settings.ls.s_theta);
+    if (switching_condition && // note we ignore the other switching condition in IPOPT (too many parameters!)
         inf_prim_res_k <= constr_vio_min) {
         is_switching = true;
     }
@@ -74,7 +84,18 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
 
         if (obj_trial <= armijo_target) {
             last_step_was_armijo = true;
+            if (settings.verbose) {
+                fmt::print("  trial point accepted by Armijo condition in switching mode (primal res: {:.3e}, dual res: {:.3e}, objective: {:.3e}), armijo target: {:.3e}\n",
+                           trial_point.prim_res, trial_point.dual_res, trial_point.objective, armijo_target);
+            }
             return true;
+        }
+        else {
+            if (settings.verbose) {
+                fmt::print("  trial point rejected by Armijo condition in switching mode (primal res: {:.3e}, dual res: {:.3e}, objective: {:.3e}), armijo target: {:.3e}\n",
+                           trial_point.prim_res, trial_point.dual_res, trial_point.objective, armijo_target);
+            }
+            return false;
         }
     } else { // filter condition for non-switching
         // Filter condition relative to the CURRENT iterate
@@ -82,11 +103,19 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
         point current_point = {inf_prim_res_k, current_kkt.inf_dual_res, obj_k};
         if (!current_point.dominate(trial_point, settings)) {
             last_step_was_armijo = false;
+            if (settings.verbose)
+                fmt::print("  trial point accepted by filter condition in non-switching mode (primal res: {:.3e}, dual res: {:.3e}, objective: {:.3e})\n",
+                           trial_point.prim_res, trial_point.dual_res, trial_point.objective);
             return true;
+        } else {
+            if (settings.verbose) {
+                fmt::print("  trial point rejected by filter condition in non-switching mode (primal res: {:.3e}, dual res: {:.3e}, objective: {:.3e}), dominated by current point (primal res: {:.3e}, dual res: {:.3e}, objective: {:.3e})\n",
+                           trial_point.prim_res, trial_point.dual_res, trial_point.objective,
+                           current_point.prim_res, current_point.dual_res, current_point.objective);
+            }
+            return false;
         }
     }
-
-    return false;
 }
 ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt) {
     if (ls.step_cnt == 0 && trial_kkt.inf_prim_res < current_kkt.inf_prim_res) {
@@ -119,6 +148,8 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     }
     bool accept = ls.try_step(trial_kkt, current_kkt, settings);
     /// if the point is acceptable or we have already tried enough steps, stop line search and accept the point if acceptable
+    print_filter();
+
     if (accept || ls.stop) {
         ls.recompute_approx = false;
         if (accept && !ls.stop) {
@@ -131,14 +162,13 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     // fmt::print("  previous res, primal res: {:.3e}, dual res: {:.3e}\n", kkt_last.inf_prim_res, kkt_last.inf_dual_res);
     /// try second-order correction before backtracking
     /// skip if line search started already or first trial already shows improvement in primal residual
-    if (settings.ls.enable_soc && ls.step_cnt == 0 && !ls.skip_soc &&
-        ls.soc_iter_cnt < settings.ls.max_soc_iter) {
-        if (settings.verbose)
-            fmt::print("  ls retry with second-order correction ({}/{})\n", ls.soc_iter_cnt + 1, settings.ls.max_soc_iter);
-        ls.soc_iter_cnt++;
-        return line_search_action::retry_second_order_correction;
-    }
-    print_filter();
+    // if (settings.ls.enable_soc && ls.step_cnt == 0 && !ls.skip_soc &&
+    //     ls.soc_iter_cnt < settings.ls.max_soc_iter) {
+    //     if (settings.verbose)
+    //         fmt::print("  ls retry with second-order correction ({}/{})\n", ls.soc_iter_cnt + 1, settings.ls.max_soc_iter);
+    //     ls.soc_iter_cnt++;
+    //     return line_search_action::retry_second_order_correction;
+    // }
     /// backtrack
     if (settings.ls.max_steps > ls.step_cnt) {
         ls.step_cnt++;

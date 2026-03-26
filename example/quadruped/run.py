@@ -9,7 +9,7 @@ import meshcat.geometry as mg
 import meshcat.transformations as tf
 import meshcat_shapes as mcs
 
-full = False
+full = True
 soft = False
 
 
@@ -257,6 +257,7 @@ class pinCasadiModel(cpin.Model):
         c = moto.constr.create(
             f"fric_{self.foot_frames[i]}", [f, self.mu], cone
         ).cast_ineq()
+        c.enable_if_all([f])
         return c
 
     def add_dt_constr_and_cost(self, prob: moto.ocp, dt_nom: moto.var):
@@ -377,8 +378,8 @@ total_gait_steps = steps * nodes_per_step
 stance_length = int((N_horizon - total_gait_steps) / 2)
 print(f"stance_length: {stance_length}, nodes_per_step: {nodes_per_step}")
 
-gait = "trot"
-# gait = "hopping"
+# gait = "trot"
+gait = "hopping"
 gait_setting = {
     "trot": [1, 1, 0, 0],
     "hopping": [0, 0, 0, 0],
@@ -438,6 +439,10 @@ sqp.settings.ls.update_alpha_dual = True
 cfg = [
     [-0.8383838383838383, 0.2525252525252526],
     [-0.4949494949494949, 0.8989898989898992],
+]
+cfg = [
+    [-0.8181818181818181, 0.3737373737373739],
+    [0.4545454545454546, -0.21212121212121204],
 ]
 step = 0
 node_idx = 0
@@ -502,7 +507,7 @@ def get_sym(node: moto.sqp.data_type):
 
 
 sqp.apply_forward(get_sym)
-
+exit(0)
 if display:
     import time
 

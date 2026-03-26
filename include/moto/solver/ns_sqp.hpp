@@ -36,6 +36,8 @@ struct ns_sqp {
         scalar_t dual_gamma = 1e-4;          ///< IPOPT-like filter objective improvement requirement: higher-> stricter
         scalar_t constr_vio_min_frac = 1e-4; ///< Threshold for switching condition (fraction of initial primal residual), lower than this * initial constraint violation means we are close enough to the feasible region to switch to objective decrease mode in line search
         scalar_t armijo_dec_frac = 1e-4;     ///< Sufficient decrease tolerance (eta in Armijo condition), smaller -> more strict decrease requirement
+        scalar_t s_phi = 2.3;                ///< IPOPT switching condition exponent on objective decrease (s_phi in IPOPT paper)
+        scalar_t s_theta = 1.1;              ///< IPOPT switching condition exponent on constraint violation (s_theta in IPOPT paper)
     };
 
     struct ipm_config : public solver::ipm_config {
@@ -130,6 +132,10 @@ struct ns_sqp {
 
     stacked_workers<settings_t::worker> setting_per_thread;
 
+    /// print inf norms of constraint residuals and Jacobians across all nodes, to diagnose scaling
+    void print_scaling_info();
+    /// check LICQ at the current point: stacks all constraint Jacobians per node and reports rank via SVD
+    void print_licq_info();
     /// print statistics header
     void print_stat_header();
     /// print statistics for the current iteration

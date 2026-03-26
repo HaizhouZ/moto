@@ -8,3 +8,4 @@ perf*
 *.c
 gen/
 __pycache__
+log

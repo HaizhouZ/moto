@@ -1,4 +1,5 @@
 #include <moto/solver/ineq_soft.hpp>
+#include <moto/solver/ipm/ipm_constr.hpp>
 #include <moto/solver/ns_riccati/generic_solver.hpp>
 #include <moto/solver/ns_sqp.hpp>
 #include <moto/utils/field_conversion.hpp>
@@ -28,6 +29,7 @@ ns_sqp::kkt_info ns_sqp::initialize() {
     kkt_info kkt = compute_kkt_info();
     // print statistics header
     if (settings.verbose) {
+        // print_scaling_info();
         print_stat_header();
         print_stats(-1, kkt, false); // print initial stats
     }
@@ -111,6 +113,8 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             detail_timed_block_start("ns factorization");
             graph_.for_each_parallel(solver_call(&solver_type::ns_factorization));
             detail_timed_block_end("ns factorization");
+            if (settings.verbose && i_iter == 0)
+                print_licq_info();
 
             detail_timed_block_start("riccati_recursion");
             graph_.apply_backward(solver_call(&solver_type::riccati_recursion), true);
@@ -138,7 +142,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                 ineq_constr_correction();
             detail_timed_block_end("ineq_corrector_step");
 
-            // iterative refinement
+            // iterative refinement (safe to run without inequality constraints)
             if (has_ineq && settings.rf.enabled && settings.rf.max_iters > 0) {
                 iterative_refinement();
             }
@@ -201,8 +205,10 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             kkt_trial.num_iter = i_iter + 1;
             kkt_trial.ls_steps = ls.step_cnt;
             kkt_last = kkt_trial;
-            if (verbose)
+            if (verbose) {
+                print_licq_info();
                 print_stats(i_iter, kkt_last, has_ineq);
+            }
 
             if (kkt_last.inf_dual_res < settings.dual_tol &&
                 kkt_last.inf_prim_res < settings.prim_tol &&
@@ -214,10 +220,9 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             }
 
             if (has_ineq && settings.ipm.mu_method == solver::ipm_config::monotonic_decrease) {
-                scalar_t per_mu_tol = settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold;
-                while (kkt_last.inf_prim_res < per_mu_tol &&
-                       kkt_last.inf_dual_res < per_mu_tol &&
-                       kkt_last.inf_comp_res < per_mu_tol) {
+                while (kkt_last.inf_prim_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold &&
+                       kkt_last.inf_dual_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold &&
+                       kkt_last.inf_comp_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold) {
                     settings.ipm.mu *= settings.ipm.mu_monotone_factor;
                     fmt::print("Monotone decrease of mu: new mu = {:.3e}\n", settings.ipm.mu);
                     ls.points.clear(); // clear the filter to accept the current point
@@ -282,5 +287,210 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
             true);
     }
     return kkt;
+}
+void ns_sqp::print_licq_info() {
+    // Global LICQ via forward nullspace propagation (DMS staircase structure).
+    // Must be called after ns_factorization (nsp_ must be populated).
+    //
+    // Equality constraints:
+    //   A_k = [s_c_stacked_0_K * Z_x  |  s_c_stacked]   (ncstr × (nz_x + nu))
+    //   where Z_x spans the null space of all prior-stage constraints in x_k coords.
+    //   x_0 is fixed → Z_x starts empty (0 cols).
+    //
+    // Approximately-active inequality constraints are stacked below the equality rows.
+    //   Active criterion: slack[i] < active_tol  (absolute, independent of mu)
+    //   Their u-Jacobian and x-Jacobian rows are collected from the ipm_constr approx data.
+    //
+    // Global LICQ holds iff rank(A_k) == nrows_k at every stage.
+    //
+    // Null space propagation:  Z_{x,k+1} = [F_x * Z_x | F_u] * null(A_k)
+    using namespace solver::ns_riccati;
+    constexpr scalar_t active_tol = 1e-3; // slack threshold for approximate activeness
+
+    fmt::print("=== Global LICQ (forward nullspace propagation) ===\n");
+
+    matrix Z_x; // null space of constraints up to stage k, in x_k coords (nx × nz_x)
+    bool any_violated = false;
+    int stage = 0;
+
+    graph_.apply_forward([&](node_data *cur_nd, node_data *next_nd) {
+        auto *d = static_cast<data *>(cur_nd);
+        auto &nsp = d->nsp_;
+        int nu = (int)d->nu;
+        int nx = (int)d->nx;
+        int ncstr = (int)d->ncstr; // equality constraints only
+        int nz_x = (int)Z_x.cols();
+
+        // Collect approximately-active inequality constraint Jacobians.
+        //
+        // __ineq_xu:  direct Jacobians w.r.t. __x and __u.
+        //
+        // __ineq_x:   x-arg is substituted to __y (= x_{k+1}) in finalize_impl, so
+        //             jac w.r.t. __y gives dg/dy_k.  Map back to (x_k, u_k) coords via dynamics:
+        //               u-col = (dg/dy_k) * F_u
+        //               x-col = (dg/dy_k) * F_x      (no direct x_k dependence after substitution)
+        //             This mirrors how s_c_stacked / s_c_stacked_0_K are built in ns_factorization.
+        matrix ineq_jac_u; // (n_active × nu)
+        matrix ineq_jac_x; // (n_active × nx)
+        int n_active = 0;
+
+        const matrix F_u_dense = d->F_u.dense();
+        const matrix F_x_dense = d->F_x.dense();
+
+        const auto collect_ineq_xu = [&](const soft_constr &sf, soft_constr::approx_data &sd) {
+            const auto *id = dynamic_cast<const solver::ipm_constr::approx_data *>(&sd);
+            if (!id)
+                return;
+            int m = (int)sf.dim();
+            for (int i = 0; i < m; ++i) {
+                if (id->slack_(i) >= active_tol)
+                    continue;
+                ineq_jac_u.conservativeResize(n_active + 1, nu);
+                ineq_jac_x.conservativeResize(n_active + 1, nx);
+                ineq_jac_u.row(n_active).setZero();
+                ineq_jac_x.row(n_active).setZero();
+                size_t arg_idx = 0;
+                for (const sym &arg : sf.in_args()) {
+                    const auto &J = id->jac_[arg_idx];
+                    if (J.rows() > 0) {
+                        if (arg.field() == __u)
+                            ineq_jac_u.row(n_active) = J.row(i);
+                        else if (arg.field() == __x)
+                            ineq_jac_x.row(n_active) = J.row(i);
+                    }
+                    arg_idx++;
+                }
+                n_active++;
+            }
+        };
+        const auto collect_ineq_x = [&](const soft_constr &sf, soft_constr::approx_data &sd) {
+            // __ineq_x: jac is w.r.t. __y (= x_{k+1}), map through dynamics
+            const auto *id = dynamic_cast<const solver::ipm_constr::approx_data *>(&sd);
+            if (!id)
+                return;
+            int m = (int)sf.dim();
+            for (int i = 0; i < m; ++i) {
+                if (id->slack_(i) >= active_tol)
+                    continue;
+                ineq_jac_u.conservativeResize(n_active + 1, nu);
+                ineq_jac_x.conservativeResize(n_active + 1, nx);
+                ineq_jac_u.row(n_active).setZero();
+                ineq_jac_x.row(n_active).setZero();
+                size_t arg_idx = 0;
+                for (const sym &arg : sf.in_args()) {
+                    const auto &J = id->jac_[arg_idx];
+                    if (J.rows() > 0)
+                        if (arg.field() == __y) {
+                            // dg/dy_k: project through F_u (u-col) and F_x (x-col)
+                            ineq_jac_u.row(n_active).noalias() += J.row(i) * F_u_dense;
+                            ineq_jac_x.row(n_active).noalias() += J.row(i) * F_x_dense;
+                        } else if (arg.field() == __x) {
+                            // direct x_k dependence (if any) after substitution
+                            ineq_jac_x.row(n_active).noalias() += J.row(i);
+                        }
+                    arg_idx++;
+                }
+                n_active++;
+            }
+        };
+        d->template for_each(__ineq_xu, collect_ineq_xu);
+        d->template for_each(__ineq_x, collect_ineq_x);
+
+        int nrows = ncstr + n_active;
+
+        int rank_Ak;
+        matrix Z_k; // null(A_k) in [t_x; t_u] coords, shape (nz_x + nu) × nz_new
+
+        if (nrows == 0) {
+            rank_Ak = 0;
+            Z_k = matrix::Identity(nz_x + nu, nz_x + nu);
+
+        } else if (nz_x == 0 && n_active == 0) {
+            // Pure equality, first stage: reuse ns_factorization result
+            rank_Ak = (int)nsp.rank;
+            if (d->rank_status_ == fully_constrained) {
+                Z_k = matrix::Zero(nu, 0);
+            } else if (d->rank_status_ == constrained) {
+                Z_k = nsp.Z_u;
+            } else {
+                Z_k = matrix::Identity(nu, nu);
+            }
+
+        } else {
+            // General case: form augmented A_k = [eq_rows ; active_ineq_rows]
+            matrix A_k(nrows, nz_x + nu);
+            A_k.setZero();
+            if (ncstr > 0) {
+                if (nz_x > 0)
+                    A_k.topLeftCorner(ncstr, nz_x).noalias() = nsp.s_c_stacked_0_K * Z_x;
+                A_k.topRightCorner(ncstr, nu) = nsp.s_c_stacked;
+            }
+            if (n_active > 0) {
+                if (nz_x > 0)
+                    A_k.bottomLeftCorner(n_active, nz_x).noalias() = ineq_jac_x * Z_x;
+                A_k.bottomRightCorner(n_active, nu) = ineq_jac_u;
+            }
+            Eigen::FullPivLU<matrix> lu_Ak(A_k);
+            rank_Ak = (int)lu_Ak.rank();
+            Z_k = lu_Ak.kernel();
+        }
+
+        bool stage_licq = (rank_Ak == nrows);
+        if (!stage_licq)
+            any_violated = true;
+
+        fmt::print("  stage {:d}  neq {:d}  nineq_active {:d}  nu {:d}  nz_x {:d} → nz {:d}  rank {:d}/{:d}{:s}\n",
+                   stage, ncstr, n_active, nu, nz_x, (int)Z_k.cols(), rank_Ak, nrows,
+                   stage_licq ? "" : "  *** GLOBAL LICQ VIOLATED ***");
+
+        // Propagate null space: Z_{x,k+1} = [F_x * Z_x | F_u] * Z_k
+        if (next_nd != nullptr) {
+            int ny = (int)d->ny;
+            matrix FZ(ny, nz_x + nu);
+            FZ.setZero();
+            if (nz_x > 0)
+                FZ.leftCols(nz_x).noalias() = d->F_x.dense() * Z_x;
+            FZ.rightCols(nu) = d->F_u.dense();
+            Z_x.noalias() = FZ * Z_k;
+        }
+        ++stage;
+    },
+                         true);
+
+    fmt::print("  Global LICQ: {:s}\n", any_violated ? "*** VIOLATED ***" : "OK");
+    fmt::print("===================================================\n");
+}
+void ns_sqp::print_scaling_info() {
+    fmt::print("=== Scaling info ===\n");
+    for (auto n : graph_.flatten_nodes()) {
+        fmt::print("  Node:\n");
+        for (auto cf : constr_fields) {
+            const auto &approx = n->dense().approx_[cf];
+            if (approx.v_.size() == 0)
+                continue;
+            scalar_t res_inf = approx.v_.cwiseAbs().maxCoeff();
+            fmt::print("    constr {:12s}  res inf-norm: {:.3e}", field::name(cf), res_inf);
+            for (auto pf : primal_fields) {
+                const auto &jac = approx.jac_[pf];
+                if (jac.is_empty())
+                    continue;
+                matrix jac_dense = jac.dense();
+                scalar_t jac_inf = jac_dense.cwiseAbs().maxCoeff();
+                fmt::print("  |J_{:s}| inf: {:.3e}", field::name(pf), jac_inf);
+            }
+            fmt::print("\n");
+        }
+        // cost Jacobians
+        fmt::print("    cost");
+        for (auto pf : primal_fields) {
+            const auto &jac = n->dense().jac_[pf];
+            if (jac.size() == 0)
+                continue;
+            scalar_t jac_inf = jac.cwiseAbs().maxCoeff();
+            fmt::print("  |J_{:s}| inf: {:.3e}", field::name(pf), jac_inf);
+        }
+        fmt::print("\n");
+    }
+    fmt::print("====================\n");
 }
 } // namespace moto
