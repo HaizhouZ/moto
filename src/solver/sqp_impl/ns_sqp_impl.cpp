@@ -34,7 +34,7 @@ ns_sqp::kkt_info ns_sqp::initialize() {
     return kkt;
 }
 
-void ns_sqp::correction_step() {
+void ns_sqp::post_factorization_correction_step() {
     detail_timed_block_start("riccati_recursion_correction");
     graph_.apply_backward(solver_call(&solver_type::riccati_recursion_correction), true);
     detail_timed_block_end("riccati_recursion_correction");
@@ -42,11 +42,47 @@ void ns_sqp::correction_step() {
     graph_.apply_forward(solver_call(&solver_type::fwd_linear_rollout_correction), true);
 }
 void ns_sqp::finalize_correction(data *d) {
-    riccati_solver_->finalize_newton_step_correction(d);
+    riccati_solver_->finalize_primal_step_correction(d);
     solver::ineq_soft::finalize_newton_step(d);
-    riccati_solver_->finalize_dual_newton_step(d);
 }
 
+void ns_sqp::ineq_constr_correction() {
+    if (settings.ipm.ipm_enable_affine_step()) {
+        graph_.for_each_parallel([this](size_t tid, data *d) {
+            solver::ineq_soft::finalize_predictor_step(d, &setting_per_thread[tid]);
+        });
+        settings.ipm.ipm_end_predictor_computation(); // ipm affine step computation is done
+        // collect worker ipm data
+        solver::ipm_config::worker &main_worker = setting_per_thread[0];
+        for (size_t i : range(settings.n_worker)) {
+            main_worker += setting_per_thread[i];
+        }
+        // adaptive mu update
+        settings.ipm.adaptive_mu_update(main_worker);
+        // use the new mu to update the rhs cost jacobian
+        graph_.for_each_parallel(solver::ineq_soft::corrector_step_start);
+        // solve the problem again with updated mu
+        post_factorization_correction_step();
+        graph_.for_each_parallel([this](data *d) {
+            solver::ineq_soft::corrector_step_end(d);
+            finalize_correction(d);
+        });
+        // recompute line search bounds with the corrected newton step
+        settings.ls.reset();
+        for (solver::linesearch_config &s : setting_per_thread) {
+            s.reset();
+        }
+        graph_.for_each_parallel([this](size_t tid, data *d) {
+            solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
+        });
+        finalize_ls_bound_and_set_to_max();
+    }
+}
+void ns_sqp::ineq_constr_prediction() {
+    if (settings.ipm.ipm_enable_affine_step()) { // compute the affine step, no need to finalize dual step
+        settings.ipm.ipm_start_predictor_computation();
+    }
+}
 ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
     settings.verbose = verbose;
     graph_.no_except() = settings.no_except;
@@ -85,57 +121,25 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             detail_timed_block_start("fwd_linear_rollout");
             graph_.apply_forward(solver_call(&solver_type::fwd_linear_rollout), true);
             detail_timed_block_end("fwd_linear_rollout");
-
-            bool finalize_dual = true;
-
-            if (has_ineq && settings.ipm.ipm_enable_affine_step()) { // compute the affine step, no need to finalize dual step
-                settings.ipm.ipm_start_predictor_computation();
-                finalize_dual = false; // do not finalize dual step
-            }
-            detail_timed_block_start("finalize_newton_step");
-            graph_.for_each_parallel([finalize_dual, this](size_t tid, data *d) {
-                riccati_solver_->finalize_newton_step(d, finalize_dual);
+            if (has_ineq)
+                ineq_constr_prediction();
+            detail_timed_block_start("finalize_primal_step");
+            graph_.for_each_parallel([this](size_t tid, data *d) {
+                riccati_solver_->finalize_primal_step(d);
                 solver::ineq_soft::finalize_newton_step(d);
                 // decide line search bounds (e.g., fraction-to-bounds)
                 solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
             });
-            detail_timed_block_end("finalize_newton_step");
-            detail_timed_block_start("corrector_step");
+            detail_timed_block_end("finalize_primal_step");
             finalize_ls_bound_and_set_to_max();
-            if (has_ineq && settings.ipm.ipm_enable_affine_step()) {
-                // line search with max bounds
-                graph_.for_each_parallel([this](size_t tid, data *d) {
-                    solver::ineq_soft::finalize_predictor_step(d, &setting_per_thread[tid]);
-                });
-                settings.ipm.ipm_end_predictor_computation(); // ipm affine step computation is done
-                // collect worker ipm data
-                solver::ipm_config::worker &main_worker = setting_per_thread[0];
-                for (size_t i : range(settings.n_worker)) {
-                    main_worker += setting_per_thread[i];
-                }
-                // adaptive mu update
-                settings.ipm.adaptive_mu_update(main_worker);
-                // use the new mu to update the rhs cost jacobian
-                graph_.for_each_parallel(solver::ineq_soft::corrector_step_start);
-                // solve the problem again with updated mu
-                correction_step();
-                graph_.for_each_parallel([this](data *d) {
-                    solver::ineq_soft::corrector_step_end(d);
-                    finalize_correction(d);
-                });
-                // recompute line search bounds with the corrected newton step
-                settings.ls.reset();
-                for (solver::linesearch_config &s : setting_per_thread) {
-                    s.reset();
-                }
-                graph_.for_each_parallel([this](size_t tid, data *d) {
-                    solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
-                });
-                finalize_ls_bound_and_set_to_max();
-            }
-            detail_timed_block_end("corrector_step");
+
+            detail_timed_block_start("ineq_corrector_step");
+            if (has_ineq)
+                ineq_constr_correction();
+            detail_timed_block_end("ineq_corrector_step");
+
             // iterative refinement
-            if (has_ineq && settings.rf.enabled) {
+            if (has_ineq && settings.rf.enabled && settings.rf.max_iters > 0) {
                 iterative_refinement();
             }
             /// @todo: update the line search stepsize?
@@ -144,28 +148,26 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             ls.initial_alpha_primal = settings.ls.alpha_primal;
             ls.initial_alpha_dual = settings.ls.alpha_dual;
             ls.best_trial = filter_linesearch_data::trial();
-            graph_.for_each_parallel([](data *d) {
+            graph_.for_each_parallel([&](data *d) {
+                // finalize dual steps before line search
+                riccati_solver_->finalize_dual_newton_step(d);
                 d->backup_trial_state();
                 solver::ineq_soft::backup_trial_state(d);
             });
         LS_START:
-            detail_timed_block_start("line_search_step");
+            detail_timed_block_start("apply_affine_step");
             graph_.for_each_parallel([this](data *d) {
                 d->restore_trial_state();
                 solver::ineq_soft::restore_trial_state(d);
                 riccati_solver_->apply_affine_step(d, &settings);
                 solver::ineq_soft::apply_affine_step(d, &settings);
-            });
-            detail_timed_block_end("line_search_step");
-            detail_timed_block_start("update_approx");
-            graph_.for_each_parallel([](data *d) {
                 d->update_approximation(node_data::update_mode::eval_val);
             });
-            detail_timed_block_end("update_approx");
+            detail_timed_block_end("apply_affine_step");
             detail_timed_block_start("update_res_stat");
-            kkt_info kkt_trial = compute_kkt_info();
+            kkt_info kkt_trial = compute_kkt_info(false);
             detail_timed_block_end("update_res_stat");
-            const auto refresh_accepted_trial = [&] {
+            const auto update_approx_derivatives = [&] {
                 detail_timed_block_start("update_approx_accepted");
                 graph_.for_each_parallel([](data *d) {
                     d->update_approximation(node_data::update_mode::eval_derivatives);
@@ -179,10 +181,10 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             }
             switch (action) {
             case line_search_action::accept:
-                refresh_accepted_trial();
+                update_approx_derivatives();
                 break;
             case line_search_action::retry_second_order_correction:
-                apply_second_order_correction();
+                second_order_correction();
                 goto LS_START;
             case line_search_action::backtrack:
                 if (ls.recompute_approx) {
@@ -191,7 +193,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                 }
                 break;
             case line_search_action::stop:
-                refresh_accepted_trial();
+                update_approx_derivatives();
                 break;
             }
             timed_block_end("sqp_single_iter");
@@ -212,9 +214,10 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             }
 
             if (has_ineq && settings.ipm.mu_method == solver::ipm_config::monotonic_decrease) {
-                while (kkt_last.inf_prim_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold &&
-                       kkt_last.inf_dual_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold &&
-                       kkt_last.inf_comp_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold) {
+                scalar_t per_mu_tol = settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold;
+                while (kkt_last.inf_prim_res < per_mu_tol &&
+                       kkt_last.inf_dual_res < per_mu_tol &&
+                       kkt_last.inf_comp_res < per_mu_tol) {
                     settings.ipm.mu *= settings.ipm.mu_monotone_factor;
                     fmt::print("Monotone decrease of mu: new mu = {:.3e}\n", settings.ipm.mu);
                     ls.points.clear(); // clear the filter to accept the current point
@@ -235,7 +238,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
     }
     return kkt_last;
 }
-ns_sqp::kkt_info ns_sqp::compute_kkt_info() {
+ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
     kkt_info kkt;
     field_t max_field;
     vector max_step;
@@ -243,7 +246,8 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info() {
     for (auto n : graph_.flatten_nodes()) {
         kkt.objective += n->cost();
         kkt.inf_prim_res = std::max(kkt.inf_prim_res, n->inf_prim_res_);
-        kkt.inf_dual_res = std::max(kkt.inf_dual_res, n->dense().jac_[__u].cwiseAbs().maxCoeff());
+        if (update_dual_res)
+            kkt.inf_dual_res = std::max(kkt.inf_dual_res, n->dense().jac_[__u].cwiseAbs().maxCoeff());
         // avg_dual_res += n->dense().jac_[__u].cwiseAbs().maxCoeff();
         kkt.inf_comp_res = std::max(kkt.inf_comp_res, n->inf_comp_res_);
         for (auto f : primal_fields) {
@@ -252,7 +256,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info() {
                 max_field = f;
                 max_step = n->trial_prim_step[f];
             }
-            kkt.obj_ful_step_dec += (n->dense().jac_[f].transpose() * n->trial_prim_step[f]).value();
+            kkt.obj_fullstep_dec += (n->dense().jac_[f].transpose() * n->trial_prim_step[f]).value();
         }
         for (auto f : constr_fields) {
             if (n->trial_dual_step[f].size() > 0) {
@@ -260,49 +264,23 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info() {
             }
         }
     }
-    // avg_dual_res /= graph_.flatten_nodes().size();
-    // // avg_dual_res = 0;
-    size_t step = 0;
-    size_t idx = 0;
-    graph_.apply_forward(
-        [&](node_data *cur, node_data *next) {
-            if (next != nullptr) [[likely]] {
-                // cancellation of jacobian from y to x
-                static row_vector tmp;
-                tmp.conservativeResize(next->dense().jac_[__x].cols());
-                tmp.noalias() = next->dense().jac_[__x] *
-                                    utils::permutation_from_y_to_x(&cur->problem(), &next->problem()) +
-                                cur->dense().jac_[__y];
-                // kkt.inf_dual_res = std::max(kkt.inf_dual_res, tmp.cwiseAbs().maxCoeff());
-                if (kkt.inf_dual_res < tmp.cwiseAbs().maxCoeff()) {
-                    kkt.inf_dual_res = tmp.cwiseAbs().maxCoeff();
-                    idx = step;
+    if (update_dual_res) {
+        graph_.apply_forward(
+            [&](node_data *cur, node_data *next) {
+                if (next != nullptr) [[likely]] {
+                    // cancellation of jacobian from y to x
+                    static row_vector tmp;
+                    tmp.conservativeResize(next->dense().jac_[__x].cols());
+                    tmp.noalias() = next->dense().jac_[__x] *
+                                        utils::permutation_from_y_to_x(&cur->problem(), &next->problem()) +
+                                    cur->dense().jac_[__y];
+                    kkt.inf_dual_res = std::max(kkt.inf_dual_res, tmp.cwiseAbs().maxCoeff());
+                } else { /// @todo: include initial jac[__x] inf norm if init is optimized
+                    kkt.inf_dual_res = std::max(kkt.inf_dual_res, cur->dense().jac_[__y].cwiseAbs().maxCoeff());
                 }
-                // fmt::print("state merit jac max inf norm at step {}: {}\n", step, tmp.cwiseAbs().maxCoeff());
-                // avg_dual_res += tmp.cwiseAbs().maxCoeff();
-            } else { /// @todo: include initial jac[__x] inf norm if init is optimized
-                // kkt.inf_dual_res = std::max(kkt.inf_dual_res, cur->dense().jac_[__y].cwiseAbs().maxCoeff());
-                // avg_dual_res += cur->dense().jac_[__y].cwiseAbs().maxCoeff();
-                if (kkt.inf_dual_res < cur->dense().jac_[__y].cwiseAbs().maxCoeff()) {
-                    kkt.inf_dual_res = cur->dense().jac_[__y].cwiseAbs().maxCoeff();
-                    idx = step;
-                }
-                // fmt::print("state merit jac max inf norm at step {}: {}\n", step, cur->dense().jac_[__y].cwiseAbs().maxCoeff());
-            }
-            step++;
-            // // fmt::println("prim {}: {}", step, cur->trial_prim_step[__x
-            // // fmt::println("prim {}: {}", step, cur->value(__u).transpose());
-            // for (auto f : constr_fields) {
-            //     if (cur->dense().dual_[f].size() > 0)
-            //         fmt::println("dual {}: {}", f, cur->dense().dual_[f].transpose());
-            // }
-            // fmt::println("dual {}: {}", step, cur->dense().dual_[__ineq_xu].transpose());
-            // fmt::println("jac  {}: {}", step++, cur->dense().jac_[__u]);
-            // fmt::println("{}", cur->dense().jac_[__y].cwiseAbs().maxCoeff());
-        },
-        true);
-    // avg_dual_res /= graph_.flatten_nodes().size();
-    // fmt::print("max dual res at step {}\n", idx);
+            },
+            true);
+    }
     return kkt;
 }
 } // namespace moto

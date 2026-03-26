@@ -43,7 +43,10 @@ struct MOTO_ALIGN_NO_SHARING linesearch_config {
         return ineq_dual_alpha_source == dual_alpha_source::primal ? alpha_primal : alpha_dual;
     }
     void reset() {
-        *this = linesearch_config();
+        alpha_primal = 1.0;
+        alpha_dual = 1.0;
+        primal = bounds();
+        dual = bounds();
     }
     void copy_from(const linesearch_config &other) {
         primal = other.primal;

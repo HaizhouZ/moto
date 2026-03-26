@@ -383,7 +383,7 @@ gait_setting = {
     "trot": [1, 1, 0, 0],
     "hopping": [0, 0, 0, 0],
 }
-sqp = moto.sqp(n_job=1)
+sqp = moto.sqp(n_job=10)
 g = sqp.graph
 n0 = g.set_head(g.add(sqp.create_node(prob)))
 
@@ -429,7 +429,7 @@ sqp.settings.dual_tol = 1e-3
 sqp.settings.comp_tol = 1e-3
 sqp.settings.rf.max_iters = 2
 sqp.settings.ls.max_soc_iter = 4
-
+sqp.settings.ls.update_alpha_dual = True
 # cfg = [
 #     [-0.9595959595959596, -0.6161616161616161],
 #     [-0.9595959595959596, 0.31313131313131315],

@@ -69,15 +69,15 @@ struct generic_solver {
      * @param cur current node data
      * @param finalize_dual whether to finalize the dual step
      */
-    virtual void finalize_newton_step(ns_riccati_data *cur, bool finalize_dual = true);
+    virtual void finalize_primal_step(ns_riccati_data *cur);
 
     virtual void finalize_dual_newton_step(ns_riccati_data *cur);
     /**
      * @brief finalize the newton step for the current node after correction
-     * @details will correct the primal steps before finalizing the dual steps
+     * @note will update the Q derivatives with the correction terms, so it should be called after the correction step
      * @param cur current node data
      */
-    virtual void finalize_newton_step_correction(ns_riccati_data *cur);
+    virtual void finalize_primal_step_correction(ns_riccati_data *cur);
     /**
      * @brief line search step for the current node
      *

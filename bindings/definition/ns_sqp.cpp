@@ -41,10 +41,12 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("prim_res_tol", &ns_sqp::iterative_refinement_setting::prim_res_tol, "Primal residual tolerance for iterative refinement")
         .def_rw("dual_res_tol", &ns_sqp::iterative_refinement_setting::dual_res_tol, "Dual residual tolerance for iterative refinement");
 
-    nb::class_<solver::linesearch_config>(sqp, "linesearch_bounds")
-        .def_rw("update_alpha_dual", &solver::linesearch_config::update_alpha_dual, "Whether to update the dual step size during line search")
+    auto ls_config_base = nb::class_<solver::linesearch_config>(m, "linesearch_config");
+    ls_config_base.def_rw("update_alpha_dual", &solver::linesearch_config::update_alpha_dual, "Whether to update the dual step size during line search")
         .def_rw("eq_dual_alpha_source", &solver::linesearch_config::eq_dual_alpha_source, "Source for dual step size for equality constraints")
         .def_rw("ineq_dual_alpha_source", &solver::linesearch_config::ineq_dual_alpha_source, "Source for dual step size for inequality constraints");
+
+    moto::export_enum<solver::linesearch_config::dual_alpha_source>(ls_config_base);
 
     nb::class_<ns_sqp::linesearch_setting, solver::linesearch_config> ls_setting(sqp, "linesearch_setting");
     ls_setting.def_rw("enabled", &ns_sqp::linesearch_setting::enabled, "Whether to use line search")
@@ -56,9 +58,8 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("dual_gamma", &ns_sqp::linesearch_setting::dual_gamma, "Objective improvement requirement for the filter (higher is stricter)")
         .def_rw("constr_vio_min_frac", &ns_sqp::linesearch_setting::constr_vio_min_frac, "Threshold for switching condition (fraction of initial primal residual)")
         .def_rw("armijo_dec_frac", &ns_sqp::linesearch_setting::armijo_dec_frac, "Sufficient decrease tolerance (eta in Armijo condition), smaller -> more strict decrease requirement");
-        
-    moto::export_enum<ns_sqp::linesearch_setting::failure_backup_strategy>(ls_setting);
 
+    moto::export_enum<ns_sqp::linesearch_setting::failure_backup_strategy>(ls_setting);
     nb::class_<ns_sqp::settings_t>(sqp, "settings_type")
         .def_ro("mu", &ns_sqp::settings_t::mu, "Barrier parameter for the IPM solver")
         .def_rw("ipm_conditional_corrector", &ns_sqp::settings_t::ipm_conditional_corrector, "Whether to use conditional corrector in the IPM solver")

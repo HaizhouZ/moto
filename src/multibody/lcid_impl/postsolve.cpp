@@ -20,7 +20,7 @@
 //     nsp.llt_ns_.solve(nsp.z_0_k, nsp.z_k, -1.0);
 //     d.d_y.k.noalias() = nsp.Z_y * nsp.z_k - nsp.y_y_k;
 // }
-// void lcid_solver::finalize_newton_step(ns_riccati_data *cur, bool finalize_dual) {
+// void lcid_solver::finalize_primal_step(ns_riccati_data *cur, bool finalize_dual) {
 //     auto &d = *cur;
 //     auto &nsp = d.nsp_;
 //     auto &aux = static_cast<lcid_solver::data &>(*d.aux_);
@@ -33,7 +33,7 @@
 //     if (finalize_dual)
 //         finalize_dual_newton_step(cur);
 // }
-// void lcid_solver::finalize_newton_step_correction(ns_riccati_data *cur) {
+// void lcid_solver::finalize_primal_step_correction(ns_riccati_data *cur) {
 //     auto &d = *cur;
 //     auto &nsp = d.nsp_;
 //     auto &aux = static_cast<lcid_solver::data &>(*d.aux_);

@@ -64,14 +64,10 @@ void generic_solver::finalize_dual_newton_step(ns_riccati_data *cur) {
     }
     cur->apply_jac_y_inverse_transpose(d.d_lbd_f, d.trial_dual_step[__dyn]);
 }
-void generic_solver::finalize_newton_step(ns_riccati_data *cur, bool finalize_dual) {
+void generic_solver::finalize_primal_step(ns_riccati_data *cur) {
     auto &d = *cur;
     auto &nsp = d.nsp_;
     d.trial_prim_step[__u].noalias() = d.d_u.k + d.d_u.K * d.trial_prim_step[__x];
-    // multiplier
-    // dynamics multiplier first two terms
-    if (finalize_dual)
-        finalize_dual_newton_step(cur);
 }
 void generic_solver::fwd_linear_rollout_correction(ns_riccati_data *cur, ns_riccati_data *next) {
     auto &d = *cur;
@@ -80,7 +76,7 @@ void generic_solver::fwd_linear_rollout_correction(ns_riccati_data *cur, ns_ricc
         utils::copy_y_to_x_tangent(d.prim_corr[__y], next->prim_corr[__x], cur->dense_->prob_, next->dense_->prob_);
     }
 }
-void generic_solver::finalize_newton_step_correction(ns_riccati_data *cur) {
+void generic_solver::finalize_primal_step_correction(ns_riccati_data *cur) {
     auto &d = *cur;
     d.prim_corr[__u].noalias() = d.d_u.k + d.d_u.K * d.prim_corr[__x];
     // correction for the primal step

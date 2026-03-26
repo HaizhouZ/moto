@@ -44,8 +44,7 @@ struct MOTO_ALIGN_NO_SHARING data_base {
     void backup_trial_state();
     void restore_trial_state();
     /// @brief first-order correction step, will clear the jacobian modification and backup the primal trial state, then call the callback to fill in the jacobian modification, finally swap the modification into the jacobian for later use
-    /// @tparam Callback called after clearing modification, so it should fill in the jacobian modification, can be a lambda or std::function, and should be invocable with either data_base* or void
-    /// @param callback
+    /// @param callback Callback called after clearing modification, so it should fill in the jacobian modification, can be a lambda or std::function, and should be invocable with either data_base* or void
     template <typename Callback>
     void first_order_correction_start(Callback &&callback) {
         prim_corr[__x].setZero();

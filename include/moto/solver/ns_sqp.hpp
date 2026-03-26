@@ -94,7 +94,7 @@ struct ns_sqp {
         scalar_t inf_comp_res = 0.;  // (inequality) complementarity residual
         scalar_t inf_prim_step = 0.; // infinity norm of the step
         scalar_t inf_dual_step = 0.; // infinity norm of the step
-        scalar_t obj_ful_step_dec = 0.; // full step decrease in objective
+        scalar_t obj_fullstep_dec = 0.; // full step decrease in objective
     } kkt_last;
     kkt_info update(size_t n_iter, bool verbose = true);
 
@@ -135,7 +135,7 @@ struct ns_sqp {
     /// print statistics for the current iteration
     void print_stats(int i_iter, const kkt_info &info, bool hcast_ineq);
     /// compute the kkt information of the current solution
-    kkt_info compute_kkt_info();
+    kkt_info compute_kkt_info(bool update_dual_res = true);
     /// perform iterative refinement to improve the solution accuracy, will modify the current solution in place
     void iterative_refinement();
     /// update the line search bounds with the (probably updated) max value
@@ -183,10 +183,12 @@ struct ns_sqp {
     };
 
     line_search_action filter_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
-    void apply_second_order_correction();
+    void second_order_correction();
+    void ineq_constr_correction();
+    void ineq_constr_prediction();
     /// initialize the solver before the first iteration or after a reset, returns the initial kkt info
     kkt_info initialize();
-    void correction_step();
+    void post_factorization_correction_step();
     void finalize_correction(data *d);
     /**
      * @brief Bind a callback to the current @ref riccati_solver_ instance

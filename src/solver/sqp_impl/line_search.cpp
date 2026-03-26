@@ -61,7 +61,7 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
 
     // check switching condition
     bool is_switching = false; // true if in objective decrease mode
-    if (current_kkt.obj_ful_step_dec < 0.0 && // note we ignore the other switching condition in IPOPT (too many parameters!)
+    if (current_kkt.obj_fullstep_dec < 0.0 && // note we ignore the other switching condition in IPOPT (too many parameters!)
         inf_prim_res_k <= constr_vio_min) {
         is_switching = true;
     }
@@ -70,7 +70,7 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
     if (is_switching) {
         // Armijo condition for the objective
         scalar_t armijo_target = obj_k +
-                                 settings.ls.armijo_dec_frac * settings.ls.alpha_primal * current_kkt.obj_ful_step_dec;
+                                 settings.ls.armijo_dec_frac * settings.ls.alpha_primal * current_kkt.obj_fullstep_dec;
 
         if (obj_trial <= armijo_target) {
             last_step_was_armijo = true;
@@ -114,8 +114,8 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
 
     record_best_trial();
     if (settings.verbose) {
-        fmt::print("  ls step, primal res: {:.3e}, objective: {:.3e}, alpha_primal: {:.3e}\n",
-                   trial_kkt.inf_prim_res, trial_kkt.objective, settings.ls.alpha_primal);
+        fmt::print("  ls step, primal res: {:.3e}, objective: {:.3e}, alpha_primal: {:.3e}, alpha_dual: {:.3e}\n",
+                   trial_kkt.inf_prim_res, trial_kkt.objective, settings.ls.alpha_primal, settings.ls.alpha_dual);
     }
     bool accept = ls.try_step(trial_kkt, current_kkt, settings);
     /// if the point is acceptable or we have already tried enough steps, stop line search and accept the point if acceptable
@@ -150,8 +150,6 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
                 settings.ls.alpha_dual - ls.initial_alpha_dual / (settings.ls.max_steps + 1e-8),
                 scalar_t(0.0));
         }
-        // settings.alpha_primal = (0.7 * settings.alpha_primal - settings.alpha_primal);
-        // settings.alpha_dual = -initial_alpha_dual / (max_ls_steps + 1e-8);
         if (settings.verbose)
             fmt::print("  ls backtrack, alpha_p: {:.3e}, alpha_d: {:.3e}\n", settings.ls.alpha_primal, settings.ls.alpha_dual);
         return line_search_action::backtrack;
@@ -180,13 +178,13 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     return line_search_action::stop;
 }
 
-void ns_sqp::apply_second_order_correction() {
+void ns_sqp::second_order_correction() {
     graph_.for_each_parallel([](data *d) {
         d->first_order_correction_start([]() {});
     });
     graph_.for_each_parallel(solver_call(&solver_type::ns_factorization_correction));
 
-    correction_step();
+    post_factorization_correction_step();
     graph_.for_each_parallel([this](data *d) {
         d->first_order_correction_end();
         finalize_correction(d);
