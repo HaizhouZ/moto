@@ -93,9 +93,10 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     //// main loop
     try {
-        filter_linesearch_data ls = {
-            .points = {{kkt_last.inf_prim_res, kkt_last.inf_dual_res}},
-        };
+        filter_linesearch_data ls;
+        //  = {
+        //     .points = {{kkt_last.inf_prim_res, kkt_last.inf_dual_res}},
+        // };
         ls.constr_vio_min = kkt_last.inf_prim_res * settings.ls.constr_vio_min_frac;
         for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
             bool has_ineq = false;
@@ -113,8 +114,6 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             detail_timed_block_start("ns factorization");
             graph_.for_each_parallel(solver_call(&solver_type::ns_factorization));
             detail_timed_block_end("ns factorization");
-            if (settings.verbose && i_iter == 0)
-                print_licq_info();
 
             detail_timed_block_start("riccati_recursion");
             graph_.apply_backward(solver_call(&solver_type::riccati_recursion), true);
@@ -206,7 +205,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             kkt_trial.ls_steps = ls.step_cnt;
             kkt_last = kkt_trial;
             if (verbose) {
-                print_licq_info();
+                // print_licq_info();
                 print_stats(i_iter, kkt_last, has_ineq);
             }
 
@@ -220,13 +219,25 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             }
 
             if (has_ineq && settings.ipm.mu_method == solver::ipm_config::monotonic_decrease) {
+                bool mu_changed = false;
                 while (kkt_last.inf_prim_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold &&
                        kkt_last.inf_dual_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold &&
                        kkt_last.inf_comp_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold) {
                     settings.ipm.mu *= settings.ipm.mu_monotone_factor;
                     fmt::print("Monotone decrease of mu: new mu = {:.3e}\n", settings.ipm.mu);
                     ls.points.clear(); // clear the filter to accept the current point
+                    mu_changed = true;
                     // ls.points.push_back({kkt_last.inf_prim_res, kkt_last.inf_dual_res});
+                }
+                if (!mu_changed) {
+                    bool prim_fail = kkt_last.inf_prim_res >= settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold;
+                    bool dual_fail = kkt_last.inf_dual_res >= settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold;
+                    bool comp_fail = kkt_last.inf_comp_res >= settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold;
+                    fmt::print("Not using monotone decrease of mu: primal res {} threshold, dual res {} threshold, comp res {} threshold\n",
+                               prim_fail ? "exceeds" : "within",
+                               dual_fail ? "exceeds" : "within",
+                               comp_fail ? "exceeds" : "within",
+                               settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold);
                 }
                 settings.ipm.mu = std::max(settings.ipm.mu, 1e-11); // enforce minimum mu
             }

@@ -153,7 +153,6 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     if (accept || ls.stop) {
         ls.recompute_approx = false;
         if (accept && !ls.stop) {
-            ls.update_filter(current_kkt, settings);
         }
         return accept ? line_search_action::accept : line_search_action::stop;
     }
@@ -204,7 +203,8 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
             settings.ls.alpha_dual = ls.best_trial.alpha_dual;
         }
     }
-    ls.points.clear();
+    ls.update_filter(current_kkt, settings);
+
     return line_search_action::stop;
 }
 

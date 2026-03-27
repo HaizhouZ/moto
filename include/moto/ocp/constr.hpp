@@ -96,6 +96,8 @@ class generic_constr : public generic_func {
 
     // @brief make an inequality constraint from this constraint by moving
     generic_constr *cast_ineq(std::string_view type_name);
+    // @brief make a soft equality constraint from this constraint by moving
+    generic_constr *cast_soft(std::string_view type_name);
 };
 } // namespace moto
 

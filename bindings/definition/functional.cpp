@@ -4,6 +4,7 @@
 #include <moto/ocp/pre_comp.hpp>
 #include <moto/ocp/sym.hpp>
 #include <moto/ocp/usr_func.hpp>
+#include <moto/solver/soft_constr/quadratic_penalized.hpp>
 #include <type_cast.hpp>
 
 #include <nanobind/stl/function.h>
@@ -154,7 +155,15 @@ void register_submodule_functional(nb::module_ &m) {
         .def(
             "cast_ineq",
             [](generic_constr &self, const std::string &type_name) { return TO_SHARED_PTR(generic_constr, self.cast_ineq(type_name)); },
-            nb::arg("type_name") = "ipm");
+            nb::arg("type_name") = "ipm")
+        .def(
+            "cast_soft",
+            [](generic_constr &self, const std::string &type_name) { return TO_SHARED_PTR(generic_constr, self.cast_soft(type_name)); },
+            nb::arg("type_name") = "pmm_constr");
+
+    nb::class_<moto::pmm_constr, generic_constr>(m, "pmm_constr")
+        .def_rw("rho", &moto::pmm_constr::rho, "Dual penalty weight for the proximal multiplier method")
+        .DEF_CLONE_FUNC(moto::pmm_constr);
 
     nb::class_<generic_cost, generic_func>(m, "cost")
         .def_static(

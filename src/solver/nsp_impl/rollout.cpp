@@ -112,6 +112,9 @@ void generic_solver::compute_kkt_residual(ns_riccati_data *cur) {
     if (d.trial_dual_step[__ineq_x].size() > 0) {
         d.dense_->approx_[__ineq_x].jac_[__y].right_T_times(d.trial_dual_step[__ineq_x], dense->res_stat_[__y]);
     }
+    if (d.trial_dual_step[__eq_x_soft].size() > 0) {
+        d.dense_->approx_[__eq_x_soft].jac_[__y].right_T_times(d.trial_dual_step[__eq_x_soft], dense->res_stat_[__y]);
+    }
     auto &f_x = dense->approx_[__dyn].jac_[__x];
     dense->res_stat_[__x].noalias() = d.Q_x_bak.transpose();
     d.Q_xx.times(d.trial_prim_step[__x], dense->res_stat_[__x]);
