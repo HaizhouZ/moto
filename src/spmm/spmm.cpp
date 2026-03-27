@@ -1,3 +1,4 @@
+#include <cassert>
 #include <moto/spmm/sparse_mat.hpp>
 
 namespace moto {

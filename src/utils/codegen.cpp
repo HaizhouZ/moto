@@ -108,7 +108,7 @@ std::string process_generated_code(
 
     std::stringstream raw_stream(raw_c_code);
     std::string line;
-    bool func_found = false, func_done = false;
+    bool func_found = false;
 
     // RE2 patterns
     RE2 simplify_cond_re("arg\\[\\d+\\]\\? ([^:;]+) : 0;");
@@ -116,15 +116,36 @@ std::string process_generated_code(
     RE2 arg_re("arg\\[(\\d+)\\]\\[(\\d+)\\]");
     RE2 res_re("res\\[(\\d+)\\]\\[(\\d+)\\]");
 
-    while (std::getline(raw_stream, line)) {
-        if (line.find("casadi_real casadi_") != std::string::npos) {
-            processed_code << line << "\n";
-        }
+    bool copying_helper = false;
+    int helper_brace_depth = 0;
+    int func_brace_depth = 0;
 
+    auto update_brace_depth = [](const std::string &s, int &depth) {
+        for (char c : s) {
+            if (c == '{') depth++;
+            else if (c == '}') depth--;
+        }
+    };
+
+    while (std::getline(raw_stream, line)) {
         if (!func_found) {
+            if (!copying_helper && line.find("casadi_real casadi_") != std::string::npos) {
+                copying_helper = true;
+                helper_brace_depth = 0;
+            }
+
+            if (copying_helper) {
+                processed_code << line << "\n";
+                update_brace_depth(line, helper_brace_depth);
+                if (helper_brace_depth == 0) {
+                    copying_helper = false;
+                }
+                continue;
+            }
+
             if (line.find("static int casadi_f0") != std::string::npos) {
                 processed_code << "CASADI_SYMBOL_EXPORT void " << func_name << "(\n"
-                               << "  std::vector<Eigen::Ref<Eigen::" << vec_type() << ">>& inputs,\n";
+                            << "  std::vector<Eigen::Ref<Eigen::" << vec_type() << ">>& inputs,\n";
                 if (vec_out) {
                     processed_code << "  Eigen::Ref<Eigen::" << vec_type() << "> outputs) {\n";
                 } else {
@@ -135,29 +156,34 @@ std::string process_generated_code(
                     }
                 }
                 func_found = true;
+                func_brace_depth = 1;
             }
             continue;
         }
 
         if (line.find("return 0;") != std::string::npos)
             continue;
-        if (line.find("}") != std::string::npos && !func_done) {
-            processed_code << "}\n";
-            func_done = true;
-            break;
-        }
 
-        // Apply RE2 transformations
         RE2::GlobalReplace(&line, simplify_cond_re, "\\1;");
         RE2::GlobalReplace(&line, simplify_if_re, "\\1;");
 
-        // Iteratively replace arg and res patterns
         int cap1, cap2;
         while (RE2::PartialMatch(line, arg_re, &cap1, &cap2)) {
-            RE2::Replace(&line, "arg\\[" + std::to_string(cap1) + "\\]\\[" + std::to_string(cap2) + "\\]", make_input_ref_access(cap1, cap2));
+            RE2::Replace(&line,
+                        "arg\\[" + std::to_string(cap1) + "\\]\\[" + std::to_string(cap2) + "\\]",
+                        make_input_ref_access(cap1, cap2));
         }
         while (RE2::PartialMatch(line, res_re, &cap1, &cap2)) {
-            RE2::Replace(&line, "res\\[" + std::to_string(cap1) + "\\]\\[" + std::to_string(cap2) + "\\]", make_output_ref_access(cap1, cap2));
+            RE2::Replace(&line,
+                        "res\\[" + std::to_string(cap1) + "\\]\\[" + std::to_string(cap2) + "\\]",
+                        make_output_ref_access(cap1, cap2));
+        }
+
+        update_brace_depth(line, func_brace_depth);
+
+        if (func_brace_depth == 0) {
+            processed_code << "}\n";
+            break;
         }
 
         processed_code << line << "\n";

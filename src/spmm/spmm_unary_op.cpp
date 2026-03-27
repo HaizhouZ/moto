@@ -4,6 +4,7 @@
 #include <moto/spmm/impl/spmm_impl.hpp>
 
 #include <moto/spmm/impl/buffer.hpp>
+#include <cassert>
 
 namespace moto {
 void sparse_mat::inner_product(const matrix &m, matrix &out) {

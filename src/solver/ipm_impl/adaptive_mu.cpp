@@ -1,3 +1,4 @@
+#include <cassert>
 #include <moto/solver/ipm/ipm_config.hpp>
 
 namespace moto {

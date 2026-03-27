@@ -8,6 +8,7 @@
 #include <ranges>
 #include <set>
 #include <vector>
+#include <cassert>
 
 namespace moto {
 namespace graph_types {
