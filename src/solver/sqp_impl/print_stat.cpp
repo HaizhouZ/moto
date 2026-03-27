@@ -30,11 +30,11 @@ void ns_sqp::print_stat_header() {
     putc('\n', stdout);
 }
 
-void ns_sqp::print_stats(int i_iter, const kkt_info &info, bool hcast_ineq) {
+void ns_sqp::print_stats(const kkt_info &info) {
     scalar_t stats_value[] = {0., info.objective, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res, info.inf_prim_step, info.inf_dual_step,
                               settings.ls.alpha_primal, settings.ls.alpha_dual, 0., settings.ipm.mu};
     std::string_view ipm_flags;
-    if (hcast_ineq && settings.ipm.ipm_enable_corrector()) {
+    if (settings.has_ineq_soft && settings.ipm.ipm_enable_corrector()) {
         if (settings.ipm.ipm_accept_corrector()) {
             ipm_flags = "[c:a]";
         } else {
@@ -42,13 +42,18 @@ void ns_sqp::print_stats(int i_iter, const kkt_info &info, bool hcast_ineq) {
         }
     }
     size_t idx_stat = 0;
+    size_t i_iter = static_cast<size_t>(info.num_iter) - 1;
     for (auto &item : stats) {
         if (item.name == "no.") {
-            fmt::print("| {:<{}} |", i_iter < 0 ? "--" : std::to_string(i_iter + 1), item.width);
+            if (settings.in_restoration) {
+                fmt::print("| {:<{}} |", fmt::format("{}r", i_iter + 1), item.width);
+            } else {
+                fmt::print("| {:<{}} |", i_iter == 0 ? "--" : std::to_string(i_iter + 1), item.width);
+            }
         } else if (item.name == "ls") {
             fmt::print("| {:<{}} |", info.ls_steps < 0 ? "--" : std::to_string(info.ls_steps), item.width);
         } else if (item.name == "ipm_mu") {
-            fmt::print("| {:<{}} |", hcast_ineq ? fmt::format("{:.6e}{}", std::log10(stats_value[idx_stat]), ipm_flags) : "---------", item.width);
+            fmt::print("| {:<{}} |", settings.has_ineq_soft ? fmt::format("{:.6e}{}", std::log10(stats_value[idx_stat]), ipm_flags) : "---------", item.width);
         } else {
             fmt::print("| {:<{}.6e} |", stats_value[idx_stat], item.width);
         }

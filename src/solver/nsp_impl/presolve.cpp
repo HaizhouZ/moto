@@ -77,7 +77,7 @@ void generic_solver::ns_factorization_correction(ns_riccati_data *cur) {
     }
 }
 
-void generic_solver::ns_factorization(ns_riccati_data *cur) {
+void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
     auto &d = *cur;
     auto &nsp = d.nsp_;
     auto &_approx = d.dense_->approx_;
@@ -151,6 +151,73 @@ void generic_solver::ns_factorization(ns_riccati_data *cur) {
     nsp.rank = nsp.lu_eq_.rank();
     timed_block_end("lu_eq_compute");
 
+    // build s_c_stacked_0_K (needed for GN mode and for the normal constrained path)
+    nsp.s_c_stacked_0_K.conservativeResize(d.ncstr, Eigen::NoChange);
+    nsp.s_c_stacked_0_K.setZero();
+    if (constr_s) {
+        nsp.s_0_p_K.conservativeResize(constr_s, Eigen::NoChange);
+        nsp.s_0_p_K.setZero();
+        d.s_x.dump_into(nsp.s_0_p_K);
+        d.s_y.times<false>(d.F_x, nsp.s_0_p_K);
+        nsp.s_c_stacked_0_K.topRows(constr_s) = nsp.s_0_p_K;
+    }
+    if (constr_c) {
+        d.c_x.dump_into(nsp.s_c_stacked_0_K.bottomRows(d.nc));
+    }
+
+    // ── Gauss-Newton mode ─────────────────────────────────────────────────────
+    // Dynamics remains a hard constraint (handled by ns_factorization_correction via y_y_k = F_0).
+    // __eq_x / __eq_xu are treated as PMM soft constraints (pmm_constr pattern):
+    //   Gradient:      Q_u/Q_x += (h/rho_eq)^T * J
+    //   Hessian:       Q_zz/V_xx += (1/rho_eq) * J^T * J
+    //   Dual recovery: dlam = (J*du + h) / rho_eq  (in finalize_dual_newton_step)
+    // s_c_stacked / s_c_stacked_0_K serve as J_u / J_x; lu_eq_ is preserved for dual recovery.
+    // Original cost and proximal Hessians (Q_uu, Q_ux, ...) are kept intact.
+    if (gauss_newton) {
+        const size_t ncstr = d.ncstr;
+        const scalar_t rho_eq    = static_cast<ns_riccati_data::restoration_aux_data *>(d.aux_.get())->rho_eq;
+        const scalar_t inv_rho_eq = scalar_t(1) / rho_eq;
+
+        // Build s_c_stacked_0_k (equality constraint residuals) for the GN gradient.
+        cur->update_projected_dynamics_residual();
+        nsp.s_c_stacked_0_k.conservativeResize(ncstr);
+        if (constr_s) {
+            nsp.s_0_p_k.conservativeResize(constr_s);
+            nsp.s_0_p_k.noalias() = _approx[__eq_x].v_;
+            d.s_y.times<false>(d.F_0, nsp.s_0_p_k);
+            nsp.s_c_stacked_0_k.head(constr_s) = nsp.s_0_p_k;
+        }
+        if (constr_c) {
+            nsp.s_c_stacked_0_k.tail(d.nc) = _approx[__eq_xu].v_;
+        }
+
+        // ── Gradients: PMM Schur complement for __eq_x / __eq_xu ──
+        // Mirrors pmm_constr::propagate_jacobian: jac_modification += (h/rho)^T * J.
+        // Q_u already contains J^T*lambda from the generic_constr base path in update_approximation;
+        // dynamics is a hard constraint handled by ns_factorization_correction (F_0 via y_y_k).
+        if (ncstr > 0) {
+            const vector h_over_rho = inv_rho_eq * nsp.s_c_stacked_0_k;
+            d.Q_u.noalias() += h_over_rho.transpose() * nsp.s_c_stacked;
+            d.Q_x.noalias() += h_over_rho.transpose() * nsp.s_c_stacked_0_K;
+        }
+
+        // ── Hessians: unconstrain_setup uses existing Q_uu/Q_ux/..., then add (1/rho_eq)*J^T*J ──
+        unconstrain_setup();
+
+        if (ncstr > 0) {
+            nsp.Q_zz.noalias()    += inv_rho_eq * nsp.s_c_stacked.transpose() * nsp.s_c_stacked;
+            nsp.u_0_p_K.noalias() += inv_rho_eq * nsp.s_c_stacked.transpose() * nsp.s_c_stacked_0_K;
+            nsp.z_0_K = nsp.u_0_p_K;
+            d.V_xx.noalias()      += inv_rho_eq * nsp.s_c_stacked_0_K.transpose() * nsp.s_c_stacked_0_K;
+        }
+
+        // rank_status_ = unconstrained (set by unconstrain_setup), so
+        // ns_factorization_correction takes the early return path.
+        // ns/nc/ncstr are left intact for finalize_dual_newton_step.
+        ns_factorization_correction(cur);
+        return;
+    }
+
     auto &rank = nsp.rank;
     if (rank == 0) {
         d.rank_status_ = rank_status::unconstrained;
@@ -190,20 +257,6 @@ void generic_solver::ns_factorization(ns_riccati_data *cur) {
     }
 
     if (d.rank_status_ != rank_status::unconstrained) {
-        nsp.s_c_stacked_0_K.conservativeResize(d.ncstr, Eigen::NoChange);
-        nsp.s_c_stacked_0_K.setZero();
-
-        if (constr_s) {
-            nsp.s_0_p_K.conservativeResize(constr_s, Eigen::NoChange);
-            nsp.s_0_p_K.setZero();
-            d.s_x.dump_into(nsp.s_0_p_K);
-            d.s_y.times<false>(d.F_x, nsp.s_0_p_K);
-            nsp.s_c_stacked_0_K.topRows(constr_s) = nsp.s_0_p_K;
-        }
-        if (constr_c) {
-            d.c_x.dump_into(nsp.s_c_stacked_0_K.bottomRows(d.nc));
-        }
-
         timed_block_start("precompute_u_y");
         nsp.u_y_K.noalias() = nsp.lu_eq_.solve(nsp.s_c_stacked_0_K);
         timed_block_end("precompute_u_y");
@@ -239,7 +292,6 @@ void generic_solver::ns_factorization(ns_riccati_data *cur) {
         d.d_y.K = -nsp.y_y_K;
     }
     ns_factorization_correction(cur);
-
 }
 } // namespace ns_riccati
 } // namespace solver

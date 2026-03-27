@@ -1,4 +1,4 @@
-#include <moto/solver/soft_constr/quadratic_penalized.hpp>
+#include <moto/solver/soft_constr/pmm_constr.hpp>
 #include <moto/ocp/problem.hpp>
 
 namespace moto {

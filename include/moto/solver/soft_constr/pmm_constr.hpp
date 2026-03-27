@@ -4,23 +4,24 @@
 namespace moto {
 namespace solver {
 /// @brief Soft equality constraint via proximal augmented Lagrangian (no slack):
-///   L = lambda^T*C(x) - rho/2*||delta lambda||^2
+///   L = lambda^T*C(x) - (rho/2)*||delta_lambda||^2
 /// Stagewise KKT over (du, dlam):
-///   [L_Hess  J^T  ] [du  ]   [L_jac]
-///   [J      -rho*I] [dlam] = -[h    ]
-/// Gradient contribution (Schur complement): +(1/rho)*J^T*h added to L_jac
-///   node_data adds J^T*lambda to Q_u; jac_modification adds (h/rho - lambda)^T*J to cancel it
-/// Hessian contribution (Schur complement):  (1/rho) * J^T * J
+///   [L_Hess  J^T  ] [du  ]   [  g_u  ]
+///   [J      -rho*I] [dlam] = -[  h    ]
+/// Schur complement of dlam into the du block:
+///   Gradient:  +=(1/rho) * J^T * h  (via jac_modification_ += (h/rho)^T * J)
+///              node_data separately adds J^T*lambda from the base soft_constr contribution
+///   Hessian:   +=(1/rho) * J^T * J  (via merit_hess_)
 /// Dual update from row 2: dlam = (J*du + h) / rho
-/// As rho -> 0: (1/rho)*J^T*J dominates, forcing J*du = -h (hard constraint recovery).
-/// As rho -> inf: regularization vanishes, soft constraint has negligible effect.
+/// As rho -> 0: (1/rho)*J^T*J penalty dominates, forcing J*du = -h (hard constraint recovery).
+/// As rho -> inf: penalty vanishes, soft constraint has negligible effect.
 class pmm_constr final : public soft_constr {
   private:
     using base = soft_constr;
 
   public:
     struct approx_data : public base::approx_data {
-        vector g_;                  ///< raw constraint value C(x) = h
+        vector g_;                  ///< raw constraint residual h = C(x), snapshot of v_ after value_impl
         vector multiplier_backup_;  ///< backup of multiplier for line search trials
         scalar_t rho_ = 1.0;        ///< dual penalty weight (copied from constraint at construction)
 

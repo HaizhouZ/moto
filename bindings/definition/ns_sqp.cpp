@@ -69,10 +69,28 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("rf", &ns_sqp::settings_t::rf, "Iterative refinement settings")
         .def_prop_ro("ls", [](ns_sqp::settings_t &self) -> auto & { return self.ls; }, "Line search settings")
         .def_rw("scaling", &ns_sqp::settings_t::scaling, "Jacobian scaling settings")
+        .def_rw("restoration", &ns_sqp::settings_t::restoration, "Restoration phase settings")
         .def_rw("no_except", &ns_sqp::settings_t::no_except, "Whether to suppress exceptions in parallel jobs")
         .def_rw("prim_tol", &ns_sqp::settings_t::prim_tol, "Primal feasibility tolerance")
         .def_rw("dual_tol", &ns_sqp::settings_t::dual_tol, "Dual feasibility tolerance")
         .def_rw("comp_tol", &ns_sqp::settings_t::comp_tol, "Complementarity feasibility tolerance");
+
+    nb::class_<ns_sqp::restoration_settings>(sqp, "restoration_settings")
+        .def_rw("enabled", &ns_sqp::restoration_settings::enabled,
+                "Whether restoration mode is allowed")
+        .def_rw("max_iter", &ns_sqp::restoration_settings::max_iter,
+                "Maximum number of restoration iterations per trigger")
+        .def_rw("trigger_on_failure_count", &ns_sqp::restoration_settings::trigger_on_failure_count,
+                "Trigger restoration after this many consecutive line-search failures")
+        .def_rw("rho_u", &ns_sqp::restoration_settings::rho_u,
+                "Proximal weight on u (anchors to point where restoration was triggered)")
+        .def_rw("rho_y", &ns_sqp::restoration_settings::rho_y,
+                "Proximal weight on y (anchors to point where restoration was triggered)")
+        .def_rw("rho_eq", &ns_sqp::restoration_settings::rho_eq,
+                "Dual regularization for GN equality constraints: Hess += (1/rho_eq)*J^T*J; "
+                "dlam = (J*du+h)/rho_eq. Smaller -> tighter constraint satisfaction per step (default 1.0)")
+        .def_rw("restoration_improvement_frac", &ns_sqp::restoration_settings::restoration_improvement_frac,
+                "Exit restoration when inf_prim_res drops below this fraction of entry infeasibility (default 0.9)");
 
     nb::class_<ns_sqp::scaling_settings> sc_setting(sqp, "scaling_settings");
     sc_setting

@@ -1,6 +1,6 @@
 #include <moto/ocp/ineq_constr.hpp>
 #include <moto/solver/ipm/ipm_constr.hpp>
-#include <moto/solver/soft_constr/quadratic_penalized.hpp>
+#include <moto/solver/soft_constr/pmm_constr.hpp>
 
 namespace moto {
 namespace details {

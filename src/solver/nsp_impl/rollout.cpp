@@ -61,6 +61,20 @@ void generic_solver::finalize_dual_newton_step(ns_riccati_data *cur) {
         if (d.nc > 0) {
             d.trial_dual_step[__eq_xu] = d.d_lbd_s_c.tail(d.nc);
         }
+    } else if (d.ncstr > 0 && d.aux_ != nullptr) {
+        // GN mode: mirrors pmm_constr::finalize_newton_step — dlam = (h + J*du) / rho_eq
+        const scalar_t rho_eq = static_cast<ns_riccati_data::restoration_aux_data *>(d.aux_.get())->rho_eq;
+        d.d_lbd_s_c.noalias()  = nsp.s_c_stacked_0_k;                       // h
+        d.d_lbd_s_c.noalias() += nsp.s_c_stacked    * d.trial_prim_step[__u]; // + J_u * du
+        d.d_lbd_s_c.noalias() += nsp.s_c_stacked_0_K * d.trial_prim_step[__x]; // + J_x * dx
+        d.d_lbd_s_c           *= scalar_t(1) / rho_eq;                       // / rho_eq
+        if (d.ns > 0) {
+            d.trial_dual_step[__eq_x] = d.d_lbd_s_c.head(d.ns);
+            d.s_y.T_times<false>(d.trial_dual_step[__eq_x], d.d_lbd_f);
+        }
+        if (d.nc > 0) {
+            d.trial_dual_step[__eq_xu] = d.d_lbd_s_c.tail(d.nc);
+        }
     }
     cur->apply_jac_y_inverse_transpose(d.d_lbd_f, d.trial_dual_step[__dyn]);
 }

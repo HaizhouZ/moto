@@ -4,7 +4,7 @@
 #include <moto/ocp/pre_comp.hpp>
 #include <moto/ocp/sym.hpp>
 #include <moto/ocp/usr_func.hpp>
-#include <moto/solver/soft_constr/quadratic_penalized.hpp>
+#include <moto/solver/soft_constr/pmm_constr.hpp>
 #include <type_cast.hpp>
 
 #include <nanobind/stl/function.h>

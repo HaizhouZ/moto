@@ -51,6 +51,20 @@ struct ns_sqp {
         scalar_t s_theta = 1.1;              ///< IPOPT switching condition exponent on constraint violation (s_theta in IPOPT paper)
     };
 
+    struct restoration_settings {
+        bool enabled = true;          ///< whether restoration mode is allowed
+        size_t max_iter = 50;         ///< max restoration iterations per trigger
+        /// trigger restoration when the filter line search fails this many consecutive outer SQP iters
+        size_t trigger_on_failure_count = 3;
+        scalar_t rho_u = 1e-4; ///< proximal weight on u (anchors to point where restoration was triggered)
+        scalar_t rho_y = 1e-4; ///< proximal weight on y (anchors to point where restoration was triggered)
+        /// dual regularization for GN equality constraints: Hess += (1/rho_eq)*J^T*J;
+        /// dlam = (J*du + h) / rho_eq. Smaller -> tighter constraint satisfaction per step.
+        scalar_t rho_eq = 1e-6;
+        /// exit restoration when inf_prim_res drops below this fraction of the entry infeasibility
+        scalar_t restoration_improvement_frac = 0.9;
+    };
+
     struct ipm_config : public solver::ipm_config {
         scalar_t mu0 = 1.0;        ///< initial barrier parameter
         bool warm_start = false;   ///< whether to warm start the IPM solver
@@ -73,6 +87,7 @@ struct ns_sqp {
 
         iterative_refinement_setting rf;
         scaling_settings scaling;
+        restoration_settings restoration;
 
         bool no_except = false;
 
@@ -83,6 +98,8 @@ struct ns_sqp {
         friend class ns_sqp;
         bool verbose = true;
         size_t n_worker = MAX_THREADS; ///< number of worker threads
+        bool in_restoration = false; ///< whether currently in restoration mode (used to adjust printouts and possibly other settings)
+        bool has_ineq_soft = false; ///< whether the problem has inequality constraints (used to adjust printouts and possibly other settings)
     } settings;
 
     using solver_type = solver::ns_riccati::generic_solver;
@@ -159,7 +176,7 @@ struct ns_sqp {
     /// print statistics header
     void print_stat_header();
     /// print statistics for the current iteration
-    void print_stats(int i_iter, const kkt_info &info, bool hcast_ineq);
+    void print_stats(const kkt_info &info);
     /// compute the kkt information of the current solution
     kkt_info compute_kkt_info(bool update_dual_res = true);
     /// perform iterative refinement to improve the solution accuracy, will modify the current solution in place
@@ -225,8 +242,25 @@ struct ns_sqp {
     void ineq_constr_prediction();
     /// initialize the solver before the first iteration or after a reset, returns the initial kkt info
     kkt_info initialize();
+    kkt_info restoration_update(const kkt_info &kkt_before, filter_linesearch_data &ls);
+    /// Compute restoration objective J_rest = ½Σ(‖F_0‖² + ‖s_c_stacked_0_k‖²) across all nodes.
+    /// Used to track filter progress in the restoration phase instead of the original running cost.
+    size_t ls_failure_count_ = 0; ///< consecutive outer iterations where line search produced no improvement
     void post_factorization_correction_step();
     void finalize_correction(data *d);
+    /**
+     * @brief Run one QP solve + line-search iteration.
+     *
+     * @param ls             Filter line-search state (updated in-place).
+     * @param kkt_current    KKT info of the current point (updated to the accepted trial on return).
+     * @param do_scaling     Whether to apply Jacobian scaling before factorization.
+     * @param do_refinement  Whether to run iterative refinement after the corrector.
+     * @param gauss_newton   If true, calls ns_factorization with gauss_newton=true.
+     * @return               Line-search action that terminated the inner loop.
+     */
+    line_search_action sqp_iter(filter_linesearch_data &ls, kkt_info &kkt_current,
+                                bool do_scaling, bool do_refinement,
+                                bool gauss_newton = false);
     /**
      * @brief Bind a callback to the current @ref riccati_solver_ instance
      *

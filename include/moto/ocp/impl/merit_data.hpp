@@ -46,6 +46,8 @@ struct merit_data {
 
     /// stationary residual
     array_type<row_vector, primal_fields> res_stat_;
+
+    array_type<aligned_vector_map_t, primal_fields> primal_prox_hess_diagonal_;
 };
 def_unique_ptr(merit_data);
 } // namespace moto

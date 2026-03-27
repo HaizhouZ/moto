@@ -42,6 +42,7 @@ merit_data::merit_data(ocp *prob) : prob_(prob) {
             hessian_[j][i].resize(prob_->tdim(j), prob_->tdim(i));
             // hessian_[j][i].setZero();
         }
+        primal_prox_hess_diagonal_[i].reset(hessian_[i][i].insert<sparsity::diag>(0, 0, prob_->tdim(i)));
         jac_[i].resize(prob_->tdim(i));
         jac_[i].setZero();
         jac_modification_[i].resize(prob_->tdim(i));
