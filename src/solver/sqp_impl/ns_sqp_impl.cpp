@@ -27,6 +27,7 @@ ns_sqp::kkt_info ns_sqp::initialize() {
         cur->update_approximation(node_data::update_mode::eval_derivatives);
     });
     kkt_info kkt = compute_kkt_info();
+    reset_scaling(); // clear scale vectors; will be recomputed on first iteration
     // print statistics header
     if (settings.verbose) {
         // print_scaling_info();
@@ -61,6 +62,17 @@ void ns_sqp::ineq_constr_correction() {
         }
         // adaptive mu update
         settings.ipm.adaptive_mu_update(main_worker);
+        if (std::max({
+            kkt_last.inf_prim_res,
+            kkt_last.inf_dual_res,
+            kkt_last.inf_comp_res,
+        }) < settings.ipm.mu_monotone_fraction_threshold * settings.ipm.mu) {
+            // if we are close enough to the feasible region, switch to monotone decrease of mu to accelerate convergence
+            fmt::print("Switching to monotone decrease of mu since we are close to the feasible region (max residual: {:.3e} < {:.3e} * mu: {:.3e})\n",
+                       std::max({kkt_last.inf_prim_res, kkt_last.inf_dual_res, kkt_last.inf_comp_res}),
+                       settings.ipm.mu_monotone_fraction_threshold, settings.ipm.mu);
+            settings.ipm.mu = std::min(settings.ipm.mu_trial, settings.ipm.mu_monotone_factor * settings.ipm.mu);
+        }
         // use the new mu to update the rhs cost jacobian
         graph_.for_each_parallel(solver::ineq_soft::corrector_step_start);
         // solve the problem again with updated mu
@@ -111,6 +123,9 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             setting_per_thread.reset(settings.n_worker);
 
             timed_block_start("sqp_single_iter");
+            detail_timed_block_start("scaling");
+            compute_and_apply_scaling(kkt_last);
+            detail_timed_block_end("scaling");
             detail_timed_block_start("ns factorization");
             graph_.for_each_parallel(solver_call(&solver_type::ns_factorization));
             detail_timed_block_end("ns factorization");
@@ -154,6 +169,10 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             graph_.for_each_parallel([&](data *d) {
                 // finalize dual steps before line search
                 riccati_solver_->finalize_dual_newton_step(d);
+            });
+            // reverse Jacobian scaling on duals so KKT residuals are in original units
+            unscale_duals();
+            graph_.for_each_parallel([&](data *d) {
                 d->backup_trial_state();
                 solver::ineq_soft::backup_trial_state(d);
             });
@@ -207,6 +226,8 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             if (verbose) {
                 // print_licq_info();
                 print_stats(i_iter, kkt_last, has_ineq);
+                // print_dual_res_breakdown();
+                // print_scaling_info();
             }
 
             if (kkt_last.inf_dual_res < settings.dual_tol &&
@@ -254,6 +275,104 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
     }
     return kkt_last;
 }
+void ns_sqp::print_dual_res_breakdown() {
+    // Decompose dual_res by field at the worst-case node.
+    //
+    // dual_res = max_k ||r_k||_inf where
+    //   r_k = jac_[__y]_k + jac_[__x]_{k+1} * P   (cross-stage costate residual)
+    //
+    // We first find the stage k* that achieves dual_res, then decompose:
+    //   r_k* = sum_cf r_{cf,k*}   where r_{cf,k} = J_{cf,y,k}^T λ_{cf,k} + J_{cf,x,k+1}^T λ_{cf,k+1}
+    //
+    // These per-field vectors sum to r_k* exactly, so their inf-norms are a true
+    // decomposition of dual_res (signed cancellation may make sum < sum-of-norms).
+
+    auto nodes = graph_.flatten_nodes();
+
+    // ── Pass 1: find node k* that achieves max cross-stage costate residual ──
+    size_t worst_i = 0;
+    scalar_t worst_y = 0.;
+    scalar_t worst_u = 0.;
+    for (size_t i = 0; i < nodes.size(); ++i) {
+        auto *cur = nodes[i];
+        node_data *next = (i + 1 < nodes.size()) ? nodes[i + 1] : nullptr;
+        // u stationarity
+        scalar_t u_res = cur->dense().jac_[__u].cwiseAbs().maxCoeff();
+        worst_u = std::max(worst_u, u_res);
+        // cross-stage costate: mirrors compute_kkt_info
+        if (next) {
+            auto P = utils::permutation_from_y_to_x(&cur->problem(), &next->problem());
+            row_vector total_r = next->dense().jac_[__x] * P + cur->dense().jac_[__y];
+            scalar_t y_res = total_r.cwiseAbs().maxCoeff();
+            if (y_res > worst_y) {
+                worst_y = y_res;
+                worst_i = i;
+            }
+        } else {
+            scalar_t y_res = cur->dense().jac_[__y].cwiseAbs().maxCoeff();
+            if (y_res > worst_y) {
+                worst_y = y_res;
+                worst_i = i;
+            }
+        }
+    }
+
+    // ── Pass 2: decompose r_{k*} by field ────────────────────────────────────
+    auto *cur = nodes[worst_i];
+    node_data *next = (worst_i + 1 < nodes.size()) ? nodes[worst_i + 1] : nullptr;
+    auto P = utils::permutation_from_y_to_x(&cur->problem(), next ? &next->problem() : &cur->problem());
+
+    int ny = (int)cur->dense().jac_[__y].cols();
+    int nx_next = next ? (int)next->dense().jac_[__x].cols() : ny;
+
+    // per-field cross-stage vector at k* (signed, not yet normed)
+    std::map<field_t, scalar_t> cross_norm;  // ||r_{cf,k*}||_inf
+    std::map<field_t, scalar_t> u_norm;      // ||J_{cf,u,k*}^T λ_{cf,k*}||_inf
+
+    for (field_t cf : constr_fields) {
+        auto &approx = cur->dense().approx_[cf];
+        if (approx.v_.size() == 0) continue;
+        const auto &lam = cur->dense().dual_[cf];
+        if (lam.size() == 0) continue;
+
+        // u-contribution at k*
+        if (!approx.jac_[__u].is_empty()) {
+            row_vector tmp(approx.jac_[__u].cols()); tmp.setZero();
+            approx.jac_[__u].right_T_times(lam, tmp);
+            u_norm[cf] = tmp.cwiseAbs().maxCoeff();
+        }
+
+        // cross-stage y-contribution: J_{cf,y,k*}^T λ_{cf,k*} + J_{cf,x,k*+1}^T λ_{cf,k*+1}
+        row_vector r = row_vector::Zero(nx_next);
+        if (!approx.jac_[__y].is_empty()) {
+            row_vector tmp(ny); tmp.setZero();
+            approx.jac_[__y].right_T_times(lam, tmp);
+            r += (tmp * P).eval();
+        }
+        if (next) {
+            auto &next_approx = next->dense().approx_[cf];
+            const auto &lam_next = next->dense().dual_[cf];
+            if (!next_approx.jac_[__x].is_empty() && lam_next.size() > 0) {
+                row_vector tmp(nx_next); tmp.setZero();
+                next_approx.jac_[__x].right_T_times(lam_next, tmp);
+                r += tmp;
+            }
+        }
+        cross_norm[cf] = r.cwiseAbs().maxCoeff();
+    }
+
+    // cost-only: jac_[__y]_k* + jac_[__x]_{k*+1} * P  minus field contributions
+    // (we just report total which mirrors dual_res exactly)
+    fmt::print("  dual_res breakdown at worst node {} (y={:.3e} u={:.3e}):\n",
+               worst_i, worst_y, worst_u);
+    fmt::print("    [{:12s}]: cross-stage-y={:.3e}  u={:.3e}\n", "total", worst_y, worst_u);
+    for (field_t cf : constr_fields) {
+        scalar_t cu = u_norm.count(cf) ? u_norm[cf] : 0.;
+        scalar_t cy = cross_norm.count(cf) ? cross_norm[cf] : 0.;
+        if (cu > 1e-10 || cy > 1e-10)
+            fmt::print("    [{:12s}]: cross-stage-y={:.3e}  u={:.3e}\n", field::name(cf), cy, cu);
+    }
+}
 ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
     kkt_info kkt;
     field_t max_field;
@@ -262,17 +381,19 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
     for (auto n : graph_.flatten_nodes()) {
         kkt.objective += n->cost();
         kkt.inf_prim_res = std::max(kkt.inf_prim_res, n->inf_prim_res_);
-        if (update_dual_res)
+        if (update_dual_res && n->dense().jac_[__u].size() > 0)
             kkt.inf_dual_res = std::max(kkt.inf_dual_res, n->dense().jac_[__u].cwiseAbs().maxCoeff());
         // avg_dual_res += n->dense().jac_[__u].cwiseAbs().maxCoeff();
         kkt.inf_comp_res = std::max(kkt.inf_comp_res, n->inf_comp_res_);
         for (auto f : primal_fields) {
-            kkt.inf_prim_step = std::max(kkt.inf_prim_step, n->trial_prim_step[f].cwiseAbs().maxCoeff());
-            if (n->trial_prim_step[f].cwiseAbs().maxCoeff() == kkt.inf_prim_step) {
-                max_field = f;
-                max_step = n->trial_prim_step[f];
+            if (n->trial_prim_step[f].size() > 0) {
+                kkt.inf_prim_step = std::max(kkt.inf_prim_step, n->trial_prim_step[f].cwiseAbs().maxCoeff());
+                if (n->trial_prim_step[f].cwiseAbs().maxCoeff() == kkt.inf_prim_step) {
+                    max_field = f;
+                    max_step = n->trial_prim_step[f];
+                }
+                kkt.obj_fullstep_dec += (n->dense().jac_[f].transpose() * n->trial_prim_step[f]).value();
             }
-            kkt.obj_fullstep_dec += (n->dense().jac_[f].transpose() * n->trial_prim_step[f]).value();
         }
         for (auto f : constr_fields) {
             if (n->trial_dual_step[f].size() > 0) {
@@ -290,9 +411,13 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
                     tmp.noalias() = next->dense().jac_[__x] *
                                         utils::permutation_from_y_to_x(&cur->problem(), &next->problem()) +
                                     cur->dense().jac_[__y];
-                    kkt.inf_dual_res = std::max(kkt.inf_dual_res, tmp.cwiseAbs().maxCoeff());
+                    if (tmp.size() > 0) {
+                        kkt.inf_dual_res = std::max(kkt.inf_dual_res, tmp.cwiseAbs().maxCoeff());
+                    }
                 } else { /// @todo: include initial jac[__x] inf norm if init is optimized
-                    kkt.inf_dual_res = std::max(kkt.inf_dual_res, cur->dense().jac_[__y].cwiseAbs().maxCoeff());
+                    if (cur->dense().jac_[__y].size() > 0) {
+                        kkt.inf_dual_res = std::max(kkt.inf_dual_res, cur->dense().jac_[__y].cwiseAbs().maxCoeff());
+                    }
                 }
             },
             true);

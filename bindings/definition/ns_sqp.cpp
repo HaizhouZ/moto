@@ -68,10 +68,23 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_prop_ro("ipm", [](ns_sqp::settings_t &self) -> auto & { return self.ipm; }, "IPM settings")
         .def_rw("rf", &ns_sqp::settings_t::rf, "Iterative refinement settings")
         .def_prop_ro("ls", [](ns_sqp::settings_t &self) -> auto & { return self.ls; }, "Line search settings")
+        .def_rw("scaling", &ns_sqp::settings_t::scaling, "Jacobian scaling settings")
         .def_rw("no_except", &ns_sqp::settings_t::no_except, "Whether to suppress exceptions in parallel jobs")
         .def_rw("prim_tol", &ns_sqp::settings_t::prim_tol, "Primal feasibility tolerance")
         .def_rw("dual_tol", &ns_sqp::settings_t::dual_tol, "Dual feasibility tolerance")
         .def_rw("comp_tol", &ns_sqp::settings_t::comp_tol, "Complementarity feasibility tolerance");
+
+    nb::class_<ns_sqp::scaling_settings> sc_setting(sqp, "scaling_settings");
+    sc_setting
+        .def_rw("scaling_mode", &ns_sqp::scaling_settings::mode,
+                "Scaling mode: none, gradient (default), or equilibrium")
+        .def_rw("equilibrium_iters", &ns_sqp::scaling_settings::equilibrium_iters,
+                "Number of Ruiz iterations for equilibrium scaling")
+        .def_rw("min_scale", &ns_sqp::scaling_settings::min_scale,
+                "Minimum scale factor clamp (avoids division by zero)")
+        .def_rw("update_ratio_threshold", &ns_sqp::scaling_settings::update_ratio_threshold,
+                "Recompute scales when dual_res / prim_res >= this threshold");
+    moto::export_enum<ns_sqp::scaling_settings::mode_t>(sc_setting);
 
     nb::enum_<moto::solver::ipm_config::adaptive_mu_t> enum_binder(sqp, "adaptive_mu_t");
 

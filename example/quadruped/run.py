@@ -203,10 +203,11 @@ class pinCasadiModel(cpin.Model):
             # cs.vcat([v_f[:2, i], z_f[i]]) * active_foot[i],
         )
         c.enable_if_all([self.f_f[i]])
-        soft_c: moto.pmm_constr = c.cast_soft()
         # return c.cast_soft() if soft else c
-        soft_c.rho = 1e-8
-        return soft_c if soft else c
+        return c
+        # soft_c: moto.pmm_constr = c.cast_soft()
+        # soft_c.rho = 1e-8
+        # return soft_c if soft else c
 
     def make_foot_kin_cost(self, i: int):
         pos_cost = (
@@ -352,14 +353,14 @@ model = pinCasadiModel(
 
 prob = moto.ocp.create()
 prob.add(model.dyn)
-if full:
-    prob.add(model.fric)
+# if full:
+#     prob.add(model.fric)
 prob.add(model.kin_constr)
 if not full:
     prob.add(model.kin_cost)
 # prob.add(model.zf_constr)
-prob.add(model.make_tq_limit_constr())
-prob.add(model.make_joint_limit_constr())
+# prob.add(model.make_tq_limit_constr())
+# prob.add(model.make_joint_limit_constr())
 model.add_dt_constr_and_cost(prob, dt_nom)
 prob.add(model.get_state_cost())
 prob.add(model.get_input_cost())
@@ -423,8 +424,8 @@ g.add_edge(nstop, n1, stance_length)
 # print(g.flatten_nodes())
 
 sqp.settings.ipm.mu0 = 1.0
-# sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
-sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.monotonic_decrease
+sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
+# sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.monotonic_decrease
 # sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.quality_function_based
 sqp.settings.ipm_conditional_corrector = True
 sqp.settings.prim_tol = 1e-3
@@ -433,6 +434,7 @@ sqp.settings.comp_tol = 1e-3
 sqp.settings.rf.max_iters = 2
 sqp.settings.ls.max_soc_iter = 4
 sqp.settings.ls.update_alpha_dual = True
+sqp.settings.scaling.scaling_mode = moto.sqp.scaling_settings.mode_none
 # cfg = [
 #     [-0.9595959595959596, -0.6161616161616161],
 #     [-0.9595959595959596, 0.31313131313131315],
@@ -486,7 +488,7 @@ cnt = 0
 iters = 0
 start = time.perf_counter()
 # while cnt < 50:
-res = sqp.update(100, verbose=True)
+res = sqp.update(50, verbose=True)
 sqp.settings.ipm.warm_start = True
 cnt += 1
 iters += res.num_iter

@@ -28,12 +28,18 @@ void ns_sqp::iterative_refinement() {
         } thread_res[settings.n_worker];
         size_t step = 0;
         graph_.apply_forward<true>([&](size_t tid, data *d, data *next) {
-            thread_res[tid].inf_res_stat_u = std::max(thread_res[tid].inf_res_stat_u, d->dense().res_stat_[__u].cwiseAbs().maxCoeff());
-            if (next != nullptr) {
-                next->dense().res_stat_[__x].applyOnTheRight(utils::permutation_from_y_to_x(&d->problem(), &next->problem()));
-                d->dense().res_stat_[__y] += next->dense().res_stat_[__x];
+            if (d->dense().res_stat_[__u].size() > 0) {
+                thread_res[tid].inf_res_stat_u = std::max(thread_res[tid].inf_res_stat_u, d->dense().res_stat_[__u].cwiseAbs().maxCoeff());
             }
-            thread_res[tid].inf_res_stat_y = std::max(thread_res[tid].inf_res_stat_y, d->dense().res_stat_[__y].cwiseAbs().maxCoeff());
+            if (next != nullptr) {
+                if (next->dense().res_stat_[__x].size() > 0) {
+                    next->dense().res_stat_[__x].applyOnTheRight(utils::permutation_from_y_to_x(&d->problem(), &next->problem()));
+                    d->dense().res_stat_[__y] += next->dense().res_stat_[__x];
+                }
+            }
+            if (d->dense().res_stat_[__y].size() > 0) {
+                thread_res[tid].inf_res_stat_y = std::max(thread_res[tid].inf_res_stat_y, d->dense().res_stat_[__y].cwiseAbs().maxCoeff());
+            }
         },
                                    true);
         scalar_t inf_res_stat_u = 0.;

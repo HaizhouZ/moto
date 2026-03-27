@@ -48,16 +48,19 @@ Multiple-inherits from:
 - `nsp_` (`nullspace_data`) — see below
 
 ### `nullspace_data` (inside `ns_riccati_data::nsp_`)
-Built by `ns_factorization`, consumed by Riccati recursion and diagnostics:
+Built by `ns_factorization` (Jacobian-based, once per SQP iteration) and updated by `ns_factorization_correction` (residual-based, also called for SOC/iterative refinement):
 - `s_c_stacked` (ncstr × nu): stacked equality constraint u-Jacobians = `[s_y*F_u ; c_u]`
 - `s_c_stacked_0_K` (ncstr × nx): stacked equality constraint x-Jacobians = `[s_x + s_y*F_x ; c_x]`
-- `lu_eq_` (`Eigen::FullPivLU`): LU of `s_c_stacked`; used to solve for `u_y_K`, compute rank/kernel
+- `s_c_stacked_0_k` (ncstr): stacked equality constraint residuals = `[s_y*F_0 ; eq_xu.v]` — built by `ns_factorization_correction`
+- `lu_eq_` (`Eigen::FullPivLU`): LU of `s_c_stacked`; used to solve for `u_y_K`/`u_y_k`, compute rank/kernel
 - `rank`: rank of `s_c_stacked` (0 = unconstrained, ncstr = fully_constrained)
 - `Z_u` (nu × nz): null space basis of `s_c_stacked` (kernel of equality u-Jacobian)
 - `Z_y` (ny × nz): `F_u * Z_u` — null space mapped to next-state coordinates
 - `Q_zz` (nz × nz): projected Hessian in null-space coordinates
-- `u_y_K` (nu × nx): `lu_eq_.solve(s_c_stacked_0_K)` — u sensitivity to x
+- `u_y_K` (nu × nx): `lu_eq_.solve(s_c_stacked_0_K)` — u sensitivity to x (Jacobian-based)
+- `u_y_k` (nu): `lu_eq_.solve(s_c_stacked_0_k)` — u feedforward from residual (built by `ns_factorization_correction`)
 - `y_y_K` (ny × nx): `F_x + F_u * u_y_K` — y sensitivity to x (closed-loop dynamics in null-space)
+- `y_y_k` (ny): `F_0 - F_u * u_y_k` — y feedforward from residual (built by `ns_factorization_correction`)
 
 ---
 
@@ -120,31 +123,77 @@ d->for_each(__ineq_xu, [](const soft_constr &sf, soft_constr::approx_data &sd) {
 
 ---
 
+## Jacobian scaling (`src/solver/sqp_impl/scaling.cpp`)
+Applied in-place to `dense().approx_[cf]` before factorization; reversed after the QP solve via `unscale_duals`.
+
+**`scaling_settings` fields** (in `ns_sqp::scaling_settings`):
+- `mode`: `none` / `gradient` / `equilibrium` (default: `gradient`; `gradient` preferred — `equilibrium` is ~2× more expensive per scale-compute step)
+- `equilibrium_iters`: Ruiz iterations (default: 5)
+- `min_scale`: clamp floor to avoid division by zero (default: 1e-6)
+- `update_ratio_threshold`: recompute scales when `inf_prim_step ≥ 1/threshold` (large primal step → Jacobians changed); cached otherwise (default: 10 → recompute when step ≥ 0.1)
+
+**Scale vectors** (cached in `data::scale_c_[cf]` and `data::scale_p_[pi]`):
+- `scale_c_[cf]`: per-row scale for constraint field `cf`; empty means not yet computed (first call or after `reset_scaling`)
+- `scale_p_[pi]`: per-primal-field scale for cost gradient (1 scalar per primal field)
+- `scaling_applied_`: flag; true between `compute_and_apply_scaling` and `unscale_duals`
+
+**`compute_and_apply_scaling(kkt)`**:
+1. Decides whether to recompute scales: recomputes if `inf_prim_step ≥ 1/update_ratio_threshold` (large step → Jacobians changed) OR `scale_c_` is empty (first call). Near convergence the cached scales are reused.
+2. Only scales `hard_constr_fields_non_dyn` = `{__eq_x, __eq_xu}`. `__dyn` excluded because `approx_[__dyn].jac_[__y]` aliases `f_y_` used by `dense_dynamics::compute_project_jacobians` LU.
+3. `gradient` mode: `s[i] = 1 / max(min_scale, max(row_infnorm(J_i), |v_i|))` — row normalises Jacobian and residual.
+4. `equilibrium` mode: iterative Ruiz; each iter computes row inf-norm of `diag(s) * J`, then `s[i] /= row_norm[i]`.
+5. Applies `s` in-place: `v_[i] *= s[i]`, `J_[row i] *= s[i]`.
+6. `scale_p_` is always 1 (cost gradient scaling disabled — `Q_y` propagates across stages via backward Riccati and per-stage scaling would cause compounding errors).
+7. Must be called **after** `update_approximation` and **before** `ns_factorization`.
+
+**`unscale_duals()`** — reverses in-place scaling for `hard_constr_fields_non_dyn` only:
+- `approx.v_[i] /= s[i]` — reverse residual scaling
+- `approx.jac_[pf]` rows divided by `s` (i.e., multiplied by `s.cwiseInverse()`)
+- `trial_dual_step[cf][i] *= s[i]` — unscale the dual **step** computed in scaled space
+
+**Key math**: scaling applies `s·J` to constraint Jacobians. Scaled KKT: `(s·J)^T Δλ_scaled = -∇f`. Original: `J^T Δλ_orig = -∇f`. Therefore `Δλ_orig = s · Δλ_scaled`. Only `trial_dual_step` is unscaled — `dual_[cf]` is the accumulated λ from previous iterations, already in original units, and must NOT be touched.
+
+---
+
 ## Per-iteration SQP loop (`ns_sqp_impl.cpp`)
 Each call to `update(n_iter, verbose)`:
 1. `initialize()` — eval values + derivatives, print header
 2. For each iteration:
-   1. `ns_factorization` (parallel) — build `s_c_stacked`, LU, Z_u, Q_zz per node
-   2. `print_licq_info()` (if verbose) — global LICQ diagnostic (see below)
+   1. `compute_and_apply_scaling(kkt)` (parallel) — row-scale Jacobians and residuals in-place
+   2. `ns_factorization` (parallel) — build `s_c_stacked`, LU, Z_u, Q_zz, `u_y_K`, `y_y_K` per node (calls `ns_factorization_correction` at end for residual-based fields)
    3. `riccati_recursion` (backward) — backward pass, updates V_xx
    4. `compute_primal_sensitivity` (parallel) — compute d_u.K, d_y.K
    5. `fwd_linear_rollout` (forward) — compute Newton step
    6. `ineq_constr_prediction` — start Mehrotra predictor step (if IPM + adaptive mu)
    7. `finalize_primal_step` + `update_ls_bounds` (parallel)
-   8. `ineq_constr_correction` — Mehrotra corrector step (if IPM + adaptive mu)
-   9. Iterative refinement (if enabled and has inequality constraints)
-   10. `finalize_dual_newton_step`, `backup_trial_state`
-   11. Filter line search loop (`filter_linesearch` → `try_step`)
-   12. `update_approximation` (derivatives) on accept
+   8. `ineq_constr_correction` — Mehrotra corrector step + re-solve (if IPM + adaptive mu)
+   9. Iterative refinement (if `rf.enabled && rf.max_iters > 0 && has_ineq`)
+   10. `unscale_duals()` — reverse all in-place scaling on duals, Jacobians, residuals
+   11. `finalize_dual_newton_step` + `backup_trial_state` (once, before line search)
+   12. Filter line search loop: `apply_affine_step` → `compute_kkt_info` → `filter_linesearch` → `line_search_action`
+       - `accept`: eval derivatives, update filter, continue
+       - `backtrack`: restore trial state, reduce alpha, goto step 12
+       - `retry_second_order_correction`: `second_order_correction()`, goto step 12 (currently commented out)
+       - `stop`: use backup strategy (min_step or best_trial), eval derivatives
    13. Print stats; check convergence; update mu (monotone mode)
+- `print_licq_info()` and `print_scaling_info()` are available as diagnostics but currently invoked under comments — call manually when needed
 
 ---
 
 ## Line search / filter (IPOPT-style)
-- `try_step()` in `line_search.cpp`: checks filter dominance, then switching condition, then Armijo or filter acceptance.
-- Switching condition guard: **`obj_fullstep_dec < 0.0` must come before the `std::pow` call** — negative base with non-integer exponent is NaN in C++.
-- `s_phi` (default 2.3) and `s_theta` (default 1.1) are configurable via `linesearch_setting` and exposed to Python.
-- SOC (second-order correction) block is currently commented out — do not remove, it may be re-enabled.
+`filter_linesearch` returns a `line_search_action` enum; the main loop dispatches on it. `try_step()` implements:
+1. **Filter rejection**: trial point dominated by any filter point → reject.
+2. **Switching condition** (IPOPT §3.3): `obj_fullstep_dec < 0` AND `(-obj_fullstep_dec)^s_phi ≥ (inf_prim_res)^s_theta` AND `inf_prim_res_k ≤ constr_vio_min`:
+   - Yes → **Armijo mode**: accept if `obj_trial ≤ obj_k + armijo_dec_frac * alpha * obj_fullstep_dec`. Sets `last_step_was_armijo = true`.
+   - No → **Filter mode**: accept if trial point is not dominated by the current iterate.
+3. `update_filter` adds the accepted point to the filter only when `!last_step_was_armijo`.
+4. `constr_vio_min` is set once at the start of `update()` as `kkt_last.inf_prim_res * constr_vio_min_frac` — fixed for the duration of the call.
+- `filter_linesearch_data::point` holds `{prim_res, dual_res, objective}` — objective is now part of the filter.
+- **Switching condition guard**: `obj_fullstep_dec < 0.0` must come before the `std::pow` call — negative base with non-integer exponent is NaN in C++.
+- `s_phi` (default 2.3), `s_theta` (default 1.1), `armijo_dec_frac` (default 1e-4), `constr_vio_min_frac` (default 1e-4) are configurable via `linesearch_setting` and exposed to Python.
+- Backtracking uses a **linear sweep**: alpha decreases by `initial_alpha / max_steps` per step (not geometric).
+- `failure_strategy` (renamed from `failure_backup`): `min_step` or `best_trial` (default).
+- SOC (`second_order_correction`) is implemented but its call site in `filter_linesearch` is commented out — do not remove.
 
 ---
 
@@ -158,7 +207,7 @@ Each call to `update(n_iter, verbose)`:
 ---
 
 ## LICQ diagnostic (`print_licq_info`)
-- Defined in `ns_sqp_impl.cpp`, called every iteration inside the `settings.verbose` block (after `ns_factorization`).
+- Defined in `ns_sqp_impl.cpp`. Call manually (currently under a comment) after `ns_factorization` has run.
 - Implements **global LICQ via forward nullspace propagation** (DMS staircase structure).
 - `Z_x` (nx × nz_x): null space of all prior-stage constraints expressed in x_k coords; starts empty (x_0 fixed).
 - Per stage builds augmented Jacobian `A_k = [eq_rows ; active_ineq_rows]` in `(Z_x, u)` coordinates and checks rank.
@@ -178,6 +227,9 @@ Each call to `update(n_iter, verbose)`:
 - IPOPT paper naming conventions are used for line search parameters (e.g., `s_phi`, `s_theta`, `armijo_dec_frac`).
 - `__eq_x` / `__ineq_x` Jacobians are always w.r.t. `__y` after finalization — never assume `__x` is present.
 - `for_each<field>(cb)` deduces `func_type` and `approx_type` from the callback signature via static cast through `shared<expr>`; use `dynamic_cast` inside when the concrete approx type may vary.
+- Use `solver_call(f)` (not `bind`) to wrap `generic_solver` member function pointers for `graph_` traversal methods.
+- `mu_method` is a **value type** (`adaptive_mu_t`), not a pointer — default is `mehrotra_predictor_corrector`. Do not check for `nullptr`.
+- `settings.ls` and `settings.ipm` are references into `settings_t` (which multiple-inherits them via `workspace_data_collection`). Do not copy `settings_t` by value after construction — the references would alias the old object.
 
 ---
 

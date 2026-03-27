@@ -15,6 +15,17 @@ struct generic_solver;
 } // namespace solver
 struct ns_sqp {
 
+    struct scaling_settings {
+        enum class mode_t : size_t {
+            none,       ///< no scaling
+            gradient,   ///< row-normalise each Jacobian to unit inf-norm
+            equilibrium ///< Ruiz / Sinkhorn doubly-balanced scaling
+        } mode = mode_t::gradient;
+        size_t equilibrium_iters = 5;        ///< Ruiz iterations (equilibrium only)
+        scalar_t min_scale = 1e-6;             ///< clamp to avoid division by zero
+        scalar_t update_ratio_threshold = 10.; ///< re-scale when dual_res / prim_res >= this; below it cached scales are reused
+    };
+
     struct iterative_refinement_setting {
         bool enabled = true;           ///< whether to use iterative refinement
         size_t max_iters = 5;          ///< max refinement iterations
@@ -61,6 +72,7 @@ struct ns_sqp {
         double comp_tol = 1e-6; ///< complementarity feasibility tolerance
 
         iterative_refinement_setting rf;
+        scaling_settings scaling;
 
         bool no_except = false;
 
@@ -83,6 +95,12 @@ struct ns_sqp {
         static void update_approx(data *d) {
             d->update_approximation();
         }
+        /// row scale applied to each constraint field (empty ⟹ scaling not yet applied)
+        array_type<vector, constr_fields> scale_c_;
+        /// scale applied to each primal field's cost gradient
+        array<scalar_t, field::num_prim> scale_p_{};
+        /// whether scaling has been applied (and therefore duals must be unscaled)
+        bool scaling_applied_ = false;
     };
 
     struct kkt_info {
@@ -134,6 +152,8 @@ struct ns_sqp {
 
     /// print inf norms of constraint residuals and Jacobians across all nodes, to diagnose scaling
     void print_scaling_info();
+    /// print per-field contribution to dual stationarity residual (first node only)
+    void print_dual_res_breakdown();
     /// check LICQ at the current point: stacks all constraint Jacobians per node and reports rank via SVD
     void print_licq_info();
     /// print statistics header
@@ -146,6 +166,17 @@ struct ns_sqp {
     void iterative_refinement();
     /// update the line search bounds with the (probably updated) max value
     void finalize_ls_bound_and_set_to_max();
+    /**
+     * @brief Compute row scales from current Jacobian magnitudes (gradient or equilibrium mode)
+     *        and apply them in-place to v_, jac_ and the cost gradient.
+     *        Must be called after update_approximation(eval_derivatives).
+     * @param kkt current KKT info (used to decide whether to refresh the scale vectors)
+     */
+    void compute_and_apply_scaling(const kkt_info &kkt);
+    /// Reverse the row scaling on the dual variables after the QP solve.
+    void unscale_duals();
+    /// Clear all stored scales (called on initialize()).
+    void reset_scaling();
     /**
      * @brief filter line search for the current iteration, will update the line search data and the kkt info of the current solution
      * @note just for convenient reset

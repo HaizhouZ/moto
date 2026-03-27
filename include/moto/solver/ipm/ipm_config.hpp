@@ -20,6 +20,7 @@ class ipm_config {
     };
 
     scalar_t mu = 1e-2; ///< initial barrier parameter
+    scalar_t mu_trial = 1e-2; ///< trial barrier parameter for the affine step
     adaptive_mu_t mu_method = mehrotra_predictor_corrector; ///< adaptive mu method
     bool ipm_conditional_corrector = false; ///< whether to use conditional corrector
 
