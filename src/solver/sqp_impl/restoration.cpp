@@ -46,6 +46,10 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     kkt_info kkt_rest = kkt_before;
 
     for (size_t i_rest = 0; i_rest < rs.max_iter; ++i_rest) {
+        if (kkt_before.num_iter + i_rest + 1 > settings.max_iter) {
+            fmt::print("[resto]: reached maximum number of iterations without convergence, exiting restoration\n");
+            break;
+        }
         // Write proximal gradient and Hessian directly into jac_modification_ and
         // hessian_modification_ after update_approximation has zeroed them.
         // merge_jacobian_modification (inside ns_factorization) will fold them into Q_u/Q_y.

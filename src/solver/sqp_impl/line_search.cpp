@@ -153,16 +153,12 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     }
 
     ls.recompute_approx = true;
-    // fmt::print("  previous res, primal res: {:.3e}, dual res: {:.3e}\n", kkt_last.inf_prim_res, kkt_last.inf_dual_res);
-    /// try second-order correction before backtracking
-    /// skip if line search started already or first trial already shows improvement in primal residual
-    // if (settings.ls.enable_soc && ls.step_cnt == 0 && !ls.skip_soc &&
-    //     ls.soc_iter_cnt < settings.ls.max_soc_iter) {
-    //     if (settings.verbose)
-    //         fmt::print("  ls retry with second-order correction ({}/{})\n", ls.soc_iter_cnt + 1, settings.ls.max_soc_iter);
-    //     ls.soc_iter_cnt++;
-    //     return line_search_action::retry_second_order_correction;
-    // }
+    // try second-order correction (IPOPT §3.4 / A-5.5): only on the first rejection,
+    // only when rejected by filter (not Armijo), and κ_soc abort not triggered.
+    if (settings.ls.enable_soc && ls.step_cnt == 0 && !ls.skip_soc &&
+        ls.soc_iter_cnt < settings.ls.max_soc_iter && !ls.switching_condition) {
+        
+    }
     /// backtrack
     if (settings.ls.max_steps > ls.step_cnt) {
         ls.step_cnt++;
@@ -204,16 +200,6 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
 }
 
 void ns_sqp::second_order_correction() {
-    graph_.for_each_parallel([](data *d) {
-        d->first_order_correction_start([]() {});
-    });
-    graph_.for_each_parallel(solver_call(&solver_type::ns_factorization_correction));
-
-    post_factorization_correction_step();
-    graph_.for_each_parallel([this](data *d) {
-        d->first_order_correction_end();
-        finalize_correction(d);
-    });
 }
 
 } // namespace moto

@@ -61,7 +61,7 @@ void corrector_step_start(data_base *data) {
         }));
 }
 void corrector_step_end(data_base *data) {
-    data->swap_jacobian_modification(); // move
+    data->first_order_correction_end();
 }
 
 } // namespace ineq_soft

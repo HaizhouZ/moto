@@ -68,10 +68,13 @@ void ns_sqp::ineq_constr_correction() {
                 kkt_last.inf_comp_res,
             }) < settings.ipm.mu_monotone_fraction_threshold * settings.ipm.mu) {
             // if we are close enough to the feasible region, switch to monotone decrease of mu to accelerate convergence
-            fmt::print("Switching to monotone decrease of mu since we are close to the feasible region (max residual: {:.3e} < {:.3e} * mu: {:.3e})\n",
-                       std::max({kkt_last.inf_prim_res, kkt_last.inf_dual_res, kkt_last.inf_comp_res}),
-                       settings.ipm.mu_monotone_fraction_threshold, settings.ipm.mu);
+            if (settings.verbose) {
+                fmt::print("Switching to monotone decrease of mu since we are close to the feasible region (max residual: {:.3e} < {:.3e} * mu: {:.3e})\n",
+                           std::max({kkt_last.inf_prim_res, kkt_last.inf_dual_res, kkt_last.inf_comp_res}),
+                           settings.ipm.mu_monotone_fraction_threshold, settings.ipm.mu);
+            }
             settings.ipm.mu = std::min(settings.ipm.mu_trial, settings.ipm.mu_monotone_factor * settings.ipm.mu);
+            settings.mu_changed = true;
         }
         // use the new mu to update the rhs cost jacobian
         graph_.for_each_parallel(solver::ineq_soft::corrector_step_start);
@@ -155,7 +158,10 @@ ns_sqp::line_search_action ns_sqp::sqp_iter(filter_linesearch_data &ls, kkt_info
         d->backup_trial_state();
         solver::ineq_soft::backup_trial_state(d);
     });
-
+    if (settings.mu_changed) {
+        ls.points.clear(); // if mu changed, the QP cost has changed and the previous line search points are no longer valid, so clear them to avoid rejecting steps based on outdated information
+    }
+    line_search_action action = line_search_action::accept;
 LS_START:
     detail_timed_block_start("apply_affine_step");
     graph_.for_each_parallel([this](data *d) {
@@ -180,24 +186,25 @@ LS_START:
         detail_timed_block_end("update_approx_accepted");
     };
 
-    line_search_action action = line_search_action::accept;
-    if (settings.ls.enabled)
+    if (settings.ls.enabled && !ls.stop) {
         action = filter_linesearch(ls, kkt_trial, kkt_current);
-
-    switch (action) {
-    case line_search_action::accept:
-        update_approx_derivatives();
-        break;
-    case line_search_action::retry_second_order_correction:
-        second_order_correction();
-        goto LS_START;
-    case line_search_action::backtrack:
-        if (ls.recompute_approx)
+        switch (action) {
+        case line_search_action::accept:
+            update_approx_derivatives();
+            break;
+        case line_search_action::retry_second_order_correction: {
+            second_order_correction();
             goto LS_START;
-        break;
-    case line_search_action::stop:
+        }
+        case line_search_action::backtrack:
+            if (ls.recompute_approx)
+                goto LS_START;
+            break;
+        case line_search_action::stop:
+            goto LS_START;
+        }
+    } else {
         update_approx_derivatives();
-        break;
     }
 
     kkt_current = kkt_trial;
@@ -222,13 +229,15 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                 }
             }
         }
-
+        settings.max_iter = n_iter;
         for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
             timed_block_start("sqp_single_iter");
             const scalar_t inf_prim_before = kkt_last.inf_prim_res;
             line_search_action action = sqp_iter(ls, kkt_last,
                                                  /*do_scaling=*/true, /*do_refinement=*/true);
             timed_block_end("sqp_single_iter");
+            if (settings.has_ineq_soft)
+                settings.mu_changed = false;
 
             kkt_last.num_iter = i_iter + 1;
             kkt_last.ls_steps = ls.step_cnt;
@@ -242,8 +251,9 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
 
             // ── restoration trigger ───────────────────────────────────────────
             if (settings.restoration.enabled) {
-                bool ls_failed = (action == line_search_action::stop) &&
-                                 (kkt_last.inf_prim_res >= inf_prim_before);
+                bool ls_failed = (action == line_search_action::stop);
+                //  &&
+                //                  (kkt_last.inf_prim_res >= inf_prim_before);
                 if (ls_failed) {
                     ++ls_failure_count_;
                 } else {
@@ -269,24 +279,25 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             }
 
             if (settings.has_ineq_soft && settings.ipm.mu_method == solver::ipm_config::monotonic_decrease) {
-                bool mu_changed = false;
                 while (kkt_last.inf_prim_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold &&
                        kkt_last.inf_dual_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold &&
                        kkt_last.inf_comp_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold) {
                     settings.ipm.mu *= settings.ipm.mu_monotone_factor;
-                    fmt::print("Monotone decrease of mu: new mu = {:.3e}\n", settings.ipm.mu);
+                    if (verbose)
+                        fmt::print("Monotone decrease of mu: new mu = {:.3e}\n", settings.ipm.mu);
                     ls.points.clear();
-                    mu_changed = true;
+                    settings.mu_changed = true;
                 }
-                if (!mu_changed) {
+                if (!settings.mu_changed) {
                     bool prim_fail = kkt_last.inf_prim_res >= settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold;
                     bool dual_fail = kkt_last.inf_dual_res >= settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold;
                     bool comp_fail = kkt_last.inf_comp_res >= settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold;
-                    fmt::print("Not using monotone decrease of mu: primal res {} threshold, dual res {} threshold, comp res {} threshold\n",
-                               prim_fail ? "exceeds" : "within",
-                               dual_fail ? "exceeds" : "within",
-                               comp_fail ? "exceeds" : "within",
-                               settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold);
+                    if (verbose)
+                        fmt::print("Not using monotone decrease of mu: primal res {} threshold, dual res {} threshold, comp res {} threshold\n",
+                                   prim_fail ? "exceeds" : "within",
+                                   dual_fail ? "exceeds" : "within",
+                                   comp_fail ? "exceeds" : "within",
+                                   settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold);
                 }
                 settings.ipm.mu = std::max(settings.ipm.mu, 1e-11);
             }
@@ -411,6 +422,8 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
     kkt_info kkt;
     field_t max_field;
     vector max_step;
+    scalar_t lambda_l1 = 0.;
+    size_t n_constr = 0;
     // scalar_t avg_dual_res = 0;
     for (auto n : graph_.flatten_nodes()) {
         kkt.objective += n->cost();
@@ -419,6 +432,15 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
             kkt.inf_dual_res = std::max(kkt.inf_dual_res, n->dense().jac_[__u].cwiseAbs().maxCoeff());
         // avg_dual_res += n->dense().jac_[__u].cwiseAbs().maxCoeff();
         kkt.inf_comp_res = std::max(kkt.inf_comp_res, n->inf_comp_res_);
+        if (update_dual_res) {
+            for (auto cf : constr_fields) {
+                const auto &lam = n->dense().dual_[cf];
+                if (lam.size() > 0) {
+                    lambda_l1 += lam.lpNorm<1>();
+                    n_constr += static_cast<size_t>(lam.size());
+                }
+            }
+        }
         for (auto f : primal_fields) {
             if (n->trial_prim_step[f].size() > 0) {
                 kkt.inf_prim_step = std::max(kkt.inf_prim_step, n->trial_prim_step[f].cwiseAbs().maxCoeff());
@@ -455,6 +477,11 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
                 }
             },
             true);
+        // IPOPT-style dual scaling: s_d = max(s_max, ||λ||_1 / n_constr) / s_max
+        if (n_constr > 0) {
+            scalar_t s_d = std::max(settings.s_max, lambda_l1 / static_cast<scalar_t>(n_constr)) / settings.s_max;
+            kkt.inf_dual_res /= s_d;
+        }
     }
     return kkt;
 }

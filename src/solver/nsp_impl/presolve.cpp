@@ -15,7 +15,7 @@ void generic_solver::ns_factorization_correction(ns_riccati_data *cur) {
     auto &d = *cur;
     auto &nsp = d.nsp_;
     auto &_approx = d.dense_->approx_;
-    
+
     cur->update_projected_dynamics_residual();
 
     nsp.u_0_p_k = d.Q_u.transpose();

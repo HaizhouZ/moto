@@ -172,49 +172,48 @@ where `u_ref`, `y_ref`, `rho_u`, `rho_y`, `sigma_u`, `sigma_y` are stored in `ns
 
 **GN mode in `ns_factorization(cur, gauss_newton=true)`** (`src/solver/nsp_impl/presolve.cpp`):
 - Runs the standard factorization preamble: `update_projected_dynamics`, `merge_jacobian_modification`, builds `s_c_stacked`, `lu_eq_`, `s_c_stacked_0_K` (always built unconditionally before the rank branch).
-- **Original running cost is dropped entirely** (`Q_u/Q_y/Q_x` zeroed; `Q_uu/Q_yy/Q_xx/Q_ux/Q_yx` not used). IPM/soft-constraint `_mod` terms retained.
-- Proximal cost is injected via `merit_data::prox_jac_[__u/y]` and `merit_data::prox_hessian_diag_[__u/y]`, which `update_approximation(eval_derivatives)` accumulates into `jac_[__u/y]` and `hessian_modification_[__u/u]`/`[__y/y]` before `ns_factorization` runs. So proximal lands in `Q_u`/`Q_y` and `Q_uu_mod`/`Q_yy_mod` automatically. The GN mode itself has no knowledge of proximal.
-- Builds `s_c_stacked_0_k` (equality residual vector) explicitly after calling `update_projected_dynamics_residual()`, so the GN gradient is computed from fresh residuals.
-- Zeros the original-cost Hessian sparse fields (`Q_uu`, `Q_ux`, `Q_yx`, `Q_xx`, `Q_yy`) so that `unconstrain_setup()` sees only `_mod` contributions. Then calls `unconstrain_setup()` normally (buffer resize + `Q_zz = Q_uu_mod`, `V_xx += F_x^T Q_yx` = 0, etc.).
-- Gradients:
-  - `Q_u = F_u^T F_0 + s_c^T s_c_0_k`  (+ proximal already in `Q_u` via `prox_jac_`)
-  - `Q_y = 0`  (+ proximal)
-  - `Q_x = F_x^T F_0 + s_c_0_K^T s_c_0_k`
-- Hessians (after `unconstrain_setup`, GN terms added):
-  - `Q_zz = Q_uu_mod + s_c^T s_c`  (`Q_uu_mod` contains proximal; `F_u^T F_u` via riccati `V_yy += I`)
-  - `V_yy = Q_yy_mod + I`  (`Q_yy_mod` contains proximal)
-  - `u_0_p_K / z_0_K = Q_ux_mod + s_c^T s_c_0_K`
-  - `V_xx = Q_xx_mod + s_c_0_K^T s_c_0_K`  (`F_x^T Q_yx` = 0 after zeroing `Q_yx`)
-- Temporarily zeros `ns/nc/ncstr` before calling `ns_factorization_correction` so it takes the unconstrained branch (`z_0_k = Q_u^T`, `y_y_k = F_0`); restores them after for `finalize_dual_newton_step`.
-- Saves `Q_x`, zeros `ns/nc/ncstr`, calls `ns_factorization_correction` (sets `z_0_k=Q_u^T`, `y_y_k=F_0`), restores `Q_x` and `ns/nc/ncstr`.
-- `lu_eq_` preserved for the dual step in `finalize_dual_newton_step`.
+- **PMM (penalty method) treatment of `__eq_x`/`__eq_xu`**: original running cost Hessians (`Q_uu`, `Q_ux`, `Q_yx`, `Q_xx`, `Q_yy`) and gradients (`Q_u`, `Q_y`) are **kept intact**; equality constraints are removed from the hard-constraint path and instead penalized. IPM/soft-constraint `_mod` terms also retained.
+- Proximal gradient/Hessian are written by `restoration_update` directly into `dense().jac_modification_[__u/y]` and `dense().primal_prox_hess_diagonal_[__u/y].diagonal()` before each `sqp_iter`. `merge_jacobian_modification` folds them into `Q_u`/`Q_y`; the diagonal Hessian lands in `Q_uu_mod`/`Q_yy_mod` via the pre-allocated diagonal sparsity in `hessian_[__u][__u]` (see `merit_data` constructor). GN mode sees proximal already in `Q_u`/`Q_uu_mod`.
+- Builds `s_c_stacked_0_k` explicitly after `update_projected_dynamics_residual()` for the PMM gradient.
+- **Gradients** (PMM Schur complement, mirrors `pmm_constr::propagate_jacobian`):
+  - `Q_u += (h/rho_eq)^T * s_c_stacked`  where `h = s_c_stacked_0_k`
+  - `Q_x += (h/rho_eq)^T * s_c_stacked_0_K`
+- Calls `unconstrain_setup()` (sets `rank_status_ = unconstrained`, copies `Q_uu+Q_uu_mod` into `Q_zz`, etc.), then adds **PMM Hessian terms**:
+  - `Q_zz += (1/rho_eq) * s_c^T * s_c`
+  - `u_0_p_K / z_0_K += (1/rho_eq) * s_c^T * s_c_0_K`
+  - `V_xx += (1/rho_eq) * s_c_0_K^T * s_c_0_K`
+- `rank_status_ = unconstrained` (set by `unconstrain_setup`), so `ns_factorization_correction` takes the early return path (`z_0_k = Q_u^T`, `y_y_k = F_0`).
+- `ns/nc/ncstr` are left intact after GN factorization for `finalize_dual_newton_step`.
+- `lu_eq_` preserved for dual recovery: `dlam = (s_c * du + h) / rho_eq` in `finalize_dual_newton_step` / `rollout.cpp`.
 
 **`restoration_update(kkt_before, ls)`** (`src/solver/sqp_impl/restoration.cpp`):
-- Snapshots proximal anchors, weights, and `sigma` scales into each node's `aux_` as `restoration_aux_data`.
-- Computes `sigma_u_sq[i] = 1/max(|u_ref[i]|,1)²` per node, writes `rho*sigma_sq` into `merit_data::prox_hessian_diag_[__u/y]` once (constant).
-- Each iteration: recomputes `rho*sigma_sq*(u-u_ref)` into `merit_data::prox_jac_[__u/y]` (changes as u moves), then calls `sqp_iter(..., is_restoration=true)`.
-- Inside `sqp_iter`, `update_approximation(eval_derivatives)` on accept accumulates `prox_jac_` into `jac_[__u/y]` and `prox_hessian_diag_` into `hessian_modification_[__u/u]`, so proximal lands in `Q_u`/`Q_y`/`Q_uu_mod`/`Q_yy_mod` before `ns_factorization` sees them.
-- After the loop, clears `prox_jac_`/`prox_hessian_diag_` (resize to 0) and `aux_` on all nodes.
+- Sets `settings.in_restoration = true` on entry, `false` on exit.
+- Iterates over **all** nodes via `graph_.flatten_nodes()` (includes key nodes AND intermediate edge nodes). Using `graph_.nodes()` instead would miss intermediate nodes, leaving their `aux_` as `nullptr` and causing a segfault in `ns_factorization`.
+- Snapshots proximal anchors (`u_ref`, `y_ref`) and per-component scaling `sigma_u_sq[i] = 1/max(|u_ref[i]|,1)²` into `prox_data` for each node. Also allocates `restoration_aux_data` on each node's `aux_` (carries `rho_eq` for the GN dual regularization).
+- Each iteration: writes proximal gradient `rho*(sigma_sq*(u-u_ref))^T` directly into `dense().jac_modification_[__u/y]`, and `rho*sigma_sq` into `dense().primal_prox_hess_diagonal_[__u/y].diagonal()`. `merge_jacobian_modification` (inside `ns_factorization`) folds the gradient into `Q_u/Q_y`; the diagonal Hessian lands in `Q_uu_mod`/`Q_yy_mod` (already aliased from `hessian_[__u][__u]` diagonal sparsity pattern).
 - No scaling; IPM predictor/corrector and iterative refinement active.
-- Uses a **dedicated** `filter_linesearch_data rls` with `constr_vio_min = 0` (pure filter mode). The restoration filter uses the original running cost (evaluated via `update_approx_derivatives` on accept/stop), keeping the filter well-defined without a separate objective.
-- `compute_restoration_objective()` computes `½Σ(‖F_0‖² + ‖s_c_0_k‖²)` across nodes (used for verbose logging only).
-- **Exit criterion**: break when line search was accepted (`rest_action != stop`) OR `inf_prim_res < restoration_improvement_frac * kkt_before.inf_prim_res`. If line search fails and neither criterion is met, give up immediately. This ensures restoration exits as soon as genuine progress is made rather than running to `max_iter`.
-- `restoration_improvement_frac` (default 0.9): fraction of entry infeasibility required for the feasibility-progress exit condition.
-- Clears `aux_`, adds the post-restoration point to the outer filter, returns updated `kkt_info`.
+- Uses `filter_linesearch_data rls = ls` — **copies the outer filter** (not a fresh one). This lets the restoration filter see prior accepted points, preventing restoration from accepting steps that would be rejected by the outer loop.
+- **Exit criteria** (any one breaks the loop):
+  1. `inf_dual_res < dual_tol` AND NOT fully feasible → sets `result = infeasible_stationary` (converged to an infeasible stationary point, e.g. due to LICQ failure).
+  2. `rest_action == accept` AND `inf_prim_res < restoration_improvement_frac * kkt_before.inf_prim_res` → sets `result` as successful.
+  3. Loop exhausted → sets `result = restoration_failed`.
+- Does **not** call `ls.update_filter` — the outer filter is not updated after restoration.
+- Clears all `aux_` pointers after the loop, returns updated `kkt_info` with `result` set.
 
 **`settings.restoration`** (`restoration_settings`):
 - `enabled` (default `true`)
 - `max_iter` (default 50)
 - `trigger_on_failure_count` (default 3)
-- `rho_u`, `rho_y` (default `1e-4`)
-- `restoration_improvement_frac` (default 0.9)
+- `rho_u`, `rho_y` (default `1e-4`) — proximal regularization weights for u and y
+- `rho_eq` (default `1e-6`) — PMM penalty weight for equality constraints in GN mode: `Hess += (1/rho_eq)*J^T*J`, `dlam = (J*du+h)/rho_eq`. Smaller → tighter constraint satisfaction per step.
+- `restoration_improvement_frac` (default 0.9) — required fraction of entry infeasibility for the accept+improve exit criterion
 
 ---
 
 ## Per-iteration SQP loop (`ns_sqp_impl.cpp`)
-Both `update()` and `restoration_update()` share a common inner loop via `sqp_iter(ls, kkt, has_ineq_soft, do_scaling, do_refinement, is_restoration)`:
+Both `update()` and `restoration_update()` share a common inner loop via `sqp_iter(ls, kkt, do_scaling, do_refinement, gauss_newton=false)`:
 1. `compute_and_apply_scaling(kkt)` (if `do_scaling`) — row-scale Jacobians and residuals in-place
-2. `ns_factorization(gauss_newton=is_restoration)` (parallel) — normal: build `s_c_stacked`, LU, Z_u/Q_zz/`u_y_K`/`y_y_K`; GN: feasibility cost (F_0, s_c_0_k); proximal already in `Q_u/Q_y/Q_uu_mod/Q_yy_mod` via `merit_data::prox_*` fields
+2. `ns_factorization(gauss_newton)` (parallel) — normal: build `s_c_stacked`, LU, Z_u/Q_zz/`u_y_K`/`y_y_K`; GN: PMM treatment of equalities, proximal already in `Q_u/Q_y/Q_uu_mod/Q_yy_mod` via `jac_modification_`/`primal_prox_hess_diagonal_`
 3. `riccati_recursion` (backward) — backward pass, updates V_xx
 4. `compute_primal_sensitivity` (parallel) — compute d_u.K, d_y.K
 5. `fwd_linear_rollout` (forward) — compute Newton step
@@ -230,8 +229,8 @@ Both `update()` and `restoration_update()` share a common inner loop via `sqp_it
     - `retry_second_order_correction`: `second_order_correction()`, goto step 12 (currently commented out)
     - `stop`: use backup strategy (min_step or best_trial), eval derivatives
 
-`update()` calls `sqp_iter` with `do_scaling=true, do_refinement=true, is_restoration=false`, then handles the restoration trigger, convergence check, stats printing, and monotone mu update.
-`restoration_update()` calls `sqp_iter` with `do_scaling=false, do_refinement=true, is_restoration=true`.
+`update()` calls `sqp_iter` with `do_scaling=true, do_refinement=true, gauss_newton=false`, then handles the restoration trigger, convergence check, stats printing, and monotone mu update.
+`restoration_update()` calls `sqp_iter` with `do_scaling=false, do_refinement=true, gauss_newton=true`.
 - `print_licq_info()` and `print_scaling_info()` are available as diagnostics but currently invoked under comments — call manually when needed
 
 ---

@@ -53,7 +53,7 @@ void ns_sqp::print_stats(const kkt_info &info) {
         } else if (item.name == "ls") {
             fmt::print("| {:<{}} |", info.ls_steps < 0 ? "--" : std::to_string(info.ls_steps), item.width);
         } else if (item.name == "ipm_mu") {
-            fmt::print("| {:<{}} |", settings.has_ineq_soft ? fmt::format("{:.6e}{}", std::log10(stats_value[idx_stat]), ipm_flags) : "---------", item.width);
+            fmt::print("| {:<{}} |", settings.has_ineq_soft ? fmt::format("{:.6e}{}", stats_value[idx_stat], ipm_flags) : "---------", item.width);
         } else {
             fmt::print("| {:<{}.6e} |", stats_value[idx_stat], item.width);
         }

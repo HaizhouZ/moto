@@ -9,8 +9,8 @@ import meshcat.geometry as mg
 import meshcat.transformations as tf
 import meshcat_shapes as mcs
 
-full = True
-soft = True
+full = False
+soft = False
 
 
 class pinCasadiModel(cpin.Model):
@@ -432,9 +432,10 @@ sqp.settings.prim_tol = 1e-3
 sqp.settings.dual_tol = 1e-3
 sqp.settings.comp_tol = 1e-3
 sqp.settings.rf.max_iters = 2
-sqp.settings.ls.max_soc_iter = 4
 sqp.settings.ls.update_alpha_dual = True
-sqp.settings.scaling.scaling_mode = moto.sqp.scaling_settings.mode_none
+# sqp.settings.scaling.scaling_mode = moto.sqp.scaling_settings.mode_gradient
+sqp.settings.restoration.trigger_on_failure_count = 1
+sqp.settings.restoration.max_iter = 1000
 # cfg = [
 #     [-0.9595959595959596, -0.6161616161616161],
 #     [-0.9595959595959596, 0.31313131313131315],
@@ -447,6 +448,11 @@ cfg = [
 cfg = [
     [-0.8181818181818181, 0.3737373737373739],
     [0.4545454545454546, -0.21212121212121204],
+]
+# simple hopping reduced
+cfg = [
+    [-0.19444444444444445, -0.17929292929292928],
+    [-0.3888888888888889, -0.35858585858585856],
 ]
 step = 0
 node_idx = 0
@@ -488,7 +494,7 @@ cnt = 0
 iters = 0
 start = time.perf_counter()
 # while cnt < 50:
-res = sqp.update(100, verbose=True)
+res = sqp.update(20, verbose=True)
 sqp.settings.ipm.warm_start = True
 cnt += 1
 iters += res.num_iter

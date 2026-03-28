@@ -36,8 +36,9 @@ struct ns_sqp {
     struct linesearch_setting : public solver::linesearch_config {
         bool enabled = true;     ///< whether to use line search
         size_t max_steps = 5;    ///< max line search steps
-        bool enable_soc = true;  ///< whether to try a second-order correction before backtracking
-        size_t max_soc_iter = 2; ///< max number of second-order correction retries per SQP iteration
+        bool enable_soc = true;    ///< whether to try a second-order correction before backtracking
+        size_t max_soc_iter = 4;   ///< max number of second-order correction retries per SQP iteration (p_max in IPOPT)
+        scalar_t kappa_soc = 0.99; ///< SOC abort threshold: abort if θ(x_soc) > kappa_soc * θ_soc_old (IPOPT eq. A-5.9)
         enum class failure_backup_strategy : size_t {
             min_step,   ///< reset to the minimum step size
             best_trial, ///< reset to the best trial so far
@@ -80,10 +81,11 @@ struct ns_sqp {
 
         linesearch_setting &ls;
         ipm_config &ipm;
-
+        size_t max_iter = 100;  ///< maximum number of SQP iterations
         double prim_tol = 1e-6; ///< primal feasibility tolerance
         double dual_tol = 1e-4; ///< dual feasibility tolerance
         double comp_tol = 1e-6; ///< complementarity feasibility tolerance
+        double s_max = 100.;    ///< IPOPT-style dual scaling: s_d = max(s_max, ||λ||_1 / n_constr) / s_max
 
         iterative_refinement_setting rf;
         scaling_settings scaling;
@@ -100,6 +102,7 @@ struct ns_sqp {
         size_t n_worker = MAX_THREADS; ///< number of worker threads
         bool in_restoration = false;   ///< whether currently in restoration mode (used to adjust printouts and possibly other settings)
         bool has_ineq_soft = false;    ///< whether the problem has inequality constraints (used to adjust printouts and possibly other settings)
+        bool mu_changed = false;       ///< whether mu was changed in the current iteration (used to decide whether to update the QP cost for the corrector step)
     } settings;
 
     using solver_type = solver::ns_riccati::generic_solver;
@@ -210,13 +213,14 @@ struct ns_sqp {
         bool recompute_approx = true;
         bool stop = false;        ///< whether to stop the line search
         bool enforce_min = false; ///< whether to enforce the minimum step size
-        size_t soc_iter_cnt = 0;  ///< number of second-order correction attempts in the current SQP iteration
-        bool skip_soc = false;    ///< whether to skip second-order correction
+        size_t soc_iter_cnt = 0;      ///< number of second-order correction attempts in the current SQP iteration
+        bool skip_soc = false;        ///< whether to skip second-order correction
+        scalar_t theta_soc_old = std::numeric_limits<scalar_t>::infinity(); ///< θ(x_k) at SOC entry, for κ_soc abort check (IPOPT A-5.9)
         size_t step_cnt = 0;      ///< current line search step
         scalar_t initial_alpha_primal = 0.;
         scalar_t initial_alpha_dual = 0.;
-        bool switching_condition = false; ///< whether the switching condition for line search is met (used to decide whether to require Armijo decrease in the line search)
-        bool armijo_cond_met = false;     ///< whether the Armijo condition is met for the current trial step
+        bool switching_condition = false;    ///< whether the switching condition for line search is met (used to decide whether to require Armijo decrease in the line search)
+        bool armijo_cond_met = false;        ///< whether the Armijo condition is met for the current trial step
         void reset_per_iter_data() {
             new (this) filter_linesearch_per_iter_data();
         }
@@ -236,6 +240,7 @@ struct ns_sqp {
         scalar_t constr_vio_min = std::numeric_limits<scalar_t>::infinity(); ///< constraint violation bound for switching condition in line search
         bool last_step_was_armijo = false;
         size_t filter_reject_cnt = 0; ///< number of consecutive filter rejections, used for adaptive strategies in line search
+
         void update_filter(const kkt_info &kkt, settings_t &settings);
         bool try_step(const kkt_info &trial_kkt, const kkt_info &current_kkt, settings_t &settings);
     };
