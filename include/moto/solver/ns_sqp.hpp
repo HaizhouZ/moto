@@ -136,13 +136,16 @@ struct ns_sqp {
         size_t num_iter = 0; // number of iterations
         size_t ls_steps = 0; ///< line search steps
 
-        scalar_t objective = 0.;        // objective value
-        scalar_t inf_prim_res = 0.;     // primal residual (constraint violation)
-        scalar_t inf_dual_res = 0.;     // dual residual (stationary condition)
-        scalar_t inf_comp_res = 0.;     // (inequality) complementarity residual
-        scalar_t inf_prim_step = 0.;    // infinity norm of the step
-        scalar_t inf_dual_step = 0.;    // infinity norm of the step
-        scalar_t obj_fullstep_dec = 0.; // full step decrease in objective
+        scalar_t cost = 0.;                  // pure running cost (sum of __cost terms)
+        scalar_t log_slack_sum = 0.;         // sum(log(slack)) across all IPM constraints, mu-free
+        scalar_t barrier_dir_deriv = 0.;     // sum(d_slack / slack_current) across all IPM constraints, mu-free
+        scalar_t objective = 0.;             // barrier objective: cost - mu * log_slack_sum (computed with current mu)
+        scalar_t obj_fullstep_dec = 0.;      // cost gradient dot full step (mu-free; combine with barrier_dir_deriv at current mu for full barrier directional derivative)
+        scalar_t inf_prim_res = 0.;          // primal residual (constraint violation)
+        scalar_t inf_dual_res = 0.;          // dual residual (stationary condition)
+        scalar_t inf_comp_res = 0.;          // (inequality) complementarity residual
+        scalar_t inf_prim_step = 0.;         // infinity norm of the step
+        scalar_t inf_dual_step = 0.;         // infinity norm of the step
     } kkt_last;
     kkt_info update(size_t n_iter, bool verbose = true);
 

@@ -218,7 +218,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
     kkt_last = initialize();
     try {
         filter_linesearch_data ls;
-        ls.constr_vio_min = kkt_last.inf_prim_res * settings.ls.constr_vio_min_frac;
+        ls.constr_vio_min = std::max(kkt_last.inf_prim_res, settings.prim_tol) * settings.ls.constr_vio_min_frac;
 
         settings.has_ineq_soft = false;
         for (data &n : graph_.nodes()) {
@@ -426,7 +426,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
     size_t n_constr = 0;
     // scalar_t avg_dual_res = 0;
     for (auto n : graph_.flatten_nodes()) {
-        kkt.objective += n->cost();
+        kkt.cost += n->cost();
         kkt.inf_prim_res = std::max(kkt.inf_prim_res, n->inf_prim_res_);
         if (update_dual_res && n->dense().jac_[__u].size() > 0)
             kkt.inf_dual_res = std::max(kkt.inf_dual_res, n->dense().jac_[__u].cwiseAbs().maxCoeff());
@@ -451,6 +451,15 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
                 kkt.obj_fullstep_dec += (n->dense().jac_[f].transpose() * n->trial_prim_step[f]).value();
             }
         }
+        // accumulate mu-free barrier quantities: log_slack_sum and barrier_dir_deriv
+        n->for_each<ineq_soft_constr_fields>([&](const soft_constr &, soft_constr::data_map_t &sd) {
+            auto *id = dynamic_cast<solver::ipm_constr::approx_data *>(&sd);
+            if (id == nullptr || id->ipm_cfg == nullptr)
+                return;
+            kkt.log_slack_sum += id->slack_.array().log().sum();
+            if (id->d_slack_.size() > 0)
+                kkt.barrier_dir_deriv += (id->d_slack_.array() / id->slack_backup_.array()).sum();
+        });
         for (auto f : constr_fields) {
             if (n->trial_dual_step[f].size() > 0) {
                 kkt.inf_dual_step = std::max(kkt.inf_dual_step, n->trial_dual_step[f].cwiseAbs().maxCoeff());
@@ -483,6 +492,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
             kkt.inf_dual_res /= s_d;
         }
     }
+    kkt.objective = kkt.cost - settings.ipm.mu * kkt.log_slack_sum;
     return kkt;
 }
 void ns_sqp::print_licq_info() {

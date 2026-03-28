@@ -9,7 +9,7 @@ import meshcat.geometry as mg
 import meshcat.transformations as tf
 import meshcat_shapes as mcs
 
-full = False
+full = True
 soft = False
 
 
@@ -494,7 +494,7 @@ cnt = 0
 iters = 0
 start = time.perf_counter()
 # while cnt < 50:
-res = sqp.update(20, verbose=True)
+res = sqp.update(40, verbose=True)
 sqp.settings.ipm.warm_start = True
 cnt += 1
 iters += res.num_iter

@@ -31,7 +31,7 @@ void ns_sqp::print_stat_header() {
 }
 
 void ns_sqp::print_stats(const kkt_info &info) {
-    scalar_t stats_value[] = {0., info.objective, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res, info.inf_prim_step, info.inf_dual_step,
+    scalar_t stats_value[] = {0., info.cost, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res, info.inf_prim_step, info.inf_dual_step,
                               settings.ls.alpha_primal, settings.ls.alpha_dual, 0., settings.ipm.mu};
     std::string_view ipm_flags;
     if (settings.has_ineq_soft && settings.ipm.ipm_enable_corrector()) {
@@ -53,7 +53,7 @@ void ns_sqp::print_stats(const kkt_info &info) {
         } else if (item.name == "ls") {
             fmt::print("| {:<{}} |", info.ls_steps < 0 ? "--" : std::to_string(info.ls_steps), item.width);
         } else if (item.name == "ipm_mu") {
-            fmt::print("| {:<{}} |", settings.has_ineq_soft ? fmt::format("{:.6e}{}", stats_value[idx_stat], ipm_flags) : "---------", item.width);
+            fmt::print("| {:<{}} |", settings.has_ineq_soft ? fmt::format("{:.3e}{}({:.1f})", stats_value[idx_stat], ipm_flags, std::log10(stats_value[idx_stat])) : "---------", item.width);
         } else {
             fmt::print("| {:<{}.6e} |", stats_value[idx_stat], item.width);
         }
