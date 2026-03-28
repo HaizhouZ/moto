@@ -21,7 +21,7 @@ struct ns_sqp {
             gradient,   ///< row-normalise each Jacobian to unit inf-norm
             equilibrium ///< Ruiz / Sinkhorn doubly-balanced scaling
         } mode = mode_t::gradient;
-        size_t equilibrium_iters = 5;        ///< Ruiz iterations (equilibrium only)
+        size_t equilibrium_iters = 5;          ///< Ruiz iterations (equilibrium only)
         scalar_t min_scale = 1e-6;             ///< clamp to avoid division by zero
         scalar_t update_ratio_threshold = 10.; ///< re-scale when dual_res / prim_res >= this; below it cached scales are reused
     };
@@ -52,8 +52,8 @@ struct ns_sqp {
     };
 
     struct restoration_settings {
-        bool enabled = true;          ///< whether restoration mode is allowed
-        size_t max_iter = 50;         ///< max restoration iterations per trigger
+        bool enabled = true;  ///< whether restoration mode is allowed
+        size_t max_iter = 50; ///< max restoration iterations per trigger
         /// trigger restoration when the filter line search fails this many consecutive outer SQP iters
         size_t trigger_on_failure_count = 3;
         scalar_t rho_u = 1e-4; ///< proximal weight on u (anchors to point where restoration was triggered)
@@ -98,8 +98,8 @@ struct ns_sqp {
         friend class ns_sqp;
         bool verbose = true;
         size_t n_worker = MAX_THREADS; ///< number of worker threads
-        bool in_restoration = false; ///< whether currently in restoration mode (used to adjust printouts and possibly other settings)
-        bool has_ineq_soft = false; ///< whether the problem has inequality constraints (used to adjust printouts and possibly other settings)
+        bool in_restoration = false;   ///< whether currently in restoration mode (used to adjust printouts and possibly other settings)
+        bool has_ineq_soft = false;    ///< whether the problem has inequality constraints (used to adjust printouts and possibly other settings)
     } settings;
 
     using solver_type = solver::ns_riccati::generic_solver;
@@ -120,17 +120,25 @@ struct ns_sqp {
         bool scaling_applied_ = false;
     };
 
+    enum iter_result_t : size_t {
+        unknown = 0,
+        success,               ///< converged to a KKT point within tolerances
+        exceed_max_iter,       ///< reached maximum number of iterations without convergence
+        restoration_failed,    ///< restoration was triggered but failed to make sufficient progress
+        infeasible_stationary, ///< reached an infeasible stationary point (e.g. due to LICQ failure) and cannot make progress
+    };
+
     struct kkt_info {
-        bool solved = false; // whether the problem is solved
+        iter_result_t result = iter_result_t::unknown;
         size_t num_iter = 0; // number of iterations
         size_t ls_steps = 0; ///< line search steps
 
-        scalar_t objective = 0.;     // objective value
-        scalar_t inf_prim_res = 0.;  // primal residual (constraint violation)
-        scalar_t inf_dual_res = 0.;  // dual residual (stationary condition)
-        scalar_t inf_comp_res = 0.;  // (inequality) complementarity residual
-        scalar_t inf_prim_step = 0.; // infinity norm of the step
-        scalar_t inf_dual_step = 0.; // infinity norm of the step
+        scalar_t objective = 0.;        // objective value
+        scalar_t inf_prim_res = 0.;     // primal residual (constraint violation)
+        scalar_t inf_dual_res = 0.;     // dual residual (stationary condition)
+        scalar_t inf_comp_res = 0.;     // (inequality) complementarity residual
+        scalar_t inf_prim_step = 0.;    // infinity norm of the step
+        scalar_t inf_dual_step = 0.;    // infinity norm of the step
         scalar_t obj_fullstep_dec = 0.; // full step decrease in objective
     } kkt_last;
     kkt_info update(size_t n_iter, bool verbose = true);
@@ -207,6 +215,8 @@ struct ns_sqp {
         size_t step_cnt = 0;      ///< current line search step
         scalar_t initial_alpha_primal = 0.;
         scalar_t initial_alpha_dual = 0.;
+        bool switching_condition = false; ///< whether the switching condition for line search is met (used to decide whether to require Armijo decrease in the line search)
+        bool armijo_cond_met = false;     ///< whether the Armijo condition is met for the current trial step
         void reset_per_iter_data() {
             new (this) filter_linesearch_per_iter_data();
         }
@@ -217,11 +227,12 @@ struct ns_sqp {
             scalar_t prim_res = std::numeric_limits<scalar_t>::infinity();
             scalar_t dual_res = std::numeric_limits<scalar_t>::infinity();
             scalar_t objective = std::numeric_limits<scalar_t>::infinity();
-            bool dominate(const point &other, const settings_t &settings) const;
+            /// @check if a point is in the filter
+            bool in_filter(const point &filter_entry, const settings_t &settings) const;
         };
         struct trial : public point, public solver::linesearch_config {
         } best_trial;
-        std::vector<point> points;                                             ///< filter for accepting line search steps
+        std::vector<point> points;                                           ///< filter for accepting line search steps
         scalar_t constr_vio_min = std::numeric_limits<scalar_t>::infinity(); ///< constraint violation bound for switching condition in line search
         bool last_step_was_armijo = false;
         size_t filter_reject_cnt = 0; ///< number of consecutive filter rejections, used for adaptive strategies in line search

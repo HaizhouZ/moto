@@ -105,9 +105,10 @@ void register_submodule_ns_sqp(nb::module_ &m) {
     moto::export_enum<ns_sqp::scaling_settings::mode_t>(sc_setting);
 
     nb::enum_<moto::solver::ipm_config::adaptive_mu_t> enum_binder(sqp, "adaptive_mu_t");
-
+    moto::export_enum<ns_sqp::iter_result_t>(sqp);
     nb::class_<ns_sqp::kkt_info>(sqp, "kkt_info")
-        .def_rw("solved", &ns_sqp::kkt_info::solved, "Whether the problem is solved")
+        .def_ro("result", &ns_sqp::kkt_info::result, "Result of the SQP iteration")
+        .def_prop_ro("solved", [](const ns_sqp::kkt_info &self) { return self.result == ns_sqp::iter_result_t::success; }, "Whether the problem is solved")
         .def_rw("num_iter", &ns_sqp::kkt_info::num_iter, "Number of iterations")
         .def_rw("objective", &ns_sqp::kkt_info::objective, "Objective value")
         .def_rw("inf_prim_res", &ns_sqp::kkt_info::inf_prim_res, "Primal residual (constraint violation)")

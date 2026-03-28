@@ -5,10 +5,10 @@ namespace moto {
 ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_linesearch_data &ls) {
     using namespace solver::ns_riccati;
     const auto &rs = settings.restoration;
-
-    if (settings.verbose)
-        fmt::print("=== Entering restoration phase (inf_prim_res: {:.3e}) ===\n",
-                   kkt_before.inf_prim_res);
+    bool resto_accept = false;
+    bool resto_converge = false;
+    settings.in_restoration = true;
+    fmt::print("[resto]: triggered restoration with rho_u: {:.3e}, rho_y: {:.3e}\n", rs.rho_u, rs.rho_y);
 
     // Snapshot proximal reference points and per-component primal scaling.
     // sigma[i] = 1/max(|ref[i]|, 1) so the proximal cost is on a percentage level.
@@ -21,9 +21,11 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         vector u_ref, y_ref;
         vector sigma_u_sq, sigma_y_sq; // rho-scaled: (1/max(|ref|,1))^2
     };
+    auto &all_nodes = graph_.flatten_nodes();
     std::vector<node_prox> prox_data;
-    prox_data.reserve(graph_.nodes().size());
-    for (data &n : graph_.nodes()) {
+    prox_data.reserve(all_nodes.size());
+    for (data *np : all_nodes) {
+        data &n = *np;
         auto &p = prox_data.emplace_back();
         p.u_ref = n.value(__u);
         p.y_ref = n.value(__y);
@@ -39,8 +41,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     // Dedicated restoration filter: tracks J_rest = ½‖F_0‖² + ½‖s_c_0_k‖² instead of
     // the original running cost, so filter progress reflects feasibility improvement.
     // constr_vio_min=0 means pure filter mode (no Armijo switching).
-    filter_linesearch_data rls;
-    rls.constr_vio_min = 0.; //// todo: maybe allow nonzero constr_vio_min to enforce some minimum restoration progress before accepting a step?
+    filter_linesearch_data rls = ls;
 
     kkt_info kkt_rest = kkt_before;
 
@@ -49,7 +50,8 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         // hessian_modification_ after update_approximation has zeroed them.
         // merge_jacobian_modification (inside ns_factorization) will fold them into Q_u/Q_y.
         size_t node_idx = 0;
-        for (data &n : graph_.nodes()) {
+        for (data *np : all_nodes) {
+            data &n = *np;
             const auto &p = prox_data[node_idx++];
             n.dense().jac_modification_[__u].noalias() +=
                 rho_u * (p.sigma_u_sq.array() * (n.value(__u) - p.u_ref).array()).matrix().transpose();
@@ -60,38 +62,47 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         }
 
         line_search_action rest_action = sqp_iter(rls, kkt_rest,
-                                                  /*do_scaling=*/false, /*do_refinement=*/true,
+                                                  /*do_scaling=*/false,
+                                                  /*do_refinement=*/true,
                                                   /*gauss_newton=*/true);
 
-        kkt_rest.num_iter = i_rest + 1;
+        kkt_rest.num_iter = kkt_before.num_iter + i_rest + 1;
         kkt_rest.ls_steps = rls.step_cnt;
 
         if (settings.verbose) {
             print_stats(kkt_rest);
         }
 
-        // Exit when line search accepted a step (genuine progress in the restoration
-        // sub-problem) OR feasibility has improved sufficiently relative to the entry point.
-        // If line search completely failed (stop) and neither criterion is met, give up.
-        bool prim_improved = (kkt_rest.inf_prim_res < rs.restoration_improvement_frac * kkt_before.inf_prim_res);
-        if (rest_action != line_search_action::stop || prim_improved) {
-            if (settings.verbose)
-                fmt::print("=== Restoration succeeded (inf_prim_res: {:.3e}) ===\n",
-                           kkt_rest.inf_prim_res);
+        if (kkt_rest.inf_dual_res < settings.dual_tol &&
+            !(kkt_rest.inf_prim_res < settings.prim_tol &&
+              kkt_rest.inf_comp_res < settings.comp_tol)) {
+            resto_converge = true;
             break;
         }
-        // line search failed and no sufficient feasibility progress — give up
-        break;
+        bool prim_improved = (kkt_rest.inf_prim_res < rs.restoration_improvement_frac * kkt_before.inf_prim_res);
+        if (rest_action == line_search_action::accept and prim_improved) {
+            resto_accept = true;
+            break;
+        }
     }
 
-    graph_.for_each_parallel([](data *d) {
+    for (data *d : all_nodes) {
         d->aux_.reset();
-    });
-    ls.update_filter(kkt_rest, settings);
+    }
 
-    if (settings.verbose)
-        fmt::print("=== Leaving restoration phase (inf_prim_res: {:.3e}) ===\n",
-                   kkt_rest.inf_prim_res);
+    if (!resto_accept) {
+        if (resto_converge) {
+            fmt::println("[resto]: dual residual below tolerance, converging to infeasible stationary point, exiting restoration");
+            kkt_rest.result = iter_result_t::infeasible_stationary;
+        } else {
+            fmt::println("[resto]: restoration failed to make sufficient progress, exiting restoration");
+            kkt_rest.result = iter_result_t::restoration_failed;
+        }
+    } else {
+        fmt::println("[resto]: restoration successful, exiting restoration");
+    }
+
+    settings.in_restoration = false;
 
     return kkt_rest;
 }

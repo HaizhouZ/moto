@@ -353,14 +353,14 @@ model = pinCasadiModel(
 
 prob = moto.ocp.create()
 prob.add(model.dyn)
-# if full:
-#     prob.add(model.fric)
+if full:
+    prob.add(model.fric)
 prob.add(model.kin_constr)
 if not full:
     prob.add(model.kin_cost)
 # prob.add(model.zf_constr)
-# prob.add(model.make_tq_limit_constr())
-# prob.add(model.make_joint_limit_constr())
+prob.add(model.make_tq_limit_constr())
+prob.add(model.make_joint_limit_constr())
 model.add_dt_constr_and_cost(prob, dt_nom)
 prob.add(model.get_state_cost())
 prob.add(model.get_input_cost())
@@ -488,7 +488,7 @@ cnt = 0
 iters = 0
 start = time.perf_counter()
 # while cnt < 50:
-res = sqp.update(50, verbose=True)
+res = sqp.update(100, verbose=True)
 sqp.settings.ipm.warm_start = True
 cnt += 1
 iters += res.num_iter

@@ -230,6 +230,16 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                                                  /*do_scaling=*/true, /*do_refinement=*/true);
             timed_block_end("sqp_single_iter");
 
+            kkt_last.num_iter = i_iter + 1;
+            kkt_last.ls_steps = ls.step_cnt;
+
+            if (verbose) {
+                // print_licq_info();
+                print_stats(kkt_last);
+                // print_dual_res_breakdown();
+                // print_scaling_info();
+            }
+
             // ── restoration trigger ───────────────────────────────────────────
             if (settings.restoration.enabled) {
                 bool ls_failed = (action == line_search_action::stop) &&
@@ -241,19 +251,12 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                 }
                 if (ls_failure_count_ >= settings.restoration.trigger_on_failure_count) {
                     ls_failure_count_ = 0;
-                    settings.in_restoration = true;
                     kkt_last = restoration_update(kkt_last, ls);
-                    settings.in_restoration = false;
+                    if (kkt_last.result == iter_result_t::infeasible_stationary ||
+                        kkt_last.result == iter_result_t::restoration_failed) {
+                        break;
+                    }
                 }
-            }
-
-            kkt_last.num_iter = i_iter + 1;
-            kkt_last.ls_steps = ls.step_cnt;
-            if (verbose) {
-                // print_licq_info();
-                print_stats(kkt_last);
-                // print_dual_res_breakdown();
-                // print_scaling_info();
             }
 
             if (kkt_last.inf_dual_res < settings.dual_tol &&
@@ -261,7 +264,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                 kkt_last.inf_comp_res < settings.comp_tol) {
                 if (verbose)
                     fmt::print("Converged!\n");
-                kkt_last.solved = true;
+                kkt_last.result = iter_result_t::success;
                 break;
             }
 
@@ -287,6 +290,9 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                 }
                 settings.ipm.mu = std::max(settings.ipm.mu, 1e-11);
             }
+        }
+        if (kkt_last.result != iter_result_t::success) {
+            kkt_last.result = iter_result_t::exceed_max_iter;
         }
     } catch (...) {
         if (settings.no_except) {

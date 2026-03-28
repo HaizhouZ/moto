@@ -42,13 +42,13 @@ void ns_sqp::print_stats(const kkt_info &info) {
         }
     }
     size_t idx_stat = 0;
-    size_t i_iter = static_cast<size_t>(info.num_iter) - 1;
+    size_t i_iter = static_cast<size_t>(info.num_iter);
     for (auto &item : stats) {
         if (item.name == "no.") {
             if (settings.in_restoration) {
-                fmt::print("| {:<{}} |", fmt::format("{}r", i_iter + 1), item.width);
+                fmt::print("| {:<{}} |", fmt::format("{}r", i_iter), item.width);
             } else {
-                fmt::print("| {:<{}} |", i_iter == 0 ? "--" : std::to_string(i_iter + 1), item.width);
+                fmt::print("| {:<{}} |", i_iter == 0 ? "--" : std::to_string(i_iter), item.width);
             }
         } else if (item.name == "ls") {
             fmt::print("| {:<{}} |", info.ls_steps < 0 ? "--" : std::to_string(info.ls_steps), item.width);
