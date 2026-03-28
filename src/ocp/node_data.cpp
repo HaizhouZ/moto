@@ -121,10 +121,12 @@ void node_data::update_approximation(update_mode config) {
     }
     if (update_cost) {
         inf_prim_res_ = 0.;
+        prim_res_l1_ = 0.;
         for (const auto &field_data : dense_->approx_) {
             if (field_data.v_.size() == 0)
                 continue; // skip empty fields
             inf_prim_res_ = std::max(field_data.v_.cwiseAbs().maxCoeff(), inf_prim_res_);
+            prim_res_l1_ += field_data.v_.lpNorm<1>();
         }
         inf_comp_res_ = 0.;
         for (const auto &comp : dense_->comp_) {

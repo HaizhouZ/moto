@@ -141,7 +141,8 @@ struct ns_sqp {
         scalar_t barrier_dir_deriv = 0.;     // sum(d_slack / slack_current) across all IPM constraints, mu-free
         scalar_t objective = 0.;             // barrier objective: cost - mu * log_slack_sum (computed with current mu)
         scalar_t obj_fullstep_dec = 0.;      // cost gradient dot full step (mu-free; combine with barrier_dir_deriv at current mu for full barrier directional derivative)
-        scalar_t inf_prim_res = 0.;          // primal residual (constraint violation)
+        scalar_t inf_prim_res = 0.;          // primal residual (constraint violation), inf-norm across all nodes/constraints
+        scalar_t prim_res_l1 = 0.;          // primal residual L1 norm (sum of |v| across all nodes/constraints)
         scalar_t inf_dual_res = 0.;          // dual residual (stationary condition)
         scalar_t inf_comp_res = 0.;          // (inequality) complementarity residual
         scalar_t max_diag_scaling = 0.;      // max Nesterov-Todd scaling (lambda/slack) across all IPM constraints

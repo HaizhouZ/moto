@@ -8,6 +8,7 @@ Nonsmooth SQP (Sequential Quadratic Programming) solver for trajectory optimizat
 - `src/solver/sqp_impl/ns_sqp_impl.cpp` — main SQP update loop, diagnostics
 - `src/solver/sqp_impl/line_search.cpp` — filter line search implementation (IPOPT-style)
 - `src/solver/sqp_impl/restoration.cpp` — `ns_sqp::restoration_update()`: restoration phase loop
+- `src/solver/sqp_impl/scaling.cpp` — `compute_and_apply_scaling` / `unscale_duals` / `reset_scaling`
 - `src/solver/nsp_impl/presolve.cpp` — `ns_factorization`: builds `s_c_stacked`, `s_c_stacked_0_K`, LU, nullspace; pass `gauss_newton=true` for restoration mode
 - `src/solver/nsp_impl/backward.cpp` — Riccati recursion (backward pass)
 - `src/solver/nsp_impl/rollout.cpp` — forward linear rollout
@@ -15,6 +16,7 @@ Nonsmooth SQP (Sequential Quadratic Programming) solver for trajectory optimizat
 - `include/moto/solver/ns_riccati/generic_solver.hpp` — solver interface (virtual methods)
 - `include/moto/solver/ipm/ipm_constr.hpp` — IPM inequality constraint implementation
 - `include/moto/solver/ipm/ipm_config.hpp` — IPM barrier parameter config (Mehrotra predictor-corrector)
+- `include/moto/solver/soft_constr/pmm_constr.hpp` — `pmm_constr`: soft equality via proximal augmented Lagrangian (Schur-complement PMM)
 - `include/moto/core/fields.hpp` — field enum (`__x`, `__u`, `__y`, `__dyn`, `__eq_x`, `__eq_xu`, `__ineq_x`, `__ineq_xu`, ...)
 - `bindings/definition/ns_sqp.cpp` — nanobind Python bindings for solver settings
 - `example/quadruped/` — quadruped locomotion example (often used for manual testing/experiments)
@@ -25,18 +27,25 @@ Nonsmooth SQP (Sequential Quadratic Programming) solver for trajectory optimizat
 
 ### `ns_sqp` (top-level class, `ns_sqp.hpp`)
 - `settings` (`settings_t`): inherits `linesearch_setting` and `ipm_config` via `workspace_data_collection`
-  - `settings.ls` — line search params (`s_phi`, `s_theta`, `armijo_dec_frac`, `enable_soc`, ...)
-  - `settings.ipm` — barrier params (`mu`, `mu0`, `mu_method`, `warm_start`, ...)
+  - `settings.ls` — line search params (`s_phi`, `s_theta`, `armijo_dec_frac`, `enable_soc`, `primal_gamma`, `dual_gamma`, ...)
+  - `settings.ipm` — barrier params (`mu`, `mu0`, `mu_method`, `warm_start`, `mu_monotone_fraction_threshold`, `mu_monotone_factor`, ...)
   - `settings.rf` — iterative refinement (`enabled`, `max_iters`, tolerances)
-  - `settings.verbose`, `settings.prim_tol`, `settings.dual_tol`, `settings.comp_tol`
+  - `settings.scaling` — Jacobian scaling (`mode`, `equilibrium_iters`, `min_scale`, `update_ratio_threshold`)
+  - `settings.restoration` — restoration settings (`enabled`, `max_iter`, `trigger_on_failure_count`, ...)
+  - `settings.verbose`, `settings.prim_tol`, `settings.dual_tol`, `settings.comp_tol`, `settings.s_max`
 - `graph_` (`directed_graph<shooting_node<data>>`): owns all stage nodes; supports `apply_forward`, `apply_backward`, `for_each_parallel`
 - `riccati_solver_` (`unique_ptr<generic_solver>`): per-stage solver operations (virtual interface)
 - `mem_` (`data_mgr`): memory pool for node data
 
-### `ns_sqp::data` (per-stage node, `ns_sqp.hpp:79`)
+### `ns_sqp::data` (per-stage node, `ns_sqp.hpp`)
 Multiple-inherits from:
 - **`node_data`** (`include/moto/ocp/impl/node_data.hpp`): holds the OCP problem formulation, sparse approximation data (`sparse_[field]`), dense merged data (`dense_`); provides `for_each(field, cb)` and `update_approximation()`
 - **`ns_riccati_data`** (`include/moto/solver/ns_riccati/ns_riccati_data.hpp`): holds Riccati/nullspace solver state
+
+Additional fields in `data`:
+- `scale_c_[cf]` — cached per-row constraint scales (empty = not yet computed)
+- `scale_p_[pf]` — per-primal-field cost gradient scales (currently always 1)
+- `scaling_applied_` — true between `compute_and_apply_scaling` and `unscale_duals`
 
 ### `ns_riccati_data` fields
 - `ns`, `nc`, `ncstr` — number of `__eq_x`, `__eq_xu`, and total equality constraints
@@ -104,9 +113,21 @@ constr_fields           = hard_constr_fields + ineq_soft_constr_fields
 generic_func
 └── generic_constr          (base; holds multiplier_, jac_[], v_)
     └── soft_constr         (adds jac_modification_[], d_multiplier_; data_map_t = approx_data)
+        ├── pmm_constr      (proximal augmented Lagrangian / PMM; adds g_, rho_, multiplier_backup_)
         └── ineq_constr     (adds comp_ complementarity residual)
             └── ipm_constr  (adds slack_, g_, diag_scaling, active_, r_s_, d_slack_, d_multiplier_)
 ```
+
+**`pmm_constr`** (`include/moto/solver/soft_constr/pmm_constr.hpp`):
+Soft equality constraint treated via Schur-complement PMM (proximal method of multipliers):
+- KKT (stagewise): `[L_Hess  J^T ; J  -rho*I] [du ; dlam] = -[g_u ; h]`
+- Schur complement of `dlam` into `du` block:
+  - Gradient: `Q_u += (1/rho) * J^T * h` (via `jac_modification_`)
+  - Hessian: `Q_uu += (1/rho) * J^T * J` (via `merit_hess_`)
+- Dual update: `dlam = (J*du + h) / rho`
+- `rho → 0`: penalty dominates → hard constraint recovery. `rho → ∞`: negligible effect.
+- `approx_data` fields: `g_` (raw residual `h = C(x)`), `multiplier_backup_` (for line search), `rho_` (copied from `pmm_constr::rho` at construction)
+- Replaces the old `quadratic_penalized` constraint type.
 - `ipm_constr::approx_data` (= `ipm_data`): the main inequality constraint data type
   - `g_[i]` — raw constraint value
   - `slack_[i]` — slack variable (kept > 0 by IPM); small → approximately active
@@ -158,7 +179,7 @@ Applied in-place to `dense().approx_[cf]` before factorization; reversed after t
 
 ## Restoration mode (`src/solver/sqp_impl/restoration.cpp`)
 
-Triggered automatically when the outer filter line search produces a `stop` action and primal infeasibility does not improve for `settings.restoration.trigger_on_failure_count` consecutive SQP iterations.
+Triggered automatically when the outer filter line search produces a `stop` action for `settings.restoration.trigger_on_failure_count` consecutive SQP iterations. (The additional primal-improvement guard `kkt_last.inf_prim_res >= inf_prim_before` is currently commented out — any `stop` action increments the counter.)
 
 **Goal**: reduce total hard-constraint infeasibility (dynamics + `__eq_x` + `__eq_xu`) by solving a Gauss-Newton sub-problem with proximal regularization. All equality constraints are treated as objectives (not hard constraints) for the duration of the restoration Riccati solve.
 
@@ -210,6 +231,19 @@ where `u_ref`, `y_ref`, `rho_u`, `rho_y`, `sigma_u`, `sigma_y` are stored in `ns
 
 ---
 
+## `kkt_info` fields (`ns_sqp.hpp`)
+- `result` — `unknown` / `success` / `exceed_max_iter` / `restoration_failed` / `infeasible_stationary`
+- `cost` — pure running cost (sum of `__cost` terms, no barrier)
+- `log_slack_sum` — `Σ log(slack_i)` across all IPM constraints, mu-free
+- `barrier_dir_deriv` — `Σ (d_slack_i / slack_backup_i)`, mu-free directional derivative of the log-barrier
+- `objective` — barrier objective: `cost - mu * log_slack_sum` (computed with current `mu`)
+- `obj_fullstep_dec` — cost gradient · full primal step (mu-free); combine with `barrier_dir_deriv` to get full barrier directional derivative: `fullstep_dec = obj_fullstep_dec - mu * barrier_dir_deriv`
+- `inf_prim_res`, `inf_dual_res`, `inf_comp_res` — KKT residuals. `inf_dual_res` is IPOPT-style dual-scaled: divided by `s_d = max(s_max, ||λ||_1 / n_constr) / s_max` (see `settings.s_max`, default 100).
+- `inf_prim_step`, `inf_dual_step` — infinity norms of the primal/dual Newton steps
+- `max_diag_scaling`, `max_eq_dual_norm`, `max_ineq_dual_norm`, `max_dual_norm` — diagnostics
+
+---
+
 ## Per-iteration SQP loop (`ns_sqp_impl.cpp`)
 Both `update()` and `restoration_update()` share a common inner loop via `sqp_iter(ls, kkt, do_scaling, do_refinement, gauss_newton=false)`:
 1. `compute_and_apply_scaling(kkt)` (if `do_scaling`) — row-scale Jacobians and residuals in-place
@@ -219,36 +253,39 @@ Both `update()` and `restoration_update()` share a common inner loop via `sqp_it
 5. `fwd_linear_rollout` (forward) — compute Newton step
 6. `ineq_constr_prediction` — start Mehrotra predictor step (if `has_ineq_soft`)
 7. `finalize_primal_step` + `update_ls_bounds` (parallel)
-8. `ineq_constr_correction` — Mehrotra corrector step + re-solve (if `has_ineq_soft`)
+8. `ineq_constr_correction` — Mehrotra corrector step + re-solve (if `has_ineq_soft`); may trigger mid-iteration monotone mu decrease
 9. Iterative refinement (if `do_refinement && rf.enabled && rf.max_iters > 0 && has_ineq_soft`)
-10. `unscale_duals()` — reverse all in-place scaling on duals, Jacobians, residuals
-11. `finalize_dual_newton_step` + `backup_trial_state` (once, before line search)
-12. Filter line search loop: `apply_affine_step` → `compute_kkt_info` → `filter_linesearch` → `line_search_action`
-    - `accept`: eval derivatives, update filter, continue
-    - `backtrack`: restore trial state, reduce alpha, goto step 12
-    - `retry_second_order_correction`: `second_order_correction()`, goto step 12 (currently commented out)
-    - `stop`: use backup strategy (min_step or best_trial), eval derivatives
+10. `finalize_dual_newton_step` (parallel) — compute dual step
+11. `unscale_duals()` — reverse all in-place scaling on duals, Jacobians, residuals
+12. `backup_trial_state` (parallel) — snapshot primal/dual for line search rollback
+13. Filter line search loop: `apply_affine_step` → `compute_kkt_info(false)` → `filter_linesearch` → `line_search_action`
+    - `accept`: eval derivatives (`update_approximation(eval_derivatives)` + full `compute_kkt_info`), update filter
+    - `backtrack`: restore trial state, reduce alpha, goto step 13
+    - `retry_second_order_correction`: `second_order_correction()` (body empty), goto step 13
+    - `stop`: set best-trial or min-step alpha, goto step 13 once more then accept
 
 `update()` calls `sqp_iter` with `do_scaling=true, do_refinement=true, gauss_newton=false`, then handles the restoration trigger, convergence check, stats printing, and monotone mu update.
 `restoration_update()` calls `sqp_iter` with `do_scaling=false, do_refinement=true, gauss_newton=true`.
-- `print_licq_info()` and `print_scaling_info()` are available as diagnostics but currently invoked under comments — call manually when needed
+- `print_licq_info()` and `print_scaling_info()` and `print_dual_res_breakdown()` are available as diagnostics but currently invoked under comments — call manually when needed
 
 ---
 
 ## Line search / filter (IPOPT-style)
 `filter_linesearch` returns a `line_search_action` enum; the main loop dispatches on it. `try_step()` implements:
-1. **Filter rejection**: trial point dominated by any filter point → reject.
-2. **Switching condition** (IPOPT §3.3): `obj_fullstep_dec < 0` AND `(-obj_fullstep_dec)^s_phi ≥ (inf_prim_res)^s_theta` AND `inf_prim_res_k ≤ constr_vio_min`:
-   - Yes → **Armijo mode**: accept if `obj_trial ≤ obj_k + armijo_dec_frac * alpha * obj_fullstep_dec`. Sets `last_step_was_armijo = true`.
-   - No → **Filter mode**: accept if trial point is not dominated by the current iterate.
-3. `update_filter` adds the accepted point to the filter only when `!last_step_was_armijo`.
-4. `constr_vio_min` is set once at the start of `update()` as `kkt_last.inf_prim_res * constr_vio_min_frac` — fixed for the duration of the call.
-- `filter_linesearch_data::point` holds `{prim_res, dual_res, objective}` — objective is now part of the filter.
-- **Switching condition guard**: `obj_fullstep_dec < 0.0` must come before the `std::pow` call — negative base with non-integer exponent is NaN in C++.
-- `s_phi` (default 2.3), `s_theta` (default 1.1), `armijo_dec_frac` (default 1e-4), `constr_vio_min_frac` (default 1e-4) are configurable via `linesearch_setting` and exposed to Python.
+1. **Filter rejection**: trial point dominated by any stored filter point → reject. Dominance uses a **2-objective filter**: a point `p` dominates `q` iff `p.prim_res ≥ (1-primal_gamma)*q.prim_res AND p.objective ≥ q.objective - dual_gamma*q.prim_res`.
+2. **Switching condition** (IPOPT §3.3): `fullstep_dec_k < 0` AND `alpha*(-fullstep_dec_k)^s_phi ≥ (inf_prim_res_k)^s_theta` AND `inf_prim_res_k ≤ constr_vio_min`:
+   - Yes → **Armijo mode**: accept if `obj_trial ≤ obj_k + armijo_dec_frac * alpha * fullstep_dec_k`. Sets `last_step_was_armijo = true`.
+   - No → **Filter mode**: accept if trial point is not dominated by the *current iterate* (not just stored filter points).
+3. `update_filter` adds the current iterate to the filter only when NOT in Armijo mode (`!switching_condition || !armijo_cond_met`). Also called on line-search failure (before returning `stop`).
+4. `update_filter` prunes stored points that are now dominated by the incoming point.
+5. `constr_vio_min` is set once at the start of `update()` as `max(kkt_last.inf_prim_res * constr_vio_min_frac, prim_tol)` — fixed for the duration of the call.
+6. Filter clears when `mu_changed` (barrier objective changed, old filter points invalid).
+- `filter_linesearch_data::point` holds `{prim_res, dual_res, objective}`. `objective = cost - mu * log_slack_sum`, recomputed with current `mu` in `try_step` (mu may have changed since `current_kkt` was computed). `fullstep_dec_k = obj_fullstep_dec - mu * barrier_dir_deriv`.
+- **Switching condition guard**: `fullstep_dec_k < 0.0` must come before the `std::pow` call — negative base with non-integer exponent is NaN in C++.
+- `s_phi` (default 2.3), `s_theta` (default 1.1), `armijo_dec_frac` (default 1e-4), `constr_vio_min_frac` (default 1e-4), `primal_gamma` (default 1e-4), `dual_gamma` (default 1e-4) are configurable via `linesearch_setting` and exposed to Python.
 - Backtracking uses a **linear sweep**: alpha decreases by `initial_alpha / max_steps` per step (not geometric).
-- `failure_strategy` (renamed from `failure_backup`): `min_step` or `best_trial` (default).
-- SOC (`second_order_correction`) is implemented but its call site in `filter_linesearch` is commented out — do not remove.
+- `failure_strategy`: `min_step` or `best_trial` (default). `best_trial` tracks `{prim_res, objective, alpha}` across all tried steps and falls back to the best one.
+- SOC (`second_order_correction`) body is empty; `retry_second_order_correction` action exists in the enum and dispatch but the trigger block in `filter_linesearch` is empty — do not remove the infrastructure.
 
 ---
 
@@ -258,6 +295,16 @@ Both `update()` and `restoration_update()` share a common inner loop via `sqp_it
 - Per iteration: predictor step (`ineq_constr_prediction`) → solve → corrector step (`ineq_constr_correction`) → adaptive `mu` update
 - `active_[i]` is always 1.0 in `value_impl`; activeness is implicit via complementarity `slack[i] * lambda[i] → mu`
 - `slack[i]` small (< threshold) → constraint `i` is approximately active at current point
+
+**Monotone mu decrease** (two paths):
+1. *Mid-iteration* (inside `ineq_constr_correction`): if `max(inf_prim_res, inf_dual_res, inf_comp_res) < mu_monotone_fraction_threshold * mu`, immediately decrease `mu = max(mu_trial, mu_monotone_factor * mu)` and set `mu_changed = true`. This re-solves the corrector with updated mu.
+2. *After iteration* (outer loop in `update()`): when `mu_method == monotonic_decrease`, decrease `mu` while all three residuals are below the threshold. Floor at 1e-11.
+
+**`ipm_config` fields** (in `ns_sqp::ipm_config`, extends `solver::ipm_config`):
+- `mu0` (default 1.0) — initial barrier parameter at `initialize()`
+- `warm_start` (default false) — skip reset of mu to mu0 on `initialize()`
+- `mu_monotone_fraction_threshold` (default 10.0) — threshold for triggering monotone mu decrease: smaller → more aggressive
+- `mu_monotone_factor` (default 0.2) — per-step mu reduction factor for monotone path
 
 ---
 
@@ -285,6 +332,8 @@ Both `update()` and `restoration_update()` share a common inner loop via `sqp_it
 - Use `solver_call(f)` (not `bind`) to wrap `generic_solver` member function pointers for `graph_` traversal methods.
 - `mu_method` is a **value type** (`adaptive_mu_t`), not a pointer — default is `mehrotra_predictor_corrector`. Do not check for `nullptr`.
 - `settings.ls` and `settings.ipm` are references into `settings_t` (which multiple-inherits them via `workspace_data_collection`). Do not copy `settings_t` by value after construction — the references would alias the old object.
+- `inf_dual_res` in `kkt_info` is IPOPT-style dual-scaled by `s_d = max(s_max, ||λ||_1/n_constr) / s_max`. `settings.s_max` (default 100) controls the scaling. Raw un-scaled dual residual is not stored separately.
+- `print_dual_res_breakdown()` is available for diagnosing which constraint field dominates the dual residual at the worst-case node — call manually after enabling verbose.
 
 ---
 

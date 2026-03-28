@@ -62,18 +62,22 @@ void ns_sqp::ineq_constr_correction() {
         }
         // adaptive mu update
         settings.ipm.adaptive_mu_update(main_worker);
-        if (std::max({
-                kkt_last.inf_prim_res,
-                kkt_last.inf_dual_res,
-                kkt_last.inf_comp_res,
-            }) < settings.ipm.mu_monotone_fraction_threshold * settings.ipm.mu) {
-            // if we are close enough to the feasible region, switch to monotone decrease of mu to accelerate convergence
-            if (settings.verbose) {
-                fmt::print("Switching to monotone decrease of mu since we are close to the feasible region (max residual: {:.3e} < {:.3e} * mu: {:.3e})\n",
-                           std::max({kkt_last.inf_prim_res, kkt_last.inf_dual_res, kkt_last.inf_comp_res}),
-                           settings.ipm.mu_monotone_fraction_threshold, settings.ipm.mu);
-            }
-            settings.ipm.mu = std::max(settings.ipm.mu_trial, settings.ipm.mu_monotone_factor * settings.ipm.mu);
+        // if (std::max({
+        //         kkt_last.inf_prim_res,
+        //         kkt_last.inf_dual_res,
+        //         kkt_last.inf_comp_res,
+        //     }) < settings.ipm.mu_monotone_fraction_threshold * settings.ipm.mu) {
+        //     // if we are close enough to the feasible region, switch to monotone decrease of mu to accelerate convergence
+        //     if (settings.verbose) {
+        //         fmt::print("Switching to monotone decrease of mu since we are close to the feasible region (max residual: {:.3e} < {:.3e} * mu: {:.3e})\n",
+        //                    std::max({kkt_last.inf_prim_res, kkt_last.inf_dual_res, kkt_last.inf_comp_res}),
+        //                    settings.ipm.mu_monotone_fraction_threshold, settings.ipm.mu);
+        //     }
+        //     settings.ipm.mu = std::max(settings.ipm.mu_trial, settings.ipm.mu_monotone_factor * settings.ipm.mu);
+        //     settings.mu_changed = true;
+        // }
+        {
+            settings.ipm.mu = settings.ipm.mu_trial;
             settings.mu_changed = true;
         }
         // use the new mu to update the rhs cost jacobian
@@ -218,8 +222,8 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
     kkt_last = initialize();
     try {
         filter_linesearch_data ls;
-        ls.constr_vio_min = std::max(kkt_last.inf_prim_res * settings.ls.constr_vio_min_frac, settings.prim_tol);
-        // ls.constr_vio_min = kkt_last.inf_prim_res * settings.ls.constr_vio_min_frac;
+        ls.constr_vio_min = std::max(kkt_last.prim_res_l1 * settings.ls.constr_vio_min_frac, settings.prim_tol);
+        // ls.constr_vio_min = kkt_last.prim_res_l1 * settings.ls.constr_vio_min_frac;
 
         settings.has_ineq_soft = false;
         for (data &n : graph_.nodes()) {
@@ -251,24 +255,24 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             }
 
             // ── restoration trigger ───────────────────────────────────────────
-            if (settings.restoration.enabled) {
-                bool ls_failed = (action == line_search_action::stop);
-                //  &&
-                //                  (kkt_last.inf_prim_res >= inf_prim_before);
-                if (ls_failed) {
-                    ++ls_failure_count_;
-                } else {
-                    ls_failure_count_ = 0;
-                }
-                if (ls_failure_count_ >= settings.restoration.trigger_on_failure_count) {
-                    ls_failure_count_ = 0;
-                    kkt_last = restoration_update(kkt_last, ls);
-                    if (kkt_last.result == iter_result_t::infeasible_stationary ||
-                        kkt_last.result == iter_result_t::restoration_failed) {
-                        break;
-                    }
-                }
-            }
+            // if (settings.restoration.enabled) {
+            //     bool ls_failed = (action == line_search_action::stop);
+            //     //  &&
+            //     //                  (kkt_last.inf_prim_res >= inf_prim_before);
+            //     if (ls_failed) {
+            //         ++ls_failure_count_;
+            //     } else {
+            //         ls_failure_count_ = 0;
+            //     }
+            //     if (ls_failure_count_ >= settings.restoration.trigger_on_failure_count) {
+            //         ls_failure_count_ = 0;
+            //         kkt_last = restoration_update(kkt_last, ls);
+            //         if (kkt_last.result == iter_result_t::infeasible_stationary ||
+            //             kkt_last.result == iter_result_t::restoration_failed) {
+            //             break;
+            //         }
+            //     }
+            // }
 
             if (kkt_last.inf_dual_res < settings.dual_tol &&
                 kkt_last.inf_prim_res < settings.prim_tol &&
@@ -429,6 +433,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
     for (auto n : graph_.flatten_nodes()) {
         kkt.cost += n->cost();
         kkt.inf_prim_res = std::max(kkt.inf_prim_res, n->inf_prim_res_);
+        kkt.prim_res_l1 += n->prim_res_l1_;
         if (update_dual_res && n->dense().jac_[__u].size() > 0)
             kkt.inf_dual_res = std::max(kkt.inf_dual_res, n->dense().jac_[__u].cwiseAbs().maxCoeff());
         // avg_dual_res += n->dense().jac_[__u].cwiseAbs().maxCoeff();

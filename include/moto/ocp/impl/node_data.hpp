@@ -18,6 +18,7 @@ class data_mgr;
  */
 struct MOTO_ALIGN_NO_SHARING node_data {
     scalar_t inf_prim_res_ = 0.;
+    scalar_t prim_res_l1_ = 0.;
     scalar_t inf_comp_res_ = 0.;
 
   protected:
