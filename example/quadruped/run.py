@@ -500,7 +500,7 @@ cnt = 0
 iters = 0
 start = time.perf_counter()
 # while cnt < 50:
-res = sqp.update(200, verbose=True)
+res = sqp.update(100, verbose=True)
 sqp.settings.ipm.warm_start = True
 cnt += 1
 iters += res.num_iter

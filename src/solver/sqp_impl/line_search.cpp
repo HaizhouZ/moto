@@ -152,7 +152,8 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     print_filter();
     bool accept = ls.try_step(trial_kkt, current_kkt, settings);
     /// if the point is acceptable or we have already tried enough steps, stop line search and accept the point if acceptable
-
+    ls.points.clear();
+    accept = true;
     if (accept || ls.stop) {
         ls.recompute_approx = false;
         if (accept && !ls.stop) {
@@ -179,11 +180,11 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
         settings.ls.alpha_primal = std::max(
             settings.ls.alpha_primal - ls.initial_alpha_primal / (settings.ls.max_steps + 1e-8),
             scalar_t(0.0));
-        if (settings.ls.update_alpha_dual) {
-            settings.ls.alpha_dual = std::max(
-                settings.ls.alpha_dual - ls.initial_alpha_dual / (settings.ls.max_steps + 1e-8),
-                scalar_t(0.0));
-        }
+        // if (settings.ls.update_alpha_dual) {
+        //     settings.ls.alpha_dual = std::max(
+        //         settings.ls.alpha_dual - ls.initial_alpha_dual / (settings.ls.max_steps + 1e-8),
+        //         scalar_t(0.0));
+        // }
         if (settings.verbose)
             fmt::print("  backtrack, alpha_p: {:.3e}, alpha_d: {:.3e}\n", settings.ls.alpha_primal, settings.ls.alpha_dual);
         return line_search_action::backtrack;
@@ -208,15 +209,7 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
             settings.ls.alpha_dual = ls.best_trial.alpha_dual;
         }
     }
-    settings.ls.alpha_primal = settings.ls.primal.alpha_max;
-    settings.ls.alpha_dual = settings.ls.dual.alpha_max;
-    // reset dual variables
-    settings.ipm.mu = settings.ipm.mu0;
-    graph_.for_each_parallel([&](data *d) {
-        for (auto c : hard_constr_fields)
-            d->dense().dual_[c].setZero();
-        solver::ineq_soft::initialize(d);
-    });
+
     // fails, will go to restoration
     fmt::println(" line search failed, dec_full_pred = {:.3e}, best trial primal res: {:.3e}, dual res: {:.3e}, objective: {:.3e}\n",
                  current_kkt.obj_fullstep_dec, ls.best_trial.prim_res, ls.best_trial.dual_res, ls.best_trial.objective);
