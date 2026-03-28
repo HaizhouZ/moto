@@ -144,6 +144,10 @@ struct ns_sqp {
         scalar_t inf_prim_res = 0.;          // primal residual (constraint violation)
         scalar_t inf_dual_res = 0.;          // dual residual (stationary condition)
         scalar_t inf_comp_res = 0.;          // (inequality) complementarity residual
+        scalar_t max_diag_scaling = 0.;      // max Nesterov-Todd scaling (lambda/slack) across all IPM constraints
+        scalar_t max_eq_dual_norm = 0.;      // max inf-norm of equality (hard) dual variables across all nodes
+        scalar_t max_ineq_dual_norm = 0.;    // max inf-norm of inequality dual variables across all nodes
+        scalar_t max_dual_norm = 0.;         // max inf-norm of dual variables across all nodes and constraint fields
         scalar_t inf_prim_step = 0.;         // infinity norm of the step
         scalar_t inf_dual_step = 0.;         // infinity norm of the step
     } kkt_last;

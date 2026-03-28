@@ -85,6 +85,7 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
     } d_u, d_y;
     // multiplier sensitivity
     vector d_lbd_f, d_lbd_s_c_pre_solve, d_lbd_s_c;
+    row_vector V_y_corr; ///< correction to value function gradient from iterative refinement backward pass
 
     ns_riccati_data(node_data *full_data);
     ns_riccati_data(const ns_riccati_data &rhs) = delete;

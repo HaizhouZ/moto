@@ -61,5 +61,7 @@ void ns_sqp::print_stats(const kkt_info &info) {
     }
 
     fmt::print("\n");
+    fmt::print("    ||lam_eq||={:.3e}  ||lam_ineq||={:.3e}  diag_scl={:.3e}  ||lam||={:.3e}\n",
+               info.max_eq_dual_norm, info.max_ineq_dual_norm, info.max_diag_scaling, info.max_dual_norm);
 };
 } // namespace moto

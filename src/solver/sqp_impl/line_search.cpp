@@ -62,7 +62,13 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
                              settings.ls.armijo_dec_frac * settings.ls.alpha_primal * fullstep_dec_k;
     armijo_cond_met = obj_trial <= armijo_target;
 
-    fmt::print("  switching condition: {}, armijo condition: {}\n", switching_condition ? "met" : "not met", armijo_cond_met ? "met" : "not met");
+    if (settings.verbose) {
+        fmt::print("  switching condition: {}, armijo condition: {}\n", switching_condition ? "met" : "not met", armijo_cond_met ? "met" : "not met");
+        if (!switching_condition) {
+            fmt::print("  cost step dec: {:.3e}, full step decrease: {:.3e}, switching lhs: {:.3e}, switching rhs: {:.3e}\n",
+                       current_kkt.obj_fullstep_dec, fullstep_dec_k, settings.ls.alpha_primal * std::pow(-fullstep_dec_k, settings.ls.s_phi), std::pow(current_kkt.inf_prim_res, settings.ls.s_theta));
+        }
+    }
     // reject if the trial point is dominated by any point in the filter
     for (const auto &p : points) {
         if (trial_point.in_filter(p, settings)) {

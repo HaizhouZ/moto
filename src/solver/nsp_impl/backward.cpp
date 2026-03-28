@@ -149,6 +149,7 @@ void generic_solver::riccati_recursion_correction(ns_riccati_data *cur, ns_ricca
         auto &d_pre = *prev;
         auto &perm = utils::permutation_from_y_to_x(prev->dense_->prob_, cur->dense_->prob_);
         d.Q_x *= perm;
+        d_pre.V_y_corr = d.Q_x; // save correction to V_y explicitly before accumulating
         d_pre.Q_y += d.Q_x;
     }
 }

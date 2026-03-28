@@ -73,7 +73,7 @@ void ns_sqp::ineq_constr_correction() {
                            std::max({kkt_last.inf_prim_res, kkt_last.inf_dual_res, kkt_last.inf_comp_res}),
                            settings.ipm.mu_monotone_fraction_threshold, settings.ipm.mu);
             }
-            settings.ipm.mu = std::min(settings.ipm.mu_trial, settings.ipm.mu_monotone_factor * settings.ipm.mu);
+            settings.ipm.mu = std::max(settings.ipm.mu_trial, settings.ipm.mu_monotone_factor * settings.ipm.mu);
             settings.mu_changed = true;
         }
         // use the new mu to update the rhs cost jacobian
@@ -218,7 +218,8 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
     kkt_last = initialize();
     try {
         filter_linesearch_data ls;
-        ls.constr_vio_min = std::max(kkt_last.inf_prim_res, settings.prim_tol) * settings.ls.constr_vio_min_frac;
+        ls.constr_vio_min = std::max(kkt_last.inf_prim_res * settings.ls.constr_vio_min_frac, settings.prim_tol);
+        // ls.constr_vio_min = kkt_last.inf_prim_res * settings.ls.constr_vio_min_frac;
 
         settings.has_ineq_soft = false;
         for (data &n : graph_.nodes()) {
@@ -438,6 +439,12 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
                 if (lam.size() > 0) {
                     lambda_l1 += lam.lpNorm<1>();
                     n_constr += static_cast<size_t>(lam.size());
+                    scalar_t lam_inf = lam.cwiseAbs().maxCoeff();
+                    kkt.max_dual_norm = std::max(kkt.max_dual_norm, lam_inf);
+                    if (cf == __dyn || cf == __eq_x || cf == __eq_xu)
+                        kkt.max_eq_dual_norm = std::max(kkt.max_eq_dual_norm, lam_inf);
+                    else if (cf == __ineq_x || cf == __ineq_xu)
+                        kkt.max_ineq_dual_norm = std::max(kkt.max_ineq_dual_norm, lam_inf);
                 }
             }
         }
@@ -459,6 +466,8 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
             kkt.log_slack_sum += id->slack_.array().log().sum();
             if (id->d_slack_.size() > 0)
                 kkt.barrier_dir_deriv += (id->d_slack_.array() / id->slack_backup_.array()).sum();
+            if (id->diag_scaling.size() > 0)
+                kkt.max_diag_scaling = std::max(kkt.max_diag_scaling, id->diag_scaling.cwiseAbs().maxCoeff());
         });
         for (auto f : constr_fields) {
             if (n->trial_dual_step[f].size() > 0) {

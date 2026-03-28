@@ -64,10 +64,10 @@ void generic_solver::finalize_dual_newton_step(ns_riccati_data *cur) {
     } else if (d.ncstr > 0 && d.aux_ != nullptr) {
         // GN mode: mirrors pmm_constr::finalize_newton_step — dlam = (h + J*du) / rho_eq
         const scalar_t rho_eq = static_cast<ns_riccati_data::restoration_aux_data *>(d.aux_.get())->rho_eq;
-        d.d_lbd_s_c.noalias()  = nsp.s_c_stacked_0_k;                       // h
-        d.d_lbd_s_c.noalias() += nsp.s_c_stacked    * d.trial_prim_step[__u]; // + J_u * du
+        d.d_lbd_s_c.noalias() = nsp.s_c_stacked_0_k;                           // h
+        d.d_lbd_s_c.noalias() += nsp.s_c_stacked * d.trial_prim_step[__u];     // + J_u * du
         d.d_lbd_s_c.noalias() += nsp.s_c_stacked_0_K * d.trial_prim_step[__x]; // + J_x * dx
-        d.d_lbd_s_c           *= scalar_t(1) / rho_eq;                       // / rho_eq
+        d.d_lbd_s_c *= scalar_t(1) / rho_eq;                                   // / rho_eq
         if (d.ns > 0) {
             d.trial_dual_step[__eq_x] = d.d_lbd_s_c.head(d.ns);
             d.s_y.T_times<false>(d.trial_dual_step[__eq_x], d.d_lbd_f);
@@ -108,39 +108,17 @@ void generic_solver::compute_kkt_residual(ns_riccati_data *cur) {
     auto &f_u = dense->approx_[__dyn].jac_[__u];
     dense->res_stat_[__u].noalias() = d.Q_u_bak.transpose(); // d.d_lbd_f
     d.Q_uu.times(d.trial_prim_step[__u], dense->res_stat_[__u]);
-
-    f_u.right_T_times(d.trial_dual_step[__dyn], dense->res_stat_[__u]);
-    if (d.nc) {
-        d.dense_->approx_[__eq_xu].jac_[__u].right_T_times(d.trial_dual_step[__eq_xu], dense->res_stat_[__u]);
-    }
-    if (d.trial_dual_step[__ineq_xu].size() > 0) {
-        d.dense_->approx_[__ineq_xu].jac_[__u].right_T_times(d.trial_dual_step[__ineq_xu], dense->res_stat_[__u]);
-    }
     dense->res_stat_[__y].noalias() = d.Q_y_bak.transpose();
     d.Q_yy.times(d.trial_prim_step[__y], dense->res_stat_[__y]);
-    auto &f_y = dense->approx_[__dyn].jac_[__y];
-    f_y.right_T_times(d.trial_dual_step[__dyn], dense->res_stat_[__y]);
-    if (d.ns) {
-        d.dense_->approx_[__eq_x].jac_[__y].right_T_times(d.trial_dual_step[__eq_x], dense->res_stat_[__y]);
-    }
-    if (d.trial_dual_step[__ineq_x].size() > 0) {
-        d.dense_->approx_[__ineq_x].jac_[__y].right_T_times(d.trial_dual_step[__ineq_x], dense->res_stat_[__y]);
-    }
-    if (d.trial_dual_step[__eq_x_soft].size() > 0) {
-        d.dense_->approx_[__eq_x_soft].jac_[__y].right_T_times(d.trial_dual_step[__eq_x_soft], dense->res_stat_[__y]);
-    }
-    auto &f_x = dense->approx_[__dyn].jac_[__x];
     dense->res_stat_[__x].noalias() = d.Q_x_bak.transpose();
     d.Q_xx.times(d.trial_prim_step[__x], dense->res_stat_[__x]);
-    f_x.right_T_times(d.trial_dual_step[__dyn], dense->res_stat_[__x]);
-    if (d.ns) {
-        d.dense_->approx_[__eq_x].jac_[__x].right_T_times(d.trial_dual_step[__eq_x], dense->res_stat_[__x]);
-    }
-    if (d.nc) {
-        d.dense_->approx_[__eq_xu].jac_[__x].right_T_times(d.trial_dual_step[__eq_xu], dense->res_stat_[__x]);
-    }
-    if (d.trial_dual_step[__ineq_xu].size() > 0) {
-        d.dense_->approx_[__ineq_xu].jac_[__x].right_T_times(d.trial_dual_step[__ineq_xu], dense->res_stat_[__x]);
+    for (auto f : primal_fields) {
+        for (auto constr : constr_fields) {
+            if (dense->approx_[constr].jac_[f].is_empty() || d.trial_dual_step[constr].size() == 0) {
+                continue;
+            }
+            dense->approx_[constr].jac_[f].right_T_times(d.trial_dual_step[constr], dense->res_stat_[f]);
+        }
     }
 }
 } // namespace ns_riccati

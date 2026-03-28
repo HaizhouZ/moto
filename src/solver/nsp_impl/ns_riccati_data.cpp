@@ -32,6 +32,7 @@ ns_riccati_data::ns_riccati_data(node_data *full_data)
       ns(dense_->approx_[__eq_x].v_.size()),
       nc(dense_->approx_[__eq_xu].v_.size()), ncstr(ns + nc), d_u(nu, nx),
       d_y(nx, nx), d_lbd_f(nx), d_lbd_s_c_pre_solve(nu), d_lbd_s_c(ncstr),
+      V_y_corr(row_vector::Zero(ny)),
       F_x(dense_->proj_f_x()),
       F_u(dense_->proj_f_u()),
       s_y(dense_->approx_[__eq_x].jac_[__y]),

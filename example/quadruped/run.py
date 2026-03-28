@@ -199,15 +199,19 @@ class pinCasadiModel(cpin.Model):
             self.pos_args + self.vel_args + [self.k_f],  # self.z_clip],
             # [self.q, k_f, *active_foot, z_clip],
             # cs.vcat([self.v_f[:2, i], self.k_f * cs.tanh(self.z_f[i]) * self.z_clip + self.v_f[2, i]]) * self.active_foot[i],
+            # res if not soft else cs.vcat([-res, res]),
             res,
             # cs.vcat([v_f[:2, i], z_f[i]]) * active_foot[i],
         )
         c.enable_if_all([self.f_f[i]])
-        # return c.cast_soft() if soft else c
         return c
-        # soft_c: moto.pmm_constr = c.cast_soft()
-        # soft_c.rho = 1e-8
-        # return soft_c if soft else c
+        # return c.cast_ineq() if soft else c
+        # if not soft:
+        #     return c
+        # else:
+        #     soft_c: moto.pmm_constr = c.cast_soft()
+        #     soft_c.rho = 1e-2
+        #     return soft_c
 
     def make_foot_kin_cost(self, i: int):
         pos_cost = (
@@ -450,10 +454,10 @@ cfg = [
     [0.4545454545454546, -0.21212121212121204],
 ]
 # simple hopping reduced
-cfg = [
-    [-0.19444444444444445, -0.17929292929292928],
-    [-0.3888888888888889, -0.35858585858585856],
-]
+# cfg = [
+#     [-0.19444444444444445, -0.17929292929292928],
+#     [-0.3888888888888889, -0.35858585858585856],
+# ]
 step = 0
 node_idx = 0
 
@@ -494,7 +498,7 @@ cnt = 0
 iters = 0
 start = time.perf_counter()
 # while cnt < 50:
-res = sqp.update(40, verbose=True)
+res = sqp.update(50, verbose=True)
 sqp.settings.ipm.warm_start = True
 cnt += 1
 iters += res.num_iter
