@@ -36,11 +36,11 @@ void pmm_constr::jacobian_impl(func_approx_data &data) const {
 void pmm_constr::propagate_jacobian(func_approx_data &data) const {
     auto &d = data.as<pmm_data>();
     // Schur complement adds (1/rho)*J^T*h to L_jac; node_data adds J^T*lambda,
-    // so jac_modification contributes (h/rho - lambda)^T*J to cancel lambda and add h/rho.
+    // so merit_jac_modification contributes (h/rho - lambda)^T*J to cancel lambda and add h/rho.
     size_t j_idx = 0;
     for (auto &j : d.jac_) {
         if (j.size() != 0) {
-            d.jac_modification_[j_idx].noalias() += (d.g_ / d.rho_).transpose() * j;
+            d.merit_jac_modification_[j_idx].noalias() += (d.g_ / d.rho_).transpose() * j;
         }
         j_idx++;
     }

@@ -59,8 +59,8 @@ void ns_sqp::iterative_refinement() {
         // prepare for iterative refinement
         graph_.for_each_parallel([this](ns_sqp::data *data) {
             data->first_order_correction_start([data]() {
-                data->dense().jac_modification_[__u] = data->dense().res_stat_[__u];
-                data->dense().jac_modification_[__y] = data->dense().res_stat_[__y];
+                data->dense().merit_jac_modification_[__u] = data->dense().res_stat_[__u];
+                data->dense().merit_jac_modification_[__y] = data->dense().res_stat_[__y];
             });
         });
         detail_timed_block_end("iterative_refinement_presolve");

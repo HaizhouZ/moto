@@ -37,7 +37,7 @@ class generic_constr : public generic_func {
         approx_data(func_approx_data &&d);
 
       protected:
-        void map_merit_jac_from_raw(decltype(merit_data::jac_) &raw, std::vector<row_vector_ref> &jac);
+        void map_merit_jac_from_raw(decltype(merit_data::merit_jac_) &raw, std::vector<row_vector_ref> &jac);
     };
 
   protected:

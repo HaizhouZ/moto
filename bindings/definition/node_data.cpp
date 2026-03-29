@@ -52,8 +52,8 @@ void register_submodule_node_data(nb::module_ &m) {
         .def_rw("dual", &merit_data::dual_)
         .def_rw("comp", &merit_data::comp_)
         .def_rw("hessian", &merit_data::hessian_)
-        .def_rw("jac", &merit_data::jac_)
-        .def_rw("jac_modification", &merit_data::jac_modification_);
+        .def_rw("merit_jac", &merit_data::merit_jac_)
+        .def_rw("merit_jac_modification", &merit_data::merit_jac_modification_);
 
     nb::class_<shared_data>(m, "shared_data")
         .def(nb::init<ocp *, sym_data *>(), nb::arg("prob"), nb::arg("primal"),

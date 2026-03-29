@@ -192,7 +192,7 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
         }
 
         // ── Gradients: PMM Schur complement for __eq_x / __eq_xu ──
-        // Mirrors pmm_constr::propagate_jacobian: jac_modification += (h/rho)^T * J.
+        // Mirrors pmm_constr::propagate_jacobian: merit_jac_modification += (h/rho)^T * J.
         // Q_u already contains J^T*lambda from the generic_constr base path in update_approximation;
         // dynamics is a hard constraint handled by ns_factorization_correction (F_0 via y_y_k).
         if (ncstr > 0) {

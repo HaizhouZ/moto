@@ -43,10 +43,12 @@ merit_data::merit_data(ocp *prob) : prob_(prob) {
             // hessian_[j][i].setZero();
         }
         primal_prox_hess_diagonal_[i].reset(hessian_[i][i].insert<sparsity::diag>(0, 0, prob_->tdim(i)));
-        jac_[i].resize(prob_->tdim(i));
-        jac_[i].setZero();
-        jac_modification_[i].resize(prob_->tdim(i));
-        jac_modification_[i].setZero();
+        cost_jac_[i].resize(prob_->tdim(i));
+        cost_jac_[i].setZero();
+        merit_jac_[i].resize(prob_->tdim(i));
+        merit_jac_[i].setZero();
+        merit_jac_modification_[i].resize(prob_->tdim(i));
+        merit_jac_modification_[i].setZero();
     }
     hessian_modification_ = hessian_; // same size
     for (auto f : primal_fields) {

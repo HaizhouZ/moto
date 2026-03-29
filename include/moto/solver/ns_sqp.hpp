@@ -44,12 +44,31 @@ struct ns_sqp {
             best_trial, ///< reset to the best trial so far
         } failure_strategy = failure_backup_strategy::best_trial;
 
+        enum class backtrack_scheme_t : size_t {
+            linspace,   ///< alpha decreases by alpha_init / max_steps each step (uniform spacing)
+            geometric,  ///< alpha *= backtrack_factor each step (exponential decay)
+        } backtrack_scheme = backtrack_scheme_t::linspace;
+        scalar_t backtrack_factor = 0.5; ///< geometric backtracking reduction factor (used when backtrack_scheme == geometric)
+
+        enum class search_method : size_t {
+            filter,            ///< IPOPT-style 2-objective filter line search (default)
+            merit_backtracking, ///< merit function: ||constraint violation||^2 + sigma * ||dual residual||^2
+        } method = search_method::filter;
+
         scalar_t primal_gamma = 1e-4;        ///< 2-obj filter primal improvement requirement: higher-> stricter
         scalar_t dual_gamma = 1e-4;          ///< IPOPT-like filter objective improvement requirement: higher-> stricter
         scalar_t constr_vio_min_frac = 1e-4; ///< Threshold for switching condition (fraction of initial primal residual), lower than this * initial constraint violation means we are close enough to the feasible region to switch to objective decrease mode in line search
         scalar_t armijo_dec_frac = 1e-4;     ///< Sufficient decrease tolerance (eta in Armijo condition), smaller -> more strict decrease requirement
         scalar_t s_phi = 2.3;                ///< IPOPT switching condition exponent on objective decrease (s_phi in IPOPT paper)
         scalar_t s_theta = 1.1;              ///< IPOPT switching condition exponent on constraint violation (s_theta in IPOPT paper)
+        scalar_t merit_sigma = 1.0;          ///< merit_backtracking weight on ||dual residual||^2 relative to ||constraint violation||^2
+
+        // Flat-objective accept: accept when the directional derivative is negligibly small,
+        // the primal residual is already low, and the step is non-trivial (so we make dual progress).
+        bool enable_flat_obj_accept = true;
+        scalar_t flat_obj_dec_tol = 1e-2;    ///< |fullstep_dec| below this is considered "flat"
+        scalar_t flat_obj_prim_tol = 1e-6;    ///< primal residual must be below this to trigger
+        scalar_t flat_obj_step_tol = 1e-12;   ///< step norm must exceed this to be "non-trivial"
     };
 
     struct restoration_settings {
@@ -149,8 +168,11 @@ struct ns_sqp {
         scalar_t max_eq_dual_norm = 0.;      // max inf-norm of equality (hard) dual variables across all nodes
         scalar_t max_ineq_dual_norm = 0.;    // max inf-norm of inequality dual variables across all nodes
         scalar_t max_dual_norm = 0.;         // max inf-norm of dual variables across all nodes and constraint fields
-        scalar_t inf_prim_step = 0.;         // infinity norm of the step
-        scalar_t inf_dual_step = 0.;         // infinity norm of the step
+        scalar_t inf_prim_step = 0.;         // infinity norm of the primal step
+        scalar_t inf_dual_step = 0.;         // infinity norm of the dual step (all constraints)
+        scalar_t inf_eq_dual_step = 0.;      // infinity norm of the dual step (equality constraints only)
+        scalar_t inf_ineq_dual_step = 0.;    // infinity norm of the dual step (inequality constraints only)
+        scalar_t avg_dual_res = 0.;          // average dual residual: L1 norm of stationarity gradient / number of elements (unscaled)
     } kkt_last;
     kkt_info update(size_t n_iter, bool verbose = true);
 
@@ -251,6 +273,14 @@ struct ns_sqp {
 
         void update_filter(const kkt_info &kkt, settings_t &settings);
         bool try_step(const kkt_info &trial_kkt, const kkt_info &current_kkt, settings_t &settings);
+
+        /***** merit backtracking part (used when settings.ls.method == merit_backtracking) *****/
+        scalar_t merit_fullstep = std::numeric_limits<scalar_t>::infinity(); ///< merit value at full step (alpha=1), for directional derivative estimate
+        struct merit_trial {
+            scalar_t merit       = std::numeric_limits<scalar_t>::infinity();
+            scalar_t alpha_primal = 0.;
+            scalar_t alpha_dual   = 0.;
+        } best_merit_trial;
     };
 
     enum class line_search_action {
@@ -260,7 +290,10 @@ struct ns_sqp {
         stop,
     };
 
+    void step_back_alpha(filter_linesearch_per_iter_data &ls);
     line_search_action filter_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
+    line_search_action merit_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
+
     void second_order_correction();
     void ineq_constr_correction();
     void ineq_constr_prediction();

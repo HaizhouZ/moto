@@ -154,6 +154,8 @@ ns_sqp::line_search_action ns_sqp::sqp_iter(filter_linesearch_data &ls, kkt_info
     ls.initial_alpha_primal = settings.ls.alpha_primal;
     ls.initial_alpha_dual = settings.ls.alpha_dual;
     ls.best_trial = filter_linesearch_data::trial();
+    ls.merit_fullstep = std::numeric_limits<scalar_t>::infinity();
+    ls.best_merit_trial = filter_linesearch_data::merit_trial{};
     graph_.for_each_parallel([this](data *d) {
         riccati_solver_->finalize_dual_newton_step(d);
     });
@@ -178,20 +180,35 @@ LS_START:
     detail_timed_block_end("apply_affine_step");
 
     detail_timed_block_start("update_res_stat");
-    kkt_info kkt_trial = compute_kkt_info(false);
-    detail_timed_block_end("update_res_stat");
-
-    const auto update_approx_derivatives = [&] {
-        detail_timed_block_start("update_approx_accepted");
+    kkt_info kkt_trial;
+    if (settings.ls.method == linesearch_setting::search_method::merit_backtracking) {
+        // merit backtracking needs dual residual, which requires Jacobians
         graph_.for_each_parallel([](data *d) {
             d->update_approximation(node_data::update_mode::eval_derivatives);
         });
         kkt_trial = compute_kkt_info();
+    } else {
+        kkt_trial = compute_kkt_info(false);
+    }
+    detail_timed_block_end("update_res_stat");
+
+    const auto update_approx_derivatives = [&] {
+        detail_timed_block_start("update_approx_accepted");
+        if (settings.ls.method != linesearch_setting::search_method::merit_backtracking) {
+            // already evaluated for merit backtracking above
+            graph_.for_each_parallel([](data *d) {
+                d->update_approximation(node_data::update_mode::eval_derivatives);
+            });
+            kkt_trial = compute_kkt_info();
+        }
         detail_timed_block_end("update_approx_accepted");
     };
 
     if (settings.ls.enabled && !ls.stop) {
-        action = filter_linesearch(ls, kkt_trial, kkt_current);
+        if (settings.ls.method == linesearch_setting::search_method::merit_backtracking)
+            action = merit_linesearch(ls, kkt_trial, kkt_current);
+        else
+            action = filter_linesearch(ls, kkt_trial, kkt_current);
         switch (action) {
         case line_search_action::accept:
             update_approx_derivatives();
@@ -324,7 +341,7 @@ void ns_sqp::print_dual_res_breakdown() {
     // Decompose dual_res by field at the worst-case node.
     //
     // dual_res = max_k ||r_k||_inf where
-    //   r_k = jac_[__y]_k + jac_[__x]_{k+1} * P   (cross-stage costate residual)
+    //   r_k = merit_jac_[__y]_k + merit_jac_[__x]_{k+1} * P   (cross-stage costate residual)
     //
     // We first find the stage k* that achieves dual_res, then decompose:
     //   r_k* = sum_cf r_{cf,k*}   where r_{cf,k} = J_{cf,y,k}^T λ_{cf,k} + J_{cf,x,k+1}^T λ_{cf,k+1}
@@ -342,19 +359,19 @@ void ns_sqp::print_dual_res_breakdown() {
         auto *cur = nodes[i];
         node_data *next = (i + 1 < nodes.size()) ? nodes[i + 1] : nullptr;
         // u stationarity
-        scalar_t u_res = cur->dense().jac_[__u].cwiseAbs().maxCoeff();
+        scalar_t u_res = cur->dense().merit_jac_[__u].cwiseAbs().maxCoeff();
         worst_u = std::max(worst_u, u_res);
         // cross-stage costate: mirrors compute_kkt_info
         if (next) {
             auto P = utils::permutation_from_y_to_x(&cur->problem(), &next->problem());
-            row_vector total_r = next->dense().jac_[__x] * P + cur->dense().jac_[__y];
+            row_vector total_r = next->dense().merit_jac_[__x] * P + cur->dense().merit_jac_[__y];
             scalar_t y_res = total_r.cwiseAbs().maxCoeff();
             if (y_res > worst_y) {
                 worst_y = y_res;
                 worst_i = i;
             }
         } else {
-            scalar_t y_res = cur->dense().jac_[__y].cwiseAbs().maxCoeff();
+            scalar_t y_res = cur->dense().merit_jac_[__y].cwiseAbs().maxCoeff();
             if (y_res > worst_y) {
                 worst_y = y_res;
                 worst_i = i;
@@ -367,8 +384,8 @@ void ns_sqp::print_dual_res_breakdown() {
     node_data *next = (worst_i + 1 < nodes.size()) ? nodes[worst_i + 1] : nullptr;
     auto P = utils::permutation_from_y_to_x(&cur->problem(), next ? &next->problem() : &cur->problem());
 
-    int ny = (int)cur->dense().jac_[__y].cols();
-    int nx_next = next ? (int)next->dense().jac_[__x].cols() : ny;
+    int ny = (int)cur->dense().merit_jac_[__y].cols();
+    int nx_next = next ? (int)next->dense().merit_jac_[__x].cols() : ny;
 
     // per-field cross-stage vector at k* (signed, not yet normed)
     std::map<field_t, scalar_t> cross_norm; // ||r_{cf,k*}||_inf
@@ -411,7 +428,7 @@ void ns_sqp::print_dual_res_breakdown() {
         cross_norm[cf] = r.cwiseAbs().maxCoeff();
     }
 
-    // cost-only: jac_[__y]_k* + jac_[__x]_{k*+1} * P  minus field contributions
+    // cost-only: merit_jac_[__y]_k* + merit_jac_[__x]_{k*+1} * P  minus field contributions
     // (we just report total which mirrors dual_res exactly)
     fmt::print("  dual_res breakdown at worst node {} (y={:.3e} u={:.3e}):\n",
                worst_i, worst_y, worst_u);
@@ -429,14 +446,17 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
     vector max_step;
     scalar_t lambda_l1 = 0.;
     size_t n_constr = 0;
-    // scalar_t avg_dual_res = 0;
+    scalar_t dual_res_l1 = 0.;
+    size_t n_dual_res = 0;
     for (auto n : graph_.flatten_nodes()) {
         kkt.cost += n->cost();
         kkt.inf_prim_res = std::max(kkt.inf_prim_res, n->inf_prim_res_);
         kkt.prim_res_l1 += n->prim_res_l1_;
-        if (update_dual_res && n->dense().jac_[__u].size() > 0)
-            kkt.inf_dual_res = std::max(kkt.inf_dual_res, n->dense().jac_[__u].cwiseAbs().maxCoeff());
-        // avg_dual_res += n->dense().jac_[__u].cwiseAbs().maxCoeff();
+        if (update_dual_res && n->dense().merit_jac_[__u].size() > 0) {
+            kkt.inf_dual_res = std::max(kkt.inf_dual_res, n->dense().merit_jac_[__u].cwiseAbs().maxCoeff());
+            dual_res_l1 += n->dense().merit_jac_[__u].cwiseAbs().sum();
+            n_dual_res += static_cast<size_t>(n->dense().merit_jac_[__u].size());
+        }
         kkt.inf_comp_res = std::max(kkt.inf_comp_res, n->inf_comp_res_);
         if (update_dual_res) {
             for (auto cf : constr_fields) {
@@ -460,7 +480,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
                     max_field = f;
                     max_step = n->trial_prim_step[f];
                 }
-                kkt.obj_fullstep_dec += (n->dense().jac_[f].transpose() * n->trial_prim_step[f]).value();
+                kkt.obj_fullstep_dec += (n->dense().cost_jac_[f].transpose() * n->trial_prim_step[f]).value();
             }
         }
         // accumulate mu-free barrier quantities: log_slack_sum and barrier_dir_deriv
@@ -476,7 +496,12 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
         });
         for (auto f : constr_fields) {
             if (n->trial_dual_step[f].size() > 0) {
-                kkt.inf_dual_step = std::max(kkt.inf_dual_step, n->trial_dual_step[f].cwiseAbs().maxCoeff());
+                scalar_t step = n->trial_dual_step[f].cwiseAbs().maxCoeff();
+                kkt.inf_dual_step = std::max(kkt.inf_dual_step, step);
+                if (in_field(f, ineq_constr_fields))
+                    kkt.inf_ineq_dual_step = std::max(kkt.inf_ineq_dual_step, step);
+                else
+                    kkt.inf_eq_dual_step = std::max(kkt.inf_eq_dual_step, step);
             }
         }
     }
@@ -486,16 +511,20 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
                 if (next != nullptr) [[likely]] {
                     // cancellation of jacobian from y to x
                     static row_vector tmp;
-                    tmp.conservativeResize(next->dense().jac_[__x].cols());
-                    tmp.noalias() = next->dense().jac_[__x] *
+                    tmp.conservativeResize(next->dense().merit_jac_[__x].cols());
+                    tmp.noalias() = next->dense().merit_jac_[__x] *
                                         utils::permutation_from_y_to_x(&cur->problem(), &next->problem()) +
-                                    cur->dense().jac_[__y];
+                                    cur->dense().merit_jac_[__y];
                     if (tmp.size() > 0) {
                         kkt.inf_dual_res = std::max(kkt.inf_dual_res, tmp.cwiseAbs().maxCoeff());
+                        dual_res_l1 += tmp.cwiseAbs().sum();
+                        n_dual_res += static_cast<size_t>(tmp.size());
                     }
                 } else { /// @todo: include initial jac[__x] inf norm if init is optimized
-                    if (cur->dense().jac_[__y].size() > 0) {
-                        kkt.inf_dual_res = std::max(kkt.inf_dual_res, cur->dense().jac_[__y].cwiseAbs().maxCoeff());
+                    if (cur->dense().merit_jac_[__y].size() > 0) {
+                        kkt.inf_dual_res = std::max(kkt.inf_dual_res, cur->dense().merit_jac_[__y].cwiseAbs().maxCoeff());
+                        dual_res_l1 += cur->dense().merit_jac_[__y].cwiseAbs().sum();
+                        n_dual_res += static_cast<size_t>(cur->dense().merit_jac_[__y].size());
                     }
                 }
             },
@@ -505,6 +534,8 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
             scalar_t s_d = std::max(settings.s_max, lambda_l1 / static_cast<scalar_t>(n_constr)) / settings.s_max;
             kkt.inf_dual_res /= s_d;
         }
+        if (n_dual_res > 0)
+            kkt.avg_dual_res = dual_res_l1 / static_cast<scalar_t>(n_dual_res);
     }
     kkt.objective = kkt.cost - settings.ipm.mu * kkt.log_slack_sum;
     return kkt;
@@ -712,7 +743,7 @@ void ns_sqp::print_scaling_info() {
         // cost Jacobians
         fmt::print("    cost");
         for (auto pf : primal_fields) {
-            const auto &jac = n->dense().jac_[pf];
+            const auto &jac = n->dense().merit_jac_[pf];
             if (jac.size() == 0)
                 continue;
             scalar_t jac_inf = jac.cwiseAbs().maxCoeff();

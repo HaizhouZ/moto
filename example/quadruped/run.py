@@ -199,19 +199,19 @@ class pinCasadiModel(cpin.Model):
             self.pos_args + self.vel_args + [self.k_f],  # self.z_clip],
             # [self.q, k_f, *active_foot, z_clip],
             # cs.vcat([self.v_f[:2, i], self.k_f * cs.tanh(self.z_f[i]) * self.z_clip + self.v_f[2, i]]) * self.active_foot[i],
-            res if not soft else cs.vcat([-res, res]),
+            res,# if not soft else cs.vcat([-res, res]),
             # res,
             # cs.vcat([v_f[:2, i], z_f[i]]) * active_foot[i],
         )
         c.enable_if_all([self.f_f[i]])
         # return c
-        return c.cast_ineq() if soft else c
-        # if not soft:
-        #     return c
-        # else:
-        # soft_c: moto.pmm_constr = c.cast_soft()
-        # soft_c.rho = 1e-6
-        # return soft_c
+        # return c.cast_ineq() if soft else c
+        if not soft:
+            return c
+        else:
+            soft_c: moto.pmm_constr = c.cast_soft()
+            soft_c.rho = 1e-8
+        return soft_c
 
     def make_foot_kin_cost(self, i: int):
         pos_cost = (
@@ -428,20 +428,24 @@ g.add_edge(nstop, n1, stance_length)
 # print(g.flatten_nodes())
 
 sqp.settings.ipm.mu0 = 1.0
-# sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
-sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.monotonic_decrease
+sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
+# sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.monotonic_decrease
 # sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.quality_function_based
 sqp.settings.ipm_conditional_corrector = True
 sqp.settings.prim_tol = 1e-3
 sqp.settings.dual_tol = 1e-3
 sqp.settings.comp_tol = 1e-3
 sqp.settings.rf.max_iters = 2
-sqp.settings.ls.update_alpha_dual = True
+sqp.settings.ls.update_alpha_dual = False
 # sqp.settings.scaling.scaling_mode = moto.sqp.scaling_settings.mode_gradient
 sqp.settings.restoration.trigger_on_failure_count = 1
 sqp.settings.restoration.max_iter = 1000
 sqp.settings.restoration.rho_eq = 1e-6
 sqp.settings.ls.primal_gamma = 1e-4
+sqp.settings.ls.method = moto.ns_sqp.search_method_filter
+sqp.settings.ls.merit_sigma = 100
+sqp.settings.ls.max_steps = 100
+# sqp.settings.ls.backtrack_scheme = moto.ns_sqp.backtrack_scheme_geometric
 # cfg = [
 #     [-0.9595959595959596, -0.6161616161616161],
 #     [-0.9595959595959596, 0.31313131313131315],

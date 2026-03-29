@@ -39,13 +39,26 @@ Nonsmooth SQP (Sequential Quadratic Programming) solver for trajectory optimizat
 
 ### `ns_sqp::data` (per-stage node, `ns_sqp.hpp`)
 Multiple-inherits from:
-- **`node_data`** (`include/moto/ocp/impl/node_data.hpp`): holds the OCP problem formulation, sparse approximation data (`sparse_[field]`), dense merged data (`dense_`); provides `for_each(field, cb)` and `update_approximation()`
+- **`node_data`** (`include/moto/ocp/impl/node_data.hpp`): holds the OCP problem formulation, sparse approximation data (`sparse_[field]`), dense merged data (`dense_` of type `merit_data`); provides `for_each(field, cb)` and `update_approximation()`
 - **`ns_riccati_data`** (`include/moto/solver/ns_riccati/ns_riccati_data.hpp`): holds Riccati/nullspace solver state
 
 Additional fields in `data`:
 - `scale_c_[cf]` — cached per-row constraint scales (empty = not yet computed)
 - `scale_p_[pf]` — per-primal-field cost gradient scales (currently always 1)
 - `scaling_applied_` — true between `compute_and_apply_scaling` and `unscale_duals`
+
+### `merit_data` gradient fields (`include/moto/ocp/impl/merit_data.hpp`)
+`dense_` (of type `merit_data`) holds the per-stage merged gradient data. Key gradient arrays (all indexed by `primal_fields = {__x, __u, __y}`):
+- `cost_jac_[pf]` — **pure cost gradient** w.r.t. primal field `pf`; snapshotted from `merit_jac_` after all cost functions write their gradients but before constraint dual contributions are accumulated. Used for `obj_fullstep_dec` in the line search.
+- `merit_jac_[pf]` — **Lagrangian gradient**: `cost_jac_[pf] + Σ_c approx_[c].jac_[pf]^T · dual_[c]`. Aliased as `Q_x`, `Q_u`, `Q_y` in `data_base`. Used for dual residual / stationarity checks.
+- `merit_jac_modification_[pf]` — pending gradient modifications (PMM soft-constraint and proximal terms); folded into `merit_jac_` by `merge_jacobian_modification()` inside `ns_factorization`.
+- `approx_[cf].jac_[pf]` — per-constraint-field Jacobian w.r.t. primal field `pf` (`func_approx_data::jac_` via `merit_data::approx_data`); **distinct** from the `merit_data` gradient fields above.
+
+`update_approximation()` build order:
+1. Reset `merit_jac_[pf]` and `merit_jac_modification_[pf]` to zero
+2. All `compute_approx` calls write cost gradients into `merit_jac_[pf]`
+3. Snapshot: `cost_jac_[pf] = merit_jac_[pf]`
+4. Accumulate constraint dual contributions: `merit_jac_[pf] += approx_[c].jac_[pf]^T · dual_[c]`
 
 ### `ns_riccati_data` fields
 - `ns`, `nc`, `ncstr` — number of `__eq_x`, `__eq_xu`, and total equality constraints
@@ -112,7 +125,10 @@ constr_fields           = hard_constr_fields + ineq_soft_constr_fields
 ```
 generic_func
 └── generic_constr          (base; holds multiplier_, jac_[], v_)
-    └── soft_constr         (adds jac_modification_[], d_multiplier_; data_map_t = approx_data)
+    └── soft_constr         (adds merit_jac_modification_[], d_multiplier_; data_map_t = approx_data)
+```
+Note: `jac_[]` here refers to the per-constraint Jacobian rows stored in `func_approx_data` — not the `merit_data` fields below.
+```
         ├── pmm_constr      (proximal augmented Lagrangian / PMM; adds g_, rho_, multiplier_backup_)
         └── ineq_constr     (adds comp_ complementarity residual)
             └── ipm_constr  (adds slack_, g_, diag_scaling, active_, r_s_, d_slack_, d_multiplier_)
@@ -122,7 +138,7 @@ generic_func
 Soft equality constraint treated via Schur-complement PMM (proximal method of multipliers):
 - KKT (stagewise): `[L_Hess  J^T ; J  -rho*I] [du ; dlam] = -[g_u ; h]`
 - Schur complement of `dlam` into `du` block:
-  - Gradient: `Q_u += (1/rho) * J^T * h` (via `jac_modification_`)
+  - Gradient: `Q_u += (1/rho) * J^T * h` (via `merit_jac_modification_`)
   - Hessian: `Q_uu += (1/rho) * J^T * J` (via `merit_hess_`)
 - Dual update: `dlam = (J*du + h) / rho`
 - `rho → 0`: penalty dominates → hard constraint recovery. `rho → ∞`: negligible effect.
@@ -133,7 +149,7 @@ Soft equality constraint treated via Schur-complement PMM (proximal method of mu
   - `slack_[i]` — slack variable (kept > 0 by IPM); small → approximately active
   - `active_[i]` — always 1.0 in current IPM (not a hard active-set mask)
   - `diag_scaling[i]` — Nesterov-Todd scaling `λ_i / (s_i + ε·λ_i)`
-  - `jac_[arg_idx]` — Jacobian rows (matrix_ref, rows = constraint dim, cols = arg dim)
+  - `jac_[arg_idx]` — per-constraint Jacobian rows (matrix_ref, rows = constraint dim, cols = arg dim); this is `func_approx_data::jac_`, distinct from the `merit_data` gradient fields
 
 To iterate over IPM constraints from a `node_data*` or `data*`:
 ```cpp
@@ -161,7 +177,7 @@ Applied in-place to `dense().approx_[cf]` before factorization; reversed after t
 
 **`compute_and_apply_scaling(kkt)`**:
 1. Decides whether to recompute scales: recomputes if `inf_prim_step ≥ 1/update_ratio_threshold` (large step → Jacobians changed) OR `scale_c_` is empty (first call). Near convergence the cached scales are reused.
-2. Only scales `hard_constr_fields_non_dyn` = `{__eq_x, __eq_xu}`. `__dyn` excluded because `approx_[__dyn].jac_[__y]` aliases `f_y_` used by `dense_dynamics::compute_project_jacobians` LU.
+2. Only scales `hard_constr_fields_non_dyn` = `{__eq_x, __eq_xu}`. `__dyn` excluded because `approx_[__dyn].jac_[__y]` (the per-constraint `func_approx_data::jac_`) aliases `f_y_` used by `dense_dynamics::compute_project_jacobians` LU.
 3. `gradient` mode: `s[i] = 1 / max(min_scale, max(row_infnorm(J_i), |v_i|))` — row normalises Jacobian and residual.
 4. `equilibrium` mode: iterative Ruiz; each iter computes row inf-norm of `diag(s) * J`, then `s[i] /= row_norm[i]`.
 5. Applies `s` in-place: `v_[i] *= s[i]`, `J_[row i] *= s[i]`.
@@ -170,7 +186,7 @@ Applied in-place to `dense().approx_[cf]` before factorization; reversed after t
 
 **`unscale_duals()`** — reverses in-place scaling for `hard_constr_fields_non_dyn` only:
 - `approx.v_[i] /= s[i]` — reverse residual scaling
-- `approx.jac_[pf]` rows divided by `s` (i.e., multiplied by `s.cwiseInverse()`)
+- `approx_[cf].jac_[pf]` rows divided by `s` (i.e., multiplied by `s.cwiseInverse()`)
 - `trial_dual_step[cf][i] *= s[i]` — unscale the dual **step** computed in scaled space
 
 **Key math**: scaling applies `s·J` to constraint Jacobians. Scaled KKT: `(s·J)^T Δλ_scaled = -∇f`. Original: `J^T Δλ_orig = -∇f`. Therefore `Δλ_orig = s · Δλ_scaled`. Only `trial_dual_step` is unscaled — `dual_[cf]` is the accumulated λ from previous iterations, already in original units, and must NOT be touched.
@@ -194,7 +210,7 @@ where `u_ref`, `y_ref`, `rho_u`, `rho_y`, `sigma_u`, `sigma_y` are stored in `ns
 **GN mode in `ns_factorization(cur, gauss_newton=true)`** (`src/solver/nsp_impl/presolve.cpp`):
 - Runs the standard factorization preamble: `update_projected_dynamics`, `merge_jacobian_modification`, builds `s_c_stacked`, `lu_eq_`, `s_c_stacked_0_K` (always built unconditionally before the rank branch).
 - **PMM (penalty method) treatment of `__eq_x`/`__eq_xu`**: original running cost Hessians (`Q_uu`, `Q_ux`, `Q_yx`, `Q_xx`, `Q_yy`) and gradients (`Q_u`, `Q_y`) are **kept intact**; equality constraints are removed from the hard-constraint path and instead penalized. IPM/soft-constraint `_mod` terms also retained.
-- Proximal gradient/Hessian are written by `restoration_update` directly into `dense().jac_modification_[__u/y]` and `dense().primal_prox_hess_diagonal_[__u/y].diagonal()` before each `sqp_iter`. `merge_jacobian_modification` folds them into `Q_u`/`Q_y`; the diagonal Hessian lands in `Q_uu_mod`/`Q_yy_mod` via the pre-allocated diagonal sparsity in `hessian_[__u][__u]` (see `merit_data` constructor). GN mode sees proximal already in `Q_u`/`Q_uu_mod`.
+- Proximal gradient/Hessian are written by `restoration_update` directly into `dense().merit_jac_modification_[__u/y]` and `dense().primal_prox_hess_diagonal_[__u/y].diagonal()` before each `sqp_iter`. `merge_jacobian_modification` folds them into `Q_u`/`Q_y`; the diagonal Hessian lands in `Q_uu_mod`/`Q_yy_mod` via the pre-allocated diagonal sparsity in `hessian_[__u][__u]` (see `merit_data` constructor). GN mode sees proximal already in `Q_u`/`Q_uu_mod`.
 - Builds `s_c_stacked_0_k` explicitly after `update_projected_dynamics_residual()` for the PMM gradient.
 - **Gradients** (PMM Schur complement, mirrors `pmm_constr::propagate_jacobian`):
   - `Q_u += (h/rho_eq)^T * s_c_stacked`  where `h = s_c_stacked_0_k`
@@ -211,7 +227,7 @@ where `u_ref`, `y_ref`, `rho_u`, `rho_y`, `sigma_u`, `sigma_y` are stored in `ns
 - Sets `settings.in_restoration = true` on entry, `false` on exit.
 - Iterates over **all** nodes via `graph_.flatten_nodes()` (includes key nodes AND intermediate edge nodes). Using `graph_.nodes()` instead would miss intermediate nodes, leaving their `aux_` as `nullptr` and causing a segfault in `ns_factorization`.
 - Snapshots proximal anchors (`u_ref`, `y_ref`) and per-component scaling `sigma_u_sq[i] = 1/max(|u_ref[i]|,1)²` into `prox_data` for each node. Also allocates `restoration_aux_data` on each node's `aux_` (carries `rho_eq` for the GN dual regularization).
-- Each iteration: writes proximal gradient `rho*(sigma_sq*(u-u_ref))^T` directly into `dense().jac_modification_[__u/y]`, and `rho*sigma_sq` into `dense().primal_prox_hess_diagonal_[__u/y].diagonal()`. `merge_jacobian_modification` (inside `ns_factorization`) folds the gradient into `Q_u/Q_y`; the diagonal Hessian lands in `Q_uu_mod`/`Q_yy_mod` (already aliased from `hessian_[__u][__u]` diagonal sparsity pattern).
+- Each iteration: writes proximal gradient `rho*(sigma_sq*(u-u_ref))^T` directly into `dense().merit_jac_modification_[__u/y]`, and `rho*sigma_sq` into `dense().primal_prox_hess_diagonal_[__u/y].diagonal()`. `merge_jacobian_modification` (inside `ns_factorization`) folds the gradient into `Q_u/Q_y`; the diagonal Hessian lands in `Q_uu_mod`/`Q_yy_mod` (already aliased from `hessian_[__u][__u]` diagonal sparsity pattern).
 - No scaling; IPM predictor/corrector and iterative refinement active.
 - Uses `filter_linesearch_data rls = ls` — **copies the outer filter** (not a fresh one). This lets the restoration filter see prior accepted points, preventing restoration from accepting steps that would be rejected by the outer loop.
 - **Exit criteria** (any one breaks the loop):
@@ -237,7 +253,7 @@ where `u_ref`, `y_ref`, `rho_u`, `rho_y`, `sigma_u`, `sigma_y` are stored in `ns
 - `log_slack_sum` — `Σ log(slack_i)` across all IPM constraints, mu-free
 - `barrier_dir_deriv` — `Σ (d_slack_i / slack_backup_i)`, mu-free directional derivative of the log-barrier
 - `objective` — barrier objective: `cost - mu * log_slack_sum` (computed with current `mu`)
-- `obj_fullstep_dec` — cost gradient · full primal step (mu-free); combine with `barrier_dir_deriv` to get full barrier directional derivative: `fullstep_dec = obj_fullstep_dec - mu * barrier_dir_deriv`
+- `obj_fullstep_dec` — **pure cost** gradient (`cost_jac_`) · full primal step (mu-free); combine with `barrier_dir_deriv` to get full barrier directional derivative: `fullstep_dec = obj_fullstep_dec - mu * barrier_dir_deriv`
 - `inf_prim_res`, `inf_dual_res`, `inf_comp_res` — KKT residuals. `inf_dual_res` is IPOPT-style dual-scaled: divided by `s_d = max(s_max, ||λ||_1 / n_constr) / s_max` (see `settings.s_max`, default 100).
 - `inf_prim_step`, `inf_dual_step` — infinity norms of the primal/dual Newton steps
 - `max_diag_scaling`, `max_eq_dual_norm`, `max_ineq_dual_norm`, `max_dual_norm` — diagnostics
@@ -247,7 +263,7 @@ where `u_ref`, `y_ref`, `rho_u`, `rho_y`, `sigma_u`, `sigma_y` are stored in `ns
 ## Per-iteration SQP loop (`ns_sqp_impl.cpp`)
 Both `update()` and `restoration_update()` share a common inner loop via `sqp_iter(ls, kkt, do_scaling, do_refinement, gauss_newton=false)`:
 1. `compute_and_apply_scaling(kkt)` (if `do_scaling`) — row-scale Jacobians and residuals in-place
-2. `ns_factorization(gauss_newton)` (parallel) — normal: build `s_c_stacked`, LU, Z_u/Q_zz/`u_y_K`/`y_y_K`; GN: PMM treatment of equalities, proximal already in `Q_u/Q_y/Q_uu_mod/Q_yy_mod` via `jac_modification_`/`primal_prox_hess_diagonal_`
+2. `ns_factorization(gauss_newton)` (parallel) — normal: build `s_c_stacked`, LU, Z_u/Q_zz/`u_y_K`/`y_y_K`; GN: PMM treatment of equalities, proximal already in `Q_u/Q_y/Q_uu_mod/Q_yy_mod` via `merit_jac_modification_`/`primal_prox_hess_diagonal_`
 3. `riccati_recursion` (backward) — backward pass, updates V_xx
 4. `compute_primal_sensitivity` (parallel) — compute d_u.K, d_y.K
 5. `fwd_linear_rollout` (forward) — compute Newton step

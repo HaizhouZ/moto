@@ -36,10 +36,12 @@ struct merit_data {
     array_type<vector, ineq_constr_fields> comp_;
     scalar_t merit_; ///< cost + sum of all constraints multipler-residual products
     scalar_t cost_;  ///< cost value
-    /// cost jacobian
-    array<row_vector, field::num_prim> jac_;
+    /// cost jacobian (pure cost gradient; excludes constraint dual contributions J_c^T λ)
+    array<row_vector, field::num_prim> cost_jac_;
+    /// Lagrangian jacobian: cost_jac_ + Σ_c J_c^T λ_c (used for dual residual / stationarity)
+    array<row_vector, field::num_prim> merit_jac_;
     /// modification of the merit jacobian, indexed by field
-    array<row_vector, field::num_prim> jac_modification_;
+    array<row_vector, field::num_prim> merit_jac_modification_;
     /// cost hessian h[a][b] is h_ab. Note only the upper block-triangular part is stored
     array<array<sparse_mat, field::num_prim>, field::num_prim> hessian_;
     array<array<sparse_mat, field::num_prim>, field::num_prim> hessian_modification_;

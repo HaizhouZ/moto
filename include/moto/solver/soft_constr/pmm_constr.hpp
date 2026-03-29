@@ -9,7 +9,7 @@ namespace solver {
 ///   [L_Hess  J^T  ] [du  ]   [  g_u  ]
 ///   [J      -rho*I] [dlam] = -[  h    ]
 /// Schur complement of dlam into the du block:
-///   Gradient:  +=(1/rho) * J^T * h  (via jac_modification_ += (h/rho)^T * J)
+///   Gradient:  +=(1/rho) * J^T * h  (via merit_jac_modification_ += (h/rho)^T * J)
 ///              node_data separately adds J^T*lambda from the base soft_constr contribution
 ///   Hessian:   +=(1/rho) * J^T * J  (via merit_hess_)
 /// Dual update from row 2: dlam = (J*du + h) / rho

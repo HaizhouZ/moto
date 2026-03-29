@@ -69,6 +69,29 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
                        current_kkt.obj_fullstep_dec, fullstep_dec_k, settings.ls.alpha_primal * std::pow(-fullstep_dec_k, settings.ls.s_phi), std::pow(current_kkt.prim_res_l1, settings.ls.s_theta));
         }
     }
+
+
+    // Flat-objective accept: when the directional derivative is negligibly small, the iterate is
+    // nearly feasible, and the step is non-trivial, accept to allow dual progress without requiring
+    // objective decrease (the objective is flat so the filter/Armijo conditions would stall).
+    auto check_flat_obj = [&]() {
+        if (settings.ls.enable_flat_obj_accept)
+            if (std::abs(fullstep_dec_k) <= settings.ls.flat_obj_dec_tol * (1 + std::abs(obj_k)) &&
+                prim_res_k < constr_vio_min &&
+                current_kkt.inf_dual_step > std::max(settings.ls.flat_obj_step_tol, settings.dual_tol)) {
+                last_step_was_armijo = false;
+                if (settings.verbose)
+                    fmt::print("  trial point accepted by flat-objective condition (fullstep_dec={:.3e}, prim_res={:.3e}, step_norm={:.3e})\n",
+                               fullstep_dec_k, prim_res_k, current_kkt.inf_dual_step);
+                return true;
+            } else {
+                if (settings.verbose)
+                    fmt::print("  flat-objective accept condition not met (fullstep_dec={:.3e}, prim_res={:.3e}, step_norm={:.3e})\n",
+                               fullstep_dec_k, prim_res_k, current_kkt.inf_dual_step);
+                return false;
+            }
+    };
+
     // reject if the trial point is dominated by any point in the filter
     for (const auto &p : points) {
         if (trial_point.in_filter(p, settings)) {
@@ -78,7 +101,7 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
                            trial_point.prim_res, trial_point.dual_res, trial_point.objective,
                            p.prim_res, p.dual_res, p.objective);
             }
-            return false;
+            return check_flat_obj();
         }
     }
     filter_reject_cnt = 0;
@@ -97,9 +120,10 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
                 fmt::print("  trial point rejected by Armijo condition in switching mode (primal res: {:.3e}, dual res: {:.3e}, objective: {:.3e}), armijo target: {:.3e}\n",
                            trial_point.prim_res, trial_point.dual_res, trial_point.objective, armijo_target);
             }
-            return false;
+            return check_flat_obj();
         }
-    } else { // filter condition for non-switching
+    }
+    else { // filter condition for non-switching
         // Filter condition relative to the CURRENT iterate
         // pass if the trial point makes sufficient progress in either primal residual or objective compared to the current point (not the filter points)
         point current_point = {prim_res_k, current_kkt.inf_dual_res, obj_k};
@@ -116,10 +140,27 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
                            trial_point.prim_res, trial_point.dual_res, trial_point.objective,
                            current_point.prim_res, current_point.dual_res, current_point.objective);
             }
-            return false;
+            return check_flat_obj();
         }
     }
 }
+void ns_sqp::step_back_alpha(filter_linesearch_per_iter_data &ls) {
+    if (settings.ls.backtrack_scheme == linesearch_setting::backtrack_scheme_t::geometric)
+        settings.ls.alpha_primal *= settings.ls.backtrack_factor;
+    else
+        settings.ls.alpha_primal = std::max(
+            settings.ls.alpha_primal - ls.initial_alpha_primal / (settings.ls.max_steps + 1e-8),
+            scalar_t(0.0));
+    if (settings.ls.update_alpha_dual) {
+        if (settings.ls.backtrack_scheme == linesearch_setting::backtrack_scheme_t::geometric)
+            settings.ls.alpha_dual *= settings.ls.backtrack_factor;
+        else
+            settings.ls.alpha_dual = std::max(
+                settings.ls.alpha_dual - ls.initial_alpha_dual / (settings.ls.max_steps + 1e-8),
+                scalar_t(0.0));
+    }
+}
+
 ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt) {
     if (ls.step_cnt == 0 && trial_kkt.prim_res_l1 < current_kkt.prim_res_l1) {
         // skip second-order correction if the first trial already shows improvement in primal residual
@@ -152,8 +193,6 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     print_filter();
     bool accept = ls.try_step(trial_kkt, current_kkt, settings);
     /// if the point is acceptable or we have already tried enough steps, stop line search and accept the point if acceptable
-    ls.points.clear();
-    accept = true;
     if (accept || ls.stop) {
         ls.recompute_approx = false;
         if (accept && !ls.stop) {
@@ -172,19 +211,11 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     // only when rejected by filter (not Armijo), and κ_soc abort not triggered.
     if (settings.ls.enable_soc && ls.step_cnt == 0 && !ls.skip_soc &&
         ls.soc_iter_cnt < settings.ls.max_soc_iter && !ls.switching_condition) {
-        
     }
     /// backtrack
     if (settings.ls.max_steps > ls.step_cnt) {
         ls.step_cnt++;
-        settings.ls.alpha_primal = std::max(
-            settings.ls.alpha_primal - ls.initial_alpha_primal / (settings.ls.max_steps + 1e-8),
-            scalar_t(0.0));
-        // if (settings.ls.update_alpha_dual) {
-        //     settings.ls.alpha_dual = std::max(
-        //         settings.ls.alpha_dual - ls.initial_alpha_dual / (settings.ls.max_steps + 1e-8),
-        //         scalar_t(0.0));
-        // }
+        step_back_alpha(ls);
         if (settings.verbose)
             fmt::print("  backtrack, alpha_p: {:.3e}, alpha_d: {:.3e}\n", settings.ls.alpha_primal, settings.ls.alpha_dual);
         return line_search_action::backtrack;
@@ -214,6 +245,76 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     fmt::println(" line search failed, dec_full_pred = {:.3e}, best trial primal res: {:.3e}, dual res: {:.3e}, objective: {:.3e}\n",
                  current_kkt.obj_fullstep_dec, ls.best_trial.prim_res, ls.best_trial.dual_res, ls.best_trial.objective);
     ls.update_filter(current_kkt, settings);
+    return line_search_action::stop;
+}
+
+ns_sqp::line_search_action ns_sqp::merit_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt) {
+    const auto merit = [&](scalar_t prim_l1, scalar_t dual_res) -> scalar_t {
+        return prim_l1 * prim_l1 + settings.ls.merit_sigma * dual_res * dual_res;
+    };
+
+    scalar_t merit_trial = merit(trial_kkt.prim_res_l1, trial_kkt.avg_dual_res);
+    scalar_t merit_k = merit(current_kkt.prim_res_l1, current_kkt.avg_dual_res);
+
+    // On the first (full-step) trial, record merit to estimate the directional derivative.
+    // dir_deriv ≈ (M(x + 1*d) - M(x)) / 1.0  (finite-difference estimate)
+    if (ls.step_cnt == 0) {
+        ls.merit_fullstep = merit_trial;
+    }
+
+    // Track best trial for the fallback strategy
+    if (merit_trial < ls.best_merit_trial.merit) {
+        ls.best_merit_trial.merit = merit_trial;
+        ls.best_merit_trial.alpha_primal = settings.ls.alpha_primal;
+        ls.best_merit_trial.alpha_dual = settings.ls.alpha_dual;
+    }
+
+    if (settings.verbose) {
+        fmt::print("[merit ls] step {}, merit: {:.3e} (prim: {:.3e}, avg_dual: {:.3e}), alpha_p: {:.3e}, merit_k: {:.3e} (prim: {:.3e}, avg_dual: {:.3e})\n",
+                   ls.step_cnt, merit_trial, trial_kkt.prim_res_l1, trial_kkt.avg_dual_res,
+                   settings.ls.alpha_primal, merit_k, current_kkt.prim_res_l1, current_kkt.avg_dual_res);
+    }
+
+    // Armijo sufficient decrease: M(x + alpha*d) <= M(x) + c * alpha * dir_deriv
+    // dir_deriv estimated from the full step (negative when making progress).
+    scalar_t dir_deriv = ls.merit_fullstep - merit_k;
+    scalar_t armijo_target = merit_k + settings.ls.armijo_dec_frac * settings.ls.alpha_primal * dir_deriv;
+
+    bool accept = merit_trial <= armijo_target;
+
+    if (accept || ls.stop) {
+        ls.recompute_approx = false;
+        return accept ? line_search_action::accept : line_search_action::stop;
+    }
+
+    ls.recompute_approx = true;
+    if (settings.ls.max_steps > ls.step_cnt) {
+        ls.step_cnt++;
+        step_back_alpha(ls);
+        if (settings.verbose)
+            fmt::print("  merit backtrack, alpha_p: {:.3e}\n", settings.ls.alpha_primal);
+        return line_search_action::backtrack;
+    }
+
+    // Line search failed — apply fallback
+    ls.stop = true;
+    if (settings.ls.failure_strategy == linesearch_setting::failure_backup_strategy::min_step) {
+        if (settings.verbose)
+            fmt::print("  merit ls failed, use min primal step...\n");
+        ls.enforce_min = true;
+        auto scale = std::min(0.01 / ls.initial_alpha_primal, 1.0);
+        settings.ls.alpha_primal = ls.initial_alpha_primal * scale;
+    } else {
+        if (settings.verbose) {
+            fmt::print("  merit ls failed, use best trial (merit: {:.3e}, alpha_p: {:.3e})...\n",
+                       ls.best_merit_trial.merit, ls.best_merit_trial.alpha_primal);
+        }
+        settings.ls.alpha_primal = ls.best_merit_trial.alpha_primal;
+        if (settings.ls.update_alpha_dual)
+            settings.ls.alpha_dual = ls.best_merit_trial.alpha_dual;
+    }
+    fmt::println(" merit line search failed, merit_k: {:.3e}, best merit: {:.3e}\n",
+                 merit_k, ls.best_merit_trial.merit);
     return line_search_action::stop;
 }
 

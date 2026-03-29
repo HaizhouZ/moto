@@ -41,7 +41,7 @@ func_approx_data::func_approx_data(sym_data &primal,
         merit_jac_.reserve(in_args_.size());
         for (size_t i : range(in_args_.size())) {
             if (in_args[i]->field() < field::num_prim && raw.prob_->is_active(in_args[i])) {
-                merit_jac_.push_back(raw.prob_->extract_tangent(raw.jac_[in_args[i]->field()], in_args[i]));
+                merit_jac_.push_back(raw.prob_->extract_tangent(raw.merit_jac_[in_args[i]->field()], in_args[i]));
             } else { // useless
                 static row_vector empty;
                 merit_jac_.push_back(empty);

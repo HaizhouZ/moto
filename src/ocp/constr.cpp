@@ -28,7 +28,7 @@ generic_constr::approx_data::approx_data(vector_ref multiplier,
         }
     }
 }
-void generic_constr::approx_data::map_merit_jac_from_raw(decltype(merit_data::jac_) &raw, std::vector<row_vector_ref> &jac) {
+void generic_constr::approx_data::map_merit_jac_from_raw(decltype(merit_data::merit_jac_) &raw, std::vector<row_vector_ref> &jac) {
     auto &in_args = func_.in_args();
     jac.clear();
     for (size_t i : range(in_args.size())) {

@@ -50,7 +50,7 @@ struct MOTO_ALIGN_NO_SHARING data_base {
         prim_corr[__x].setZero();
         // clear modification
         for (auto field : primal_fields) {
-            dense_->jac_modification_[field].setZero();
+            dense_->merit_jac_modification_[field].setZero();
         }
         if constexpr (std::is_invocable_v<Callback, data_base *>) {
             callback(this);

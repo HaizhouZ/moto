@@ -77,8 +77,8 @@ void node_data::update_approximation(update_mode config) {
             r.setZero();
         }
         for (auto field : primal_fields) {
-            dense_->jac_[field].setZero();
-            dense_->jac_modification_[field].setZero();
+            dense_->merit_jac_[field].setZero();
+            dense_->merit_jac_modification_[field].setZero();
         }
 
         if (config >= update_mode::eval_hess)
@@ -108,6 +108,12 @@ void node_data::update_approximation(update_mode config) {
     for (const generic_custom_func &f : prob_->exprs(__post_comp)) {
         f.custom_call((*shared_)[f]); ///< @todo pass update mode
     }
+    // snapshot pure cost gradient before adding constraint dual contributions
+    if (config >= update_mode::eval_jac)
+        for (auto field : primal_fields){
+            dense_->cost_jac_[field] = dense_->merit_jac_[field];
+        }
+
     for (auto f : merit_data::stored_constr_fields) {
         if (prob_->dim(f) == 0)
             continue; // skip empty jacobian
@@ -116,7 +122,7 @@ void node_data::update_approximation(update_mode config) {
             for (auto p : primal_fields) {
                 if (dense_->approx_[f].jac_[p].is_empty())
                     continue; // skip empty jacobian
-                dense_->approx_[f].jac_[p].right_T_times(dense_->dual_[f], dense_->jac_[p]);
+                dense_->approx_[f].jac_[p].right_T_times(dense_->dual_[f], dense_->merit_jac_[p]);
             }
     }
     if (update_cost) {

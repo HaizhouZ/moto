@@ -98,8 +98,8 @@ void generic_solver::finalize_primal_step_correction(ns_riccati_data *cur) {
         d.trial_prim_step[f] += d.prim_corr[f];
     }
     /// update Q_y with correction
-    d.Q_u += d.dense_->jac_modification_[__u];
-    d.Q_y += d.dense_->jac_modification_[__y];
+    d.Q_u += d.dense_->merit_jac_modification_[__u];
+    d.Q_y += d.dense_->merit_jac_modification_[__y];
 }
 void generic_solver::compute_kkt_residual(ns_riccati_data *cur) {
     auto &d = *cur;

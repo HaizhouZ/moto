@@ -54,14 +54,25 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("enable_soc", &ns_sqp::linesearch_setting::enable_soc, "Whether to try a second-order correction before backtracking")
         .def_rw("max_soc_iter", &ns_sqp::linesearch_setting::max_soc_iter, "Maximum number of second-order correction retries per SQP iteration")
         .def_rw("failure_strategy", &ns_sqp::linesearch_setting::failure_strategy, "Line search failure backup strategy")
+        .def_rw("method", &ns_sqp::linesearch_setting::method, "Line search method: filter (default) or merit_backtracking")
         .def_rw("primal_gamma", &ns_sqp::linesearch_setting::primal_gamma, "Primal improvement requirement for the filter (higher is stricter)")
         .def_rw("dual_gamma", &ns_sqp::linesearch_setting::dual_gamma, "Objective improvement requirement for the filter (higher is stricter)")
         .def_rw("constr_vio_min_frac", &ns_sqp::linesearch_setting::constr_vio_min_frac, "Threshold for switching condition (fraction of initial primal residual)")
         .def_rw("armijo_dec_frac", &ns_sqp::linesearch_setting::armijo_dec_frac, "Sufficient decrease tolerance (eta in Armijo condition), smaller -> more strict decrease requirement")
         .def_rw("s_phi", &ns_sqp::linesearch_setting::s_phi, "IPOPT switching condition exponent on objective decrease (s_phi in IPOPT paper, Section 3.3)")
-        .def_rw("s_theta", &ns_sqp::linesearch_setting::s_theta, "IPOPT switching condition exponent on constraint violation (s_theta in IPOPT paper, Section 3.3)");
+        .def_rw("s_theta", &ns_sqp::linesearch_setting::s_theta, "IPOPT switching condition exponent on constraint violation (s_theta in IPOPT paper, Section 3.3)")
+        .def_rw("merit_sigma", &ns_sqp::linesearch_setting::merit_sigma, "Merit backtracking: weight on ||dual residual||^2 relative to ||constraint violation||^2 (default 1.0)")
+        .def_rw("enable_flat_obj_accept", &ns_sqp::linesearch_setting::enable_flat_obj_accept, "Accept step when objective is flat, iterate is nearly feasible, and step is non-trivial")
+        .def_rw("flat_obj_dec_tol", &ns_sqp::linesearch_setting::flat_obj_dec_tol, "Threshold on |fullstep_dec| below which the objective is considered flat")
+        .def_rw("flat_obj_prim_tol", &ns_sqp::linesearch_setting::flat_obj_prim_tol, "Primal residual must be below this for flat-objective accept")
+        .def_rw("flat_obj_step_tol", &ns_sqp::linesearch_setting::flat_obj_step_tol, "Step norm must exceed this for flat-objective accept (ensures non-trivial step)");
+
+    ls_setting.def_rw("backtrack_scheme", &ns_sqp::linesearch_setting::backtrack_scheme, "Backtracking scheme: linspace (default) or geometric")
+        .def_rw("backtrack_factor", &ns_sqp::linesearch_setting::backtrack_factor, "Geometric backtracking reduction factor (alpha *= factor each step, used when backtrack_scheme == geometric)");
 
     moto::export_enum<ns_sqp::linesearch_setting::failure_backup_strategy>(ls_setting);
+    moto::export_enum<ns_sqp::linesearch_setting::backtrack_scheme_t>(sqp);
+    moto::export_enum<ns_sqp::linesearch_setting::search_method>(sqp);
     nb::class_<ns_sqp::settings_t>(sqp, "settings_type")
         .def_ro("mu", &ns_sqp::settings_t::mu, "Barrier parameter for the IPM solver")
         .def_rw("ipm_conditional_corrector", &ns_sqp::settings_t::ipm_conditional_corrector, "Whether to use conditional corrector in the IPM solver")
