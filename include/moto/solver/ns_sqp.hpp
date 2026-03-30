@@ -172,6 +172,9 @@ struct ns_sqp {
         scalar_t inf_dual_step = 0.;         // infinity norm of the dual step (all constraints)
         scalar_t inf_eq_dual_step = 0.;      // infinity norm of the dual step (equality constraints only)
         scalar_t inf_ineq_dual_step = 0.;    // infinity norm of the dual step (inequality constraints only)
+        scalar_t inf_dyn_dual_step = 0.;     // inf-norm of dual step for __dyn
+        scalar_t inf_eq_x_dual_step = 0.;   // inf-norm of dual step for __eq_x
+        scalar_t inf_eq_xu_dual_step = 0.;  // inf-norm of dual step for __eq_xu
         scalar_t avg_dual_res = 0.;          // average dual residual: L1 norm of stationarity gradient / number of elements (unscaled)
     } kkt_last;
     kkt_info update(size_t n_iter, bool verbose = true);

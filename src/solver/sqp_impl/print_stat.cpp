@@ -67,5 +67,35 @@ void ns_sqp::print_stats(const kkt_info &info) {
     fmt::print("\n");
     fmt::print("    ||lam_eq||={:.3e}  ||lam_ineq||={:.3e}  diag_scl={:.3e}  ||lam||={:.3e}\n",
                info.max_eq_dual_norm, info.max_ineq_dual_norm, info.max_diag_scaling, info.max_dual_norm);
+    fmt::print("    d_eq: dyn={:.3e}  eq_x={:.3e}  eq_xu={:.3e}\n",
+               info.inf_dyn_dual_step, info.inf_eq_x_dual_step, info.inf_eq_xu_dual_step);
+    std::vector<vector> dual_dyn;
+    size_t idx = 0;
+    if (i_iter == 0)
+        return;
+    for (auto n : graph_.flatten_nodes()) {
+        // fmt::print("    value x at node {}: {:.4}\n", idx, n->trial_prim_state_bak[__x].transpose());
+        // fmt::print("    delta x at node {}: {:.4}\n", idx, n->trial_prim_step[__x].transpose());
+        // fmt::print("    value u at node {}: {:.4}\n", idx, n->trial_prim_state_bak[__u].transpose());
+        // fmt::print("    delta u at node {}: {:.4}\n", idx, n->trial_prim_step[__u].transpose());
+        // fmt::print("    value y at node {}: {:.4}\n", idx, n->trial_prim_state_bak[__y].transpose());
+        // fmt::print("    delta y at node {}: {:.4}\n", idx, n->trial_prim_step[__y].transpose());
+
+        // if (n->dense().dual_[__dyn].size() > 0) {
+        //     dual_dyn.push_back(n->trial_dual_step[__dyn]);
+        //     fmt::print("    lam_dyn at node {}: {:.4}\n", idx, n->trial_dual_state_bak[__dyn].transpose());
+        //     fmt::print("    d l_dyn at node {}: {:.4}\n", idx, n->trial_dual_step[__dyn].transpose());
+        // }
+        // // if (idx == 99) {
+        //     fmt::print("    lam_eqc at node {}: {:.4}\n", idx + 1, n->trial_dual_state_bak[__eq_x_soft].transpose());
+        //     fmt::print("    d l_eqc at node {}: {:.4}\n", idx + 1, n->trial_dual_step[__eq_x_soft].transpose());
+        // // }
+        // fmt::println("    node {}:", idx);
+        // fmt::print("R \n{}\n", n->Q_uu.dense());
+        // fmt::print("q \n{}\n", n->Q_u.transpose());
+        // fmt::print("Q \n{}\n", n->Q_yy.dense());
+        // fmt::print("r \n{}\n", n->Q_y.transpose());
+        idx++;
+    }
 };
 } // namespace moto

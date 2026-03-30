@@ -30,6 +30,7 @@ class dense_dynamics : public generic_dynamics {
         aligned_map_t proj_f_x_;                           ///< Jacobian of x
         std::vector<aligned_map_t> proj_f_u_shared_;       ///< projection of f_u
         approx_data(generic_constr::approx_data &&rhs);
+        void reset() override;
         ~approx_data();
     };
 
@@ -57,6 +58,7 @@ class dense_dynamics : public generic_dynamics {
     size_t active_dim_shared_inputs(const ocp *prob) const;
     size_t active_num_exclusive_inputs(const ocp *prob) const;
     size_t active_num_shared_inputs(const ocp *prob) const;
+
   private:
     struct info : public generic_func::info {
         size_t num_exclusive_inputs_ = 0; ///< number of exclusive input variables (i.e., not shared)

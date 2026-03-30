@@ -22,7 +22,7 @@ void pmm_constr::initialize(data_map_t &data) const {
 void pmm_constr::value_impl(func_approx_data &data) const {
     base::value_impl(data);
     auto &d = data.as<pmm_data>();
-    d.g_ = d.v_;  // raw C(x) = h; v_ is the primal residual used by inf_prim_res and merit
+    d.g_ = d.v_ - d.rho_ * d.multiplier_;  // raw C(x) = h; v_ is the primal residual used by inf_prim_res and merit
 }
 
 void pmm_constr::jacobian_impl(func_approx_data &data) const {

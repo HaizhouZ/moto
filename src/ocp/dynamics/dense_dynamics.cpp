@@ -10,6 +10,10 @@ dense_dynamics::approx_data::~approx_data() {
     }
 }
 
+void dense_dynamics::approx_data::reset() {
+    new (lu_.get()) lu_t(); // reset the LU factorizer
+}
+
 dense_dynamics::approx_data::approx_data(generic_constr::approx_data &&rhs)
     : generic_dynamics::approx_data(std::move(rhs)), lu_(new lu_t()) {
     auto &prob = *merit_data_->prob_;

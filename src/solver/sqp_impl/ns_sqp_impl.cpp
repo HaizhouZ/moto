@@ -147,7 +147,7 @@ ns_sqp::line_search_action ns_sqp::sqp_iter(filter_linesearch_data &ls, kkt_info
         ineq_constr_correction();
     detail_timed_block_end("ineq_corrector_step");
 
-    if (do_refinement && settings.has_ineq_soft && settings.rf.enabled && settings.rf.max_iters > 0)
+    if (do_refinement && settings.rf.enabled && settings.rf.max_iters > 0)
         iterative_refinement();
 
     ls.reset_per_iter_data();
@@ -227,7 +227,6 @@ LS_START:
     } else {
         update_approx_derivatives();
     }
-
     kkt_current = kkt_trial;
     return action;
 }
@@ -500,8 +499,15 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
                 kkt.inf_dual_step = std::max(kkt.inf_dual_step, step);
                 if (in_field(f, ineq_constr_fields))
                     kkt.inf_ineq_dual_step = std::max(kkt.inf_ineq_dual_step, step);
-                else
+                else {
                     kkt.inf_eq_dual_step = std::max(kkt.inf_eq_dual_step, step);
+                    if (f == __dyn)
+                        kkt.inf_dyn_dual_step = std::max(kkt.inf_dyn_dual_step, step);
+                    else if (f == __eq_x)
+                        kkt.inf_eq_x_dual_step = std::max(kkt.inf_eq_x_dual_step, step);
+                    else if (f == __eq_xu)
+                        kkt.inf_eq_xu_dual_step = std::max(kkt.inf_eq_xu_dual_step, step);
+                }
             }
         }
     }
