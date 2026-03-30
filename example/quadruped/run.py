@@ -3,6 +3,7 @@ import casadi as cs
 import numpy as np
 import pinocchio as pin
 import pinocchio.casadi as cpin
+import os
 
 from example_robot_data import load
 import meshcat.geometry as mg
@@ -464,6 +465,9 @@ sqp.settings.ls.primal_gamma = 1e-4
 sqp.settings.ls.method = moto.ns_sqp.search_method_filter
 sqp.settings.ls.merit_sigma = 100
 sqp.settings.ls.max_steps = 100
+
+max_update_iter = int(os.getenv("MOTO_SQP_MAX_ITER", "2"))
+print(f"SQP update iters: {max_update_iter}")
 # sqp.settings.ls.backtrack_scheme = moto.ns_sqp.backtrack_scheme_geometric
 # cfg = [
 #     [-0.9595959595959596, -0.6161616161616161],
@@ -524,7 +528,7 @@ cnt = 0
 iters = 0
 start = time.perf_counter()
 # while cnt < 50:
-res = sqp.update(2, verbose=True)
+res = sqp.update(max_update_iter, verbose=True)
 sqp.settings.ipm.warm_start = True
 cnt += 1
 iters += res.num_iter

@@ -85,8 +85,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("prim_tol", &ns_sqp::settings_t::prim_tol, "Primal feasibility tolerance")
         .def_rw("dual_tol", &ns_sqp::settings_t::dual_tol, "Dual feasibility tolerance")
         .def_rw("comp_tol", &ns_sqp::settings_t::comp_tol, "Complementarity feasibility tolerance")
-        .def_rw("s_max", &ns_sqp::settings_t::s_max, "IPOPT-style dual scaling parameter: s_d = max(s_max, ||λ||_1/n_constr)/s_max")
-        .def_rw("lbfgs", &ns_sqp::settings_t::lbfgs, "Structured L-BFGS Hessian correction settings");
+        .def_rw("s_max", &ns_sqp::settings_t::s_max, "IPOPT-style dual scaling parameter: s_d = max(s_max, ||λ||_1/n_constr)/s_max");
 
     nb::class_<ns_sqp::restoration_settings>(sqp, "restoration_settings")
         .def_rw("enabled", &ns_sqp::restoration_settings::enabled,
@@ -117,22 +116,13 @@ void register_submodule_ns_sqp(nb::module_ &m) {
                 "Recompute scales when dual_res / prim_res >= this threshold");
     moto::export_enum<ns_sqp::scaling_settings::mode_t>(sc_setting);
 
-    nb::class_<moto::solver::lbfgs_settings>(sqp, "lbfgs_settings")
-        .def_rw("enabled", &moto::solver::lbfgs_settings::enabled,
-                "Enable structured L-BFGS Hessian correction (default false). "
-                "When enabled, per-stage curvature pairs (s, y#) are collected after each "
-                "accepted SQP step and used to correct Q_zz in the Riccati backward pass.")
-        .def_rw("max_pairs", &moto::solver::lbfgs_settings::max_pairs,
-                "Maximum number of (s, y#) curvature pairs to retain per stage (default 10)")
-        .def_rw("min_curvature", &moto::solver::lbfgs_settings::min_curvature,
-                "Discard pairs where y#·s < min_curvature * ||s||² (default 1e-8)");
-
     nb::enum_<moto::solver::ipm_config::adaptive_mu_t> enum_binder(sqp, "adaptive_mu_t");
     moto::export_enum<ns_sqp::iter_result_t>(sqp);
     nb::class_<ns_sqp::kkt_info>(sqp, "kkt_info")
         .def_ro("result", &ns_sqp::kkt_info::result, "Result of the SQP iteration")
         .def_prop_ro("solved", [](const ns_sqp::kkt_info &self) { return self.result == ns_sqp::iter_result_t::success; }, "Whether the problem is solved")
         .def_rw("num_iter", &ns_sqp::kkt_info::num_iter, "Number of iterations")
+        .def_rw("ls_steps", &ns_sqp::kkt_info::ls_steps, "Line-search trial count used in this SQP iteration")
         .def_rw("objective", &ns_sqp::kkt_info::objective, "Objective value")
         .def_ro("cost", &ns_sqp::kkt_info::cost, "Pure running cost (sum of __cost terms, no barrier)")
         .def_rw("inf_prim_res", &ns_sqp::kkt_info::inf_prim_res, "Primal residual (constraint violation)")

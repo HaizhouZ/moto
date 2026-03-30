@@ -109,7 +109,6 @@ struct ns_sqp {
         iterative_refinement_setting rf;
         scaling_settings scaling;
         restoration_settings restoration;
-        solver::lbfgs_settings lbfgs; ///< structured L-BFGS Hessian correction settings
 
         bool no_except = false;
 

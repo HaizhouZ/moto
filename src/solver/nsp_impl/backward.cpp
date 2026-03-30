@@ -1,7 +1,6 @@
 #define MOTO_NS_RICCATI_IMPL
 
 #include <moto/solver/ns_riccati/generic_solver.hpp>
-#include <moto/solver/lbfgs.hpp>
 #include <moto/utils/field_conversion.hpp>
 
 // #define ENABLE_TIMED_BLOCK
@@ -42,19 +41,12 @@ void generic_solver::riccati_recursion(ns_riccati_data *cur, ns_riccati_data *pr
     if (d.rank_status_ == rank_status::unconstrained) {
         d.F_x.right_times<false>(d.V_yy, nsp.y_0_p_K);
         d.F_u.inner_product(d.V_yy, nsp.Q_zz);
-        // Structured L-BFGS additive correction A_k (unknown Hessian estimate).
-        // Q_zz already holds C_k + H_IPM_k + F_u^T·V_yy·F_u at this point.
-        // A_k is built from γ·I using stored (s, y#) pairs and added in.
-        solver::lbfgs_apply_structured_to_qzz(nsp.Q_zz, d.lbfgs_);
         d.F_u.T_times<false>(nsp.y_0_p_k, nsp.z_0_k);
         d.F_u.T_times<false>(nsp.y_0_p_K, nsp.z_0_K);
     } else {
         nsp.y_0_p_K.noalias() -= d.V_yy * nsp.y_y_K;
         if (d.rank_status_ == rank_status::constrained) [[likely]] {
             nsp.Q_zz.noalias() += nsp.Z_y.transpose() * d.V_yy * nsp.Z_y; /// todo unconstrained
-            // Structured L-BFGS additive correction A_k in null-space coordinates.
-            // Q_zz already holds Z_u^T·(C_k+H_IPM_k)·Z_u + Z_y^T·V_yy·Z_y at this point.
-            solver::lbfgs_apply_structured_to_qzz(nsp.Q_zz, nsp.Z_u, d.lbfgs_);
             // compute bar{y}_0
             nsp.z_0_k.noalias() += nsp.Z_y.transpose() * nsp.y_0_p_k;
             nsp.z_0_K.noalias() += nsp.Z_y.transpose() * nsp.y_0_p_K;
