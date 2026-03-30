@@ -20,7 +20,7 @@ class generic_constr : public generic_func {
      */
     struct approx_data : public func_approx_data {
         solver::linesearch_config *ls_cfg = nullptr; ///< line search configuration, can be nullptr
-        scalar_t *merit_;                            ///< pointer to the merit value
+        scalar_t *lag_;                              ///< pointer to the lagrangian value
         vector_ref multiplier_;                      ///< multiplier vector reference
         /**
          * @brief construct a new generic_constr data object by moving from another sparse approximation map
@@ -28,7 +28,7 @@ class generic_constr : public generic_func {
          * @param raw raw approximation storage
          * @param d sparse approximation map
          */
-        approx_data(vector_ref multiplier, merit_data &raw, func_approx_data &&d);
+        approx_data(vector_ref multiplier, lag_data &raw, func_approx_data &&d);
         /**
          * @brief construct a new generic_constr data object, will bind multiplier to the raw data
          * @param raw raw approximation storage
@@ -37,7 +37,7 @@ class generic_constr : public generic_func {
         approx_data(func_approx_data &&d);
 
       protected:
-        void map_merit_jac_from_raw(decltype(merit_data::merit_jac_) &raw, std::vector<row_vector_ref> &jac);
+        void map_lag_jac_from_raw(decltype(lag_data::lag_jac_) &raw, std::vector<row_vector_ref> &jac);
     };
 
   protected:
@@ -72,19 +72,19 @@ class generic_constr : public generic_func {
      */
     template <typename derived = generic_constr>
         requires(std::derived_from<derived, generic_constr>)
-    auto make_approx(sym_data &primal, merit_data &raw, shared_data &shared) const {
+    auto make_approx(sym_data &primal, lag_data &raw, shared_data &shared) const {
         using data_base = generic_constr::approx_data;
         using data_derived = typename derived::approx_data;
         data_base d(func_approx_data(primal, raw, shared, *this));
         return new data_derived(std::move(d));
     }
 #define OVERLOAD_CREATE_APPROX_DATA(derived)                                                                           \
-    func_approx_data_ptr_t create_approx_data(sym_data &primal, merit_data &raw, shared_data &shared) const override { \
+    func_approx_data_ptr_t create_approx_data(sym_data &primal, lag_data &raw, shared_data &shared) const override { \
         return func_approx_data_ptr_t(make_approx<derived>(primal, raw, shared));                                      \
     }
     /**
      * @brief wrapped data maker for generic_constr
-     * @details if field_ is in @ref merit_data::stored_constr_fields, it will return approx_data
+     * @details if field_ is in @ref lag_data::stored_constr_fields, it will return approx_data
      * otherwise it will call @ref make_approx to generate @ref generic_constr::constr_data_tpl (with independent storage)
      * @param primal primal data
      * @param raw approximation data

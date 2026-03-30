@@ -44,16 +44,19 @@ void register_submodule_node_data(nb::module_ &m) {
                 throw std::runtime_error("Invalid type for sym_data assignment");
             } });
 
-    nb::class_<merit_data>(m, "merit_data")
-        .def(nb::init<ocp *>(), nb::arg("prob"), "Constructor for merit_data with OCP problem")
-        .def_prop_ro("prob", [](merit_data &self) -> ocp & { return *self.prob_; })
-        .def_rw("cost", &merit_data::cost_)
-        .def_rw("approx", &merit_data::approx_)
-        .def_rw("dual", &merit_data::dual_)
-        .def_rw("comp", &merit_data::comp_)
-        .def_rw("hessian", &merit_data::hessian_)
-        .def_rw("merit_jac", &merit_data::merit_jac_)
-        .def_rw("merit_jac_modification", &merit_data::merit_jac_modification_);
+    auto lag_data_handle =
+        nb::class_<lag_data>(m, "lag_data")
+            .def(nb::init<ocp *>(), nb::arg("prob"), "Constructor for lag_data with OCP problem")
+            .def_prop_ro("prob", [](lag_data &self) -> ocp & { return *self.prob_; })
+            .def_rw("lag", &lag_data::lag_)
+            .def_rw("cost", &lag_data::cost_)
+            .def_rw("approx", &lag_data::approx_)
+            .def_rw("dual", &lag_data::dual_)
+            .def_rw("comp", &lag_data::comp_)
+            .def_rw("lag_hess", &lag_data::lag_hess_)
+            .def_rw("lag_jac", &lag_data::lag_jac_)
+            .def_rw("lag_jac_corr", &lag_data::lag_jac_corr_);
+    m.attr("lag_data") = lag_data_handle;
 
     nb::class_<shared_data>(m, "shared_data")
         .def(nb::init<ocp *, sym_data *>(), nb::arg("prob"), nb::arg("primal"),
@@ -84,8 +87,8 @@ void register_submodule_node_data(nb::module_ &m) {
         .def_prop_ro("prob", [](func_approx_data &self) -> auto & { return *self.problem(); })
         .def("__getitem__", [](func_approx_data &self, py_var_inarg_wrapper s) { return self[(sym &)s]; })
         .def("__setitem__", [](func_approx_data &self, py_var_inarg_wrapper s, vector_ref d) { self[(sym &)s] = d; })
-        .def(nb::init<sym_data &, merit_data &, shared_data &, const func &>(), nb::arg("primal"), nb::arg("raw"), nb::arg("shared"), nb::arg("f"),
-             "Constructor for func_approx_data with sym_data, merit_data and shared_data")
+        .def(nb::init<sym_data &, lag_data &, shared_data &, const func &>(), nb::arg("primal"), nb::arg("raw"), nb::arg("shared"), nb::arg("f"),
+             "Constructor for func_approx_data with sym_data, lag_data and shared_data")
         .def("setup_hessian", &func_approx_data::setup_hessian, "Setup hessian from raw approximation data")
         .def_rw("v", &func_approx_data::v_, "Value vector reference")
         // .def_rw("jac", &func_approx_data::jac_, "Jacobian matrix references indexed by input arguments")

@@ -1,5 +1,5 @@
-#ifndef MOTO_OCP_PROBLEM_DATA_HPP
-#define MOTO_OCP_PROBLEM_DATA_HPP
+#ifndef MOTO_OCP_LAG_DATA
+#define MOTO_OCP_LAG_DATA
 
 #include <moto/core/array.hpp>
 #include <moto/core/fields.hpp>
@@ -11,8 +11,8 @@ struct generic_dynamics;
  * @brief dense raw approximation data
  * deserialized data storage of all function fields
  */
-struct merit_data {
-    merit_data(ocp *prob);
+struct lag_data {
+    lag_data(ocp *prob);
 
     ocp *prob_;
     struct approx_data {
@@ -34,24 +34,32 @@ struct merit_data {
     array_type<vector, constr_fields> dual_;
     /// complementarity of each inequality fields
     array_type<vector, ineq_constr_fields> comp_;
-    scalar_t merit_; ///< cost + sum of all constraints multipler-residual products
+    scalar_t lag_; ///< cost + sum of all constraints multipler-residual products
     scalar_t cost_;  ///< cost value
     /// cost jacobian (pure cost gradient; excludes constraint dual contributions J_c^T λ)
     array<row_vector, field::num_prim> cost_jac_;
-    /// Lagrangian jacobian: cost_jac_ + Σ_c J_c^T λ_c (used for dual residual / stationarity)
-    array<row_vector, field::num_prim> merit_jac_;
-    /// modification of the merit jacobian, indexed by field
-    array<row_vector, field::num_prim> merit_jac_modification_;
+    /// Base stage Lagrangian gradient:
+    ///   cost_jac_ + Σ_c J_c^T λ_c
+    /// This is the persistent gradient state produced by update_approximation().
+    /// Solver code often aliases these entries as Q_x / Q_u / Q_y.
+    array<row_vector, field::num_prim> lag_jac_;
+    /// Pending additive correction to lag_jac_ used by the next linear solve.
+    /// Typical writers are:
+    /// - IPM / PMM Schur-complement terms
+    /// - iterative refinement residual correction
+    /// - restoration proximal terms
+    ///
+    /// Lifecycle:
+    /// - update_approximation() clears this buffer
+    /// - solver code fills it
+    /// - data_base::activate_lag_jac_corr() adds it into lag_jac_
+    /// - some correction paths temporarily swap this buffer with lag_jac_ for efficiency
+    array<row_vector, field::num_prim> lag_jac_corr_;
     /// cost hessian h[a][b] is h_ab. Note only the upper block-triangular part is stored
-    array<array<sparse_mat, field::num_prim>, field::num_prim> hessian_;
+    array<array<sparse_mat, field::num_prim>, field::num_prim> lag_hess_;
     array<array<sparse_mat, field::num_prim>, field::num_prim> hessian_modification_;
-
-    /// stationary residual
-    array_type<row_vector, primal_fields> res_stat_;
-
-    array_type<aligned_vector_map_t, primal_fields> primal_prox_hess_diagonal_;
 };
-def_unique_ptr(merit_data);
+def_unique_ptr(lag_data);
 } // namespace moto
 
-#endif // MOTO_OCP_PROBLEM_DATA_HPP
+#endif // MOTO_OCP_LAG_DATA

@@ -203,7 +203,7 @@ class generic_func : public expr {
     void enable_if_any(const expr_inarg_list &args);
 
     virtual func_approx_data_ptr_t create_approx_data(sym_data &primal,
-                                                      merit_data &raw,
+                                                      lag_data &raw,
                                                       shared_data &shared) const;
     /// @brief compute the approximation of the function
     /// @param data approximation data

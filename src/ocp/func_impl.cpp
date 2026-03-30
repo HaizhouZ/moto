@@ -9,7 +9,7 @@
 
 namespace moto {
 
-func_approx_data_ptr_t generic_func::create_approx_data(sym_data &primal, merit_data &raw, shared_data &shared) const {
+func_approx_data_ptr_t generic_func::create_approx_data(sym_data &primal, lag_data &raw, shared_data &shared) const {
     if (field() - __dyn >= field::num_func)
         throw std::runtime_error(fmt::format("create_approx_data cannot be called for func {} type {}",
                                              name(), field::name(field())));
@@ -60,7 +60,7 @@ void generic_func::load_external_impl(const std::string &path) {
     };
 
     hessian = [hess = std::move(funcs[2])](func_approx_data &d) {
-        hess.invoke(d.in_arg_data(), d.merit_hess_);
+        hess.invoke(d.in_arg_data(), d.lag_hess_);
     };
 }
 

@@ -73,7 +73,7 @@ class ipm_constr final : public ineq_constr {
      * @param shared shared data
      * @return func_approx_data_ptr_t
      */
-    func_approx_data_ptr_t create_approx_data(sym_data &primal, merit_data &raw, shared_data &shared) const override {
+    func_approx_data_ptr_t create_approx_data(sym_data &primal, lag_data &raw, shared_data &shared) const override {
         return func_approx_data_ptr_t(make_approx<ipm_constr>(primal, raw, shared));
     }
     DEF_DEFAULT_CLONE(ipm_constr)

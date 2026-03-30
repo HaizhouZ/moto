@@ -3,24 +3,24 @@
 
 namespace moto {
 generic_constr::approx_data::approx_data(func_approx_data &&d)
-    : approx_data(d.merit_data_->prob_->extract(d.merit_data_->dual_[d.func_.field()], d.func_), *d.merit_data_, std::move(d)) {
+    : approx_data(d.lag_data_->prob_->extract(d.lag_data_->dual_[d.func_.field()], d.func_), *d.lag_data_, std::move(d)) {
 }
 generic_constr::approx_data::approx_data(vector_ref multiplier,
-                                         merit_data &raw,
+                                         lag_data &raw,
                                          func_approx_data &&d)
-    : func_approx_data(std::move(d)), merit_(&raw.merit_),
+    : func_approx_data(std::move(d)), lag_(&raw.lag_),
       multiplier_(multiplier) {
     if (func_.order() >= approx_order::second) { // for hessian from vjp autodiff codegen
         in_args_.push_back(multiplier_);
     }
-    if (in_field(func_.field(), merit_data::stored_constr_fields) && func_.field() != __dyn) {
-        auto prob_ = merit_data_->prob_;
+    if (in_field(func_.field(), lag_data::stored_constr_fields) && func_.field() != __dyn) {
+        auto prob_ = lag_data_->prob_;
         size_t f_st = prob_->get_expr_start(func_);
         size_t arg_idx = 0;
         for (const sym &arg : func_.in_args()) {
             field_t f = arg.field();
             if (f < field::num_prim && prob_->is_active(arg)) {
-                auto d = merit_data_->approx_[func_.field()].jac_[f].insert(
+                auto d = lag_data_->approx_[func_.field()].jac_[f].insert(
                     f_st, prob_->get_expr_start_tangent(arg), func_.dim(), arg.tdim(), sparsity::dense);
                 new (&jac_[arg_idx]) matrix_ref(d);
             }
@@ -28,7 +28,7 @@ generic_constr::approx_data::approx_data(vector_ref multiplier,
         }
     }
 }
-void generic_constr::approx_data::map_merit_jac_from_raw(decltype(merit_data::merit_jac_) &raw, std::vector<row_vector_ref> &jac) {
+void generic_constr::approx_data::map_lag_jac_from_raw(decltype(lag_data::lag_jac_) &raw, std::vector<row_vector_ref> &jac) {
     auto &in_args = func_.in_args();
     jac.clear();
     for (size_t i : range(in_args.size())) {

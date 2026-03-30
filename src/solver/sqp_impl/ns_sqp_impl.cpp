@@ -342,7 +342,7 @@ void ns_sqp::print_dual_res_breakdown() {
     // Decompose dual_res by field at the worst-case node.
     //
     // dual_res = max_k ||r_k||_inf where
-    //   r_k = merit_jac_[__y]_k + merit_jac_[__x]_{k+1} * P   (cross-stage costate residual)
+    //   r_k = lag_jac_[__y]_k + lag_jac_[__x]_{k+1} * P   (cross-stage costate residual)
     //
     // We first find the stage k* that achieves dual_res, then decompose:
     //   r_k* = sum_cf r_{cf,k*}   where r_{cf,k} = J_{cf,y,k}^T λ_{cf,k} + J_{cf,x,k+1}^T λ_{cf,k+1}
@@ -360,19 +360,19 @@ void ns_sqp::print_dual_res_breakdown() {
         auto *cur = nodes[i];
         node_data *next = (i + 1 < nodes.size()) ? nodes[i + 1] : nullptr;
         // u stationarity
-        scalar_t u_res = cur->dense().merit_jac_[__u].cwiseAbs().maxCoeff();
+        scalar_t u_res = cur->dense().lag_jac_[__u].cwiseAbs().maxCoeff();
         worst_u = std::max(worst_u, u_res);
         // cross-stage costate: mirrors compute_kkt_info
         if (next) {
             auto P = utils::permutation_from_y_to_x(&cur->problem(), &next->problem());
-            row_vector total_r = next->dense().merit_jac_[__x] * P + cur->dense().merit_jac_[__y];
+            row_vector total_r = next->dense().lag_jac_[__x] * P + cur->dense().lag_jac_[__y];
             scalar_t y_res = total_r.cwiseAbs().maxCoeff();
             if (y_res > worst_y) {
                 worst_y = y_res;
                 worst_i = i;
             }
         } else {
-            scalar_t y_res = cur->dense().merit_jac_[__y].cwiseAbs().maxCoeff();
+            scalar_t y_res = cur->dense().lag_jac_[__y].cwiseAbs().maxCoeff();
             if (y_res > worst_y) {
                 worst_y = y_res;
                 worst_i = i;
@@ -385,8 +385,8 @@ void ns_sqp::print_dual_res_breakdown() {
     node_data *next = (worst_i + 1 < nodes.size()) ? nodes[worst_i + 1] : nullptr;
     auto P = utils::permutation_from_y_to_x(&cur->problem(), next ? &next->problem() : &cur->problem());
 
-    int ny = (int)cur->dense().merit_jac_[__y].cols();
-    int nx_next = next ? (int)next->dense().merit_jac_[__x].cols() : ny;
+    int ny = (int)cur->dense().lag_jac_[__y].cols();
+    int nx_next = next ? (int)next->dense().lag_jac_[__x].cols() : ny;
 
     // per-field cross-stage vector at k* (signed, not yet normed)
     std::map<field_t, scalar_t> cross_norm; // ||r_{cf,k*}||_inf
@@ -429,7 +429,7 @@ void ns_sqp::print_dual_res_breakdown() {
         cross_norm[cf] = r.cwiseAbs().maxCoeff();
     }
 
-    // cost-only: merit_jac_[__y]_k* + merit_jac_[__x]_{k*+1} * P  minus field contributions
+    // cost-only: lag_jac_[__y]_k* + lag_jac_[__x]_{k*+1} * P  minus field contributions
     // (we just report total which mirrors dual_res exactly)
     fmt::print("  dual_res breakdown at worst node {} (y={:.3e} u={:.3e}):\n",
                worst_i, worst_y, worst_u);
@@ -453,10 +453,10 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
         kkt.cost += n->cost();
         kkt.inf_prim_res = std::max(kkt.inf_prim_res, n->inf_prim_res_);
         kkt.prim_res_l1 += n->prim_res_l1_;
-        if (update_dual_res && n->dense().merit_jac_[__u].size() > 0) {
-            kkt.inf_dual_res = std::max(kkt.inf_dual_res, n->dense().merit_jac_[__u].cwiseAbs().maxCoeff());
-            dual_res_l1 += n->dense().merit_jac_[__u].cwiseAbs().sum();
-            n_dual_res += static_cast<size_t>(n->dense().merit_jac_[__u].size());
+        if (update_dual_res && n->dense().lag_jac_[__u].size() > 0) {
+            kkt.inf_dual_res = std::max(kkt.inf_dual_res, n->dense().lag_jac_[__u].cwiseAbs().maxCoeff());
+            dual_res_l1 += n->dense().lag_jac_[__u].cwiseAbs().sum();
+            n_dual_res += static_cast<size_t>(n->dense().lag_jac_[__u].size());
         }
         kkt.inf_comp_res = std::max(kkt.inf_comp_res, n->inf_comp_res_);
         if (update_dual_res) {
@@ -519,20 +519,20 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
                 if (next != nullptr) [[likely]] {
                     // cancellation of jacobian from y to x
                     static row_vector tmp;
-                    tmp.conservativeResize(next->dense().merit_jac_[__x].cols());
-                    tmp.noalias() = next->dense().merit_jac_[__x] *
+                    tmp.conservativeResize(next->dense().lag_jac_[__x].cols());
+                    tmp.noalias() = next->dense().lag_jac_[__x] *
                                         utils::permutation_from_y_to_x(&cur->problem(), &next->problem()) +
-                                    cur->dense().merit_jac_[__y];
+                                    cur->dense().lag_jac_[__y];
                     if (tmp.size() > 0) {
                         kkt.inf_dual_res = std::max(kkt.inf_dual_res, tmp.cwiseAbs().maxCoeff());
                         dual_res_l1 += tmp.cwiseAbs().sum();
                         n_dual_res += static_cast<size_t>(tmp.size());
                     }
                 } else { /// @todo: include initial jac[__x] inf norm if init is optimized
-                    if (cur->dense().merit_jac_[__y].size() > 0) {
-                        kkt.inf_dual_res = std::max(kkt.inf_dual_res, cur->dense().merit_jac_[__y].cwiseAbs().maxCoeff());
-                        dual_res_l1 += cur->dense().merit_jac_[__y].cwiseAbs().sum();
-                        n_dual_res += static_cast<size_t>(cur->dense().merit_jac_[__y].size());
+                    if (cur->dense().lag_jac_[__y].size() > 0) {
+                        kkt.inf_dual_res = std::max(kkt.inf_dual_res, cur->dense().lag_jac_[__y].cwiseAbs().maxCoeff());
+                        dual_res_l1 += cur->dense().lag_jac_[__y].cwiseAbs().sum();
+                        n_dual_res += static_cast<size_t>(cur->dense().lag_jac_[__y].size());
                     }
                 }
             },
@@ -751,7 +751,7 @@ void ns_sqp::print_scaling_info() {
         // cost Jacobians
         fmt::print("    cost");
         for (auto pf : primal_fields) {
-            const auto &jac = n->dense().merit_jac_[pf];
+            const auto &jac = n->dense().lag_jac_[pf];
             if (jac.size() == 0)
                 continue;
             scalar_t jac_inf = jac.cwiseAbs().maxCoeff();

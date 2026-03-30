@@ -54,7 +54,7 @@ vector_ref sym_data::get(const sym &s) {
 node_data::node_data(const ocp_ptr_t &prob)
     : prob_(prob),
       sym_(new sym_data(prob.get())),
-      dense_(new merit_data(prob.get())),
+      dense_(new lag_data(prob.get())),
       shared_(new shared_data(prob.get(), sym_.get())) {
     for (size_t field : func_fields) {
         size_t idx = 0;
@@ -69,20 +69,17 @@ void node_data::update_approximation(update_mode config) {
     bool update_cost = config == update_mode::eval_val || config == update_mode::eval_all;
     if (update_cost) {
         dense_->cost_ = 0.;
-        dense_->merit_ = 0.;
+        dense_->lag_ = 0.;
     }
-    // set merit jacobian to zero
+    // set lagrangian gradient to zero
     if (config > update_mode::eval_val) {
-        for (auto &r : dense_->res_stat_) {
-            r.setZero();
-        }
         for (auto field : primal_fields) {
-            dense_->merit_jac_[field].setZero();
-            dense_->merit_jac_modification_[field].setZero();
+            dense_->lag_jac_[field].setZero();
+            dense_->lag_jac_corr_[field].setZero();
         }
 
         if (config >= update_mode::eval_hess)
-            for (auto &hess_l_0 : dense_->hessian_) {
+            for (auto &hess_l_0 : dense_->lag_hess_) {
                 for (auto &hess_l_1 : hess_l_0) {
                     hess_l_1.setZero();
                 }
@@ -111,18 +108,18 @@ void node_data::update_approximation(update_mode config) {
     // snapshot pure cost gradient before adding constraint dual contributions
     if (config >= update_mode::eval_jac)
         for (auto field : primal_fields){
-            dense_->cost_jac_[field] = dense_->merit_jac_[field];
+            dense_->cost_jac_[field] = dense_->lag_jac_[field];
         }
 
-    for (auto f : merit_data::stored_constr_fields) {
+    for (auto f : lag_data::stored_constr_fields) {
         if (prob_->dim(f) == 0)
             continue; // skip empty jacobian
-        dense_->merit_ += dense_->approx_[f].v_.dot(dense_->dual_[f]);
+        dense_->lag_ += dense_->approx_[f].v_.dot(dense_->dual_[f]);
         if (config >= update_mode::eval_jac)
             for (auto p : primal_fields) {
                 if (dense_->approx_[f].jac_[p].is_empty())
                     continue; // skip empty jacobian
-                dense_->approx_[f].jac_[p].right_T_times(dense_->dual_[f], dense_->merit_jac_[p]);
+                dense_->approx_[f].jac_[p].right_T_times(dense_->dual_[f], dense_->lag_jac_[p]);
             }
     }
     if (update_cost) {
@@ -140,12 +137,12 @@ void node_data::update_approximation(update_mode config) {
                 continue; // skip empty fields
             inf_comp_res_ = std::max(comp.cwiseAbs().maxCoeff(), inf_comp_res_);
         }
-        dense_->merit_ += dense_->cost_;
+        dense_->lag_ += dense_->cost_;
     }
 }
 
 void node_data::print_residuals() const {
-    for (auto f : merit_data::stored_constr_fields) {
+    for (auto f : lag_data::stored_constr_fields) {
         fmt::println("Field {}: dim {} residual {}", field::name(f), dense_->approx_[f].v_.size(),
                      dense_->approx_[f].v_.transpose());
     }

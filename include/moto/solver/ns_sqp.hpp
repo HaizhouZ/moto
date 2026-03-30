@@ -130,11 +130,18 @@ struct ns_sqp {
 
     struct data : public node_data, ns_riccati_data {
         data(const ocp_ptr_t &prob)
-            : node_data(prob), ns_riccati_data((node_data *)this) {}
+            : node_data(prob), ns_riccati_data((node_data *)this) {
+            for (auto f : primal_fields) {
+                auto &diag_panels = this->dense().lag_hess_[f][f].diag_panels_;
+                assert(!diag_panels.empty() && "expected pre-inserted proximal diagonal panel");
+                primal_prox_hess_diagonal_[f].reset(diag_panels.back().data_);
+            }
+        }
         data(data &&rhs) = default;
         static void update_approx(data *d) {
             d->update_approximation();
         }
+        array_type<aligned_vector_map_t, primal_fields> primal_prox_hess_diagonal_;
         /// row scale applied to each constraint field (empty ⟹ scaling not yet applied)
         array_type<vector, constr_fields> scale_c_;
         /// scale applied to each primal field's cost gradient

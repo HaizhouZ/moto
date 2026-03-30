@@ -36,7 +36,7 @@ class ineq_constr : public soft_constr {
     /***
      * @brief make approximation data for the inequality constraint, will use default @ref data_type
      */
-    func_approx_data_ptr_t create_approx_data(sym_data &primal, merit_data &raw, shared_data &shared) const override {
+    func_approx_data_ptr_t create_approx_data(sym_data &primal, lag_data &raw, shared_data &shared) const override {
         return func_approx_data_ptr_t(make_approx<ineq_constr>(primal, raw, shared));
     }
 };

@@ -86,9 +86,11 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
     cur->update_projected_dynamics();
     timed_block_end("update_projected_dynamics");
 
-    timed_block_start("merge_jacobian_modification");
-    cur->merge_jacobian_modification();
-    timed_block_end("merge_jacobian_modification");
+    // Fold pending gradient corrections (IPM / PMM / restoration / refinement)
+    // into the active stage gradient used by this factorization.
+    timed_block_start("activate_lag_jac_corr");
+    cur->activate_lag_jac_corr();
+    timed_block_end("activate_lag_jac_corr");
 
     nsp.u_0_p_K.setZero();
     d.Q_ux.dump_into(nsp.u_0_p_K);
@@ -192,7 +194,7 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
         }
 
         // ── Gradients: PMM Schur complement for __eq_x / __eq_xu ──
-        // Mirrors pmm_constr::propagate_jacobian: merit_jac_modification += (h/rho)^T * J.
+        // Mirrors pmm_constr::propagate_jacobian: lag_jac_corr_ += (h/rho)^T * J.
         // Q_u already contains J^T*lambda from the generic_constr base path in update_approximation;
         // dynamics is a hard constraint handled by ns_factorization_correction (F_0 via y_y_k).
         if (ncstr > 0) {

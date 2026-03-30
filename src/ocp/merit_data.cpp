@@ -1,9 +1,9 @@
-#include <moto/ocp/impl/merit_data.hpp>
+#include <moto/ocp/impl/lag_data.hpp>
 #include <moto/ocp/problem.hpp>
 
 namespace moto {
 
-merit_data::merit_data(ocp *prob) : prob_(prob) {
+lag_data::lag_data(ocp *prob) : prob_(prob) {
     prob->wait_until_ready();
     size_t n_dyn = prob_->exprs(__dyn).size();
     for (auto i : constr_fields) {
@@ -11,12 +11,12 @@ merit_data::merit_data(ocp *prob) : prob_(prob) {
             continue;
         }
         size_t dim = prob_->dim(i);
-        if (in_field(i, merit_data::stored_constr_fields)) {
+        if (in_field(i, lag_data::stored_constr_fields)) {
             approx_[i].v_.resize(dim);
             approx_[i].v_.setZero();
             for (auto f : primal_fields) {
                 approx_[i].jac_[f].resize(dim, prob_->tdim(f));
-                // fmt::println("prob {} merit_data: approx jacobian for constr field {} w.r.t. primal field {} has dim {}x{}",
+                // fmt::println("prob {} lag_data: approx jacobian for constr field {} w.r.t. primal field {} has dim {}x{}",
                 //              prob_->uid(), field::name(i), field::name(f), dim, prob_->tdim(f));
             }
         }
@@ -39,21 +39,17 @@ merit_data::merit_data(ocp *prob) : prob_(prob) {
     // cost hessian(store only half)
     for (auto i : range(field::num_prim)) {
         for (auto j : range(i, field::num_prim)) {
-            hessian_[j][i].resize(prob_->tdim(j), prob_->tdim(i));
-            // hessian_[j][i].setZero();
+            lag_hess_[j][i].resize(prob_->tdim(j), prob_->tdim(i));
+            // lag_hess_[j][i].setZero();
         }
-        primal_prox_hess_diagonal_[i].reset(hessian_[i][i].insert<sparsity::diag>(0, 0, prob_->tdim(i)));
+        lag_hess_[i][i].insert<sparsity::diag>(0, 0, prob_->tdim(i));
         cost_jac_[i].resize(prob_->tdim(i));
         cost_jac_[i].setZero();
-        merit_jac_[i].resize(prob_->tdim(i));
-        merit_jac_[i].setZero();
-        merit_jac_modification_[i].resize(prob_->tdim(i));
-        merit_jac_modification_[i].setZero();
+        lag_jac_[i].resize(prob_->tdim(i));
+        lag_jac_[i].setZero();
+        lag_jac_corr_[i].resize(prob_->tdim(i));
+        lag_jac_corr_[i].setZero();
     }
-    hessian_modification_ = hessian_; // same size
-    for (auto f : primal_fields) {
-        res_stat_[f].resize(prob_->tdim(f));
-        res_stat_[f].setZero();
-    }
+    hessian_modification_ = lag_hess_; // same size
 }
 } // namespace moto

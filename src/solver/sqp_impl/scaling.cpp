@@ -11,7 +11,7 @@
  * The scale vectors are cached in ns_sqp::data::scale_c_ / scale_p_ and reused
  * across iterations unless the KKT residuals grow beyond configurable thresholds.
  *
- * All scaling is applied *in-place* to merit_data (v_, jac_, cost jac_) so the
+ * All scaling is applied *in-place* to lag_data (v_, jac_, cost jac_) so the
  * downstream Riccati factorization sees a well-conditioned QP.  After the solve,
  * unscale_duals() reverses the scaling on the dual variables so that the next
  * evaluation of the full KKT residuals is in original (physical) units.
@@ -202,10 +202,9 @@ void ns_sqp::compute_and_apply_scaling(const kkt_info &kkt) {
             }
 
             // Cost gradient scaling is intentionally disabled.
-            // Q_y propagates across stages through the backward Riccati recursion
-            // (d_pre.Q_y += d.Q_x, which is built from the current stage's Q_y).
-            // Scaling Q_y in-place at each stage corrupts the inter-stage gradient
-            // accumulation, causing compounding errors across the horizon.
+            // Q_y is propagated across stages during the backward Riccati recursion.
+            // Scaling Q_y in-place at each stage would therefore contaminate the
+            // cross-stage first-order value terms across the horizon.
             d->scale_p_.fill(1.);
         });
     }

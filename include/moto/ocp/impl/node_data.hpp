@@ -24,7 +24,7 @@ struct MOTO_ALIGN_NO_SHARING node_data {
   protected:
     ocp_ptr_t prob_;           /// < pointer to the problem
     sym_data_ptr_t sym_;       /// < dense storage of symbolic data
-    merit_data_ptr_t dense_;   /// <dense storage of the func data
+    lag_data_ptr_t dense_;     /// <dense storage of the func data
     shared_data_ptr_t shared_; /// < shared data
     shifted_array<std::vector<func_approx_data_ptr_t>, field::num_func, __dyn>
         sparse_; /// < sparse view per func
@@ -107,8 +107,8 @@ struct MOTO_ALIGN_NO_SHARING node_data {
         for_each<constr_fields>(std::forward<Callback>(f));
     }
 
-    void clear_merit_jac();
-    void clear_merit_hessian();
+    void clear_lag_jac();
+    void clear_lag_hessian();
 
     void print_residuals() const;
 };

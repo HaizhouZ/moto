@@ -37,7 +37,7 @@ class dense_dynamics : public generic_dynamics {
     using base::base;
 
     func_approx_data_ptr_t create_approx_data(sym_data &primal,
-                                              merit_data &raw,
+                                              lag_data &raw,
                                               shared_data &shared) const override {
         return func_approx_data_ptr_t(make_approx<dense_dynamics>(primal, raw, shared));
     }

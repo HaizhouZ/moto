@@ -70,8 +70,8 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
     std::unique_ptr<aux_data> aux_; // auxiliary data pointer, can be used to store custom data
 
     /// Auxiliary data used to signal GN/restoration mode to the factorization.
-    /// Proximal cost (gradient + diagonal Hessian) is injected via merit_data::prox_jac_
-    /// and merit_data::prox_hessian_diag_ directly by ns_sqp::restoration_update.
+    /// Proximal cost (gradient + diagonal Hessian) is injected directly into
+    /// lag_data by ns_sqp::restoration_update.
     struct restoration_aux_data : aux_data {
         scalar_t rho_eq = 1.0; ///< dual regularization weight for GN equality constraints:
                                 ///< Hessian += (1/rho_eq)*s_c^T*s_c; dlam = (J*du+h)/rho_eq
@@ -86,7 +86,6 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
     } d_u, d_y;
     // multiplier sensitivity
     vector d_lbd_f, d_lbd_s_c_pre_solve, d_lbd_s_c;
-    row_vector V_y_corr; ///< correction to value function gradient from iterative refinement backward pass
 
     ns_riccati_data(node_data *full_data);
     ns_riccati_data(const ns_riccati_data &rhs) = delete;

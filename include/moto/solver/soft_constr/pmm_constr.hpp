@@ -9,9 +9,9 @@ namespace solver {
 ///   [L_Hess  J^T  ] [du  ]   [  g_u  ]
 ///   [J      -rho*I] [dlam] = -[  h    ]
 /// Schur complement of dlam into the du block:
-///   Gradient:  +=(1/rho) * J^T * h  (via merit_jac_modification_ += (h/rho)^T * J)
+///   Gradient:  +=(1/rho) * J^T * h  (via lag_jac_corr_ += (h/rho)^T * J)
 ///              node_data separately adds J^T*lambda from the base soft_constr contribution
-///   Hessian:   +=(1/rho) * J^T * J  (via merit_hess_)
+///   Hessian:   +=(1/rho) * J^T * J  (via lag_hess_)
 /// Dual update from row 2: dlam = (J*du + h) / rho
 /// As rho -> 0: (1/rho)*J^T*J penalty dominates, forcing J*du = -h (hard constraint recovery).
 /// As rho -> inf: penalty vanishes, soft constraint has negligible effect.
@@ -52,7 +52,7 @@ class pmm_constr final : public soft_constr {
     /// @brief apply: lambda += alpha*d_multiplier
     void apply_affine_step(data_map_t &data, workspace_data *cfg) const override final;
 
-    func_approx_data_ptr_t create_approx_data(sym_data &primal, merit_data &raw, shared_data &shared) const override {
+    func_approx_data_ptr_t create_approx_data(sym_data &primal, lag_data &raw, shared_data &shared) const override {
         std::unique_ptr<base::approx_data> base_d(make_approx<soft_constr>(primal, raw, shared));
         return func_approx_data_ptr_t(new approx_data(std::move(*base_d), rho));
     }

@@ -50,19 +50,19 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
             fmt::print("[resto]: reached maximum number of iterations without convergence, exiting restoration\n");
             break;
         }
-        // Write proximal gradient and Hessian directly into merit_jac_modification_ and
-        // hessian_modification_ after update_approximation has zeroed them.
-        // merge_jacobian_modification (inside ns_factorization) will fold them into Q_u/Q_y.
+        // Write proximal gradient corrections into lag_jac_corr_.
+        // activate_lag_jac_corr() inside ns_factorization() will fold them
+        // into the active stage gradient seen by the linear solve.
         size_t node_idx = 0;
         for (data *np : all_nodes) {
             data &n = *np;
             const auto &p = prox_data[node_idx++];
-            n.dense().merit_jac_modification_[__u].noalias() +=
+            n.dense().lag_jac_corr_[__u].noalias() +=
                 rho_u * (p.sigma_u_sq.array() * (n.value(__u) - p.u_ref).array()).matrix().transpose();
-            n.dense().merit_jac_modification_[__y].noalias() +=
+            n.dense().lag_jac_corr_[__y].noalias() +=
                 rho_y * (p.sigma_y_sq.array() * (n.value(__y) - p.y_ref).array()).matrix().transpose();
-            n.dense().primal_prox_hess_diagonal_[__u].diagonal() += rho_u * p.sigma_u_sq;
-            n.dense().primal_prox_hess_diagonal_[__y].diagonal() += rho_y * p.sigma_y_sq;
+            n.primal_prox_hess_diagonal_[__u].diagonal() += rho_u * p.sigma_u_sq;
+            n.primal_prox_hess_diagonal_[__y].diagonal() += rho_y * p.sigma_y_sq;
         }
 
         line_search_action rest_action = sqp_iter(rls, kkt_rest,

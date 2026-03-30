@@ -16,7 +16,7 @@ void dense_dynamics::approx_data::reset() {
 
 dense_dynamics::approx_data::approx_data(generic_constr::approx_data &&rhs)
     : generic_dynamics::approx_data(std::move(rhs)), lu_(new lu_t()) {
-    auto &prob = *merit_data_->prob_;
+    auto &prob = *lag_data_->prob_;
     size_t f_st = prob.get_expr_start(func_);
     size_t arg_idx = 0;
     auto &in_args = func_.in_args();

@@ -136,7 +136,7 @@ void register_submodule_functional(nb::module_ &m) {
         .def("active_tdim", &generic_func::active_tdim)
         .def("active_args", &generic_func::active_args)
         .DEF_CLONE_FUNC(generic_func)
-        .def("create_approx_data", [](generic_func &self, sym_data &primal, merit_data &raw, shared_data &shared) { return self.create_approx_data(primal, raw, shared); }, nb::arg("primal"), nb::arg("raw"), nb::arg("shared"));
+        .def("create_approx_data", [](generic_func &self, sym_data &primal, lag_data &raw, shared_data &shared) { return self.create_approx_data(primal, raw, shared); }, nb::arg("primal"), nb::arg("raw"), nb::arg("shared"));
 
     nb::class_<generic_constr, generic_func>(m, "constr")
         .def_static(

@@ -97,27 +97,25 @@ void generic_solver::finalize_primal_step_correction(ns_riccati_data *cur) {
     for (auto f : primal_fields) {
         d.trial_prim_step[f] += d.prim_corr[f];
     }
-    /// update Q_y with correction
-    d.Q_u += d.dense_->merit_jac_modification_[__u];
-    d.Q_y += d.dense_->merit_jac_modification_[__y];
+    d.Q_u += d.dense_->lag_jac_corr_[__u];
+    d.Q_y += d.dense_->lag_jac_corr_[__y];
 }
 void generic_solver::compute_kkt_residual(ns_riccati_data *cur) {
     auto &d = *cur;
     // compute KKT residual
     auto dense = d.dense_;
-    auto &f_u = dense->approx_[__dyn].jac_[__u];
-    dense->res_stat_[__u].noalias() = d.Q_u_bak.transpose(); // d.d_lbd_f
-    d.Q_uu.times(d.trial_prim_step[__u], dense->res_stat_[__u]);
-    dense->res_stat_[__y].noalias() = d.Q_y_bak.transpose();
-    d.Q_yy.times(d.trial_prim_step[__y], dense->res_stat_[__y]);
-    dense->res_stat_[__x].noalias() = d.Q_x_bak.transpose();
-    d.Q_xx.times(d.trial_prim_step[__x], dense->res_stat_[__x]);
+    d.kkt_stat_err_[__u].noalias() = d.base_lag_grad_backup[__u].transpose();
+    d.Q_uu.times(d.trial_prim_step[__u], d.kkt_stat_err_[__u]);
+    d.kkt_stat_err_[__y].noalias() = d.base_lag_grad_backup[__y].transpose();
+    d.Q_yy.times(d.trial_prim_step[__y], d.kkt_stat_err_[__y]);
+    d.kkt_stat_err_[__x].noalias() = d.base_lag_grad_backup[__x].transpose();
+    d.Q_xx.times(d.trial_prim_step[__x], d.kkt_stat_err_[__x]);
     for (auto f : primal_fields) {
         for (auto constr : constr_fields) {
             if (dense->approx_[constr].jac_[f].is_empty() || d.trial_dual_step[constr].size() == 0) {
                 continue;
             }
-            dense->approx_[constr].jac_[f].right_T_times(d.trial_dual_step[constr], dense->res_stat_[f]);
+            dense->approx_[constr].jac_[f].right_T_times(d.trial_dual_step[constr], d.kkt_stat_err_[f]);
         }
     }
 }

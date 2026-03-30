@@ -69,16 +69,18 @@ void backup_trial_state(node_data *data);
 void restore_trial_state(node_data *data);
 /**
  * @brief prepare for the first-order primal correction and call to apply_corrector_step on each soft constraint
- * @details it will set prim_corr[__x] to zero and swap merit jacobian and its modifcation (as a pre-correction cache),
- * i.e., later solving will use the jacobian modification
- * it is @b assumed Q_y will be used in newton step finalization
+ * @details it will set prim_corr[__x] to zero and swap the active stage gradient with the
+ * lagrangian-gradient correction buffer (as a pre-correction cache),
+ * i.e., later solving will use the correction right-hand side
+ * it is @b assumed Q_y will later be used in newton step finalization
  * @param data
  */
 void corrector_step_start(data_base *data);
 /**
- * @brief finalize the first-order primal correction and cache Q_y after correction
- * @details it will swap back merit jacobian and its modification and set Q_y_corr to the Q_y correction
- * it is @b assumed Q_y will be used in newton step finalization
+ * @brief finalize the first-order primal correction and restore the active stage
+ * gradient after correction
+ * @details it will swap back the active stage gradient and lagrangian-gradient
+ * correction buffer, then fold the local y correction into Q_y
  * @param data
  */
 void corrector_step_end(data_base *data);

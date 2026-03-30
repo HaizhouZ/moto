@@ -188,8 +188,8 @@ void ipm_constr::propagate_jacobian(func_approx_data &data) const {
     auto &d = data.as<ipm_data>();
     for (auto &j : d.jac_) {
         if (j.size() != 0) {
-            d.merit_jac_modification_[j_idx].noalias() += d.scaled_res_.transpose() * j;
-            if (d.merit_jac_modification_[j_idx].hasNaN()) {
+            d.lag_jac_corr_[j_idx].noalias() += d.scaled_res_.transpose() * j;
+            if (d.lag_jac_corr_[j_idx].hasNaN()) {
                 nan_found = true;
                 fmt::print("--------------------\n");
                 fmt::print("constraint name: {}\n", d.func_.name());
@@ -202,7 +202,7 @@ void ipm_constr::propagate_jacobian(func_approx_data &data) const {
                 fmt::print("multiplier: {:.3}\n", d.multiplier_.transpose());
                 fmt::print("diag_scaling: {:.3}\n", d.diag_scaling.transpose());
                 fmt::print("scaled_res: {:.3}\n", d.scaled_res_.transpose());
-                fmt::print("jac modification: {:.3}\n", d.merit_jac_modification_[j_idx]);
+                fmt::print("lag jac corr: {:.3}\n", d.lag_jac_corr_[j_idx]);
                 fmt::print("NaN in jac modification[{}]\n", j_idx);
             }
         }
@@ -216,7 +216,7 @@ void ipm_constr::propagate_jacobian(func_approx_data &data) const {
 void ipm_constr::propagate_hessian(func_approx_data &d) const {
     // modification of hessian
     size_t outer_idx = 0;
-    for (auto &outer : d.merit_hess_) {
+    for (auto &outer : d.lag_hess_) {
         size_t inner_idx = 0;
         if (outer.size()) { // skip empty hess
             for (auto &inner : outer) {
