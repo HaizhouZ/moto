@@ -378,9 +378,9 @@ gait_setting = {
 }
 sqp = moto.sqp(n_job=10)
 g = sqp.graph
-n0 = g.set_head(g.add(sqp.create_node(prob)))
-n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
-g.add_edge(n0, n1, N_horizon)
+n0 = g.add_head(sqp.create_node(prob))
+n1 = g.add_tail(sqp.create_node(prob_term))
+g.connect(n0, n1, N_horizon)
 
 sqp.settings.ipm.mu0 = 0.1
 sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector

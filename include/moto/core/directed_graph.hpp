@@ -93,6 +93,11 @@ class directed_graph {
   public:
     using data_type = typename node::data_type;
     using edge = graph_types::edge_base<node>;
+    struct edge_options {
+        size_t len = 2;
+        bool include_st = true;
+        bool include_ed = true;
+    };
     directed_graph(size_t n_jobs = MAX_THREADS)
         : n_jobs_(n_jobs) {
         unary_in_.reserve(100 * n_jobs);
@@ -116,7 +121,11 @@ class directed_graph {
             throw std::invalid_argument("Edge length is too short for the requested endpoint inclusion");
         }
         edges_.emplace_back(&st, &ed, len - included_nodes);
-        // return edges_.back();
+        flatten_cache_dirty_ = true;
+    }
+
+    void connect(node &st, node &ed, edge_options opts = {}) {
+        add_edge(st, ed, opts.len, opts.include_st, opts.include_ed);
     }
 
     /**
@@ -126,19 +135,65 @@ class directed_graph {
      * @return node& reference to the added node
      */
     node &add(node &&d) {
+        flatten_cache_dirty_ = true;
         return nodes_.emplace_back(std::move(d));
+    }
+
+    template <typename... Args>
+    node &emplace(Args &&...args) {
+        flatten_cache_dirty_ = true;
+        return nodes_.emplace_back(std::forward<Args>(args)...);
     }
 
     node &set_tail(node &tail) { return *(tail_ = &tail); }
     node &set_head(node &head) { return *(head_ = &head); }
+
+    node &head(node &n) { return set_head(n); }
+    node &tail(node &n) { return set_tail(n); }
+
+    node &add_head(node &&n) { return set_head(add(std::move(n))); }
+    node &add_tail(node &&n) { return set_tail(add(std::move(n))); }
+
+    template <typename... Args>
+    node &emplace_head(Args &&...args) {
+        return set_head(emplace(std::forward<Args>(args)...));
+    }
+
+    template <typename... Args>
+    node &emplace_tail(Args &&...args) {
+        return set_tail(emplace(std::forward<Args>(args)...));
+    }
+
+    node &link_new(node &st, node &&ed, edge_options opts = {}) {
+        node &n = add(std::move(ed));
+        connect(st, n, opts);
+        return n;
+    }
+
+    node &insert_after(node &st, node &&next, edge_options opts = {}) {
+        return link_new(st, std::move(next), opts);
+    }
+
+    template <typename... Args>
+    node &emplace_after(node &st, edge_options opts, Args &&...args) {
+        node &n = emplace(std::forward<Args>(args)...);
+        connect(st, n, opts);
+        return n;
+    }
+
+    template <typename... Args>
+    node &emplace_after(node &st, Args &&...args) {
+        return emplace_after(st, edge_options{}, std::forward<Args>(args)...);
+    }
     /**
      * @brief get the flattened list of all nodes in the graph
      *
      */
     void unary_unordered_flatten() {
+        if (!flatten_cache_dirty_)
+            return;
         unary_in_.clear();
         for (auto &cur : nodes_) {
-            // fmt::print("Raw pointer of cur: {}\n", static_cast<void *>(cur.get()));
             unary_in_.push_back(cur.data_);
             for (auto e : cur.out_edges) {
                 for (auto &p : e->nodes) {
@@ -146,6 +201,7 @@ class directed_graph {
                 }
             }
         }
+        flatten_cache_dirty_ = false;
     }
 
     /**
@@ -346,31 +402,78 @@ class directed_graph {
      * @param callback function [node]
      */
     template <typename callback_t>
-    void for_each_parallel(callback_t &&callback) {
+    void run_unary_parallel(std::vector<data_type *> &view, callback_t &&callback) {
         constexpr bool is_unary = std::is_invocable_r_v<void, callback_t, data_type *>;
         constexpr bool is_unary_with_tid = std::is_invocable_r_v<void, callback_t, size_t, data_type *>;
-        unary_unordered_flatten();
         if constexpr (is_unary_with_tid) {
             parallel_for(
-                0, unary_in_.size(),
-                [&callback, this](size_t tid, size_t i) { callback(tid, unary_in_[i]); },
+                0, view.size(),
+                [&callback, &view](size_t tid, size_t i) { callback(tid, view[i]); },
                 n_jobs_, no_except_);
         } else if constexpr (is_unary) {
             parallel_for(
-                0, unary_in_.size(),
-                [&callback, this](size_t i) { callback(unary_in_[i]); },
+                0, view.size(),
+                [&callback, &view](size_t i) { callback(view[i]); },
                 n_jobs_, no_except_);
         } else {
-            static_assert(false, "Callback function arity not supported in for_each_parallel()");
+            static_assert(false, "Callback function arity not supported in run_unary_parallel()");
         }
+    }
+
+    template <typename callback_t>
+    void run_unary_sequential(std::vector<data_type *> &view, callback_t &&callback) {
+        constexpr bool is_unary = std::is_invocable_r_v<void, callback_t, data_type *>;
+        constexpr bool is_unary_with_tid = std::is_invocable_r_v<void, callback_t, size_t, data_type *>;
+        if constexpr (is_unary_with_tid) {
+            sequential_for(
+                0, view.size(),
+                [&callback, &view](size_t tid, size_t i) { callback(tid, view[i]); },
+                n_jobs_, no_except_);
+        } else if constexpr (is_unary) {
+            sequential_for(
+                0, view.size(),
+                [&callback, &view](size_t i) { callback(view[i]); },
+                n_jobs_, no_except_);
+        } else {
+            static_assert(false, "Callback function arity not supported in run_unary_sequential()");
+        }
+    }
+
+    template <bool parallel = false, typename callback_t>
+    void run_binary(std::vector<std::pair<data_type *, data_type *>> &view, callback_t &&callback) {
+        constexpr bool is_binary = std::is_invocable_r_v<void, callback_t, data_type *, data_type *>;
+        constexpr bool is_binary_with_tid = std::is_invocable_r_v<void, callback_t, size_t, data_type *, data_type *>;
+        if constexpr (is_binary_with_tid) {
+            auto job = [&callback, &view](size_t tid, size_t i) {
+                callback(tid, view[i].first, view[i].second);
+            };
+            if constexpr (parallel)
+                parallel_for(0, view.size(), job, n_jobs_, no_except_);
+            else
+                sequential_for(0, view.size(), job, n_jobs_, no_except_);
+        } else if constexpr (is_binary) {
+            auto job = [&callback, &view](size_t i) {
+                callback(view[i].first, view[i].second);
+            };
+            if constexpr (parallel)
+                parallel_for(0, view.size(), job, n_jobs_, no_except_);
+            else
+                sequential_for(0, view.size(), job, n_jobs_, no_except_);
+        } else {
+            static_assert(false, "Callback function arity not supported in run_binary()");
+        }
+    }
+
+    template <typename callback_t>
+    void for_each_parallel(callback_t &&callback) {
+        unary_unordered_flatten();
+        run_unary_parallel(unary_in_, std::forward<callback_t>(callback));
     }
 
     template <bool forward = true, bool parallel = false, typename callback_t>
     void apply(callback_t &&callback, bool null_on_end = false) {
         constexpr bool is_unary = std::is_invocable_r_v<void, callback_t, data_type *>;
         constexpr bool is_unary_with_tid = std::is_invocable_r_v<void, callback_t, size_t, data_type *>;
-        constexpr bool is_binary = std::is_invocable_r_v<void, callback_t, data_type *, data_type *>;
-        constexpr bool is_binary_with_tid = std::is_invocable_r_v<void, callback_t, size_t, data_type *, data_type *>;
         if constexpr (is_unary || is_unary_with_tid) {
             if constexpr (forward) {
                 unary_view_ = forward_view();
@@ -379,46 +482,22 @@ class directed_graph {
             }
             if constexpr (is_unary_with_tid) {
                 while (unary_view_.update()) {
-                    sequential_for(
-                        0, unary_view_.size(),
-                        [&callback, this](size_t tid, size_t i) { callback(tid, unary_view_[i]); },
-                        n_jobs_, no_except_);
+                    run_unary_sequential(unary_view_, std::forward<callback_t>(callback));
                 }
             } else {
                 while (unary_view_.update()) {
-                    sequential_for(
-                        0, unary_view_.size(),
-                        [&callback, this](size_t i) { callback(unary_view_[i]); },
-                        n_jobs_, no_except_);
+                    run_unary_sequential(unary_view_, std::forward<callback_t>(callback));
                 }
             }
-        } else if constexpr (is_binary || is_binary_with_tid) {
+        } else {
             if constexpr (forward) {
                 binary_view_ = forward_binary_view(null_on_end);
             } else {
                 binary_view_ = backward_binary_view(null_on_end);
             }
             while (binary_view_.update()) {
-                if constexpr (is_binary_with_tid) {
-                    auto job = [&callback, this](size_t tid, size_t i) {
-                        callback(tid, binary_view_[i].first, binary_view_[i].second);
-                    };
-                    if constexpr (parallel)
-                        parallel_for(0, binary_view_.size(), job, n_jobs_, no_except_);
-                    else
-                        sequential_for(0, binary_view_.size(), job, n_jobs_, no_except_);
-                } else {
-                    auto job = [&callback, this](size_t i) {
-                        callback(binary_view_[i].first, binary_view_[i].second);
-                    };
-                    if constexpr (parallel)
-                        parallel_for(0, binary_view_.size(), job, n_jobs_, no_except_);
-                    else
-                        sequential_for(0, binary_view_.size(), job, n_jobs_, no_except_);
-                }
+                run_binary<parallel>(binary_view_, std::forward<callback_t>(callback));
             }
-        } else {
-            static_assert(false, "Callback function arity not supported in apply()");
         }
     }
 
@@ -457,7 +536,8 @@ class directed_graph {
     std::list<edge> edges_; ///< edges used to connect the key nodes
 
     // temporary storage for unary and binary functions
-    std::vector<data_type *> unary_in_; ///< data pointers for unary functions
+    bool flatten_cache_dirty_ = true;
+    std::vector<data_type *> unary_in_; ///< cached flattened data pointers for unary functions
     unary_view unary_view_;             ///< data pointers for unary functions
     binary_view binary_view_;           ///< data pointers for binary functions
     std::vector<edge *> cur_edges;      ///< edges for bfs current iteration

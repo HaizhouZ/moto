@@ -148,10 +148,24 @@ void register_submodule_ns_sqp(nb::module_ &m) {
     nb::class_<graph_type> graph(sqp, "graph_type");
     graph.def(nb::init<>())
         .def("add", &graph_type::add, nb::arg("node"), "Add a node to the graph and return a reference to it", nb::rv_policy::reference)
+        .def("add_head", &graph_type::add_head, nb::arg("node"), nb::rv_policy::reference, "Add a node and set it as the head")
+        .def("add_tail", &graph_type::add_tail, nb::arg("node"), nb::rv_policy::reference, "Add a node and set it as the tail")
         .def("set_head", &graph_type::set_head, nb::arg("node"), nb::rv_policy::reference)
         .def("set_tail", &graph_type::set_tail, nb::arg("node"), nb::rv_policy::reference)
+        .def("connect",
+             [](graph_type &self, ns_sqp::node_type &start, ns_sqp::node_type &to, size_t steps, bool include_st, bool include_ed) {
+                 self.connect(start, to, {steps, include_st, include_ed});
+             },
+             nb::arg("start"), nb::arg("to"), nb::arg("steps") = 2, nb::arg("include_st") = true, nb::arg("include_ed") = true,
+             "Connect two existing nodes with a path of the requested length")
         .def("add_edge", &graph_type::add_edge, nb::arg("start"), nb::arg("to"), nb::arg("steps") = 1, nb::arg("include_st") = true, nb::arg("include_ed") = true,
              "Add an edge from one node to another with a given number of steps")
+        .def("insert_after",
+             [](graph_type &self, ns_sqp::node_type &start, ns_sqp::node_type next, size_t steps, bool include_st, bool include_ed) -> ns_sqp::node_type & {
+                 return self.insert_after(start, std::move(next), {steps, include_st, include_ed});
+             },
+             nb::arg("start"), nb::arg("node"), nb::arg("steps") = 2, nb::arg("include_st") = true, nb::arg("include_ed") = true,
+             nb::rv_policy::reference, "Add a new node after the given node and connect it immediately")
         .def("flatten_nodes", &graph_type::flatten_nodes, nb::rv_policy::reference, "Get the unordered flattened list of all nodes in the graph")
         .def_prop_ro("nodes", &graph_type::nodes, nb::rv_policy::reference, "key nodes")
         .def("forward_view", &graph_type::forward_view, nb::rv_policy::reference, "Get a forward view of the graph, i.e., a view of all nodes in forward direction")

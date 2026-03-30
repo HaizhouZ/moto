@@ -51,7 +51,20 @@ void ns_sqp::finalize_correction(data *d) {
     solver::ineq_soft::finalize_newton_step(d);
 }
 
-void ns_sqp::ineq_constr_correction() {
+void ns_sqp::reset_ls_workers() {
+    settings.ls.reset();
+    setting_per_thread.reset(settings.n_worker);
+}
+
+void ns_sqp::refresh_ls_bounds() {
+    reset_ls_workers();
+    graph_.for_each_parallel([this](size_t tid, data *d) {
+        solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
+    });
+    finalize_ls_bound_and_set_to_max();
+}
+
+void ns_sqp::ineq_constr_correction(iteration_context &ctx) {
     if (settings.ipm.ipm_enable_affine_step()) {
         graph_.for_each_parallel([this](size_t tid, data *d) {
             solver::ineq_soft::finalize_predictor_step(d, &setting_per_thread[tid]);
@@ -80,25 +93,14 @@ void ns_sqp::ineq_constr_correction() {
         // }
         {
             settings.ipm.mu = settings.ipm.mu_trial;
-            settings.mu_changed = true;
+            ctx.mu_changed = true;
         }
-        // use the new mu to update the rhs cost jacobian
-        graph_.for_each_parallel(solver::ineq_soft::corrector_step_start);
-        // solve the problem again with updated mu
-        post_factorization_correction_step();
-        graph_.for_each_parallel([this](data *d) {
-            solver::ineq_soft::corrector_step_end(d);
-            finalize_correction(d);
-        });
-        // recompute line search bounds with the corrected newton step
-        settings.ls.reset();
-        for (solver::linesearch_config &s : setting_per_thread) {
-            s.reset();
-        }
-        graph_.for_each_parallel([this](size_t tid, data *d) {
-            solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
-        });
-        finalize_ls_bound_and_set_to_max();
+        run_correction_step(
+            solver::ineq_soft::corrector_step_start,
+            [this](data *d) {
+                solver::ineq_soft::corrector_step_end(d);
+                finalize_correction(d);
+            });
     }
 }
 void ns_sqp::ineq_constr_prediction() {
@@ -106,14 +108,11 @@ void ns_sqp::ineq_constr_prediction() {
         settings.ipm.ipm_start_predictor_computation();
     }
 }
-ns_sqp::line_search_action ns_sqp::sqp_iter(filter_linesearch_data &ls, kkt_info &kkt_current,
-                                            bool do_scaling, bool do_refinement, bool gauss_newton) {
-    settings.ls.reset();
-    setting_per_thread.reset(settings.n_worker);
 
+void ns_sqp::solve_direction(iteration_context &ctx, bool do_scaling, bool gauss_newton) {
     if (do_scaling) {
         detail_timed_block_start("scaling");
-        compute_and_apply_scaling(kkt_current);
+        compute_and_apply_scaling(ctx.current);
         detail_timed_block_end("scaling");
     }
 
@@ -143,21 +142,26 @@ ns_sqp::line_search_action ns_sqp::sqp_iter(filter_linesearch_data &ls, kkt_info
     });
     detail_timed_block_end("finalize_primal_step");
     finalize_ls_bound_and_set_to_max();
+}
 
+void ns_sqp::correct_direction(iteration_context &ctx, bool do_refinement) {
     detail_timed_block_start("ineq_corrector_step");
     if (settings.has_ineq_soft)
-        ineq_constr_correction();
+        ineq_constr_correction(ctx);
     detail_timed_block_end("ineq_corrector_step");
 
     if (do_refinement && settings.rf.enabled && settings.rf.max_iters > 0)
         iterative_refinement();
+}
 
+void ns_sqp::prepare_globalization(filter_linesearch_data &ls, iteration_context &ctx) {
     ls.reset_per_iter_data();
     ls.initial_alpha_primal = settings.ls.alpha_primal;
     ls.initial_alpha_dual = settings.ls.alpha_dual;
     ls.best_trial = filter_linesearch_data::trial();
     ls.merit_fullstep = std::numeric_limits<scalar_t>::infinity();
     ls.best_merit_trial = filter_linesearch_data::merit_trial{};
+
     graph_.for_each_parallel([this](data *d) {
         riccati_solver_->finalize_dual_newton_step(d);
     });
@@ -166,11 +170,12 @@ ns_sqp::line_search_action ns_sqp::sqp_iter(filter_linesearch_data &ls, kkt_info
         d->backup_trial_state();
         solver::ineq_soft::backup_trial_state(d);
     });
-    if (settings.mu_changed) {
-        ls.points.clear(); // if mu changed, the QP cost has changed and the previous line search points are no longer valid, so clear them to avoid rejecting steps based on outdated information
+    if (ctx.mu_changed) {
+        ls.points.clear(); // the QP objective changed, so old filter points are no longer comparable
     }
-    line_search_action action = line_search_action::accept;
-LS_START:
+}
+
+bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context &ctx) {
     detail_timed_block_start("apply_affine_step");
     graph_.for_each_parallel([this](data *d) {
         d->restore_trial_state();
@@ -182,54 +187,78 @@ LS_START:
     detail_timed_block_end("apply_affine_step");
 
     detail_timed_block_start("update_res_stat");
-    kkt_info kkt_trial;
     if (settings.ls.method == linesearch_setting::search_method::merit_backtracking) {
-        // merit backtracking needs dual residual, which requires Jacobians
         graph_.for_each_parallel([](data *d) {
             d->update_approximation(node_data::update_mode::eval_derivatives);
         });
-        kkt_trial = compute_kkt_info();
+        ctx.trial = compute_kkt_info();
     } else {
-        kkt_trial = compute_kkt_info(false);
+        ctx.trial = compute_kkt_info(false);
     }
     detail_timed_block_end("update_res_stat");
 
-    const auto update_approx_derivatives = [&] {
-        detail_timed_block_start("update_approx_accepted");
-        if (settings.ls.method != linesearch_setting::search_method::merit_backtracking) {
-            // already evaluated for merit backtracking above
-            graph_.for_each_parallel([](data *d) {
-                d->update_approximation(node_data::update_mode::eval_derivatives);
-            });
-            kkt_trial = compute_kkt_info();
-        }
-        detail_timed_block_end("update_approx_accepted");
-    };
+    return settings.ls.method == linesearch_setting::search_method::merit_backtracking;
+}
 
-    if (settings.ls.enabled && !ls.stop) {
-        if (settings.ls.method == linesearch_setting::search_method::merit_backtracking)
-            action = merit_linesearch(ls, kkt_trial, kkt_current);
-        else
-            action = filter_linesearch(ls, kkt_trial, kkt_current);
-        switch (action) {
-        case line_search_action::accept:
-            update_approx_derivatives();
-            break;
-        case line_search_action::retry_second_order_correction: {
-            second_order_correction();
-            goto LS_START;
+void ns_sqp::accept_trial_point(filter_linesearch_data &ls, iteration_context &ctx) {
+    detail_timed_block_start("update_approx_accepted");
+    if (settings.ls.method != linesearch_setting::search_method::merit_backtracking) {
+        graph_.for_each_parallel([](data *d) {
+            d->update_approximation(node_data::update_mode::eval_derivatives);
+        });
+        ctx.trial = compute_kkt_info();
+    }
+    detail_timed_block_end("update_approx_accepted");
+    ctx.current = ctx.trial;
+}
+
+ns_sqp::line_search_action ns_sqp::run_globalization(filter_linesearch_data &ls, iteration_context &ctx) {
+    while (true) {
+        bool has_trial_derivatives = evaluate_trial_point(ls, ctx);
+
+        if (settings.ls.enabled && !ls.stop) {
+            if (settings.ls.method == linesearch_setting::search_method::merit_backtracking)
+                ctx.action = merit_linesearch(ls, ctx.trial, ctx.current);
+            else
+                ctx.action = filter_linesearch(ls, ctx.trial, ctx.current);
+        } else {
+            ctx.action = line_search_action::accept;
         }
+
+        switch (ctx.action) {
+        case line_search_action::accept:
+            if (!has_trial_derivatives)
+                accept_trial_point(ls, ctx);
+            else
+                ctx.current = ctx.trial;
+            return ctx.action;
+        case line_search_action::retry_second_order_correction:
+            second_order_correction();
+            break;
         case line_search_action::backtrack:
-            if (ls.recompute_approx)
-                goto LS_START;
+            if (!ls.recompute_approx)
+                return ctx.action;
             break;
         case line_search_action::stop:
-            goto LS_START;
+            break;
         }
-    } else {
-        update_approx_derivatives();
+
+        if (ctx.action == line_search_action::stop && !settings.ls.enabled) {
+            accept_trial_point(ls, ctx);
+            return line_search_action::accept;
+        }
     }
-    kkt_current = kkt_trial;
+}
+
+ns_sqp::line_search_action ns_sqp::sqp_iter(filter_linesearch_data &ls, kkt_info &kkt_current,
+                                            bool do_scaling, bool do_refinement, bool gauss_newton) {
+    iteration_context ctx{.current = kkt_current};
+    reset_ls_workers();
+    solve_direction(ctx, do_scaling, gauss_newton);
+    correct_direction(ctx, do_refinement);
+    prepare_globalization(ls, ctx);
+    line_search_action action = run_globalization(ls, ctx);
+    kkt_current = ctx.current;
     return action;
 }
 
@@ -259,8 +288,6 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             line_search_action action = sqp_iter(ls, kkt_last,
                                                  /*do_scaling=*/true, /*do_refinement=*/true);
             timed_block_end("sqp_single_iter");
-            if (settings.has_ineq_soft)
-                settings.mu_changed = false;
 
             kkt_last.num_iter = i_iter + 1;
             kkt_last.ls_steps = ls.step_cnt;
@@ -302,6 +329,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             }
 
             if (settings.has_ineq_soft && settings.ipm.mu_method == solver::ipm_config::monotonic_decrease) {
+                bool mu_changed = false;
                 while (kkt_last.inf_prim_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold &&
                        kkt_last.inf_dual_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold &&
                        kkt_last.inf_comp_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold) {
@@ -309,9 +337,9 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                     if (verbose)
                         fmt::print("Monotone decrease of mu: new mu = {:.3e}\n", settings.ipm.mu);
                     ls.points.clear();
-                    settings.mu_changed = true;
+                    mu_changed = true;
                 }
-                if (!settings.mu_changed) {
+                if (!mu_changed) {
                     bool prim_fail = kkt_last.inf_prim_res >= settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold;
                     bool dual_fail = kkt_last.inf_dual_res >= settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold;
                     bool comp_fail = kkt_last.inf_comp_res >= settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold;

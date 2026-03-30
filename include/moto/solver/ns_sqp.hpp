@@ -6,6 +6,7 @@
 #include <moto/solver/linesearch_config.hpp>
 #include <moto/solver/ns_riccati/generic_solver.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
+#include <functional>
 
 namespace moto {
 namespace solver {
@@ -121,7 +122,6 @@ struct ns_sqp {
         size_t n_worker = MAX_THREADS; ///< number of worker threads
         bool in_restoration = false;   ///< whether currently in restoration mode (used to adjust printouts and possibly other settings)
         bool has_ineq_soft = false;    ///< whether the problem has inequality constraints (used to adjust printouts and possibly other settings)
-        bool mu_changed = false;       ///< whether mu was changed in the current iteration (used to decide whether to update the QP cost for the corrector step)
         bool initialized = false;     ///< whether the settings have been initialized based on the problem (used to trigger one-time initialization in the first iteration, e.g. setting initial mu based on initial residuals)
     } settings;
 
@@ -301,12 +301,19 @@ struct ns_sqp {
         stop,
     };
 
+    struct iteration_context {
+        kkt_info current;
+        kkt_info trial;
+        line_search_action action = line_search_action::accept;
+        bool mu_changed = false;
+    };
+
     void step_back_alpha(filter_linesearch_per_iter_data &ls);
     line_search_action filter_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
     line_search_action merit_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
 
     void second_order_correction();
-    void ineq_constr_correction();
+    void ineq_constr_correction(iteration_context &ctx);
     void ineq_constr_prediction();
     /// initialize the solver before the first iteration or after a reset, returns the initial kkt info
     kkt_info initialize();
@@ -316,6 +323,27 @@ struct ns_sqp {
     size_t ls_failure_count_ = 0; ///< consecutive outer iterations where line search produced no improvement
     void post_factorization_correction_step();
     void finalize_correction(data *d);
+    void reset_ls_workers();
+    void refresh_ls_bounds();
+    template <typename Prepare, typename Finalize>
+    void run_correction_step(Prepare &&prepare, Finalize &&finalize) {
+        graph_.for_each_parallel(
+            [prepare = std::forward<Prepare>(prepare)](data *d) mutable {
+                std::invoke(prepare, d);
+            });
+        post_factorization_correction_step();
+        graph_.for_each_parallel(
+            [finalize = std::forward<Finalize>(finalize)](data *d) mutable {
+                std::invoke(finalize, d);
+            });
+        refresh_ls_bounds();
+    }
+    void solve_direction(iteration_context &ctx, bool do_scaling, bool gauss_newton);
+    void correct_direction(iteration_context &ctx, bool do_refinement);
+    void prepare_globalization(filter_linesearch_data &ls, iteration_context &ctx);
+    bool evaluate_trial_point(filter_linesearch_data &ls, iteration_context &ctx);
+    void accept_trial_point(filter_linesearch_data &ls, iteration_context &ctx);
+    line_search_action run_globalization(filter_linesearch_data &ls, iteration_context &ctx);
     /**
      * @brief Run one QP solve + line-search iteration.
      *

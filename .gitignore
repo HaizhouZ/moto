@@ -9,3 +9,4 @@ perf*
 gen/
 __pycache__
 log
+.cache

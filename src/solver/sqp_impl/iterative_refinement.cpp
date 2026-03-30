@@ -55,33 +55,18 @@ void ns_sqp::iterative_refinement() {
             break;
         }
         detail_timed_block_start("iterative_refinement_step");
-        detail_timed_block_start("iterative_refinement_presolve");
-        // prepare for iterative refinement
-        graph_.for_each_parallel([this](ns_sqp::data *data) {
-            data->first_order_correction_start([data]() {
-                data->dense().lag_jac_corr_[__u] = data->kkt_stat_err_[__u];
-                data->dense().lag_jac_corr_[__y] = data->kkt_stat_err_[__y];
+        run_correction_step(
+            [](ns_sqp::data *data) {
+                data->first_order_correction_start([data]() {
+                    data->dense().lag_jac_corr_[__u] = data->kkt_stat_err_[__u];
+                    data->dense().lag_jac_corr_[__y] = data->kkt_stat_err_[__y];
+                });
+            },
+            [this](ns_sqp::data *data) {
+                data->first_order_correction_end();
+                finalize_correction(data);
             });
-        });
-        detail_timed_block_end("iterative_refinement_presolve");
-        post_factorization_correction_step();
-        detail_timed_block_start("iterative_refinement_step_finalize");
-        // end iterative refinement
-        graph_.for_each_parallel([this](ns_sqp::data *data) {
-            data->first_order_correction_end();
-            finalize_correction(data);
-        });
-        detail_timed_block_end("iterative_refinement_step_finalize");
         detail_timed_block_end("iterative_refinement_step");
-        // recompute line search bounds with the corrected newton step
-        settings.ls.reset();
-        for (solver::linesearch_config &s : setting_per_thread) {
-            s.reset();
-        }
-        graph_.for_each_parallel([this](size_t tid, data *d) {
-            solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
-        });
-        finalize_ls_bound_and_set_to_max();
         iter_refine++;
     }
     detail_timed_block_end("iterative_refinement");

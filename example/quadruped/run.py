@@ -11,7 +11,7 @@ import meshcat.transformations as tf
 import meshcat_shapes as mcs
 
 full = True
-soft = True
+soft = False
 
 
 class pinCasadiModel(cpin.Model):
@@ -367,8 +367,8 @@ prob.add(model.kin_constr)
 if not full:
     prob.add(model.kin_cost)
 # prob.add(model.zf_constr)
-# prob.add(model.make_tq_limit_constr())
-# prob.add(model.make_joint_limit_constr())
+prob.add(model.make_tq_limit_constr())
+prob.add(model.make_joint_limit_constr())
 model.add_dt_constr_and_cost(prob, dt_nom)
 prob.add(model.get_state_cost())
 prob.add(model.get_input_cost())
@@ -397,7 +397,7 @@ gait_setting = {
 }
 sqp = moto.sqp(n_job=10)
 g = sqp.graph
-n0 = g.set_head(g.add(sqp.create_node(prob)))
+n0 = g.add_head(sqp.create_node(prob))
 
 
 def create_phase_problem(step):
@@ -416,18 +416,25 @@ def create_phase_problem(step):
 
 
 for step in range(steps):
-    np = g.add(sqp.create_node(create_phase_problem(step + 1)))
+    np = g.insert_after(
+        n0 if step == 0 else n_prev,
+        sqp.create_node(create_phase_problem(step + 1)),
+        stance_length if step == 0 else nodes_per_step,
+        True,
+        False,
+    )
     np.data.prob.print_summary()
-    if step == 0:
-        g.add_edge(n0, np, stance_length, include_ed=False)
-    else:
-        g.add_edge(n_prev, np, nodes_per_step, include_ed=False)
     n_prev = np
 
-nstop = g.add(sqp.create_node(prob))
-g.add_edge(n_prev, nstop, nodes_per_step, include_ed=False)
-n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
-g.add_edge(nstop, n1, stance_length)
+nstop = g.insert_after(
+    n_prev,
+    sqp.create_node(prob),
+    nodes_per_step,
+    True,
+    False,
+)
+n1 = g.add_tail(sqp.create_node(prob_term))
+g.connect(nstop, n1, stance_length)
 # g.add_edge(n0, n1, N_horizon)
 # print(len(g.flatten_nodes()))
 # names = [[] for _ in range(len(g.flatten_nodes()))]
@@ -459,15 +466,11 @@ sqp.settings.rf.max_iters = 4
 sqp.settings.ls.update_alpha_dual = False
 # sqp.settings.scaling.scaling_mode = moto.sqp.scaling_settings.mode_gradient
 sqp.settings.restoration.trigger_on_failure_count = 1
-sqp.settings.restoration.max_iter = 1000
+sqp.settings.restoration.max_iter = 10
 sqp.settings.restoration.rho_eq = 1e-6
 sqp.settings.ls.primal_gamma = 1e-4
 sqp.settings.ls.method = moto.ns_sqp.search_method_filter
-sqp.settings.ls.merit_sigma = 100
-sqp.settings.ls.max_steps = 100
 
-max_update_iter = int(os.getenv("MOTO_SQP_MAX_ITER", "2"))
-print(f"SQP update iters: {max_update_iter}")
 # sqp.settings.ls.backtrack_scheme = moto.ns_sqp.backtrack_scheme_geometric
 # cfg = [
 #     [-0.9595959595959596, -0.6161616161616161],
@@ -528,7 +531,7 @@ cnt = 0
 iters = 0
 start = time.perf_counter()
 # while cnt < 50:
-res = sqp.update(max_update_iter, verbose=True)
+res = sqp.update(50, verbose=True)
 sqp.settings.ipm.warm_start = True
 cnt += 1
 iters += res.num_iter
