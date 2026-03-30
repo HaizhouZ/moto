@@ -31,8 +31,9 @@ void ns_sqp::filter_linesearch_data::update_filter(const kkt_info &current_kkt, 
                          return p.in_filter(current_point, settings);
                      }),
                  points.end());
-    fmt::print("  added point to filter: primal res: {:.3e}, dual res: {:.3e}, objective: {:.3e}\n",
-               current_point.prim_res, current_point.dual_res, current_point.objective);
+    if (settings.verbose)
+        fmt::print("  added point to filter: primal res: {:.3e}, dual res: {:.3e}, objective: {:.3e}\n",
+                   current_point.prim_res, current_point.dual_res, current_point.objective);
     points.push_back(current_point);
 }
 bool ns_sqp::filter_linesearch_data::point::in_filter(const point &filter_entry, const settings_t &settings) const {
@@ -64,12 +65,9 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
 
     if (settings.verbose) {
         fmt::print("  switching condition: {}, armijo condition: {}\n", switching_condition ? "met" : "not met", armijo_cond_met ? "met" : "not met");
-        if (!switching_condition) {
-            fmt::print("  cost step dec: {:.3e}, full step decrease: {:.3e}, switching lhs: {:.3e}, switching rhs: {:.3e}\n",
-                       current_kkt.obj_fullstep_dec, fullstep_dec_k, settings.ls.alpha_primal * std::pow(-fullstep_dec_k, settings.ls.s_phi), std::pow(current_kkt.prim_res_l1, settings.ls.s_theta));
-        }
+        fmt::print("  cost step dec: {:.3e}, full step decrease: {:.3e}, switching lhs: {:.3e}, switching rhs: {:.3e}\n",
+                   current_kkt.obj_fullstep_dec, fullstep_dec_k, settings.ls.alpha_primal * std::pow(-fullstep_dec_k, settings.ls.s_phi), std::pow(current_kkt.prim_res_l1, settings.ls.s_theta));
     }
-
 
     // Flat-objective accept: when the directional derivative is negligibly small, the iterate is
     // nearly feasible, and the step is non-trivial, accept to allow dual progress without requiring
@@ -122,8 +120,7 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
             }
             return check_flat_obj();
         }
-    }
-    else { // filter condition for non-switching
+    } else { // filter condition for non-switching
         // Filter condition relative to the CURRENT iterate
         // pass if the trial point makes sufficient progress in either primal residual or objective compared to the current point (not the filter points)
         point current_point = {prim_res_k, current_kkt.inf_dual_res, obj_k};
@@ -245,6 +242,7 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     fmt::println(" line search failed, dec_full_pred = {:.3e}, best trial primal res: {:.3e}, dual res: {:.3e}, objective: {:.3e}\n",
                  current_kkt.obj_fullstep_dec, ls.best_trial.prim_res, ls.best_trial.dual_res, ls.best_trial.objective);
     ls.update_filter(current_kkt, settings);
+    throw std::runtime_error("line search failed, fallback to restoration");
     return line_search_action::stop;
 }
 

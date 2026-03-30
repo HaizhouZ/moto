@@ -34,8 +34,8 @@ struct ns_sqp {
     };
 
     struct linesearch_setting : public solver::linesearch_config {
-        bool enabled = true;     ///< whether to use line search
-        size_t max_steps = 5;    ///< max line search steps
+        bool enabled = true;       ///< whether to use line search
+        size_t max_steps = 5;      ///< max line search steps
         bool enable_soc = true;    ///< whether to try a second-order correction before backtracking
         size_t max_soc_iter = 4;   ///< max number of second-order correction retries per SQP iteration (p_max in IPOPT)
         scalar_t kappa_soc = 0.99; ///< SOC abort threshold: abort if θ(x_soc) > kappa_soc * θ_soc_old (IPOPT eq. A-5.9)
@@ -45,13 +45,13 @@ struct ns_sqp {
         } failure_strategy = failure_backup_strategy::best_trial;
 
         enum class backtrack_scheme_t : size_t {
-            linspace,   ///< alpha decreases by alpha_init / max_steps each step (uniform spacing)
-            geometric,  ///< alpha *= backtrack_factor each step (exponential decay)
+            linspace,  ///< alpha decreases by alpha_init / max_steps each step (uniform spacing)
+            geometric, ///< alpha *= backtrack_factor each step (exponential decay)
         } backtrack_scheme = backtrack_scheme_t::linspace;
         scalar_t backtrack_factor = 0.5; ///< geometric backtracking reduction factor (used when backtrack_scheme == geometric)
 
         enum class search_method : size_t {
-            filter,            ///< IPOPT-style 2-objective filter line search (default)
+            filter,             ///< IPOPT-style 2-objective filter line search (default)
             merit_backtracking, ///< merit function: ||constraint violation||^2 + sigma * ||dual residual||^2
         } method = search_method::filter;
 
@@ -66,9 +66,9 @@ struct ns_sqp {
         // Flat-objective accept: accept when the directional derivative is negligibly small,
         // the primal residual is already low, and the step is non-trivial (so we make dual progress).
         bool enable_flat_obj_accept = true;
-        scalar_t flat_obj_dec_tol = 1e-2;    ///< |fullstep_dec| below this is considered "flat"
-        scalar_t flat_obj_prim_tol = 1e-6;    ///< primal residual must be below this to trigger
-        scalar_t flat_obj_step_tol = 1e-12;   ///< step norm must exceed this to be "non-trivial"
+        scalar_t flat_obj_dec_tol = 1e-2;   ///< |fullstep_dec| below this is considered "flat"
+        scalar_t flat_obj_prim_tol = 1e-6;  ///< primal residual must be below this to trigger
+        scalar_t flat_obj_step_tol = 1e-12; ///< step norm must exceed this to be "non-trivial"
     };
 
     struct restoration_settings {
@@ -109,6 +109,7 @@ struct ns_sqp {
         iterative_refinement_setting rf;
         scaling_settings scaling;
         restoration_settings restoration;
+        solver::lbfgs_settings lbfgs; ///< structured L-BFGS Hessian correction settings
 
         bool no_except = false;
 
@@ -122,6 +123,7 @@ struct ns_sqp {
         bool in_restoration = false;   ///< whether currently in restoration mode (used to adjust printouts and possibly other settings)
         bool has_ineq_soft = false;    ///< whether the problem has inequality constraints (used to adjust printouts and possibly other settings)
         bool mu_changed = false;       ///< whether mu was changed in the current iteration (used to decide whether to update the QP cost for the corrector step)
+        bool initialized = false;     ///< whether the settings have been initialized based on the problem (used to trigger one-time initialization in the first iteration, e.g. setting initial mu based on initial residuals)
     } settings;
 
     using solver_type = solver::ns_riccati::generic_solver;
@@ -155,27 +157,27 @@ struct ns_sqp {
         size_t num_iter = 0; // number of iterations
         size_t ls_steps = 0; ///< line search steps
 
-        scalar_t cost = 0.;                  // pure running cost (sum of __cost terms)
-        scalar_t log_slack_sum = 0.;         // sum(log(slack)) across all IPM constraints, mu-free
-        scalar_t barrier_dir_deriv = 0.;     // sum(d_slack / slack_current) across all IPM constraints, mu-free
-        scalar_t objective = 0.;             // barrier objective: cost - mu * log_slack_sum (computed with current mu)
-        scalar_t obj_fullstep_dec = 0.;      // cost gradient dot full step (mu-free; combine with barrier_dir_deriv at current mu for full barrier directional derivative)
-        scalar_t inf_prim_res = 0.;          // primal residual (constraint violation), inf-norm across all nodes/constraints
-        scalar_t prim_res_l1 = 0.;          // primal residual L1 norm (sum of |v| across all nodes/constraints)
-        scalar_t inf_dual_res = 0.;          // dual residual (stationary condition)
-        scalar_t inf_comp_res = 0.;          // (inequality) complementarity residual
-        scalar_t max_diag_scaling = 0.;      // max Nesterov-Todd scaling (lambda/slack) across all IPM constraints
-        scalar_t max_eq_dual_norm = 0.;      // max inf-norm of equality (hard) dual variables across all nodes
-        scalar_t max_ineq_dual_norm = 0.;    // max inf-norm of inequality dual variables across all nodes
-        scalar_t max_dual_norm = 0.;         // max inf-norm of dual variables across all nodes and constraint fields
-        scalar_t inf_prim_step = 0.;         // infinity norm of the primal step
-        scalar_t inf_dual_step = 0.;         // infinity norm of the dual step (all constraints)
-        scalar_t inf_eq_dual_step = 0.;      // infinity norm of the dual step (equality constraints only)
-        scalar_t inf_ineq_dual_step = 0.;    // infinity norm of the dual step (inequality constraints only)
-        scalar_t inf_dyn_dual_step = 0.;     // inf-norm of dual step for __dyn
-        scalar_t inf_eq_x_dual_step = 0.;   // inf-norm of dual step for __eq_x
-        scalar_t inf_eq_xu_dual_step = 0.;  // inf-norm of dual step for __eq_xu
-        scalar_t avg_dual_res = 0.;          // average dual residual: L1 norm of stationarity gradient / number of elements (unscaled)
+        scalar_t cost = 0.;                // pure running cost (sum of __cost terms)
+        scalar_t log_slack_sum = 0.;       // sum(log(slack)) across all IPM constraints, mu-free
+        scalar_t barrier_dir_deriv = 0.;   // sum(d_slack / slack_current) across all IPM constraints, mu-free
+        scalar_t objective = 0.;           // barrier objective: cost - mu * log_slack_sum (computed with current mu)
+        scalar_t obj_fullstep_dec = 0.;    // cost gradient dot full step (mu-free; combine with barrier_dir_deriv at current mu for full barrier directional derivative)
+        scalar_t inf_prim_res = 0.;        // primal residual (constraint violation), inf-norm across all nodes/constraints
+        scalar_t prim_res_l1 = 0.;         // primal residual L1 norm (sum of |v| across all nodes/constraints)
+        scalar_t inf_dual_res = 0.;        // dual residual (stationary condition)
+        scalar_t inf_comp_res = 0.;        // (inequality) complementarity residual
+        scalar_t max_diag_scaling = 0.;    // max Nesterov-Todd scaling (lambda/slack) across all IPM constraints
+        scalar_t max_eq_dual_norm = 0.;    // max inf-norm of equality (hard) dual variables across all nodes
+        scalar_t max_ineq_dual_norm = 0.;  // max inf-norm of inequality dual variables across all nodes
+        scalar_t max_dual_norm = 0.;       // max inf-norm of dual variables across all nodes and constraint fields
+        scalar_t inf_prim_step = 0.;       // infinity norm of the primal step
+        scalar_t inf_dual_step = 0.;       // infinity norm of the dual step (all constraints)
+        scalar_t inf_eq_dual_step = 0.;    // infinity norm of the dual step (equality constraints only)
+        scalar_t inf_ineq_dual_step = 0.;  // infinity norm of the dual step (inequality constraints only)
+        scalar_t inf_dyn_dual_step = 0.;   // inf-norm of dual step for __dyn
+        scalar_t inf_eq_x_dual_step = 0.;  // inf-norm of dual step for __eq_x
+        scalar_t inf_eq_xu_dual_step = 0.; // inf-norm of dual step for __eq_xu
+        scalar_t avg_dual_res = 0.;        // average dual residual: L1 norm of stationarity gradient / number of elements (unscaled)
     } kkt_last;
     kkt_info update(size_t n_iter, bool verbose = true);
 
@@ -244,16 +246,16 @@ struct ns_sqp {
      */
     struct filter_linesearch_per_iter_data {
         bool recompute_approx = true;
-        bool stop = false;        ///< whether to stop the line search
-        bool enforce_min = false; ///< whether to enforce the minimum step size
-        size_t soc_iter_cnt = 0;      ///< number of second-order correction attempts in the current SQP iteration
-        bool skip_soc = false;        ///< whether to skip second-order correction
+        bool stop = false;                                                  ///< whether to stop the line search
+        bool enforce_min = false;                                           ///< whether to enforce the minimum step size
+        size_t soc_iter_cnt = 0;                                            ///< number of second-order correction attempts in the current SQP iteration
+        bool skip_soc = false;                                              ///< whether to skip second-order correction
         scalar_t theta_soc_old = std::numeric_limits<scalar_t>::infinity(); ///< θ(x_k) at SOC entry, for κ_soc abort check (IPOPT A-5.9)
-        size_t step_cnt = 0;      ///< current line search step
+        size_t step_cnt = 0;                                                ///< current line search step
         scalar_t initial_alpha_primal = 0.;
         scalar_t initial_alpha_dual = 0.;
-        bool switching_condition = false;    ///< whether the switching condition for line search is met (used to decide whether to require Armijo decrease in the line search)
-        bool armijo_cond_met = false;        ///< whether the Armijo condition is met for the current trial step
+        bool switching_condition = false; ///< whether the switching condition for line search is met (used to decide whether to require Armijo decrease in the line search)
+        bool armijo_cond_met = false;     ///< whether the Armijo condition is met for the current trial step
         void reset_per_iter_data() {
             new (this) filter_linesearch_per_iter_data();
         }
@@ -280,9 +282,9 @@ struct ns_sqp {
         /***** merit backtracking part (used when settings.ls.method == merit_backtracking) *****/
         scalar_t merit_fullstep = std::numeric_limits<scalar_t>::infinity(); ///< merit value at full step (alpha=1), for directional derivative estimate
         struct merit_trial {
-            scalar_t merit       = std::numeric_limits<scalar_t>::infinity();
+            scalar_t merit = std::numeric_limits<scalar_t>::infinity();
             scalar_t alpha_primal = 0.;
-            scalar_t alpha_dual   = 0.;
+            scalar_t alpha_dual = 0.;
         } best_merit_trial;
     };
 

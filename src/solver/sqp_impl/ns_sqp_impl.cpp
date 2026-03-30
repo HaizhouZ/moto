@@ -1,5 +1,6 @@
 #include <moto/solver/ineq_soft.hpp>
 #include <moto/solver/ipm/ipm_constr.hpp>
+#include <moto/solver/lbfgs.hpp>
 #include <moto/solver/ns_riccati/generic_solver.hpp>
 #include <moto/solver/ns_sqp.hpp>
 #include <moto/utils/field_conversion.hpp>
@@ -20,8 +21,14 @@ ns_sqp::kkt_info ns_sqp::initialize() {
         cur->for_each_constr([this](const generic_func &c, func_approx_data &d) { c.setup_workspace_data(d, &settings); });
         cur->update_approximation(node_data::update_mode::eval_val);
         // initialize the data
-        if (!settings.ipm.warm_start)
+        if (!settings.ipm.warm_start || !settings.initialized)
+            // if not warm starting but we have already initialized before, we should be in restoration mode
             solver::ineq_soft::initialize(cur);
+        // sync L-BFGS settings and clear stale history from any previous solve
+        cur->lbfgs_.max_pairs = settings.lbfgs.max_pairs;
+        cur->lbfgs_.min_curvature = settings.lbfgs.min_curvature;
+        cur->lbfgs_.clear();
+        settings.initialized = true;
     });
     graph_.for_each_parallel([](data *cur) {
         cur->update_approximation(node_data::update_mode::eval_derivatives);
@@ -108,6 +115,17 @@ ns_sqp::line_search_action ns_sqp::sqp_iter(filter_linesearch_data &ls, kkt_info
                                             bool do_scaling, bool do_refinement, bool gauss_newton) {
     settings.ls.reset();
     setting_per_thread.reset(settings.n_worker);
+
+    // ── Structured L-BFGS: snapshot pre-step gradient ────────────────────────
+    // Save merit_jac_[__u] at the current point before any factorization or
+    // scaling so we can compute the gradient change after the accepted step.
+    // Skipped in Gauss-Newton (restoration) mode where pairs are meaningless.
+    if (settings.lbfgs.enabled && !gauss_newton) {
+        graph_.for_each_parallel([](data *d) {
+            d->lbfgs_merit_jac_bak_ = d->dense().merit_jac_[__u];
+            d->lbfgs_.max_pairs = d->lbfgs_.max_pairs; // already set; no-op
+        });
+    }
 
     if (do_scaling) {
         detail_timed_block_start("scaling");
@@ -227,6 +245,33 @@ LS_START:
     } else {
         update_approx_derivatives();
     }
+    // ── Structured L-BFGS: collect curvature pair ────────────────────────────
+    // At this point:
+    //   - update_approx_derivatives() has been called → merit_jac_[__u] and
+    //     Q_uu / Q_uu_mod reflect the NEW accepted point.
+    //   - lbfgs_merit_jac_bak_ holds merit_jac_[__u] from the OLD point.
+    //   - settings.ls.alpha_primal is the accepted step size.
+    //   - trial_prim_step[__u] is the Newton step direction.
+    // Skipped in Gauss-Newton (restoration) mode.
+    if (settings.lbfgs.enabled && !gauss_newton) {
+        const scalar_t alpha = settings.ls.alpha_primal;
+        const scalar_t min_curvature = settings.lbfgs.min_curvature;
+        graph_.for_each_parallel([alpha, min_curvature](data *d) {
+            if (d->lbfgs_merit_jac_bak_.size() != static_cast<int>(d->nu))
+                return;
+            // Actual primal step applied to this node's u
+            vector s_u = alpha * d->trial_prim_step[__u];
+            solver::lbfgs_collect_structured_pair(
+                d->lbfgs_,
+                d->dense().merit_jac_[__u], // gradient at new point
+                d->lbfgs_merit_jac_bak_,    // gradient at old point
+                d->Q_uu,
+                d->Q_uu_mod,
+                std::move(s_u),
+                min_curvature);
+        });
+    }
+
     kkt_current = kkt_trial;
     return action;
 }

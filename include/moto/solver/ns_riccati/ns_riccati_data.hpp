@@ -2,6 +2,7 @@
 #define __NS_RICCATI_DATA__
 
 #include <moto/solver/data_base.hpp>
+#include <moto/solver/lbfgs.hpp>
 
 #include <Eigen/Cholesky>
 #include <Eigen/LU>
@@ -63,6 +64,14 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
     } nsp_;
 
     node_data *full_data_;
+
+    /// Structured L-BFGS history for this stage.
+    /// Pairs (s_u, y#_u) are in u-space; y# has the known Hessian (Q_uu + Q_uu_mod) removed.
+    solver::lbfgs_history lbfgs_;
+    /// Snapshot of merit_jac_[__u] taken at the start of the current SQP iteration,
+    /// used to compute the gradient change for the L-BFGS pair at acceptance.
+    row_vector lbfgs_merit_jac_bak_;
+
     struct aux_data {
         virtual ~aux_data() = default;
     };
