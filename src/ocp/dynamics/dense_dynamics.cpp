@@ -157,19 +157,19 @@ void dense_dynamics::mark_shared_inputs(const var_inarg_list &args) {
     setup_ocpwise_info(prob);     \
     return ((info &)*ocpwise_info_map_->at(prob->uid())).var_name
 
-size_t dense_dynamics::active_dim_exclusive_inputs(const ocp *prob) const {
+size_t dense_dynamics::active_dim_exclusive_inputs(const ocp_base *prob) const {
     access_ocp_info(dim_exclusive_inputs_);
 }
-size_t dense_dynamics::active_dim_shared_inputs(const ocp *prob) const {
+size_t dense_dynamics::active_dim_shared_inputs(const ocp_base *prob) const {
     access_ocp_info(dim_shared_inputs_);
 }
-size_t dense_dynamics::active_num_exclusive_inputs(const ocp *prob) const {
+size_t dense_dynamics::active_num_exclusive_inputs(const ocp_base *prob) const {
     access_ocp_info(num_exclusive_inputs_);
 }
-size_t dense_dynamics::active_num_shared_inputs(const ocp *prob) const {
+size_t dense_dynamics::active_num_shared_inputs(const ocp_base *prob) const {
     access_ocp_info(num_shared_inputs_);
 }
-bool dense_dynamics::setup_ocpwise_info(const ocp *prob) const {
+bool dense_dynamics::setup_ocpwise_info(const ocp_base *prob) const {
     if (generic_func::setup_ocpwise_info(prob)) {
         auto &_info = ocpwise_info_map_->at(prob->uid()).replace([](generic_func::info &old) {
             return new info(std::move(old));

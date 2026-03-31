@@ -183,7 +183,7 @@ void generic_func::finalize_impl() {
     }
     finalized_ = true;
 }
-bool generic_func::setup_ocpwise_info(const ocp *prob) const {
+bool generic_func::setup_ocpwise_info(const ocp_base *prob) const {
     if (ocpwise_info_map_->contains(prob->uid()))
         return false;
     auto &tmp = *ocpwise_info_map_->insert(
@@ -208,27 +208,27 @@ bool generic_func::setup_ocpwise_info(const ocp *prob) const {
     // }
     return true;
 }
-const var_list &generic_func::active_args(field_t f, const ocp *prob) const {
+const var_list &generic_func::active_args(field_t f, const ocp_base *prob) const {
     field_read_guard(f);
     setup_ocpwise_info(prob);
     return ocpwise_info_map_->at(prob->uid())->arg_by_field_[f];
 }
-size_t generic_func::active_dim(field_t f, const ocp *prob) const {
+size_t generic_func::active_dim(field_t f, const ocp_base *prob) const {
     field_read_guard(f);
     setup_ocpwise_info(prob);
     return ocpwise_info_map_->at(prob->uid())->arg_dim_[f];
 }
-size_t generic_func::active_tdim(field_t f, const ocp *prob) const {
+size_t generic_func::active_tdim(field_t f, const ocp_base *prob) const {
     field_read_guard(f);
     setup_ocpwise_info(prob);
     return ocpwise_info_map_->at(prob->uid())->arg_tdim_[f];
 }
-size_t generic_func::active_num(field_t f, const ocp *prob) const {
+size_t generic_func::active_num(field_t f, const ocp_base *prob) const {
     field_read_guard(f);
     setup_ocpwise_info(prob);
     return ocpwise_info_map_->at(prob->uid())->arg_num_[f];
 }
-const bool generic_func::check_enable(ocp *prob) const {
+const bool generic_func::check_enable(ocp_base *prob) const {
     if (disable_if_any_deps_.empty() && enable_if_all_deps_.empty() && enable_if_any_deps_.empty())
         return true;
     bool pass_check = true;

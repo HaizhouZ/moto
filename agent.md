@@ -118,9 +118,19 @@ Core function / constraint fields:
 
 Important convention:
 
-- `__eq_x` and `__ineq_x` are finalized against `__y`, not `__x`
-- after finalization, a state-only constraint is usually differentiated with respect to `__y = x_{k+1}`
-- do not assume `__x` Jacobians exist for those constraints after problem finalization
+- pure state-only path terms are modeled by the user on `x`
+- internally, non-terminal pure-`x` costs/constraints are lowered onto predecessor `y`
+- terminal pure-`x` terms should be added with `prob.add_terminal(...)`, which disables the `x -> y` remap for that add
+- after non-terminal finalization, do not assume `__x` Jacobians still exist for those pure state-only terms
+
+Why this is easy to trip over:
+
+- a user may write a stage-local constraint `g(x_k)` and expect it to remain attached to the current `x`
+- internally the solver still wants many pure state-only path terms on `y_k`, which is the outgoing state copy of the previous stage
+- that means the user-facing semantics and the solver-facing storage are intentionally different
+- the remap is now keyed off the OCP insertion path:
+  - `prob.add(expr)` means path semantics and allows pure-`x -> y` lowering
+  - `prob.add_terminal(expr)` means terminal semantics and preserves pure-`x` on the terminal node
 
 Useful field groups used throughout the solver:
 
@@ -152,6 +162,107 @@ Important `ocp` behaviors:
 - `wait_until_ready()` blocks until code-generated functions are available
 
 `ocp` is the static formulation. Runtime values and derivatives live elsewhere.
+
+## X-U-Y Triplet Formulation
+
+The current stage model is built around three primal blocks:
+
+- `x_k`: current state entering stage `k`
+- `u_k`: control applied at stage `k`
+- `y_k`: state leaving stage `k`
+
+This is a valid solver formulation, but it mixes two different concerns:
+
+- modeling semantics: "what variables does the user think this stage owns?"
+- solver algebra: "which state copy is most convenient for the nullspace / Riccati factorization?"
+
+Today the solver still stores some path-state algebra on `y_k`, but the intended modeling interface is:
+
+- users write `constr.create(...)` and `cost.create(...)` normally
+- if an expression is pure-`x` and added with `prob.add(...)`, the framework may remap it internally to predecessor `y`
+- if an expression is terminal, the user writes `prob.add_terminal(...)` and that add path suppresses the remap
+
+That makes stage-local modeling harder than it needs to be.
+
+### Current Recommended Usage
+
+Keep user code simple:
+
+- define expressions with `constr.create(...)` or `cost.create(...)`
+- add path terms with `prob.add(...)`
+- add terminal terms with `prob.add_terminal(...)`
+
+This preserves the current solver backend while giving the modeling layer the semantics most users expect:
+
+- `s(x)` still means a state-only term on that stage state semantically
+- the framework is responsible for remapping non-terminal pure-`x` terms onto predecessor `y`
+- terminal terms opt out of that remap through the add path instead of through a separate create-time API
+
+This is much clearer than relying on implicit `x -> y` substitution in finalize.
+
+#### 2. Add a lowering pass instead of silent substitution
+
+Instead of mutating the user-authored expression in `generic_constr::finalize_impl()` and `generic_cost::finalize_impl()`, add a lowering step:
+
+- user creates expression in modeling IR terms
+- `ocp::finalize()` or a new `lower_to_solver_ir()` maps it into solver fields
+- lowering decides whether a path state constraint becomes:
+  - direct `__x`-anchored metadata in modeling IR
+  - or internal `__y`-anchored solver storage if the solver still wants that
+
+This keeps user intent intact while still supporting the current Riccati implementation.
+
+#### 3. Preserve user intent in metadata
+
+Each `generic_func` / `generic_constr` / `generic_cost` should carry two notions:
+
+- `model_loc`: where the user meant the expression to live
+- `solver_field`: where the solver finally stores it
+
+For example:
+
+```cpp
+struct timing_hint {
+    stage_loc model_loc = stage_loc::path;
+    bool allow_lowering_to_out = true;
+};
+```
+
+Then:
+
+- user writes `g(x_k)` with `model_loc = path`
+- lowering may store it under `__eq_x` / `__ineq_x` and internally map it to `y_k`
+- but the original semantic location remains available for docs, debugging, printing, and future backends
+
+#### 4. Recommended staged migration
+
+To minimize churn:
+
+1. Stop automatic substitution by default for new APIs.
+2. Keep old constructors as legacy behavior.
+3. Add explicit helpers:
+   - `constr.create_path(...)`
+   - `constr.create_terminal(...)`
+   - `cost.create_path(...)`
+   - `cost.create_terminal(...)`
+4. Lower those helpers into the existing internal fields.
+5. Once stable, deprecate "pure `x` means substitute to `y`".
+
+#### 5. Best internal mental model
+
+If the solver keeps the triplet, the cleanest interpretation is:
+
+- `x`: state owned by the node
+- `u`: action owned by the outgoing edge
+- `y`: predicted outgoing state copy used only by the solver
+
+That is better than presenting all three as peer modeling variables.
+
+In short:
+
+- user-facing model: `x_k`, `u_k`, `x_N`
+- internal solver model: `x/u/y`
+- bridge between them: explicit lowering, not implicit substitution
 
 ## Expression And Function Model
 
@@ -812,6 +923,8 @@ When adding or changing settings, enum values, or public solver surface area:
 - do not copy `settings_t`
 - do not assume soft constraints are only inequalities; PMM soft equalities use the same dispatch layer
 - do not remove commented or dormant solver hooks like restoration or SOC infrastructure without checking intended roadmap
+- when changing C++ code that affects Python examples, always wait for the full build to finish before running Python tests
+- do not trust a Python test run started while `moto` / `moto_pywrap` is still linking; stale modules can easily give misleading results
 
 ## Common Pitfalls
 
@@ -822,6 +935,7 @@ When adding or changing settings, enum values, or public solver surface area:
 - touching line-search or IPM state without handling backup/restore
 - changing a settings struct without updating bindings
 - treating [`example/quadruped/run.py`](/home/harper/Documents/moto/example/quadruped/run.py) as canonical; it is often used for experiments
+- seeing `warning: substitution in generic_constr ... go2_q_nxt` in quadruped logs means the example is still using the legacy `ocp.create()` path, not the newer `node_ocp / edge_ocp` modeling path
 
 ## Suggested Reading Order For Solver Work
 
@@ -838,3 +952,35 @@ If you are new to the repo and need to debug solver behavior, read in this order
 9. [`src/solver/soft_impl/pmm_constr.cpp`](/home/harper/Documents/moto/src/solver/soft_impl/pmm_constr.cpp)
 
 That path covers most bugs involving assembly, factorization, rollout, globalization, and inequality handling.
+
+## Current Refactor Status
+
+As of the current working tree, the OCP layer has been partially refactored to introduce:
+
+- `ocp_base` as the shared storage / activation / flattening container
+- `ocp` as the generic legacy-compatible problem type
+- `node_ocp` as a thin node-local wrapper
+- `edge_ocp` as a thin transition-local wrapper that can bind start/end node problems
+
+What is already true:
+
+- [`include/moto/ocp/problem.hpp`](/home/harper/Documents/moto/include/moto/ocp/problem.hpp) now documents the intended role split between these types
+- clone logic was deduplicated into `ocp_base::refresh_after_clone(...)`
+- quadruped still matches the historical baseline after the refactor:
+  - build with `cmake -E env CCACHE_DISABLE=1 cmake --build build -j4`
+  - run with `python example/quadruped/run.py`
+  - expected result is convergence in `46` iterations with objective about `3.060e+02`
+
+What is not true yet:
+
+- the quadruped example is not yet using the new modeling layer as its primary construction path
+- the presence of `x -> y` substitution warnings in quadruped output confirms that it still goes through the legacy stage formulation path
+- `node_ocp / edge_ocp` are still intentionally thin wrappers; they do not yet replace the legacy lowering path end-to-end
+
+Recommended next step from here:
+
+1. Validate the new node/edge modeling path on a small example first
+2. Confirm that the small example does not rely on legacy pure-`x -> y` substitution
+3. Only then migrate [`example/quadruped/run.py`](/home/harper/Documents/moto/example/quadruped/run.py) to the new modeling path
+
+This order is important because quadruped is too large to use as the first proving ground for new node/edge semantics.

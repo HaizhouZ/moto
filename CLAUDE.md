@@ -39,7 +39,7 @@ Nonsmooth SQP (Sequential Quadratic Programming) solver for trajectory optimizat
 
 ### `ns_sqp::data` (per-stage node, `ns_sqp.hpp`)
 Multiple-inherits from:
-- **`node_data`** (`include/moto/ocp/impl/node_data.hpp`): holds the OCP problem formulation, sparse approximation data (`sparse_[field]`), dense merged data (`dense_` of type `merit_data`); provides `for_each(field, cb)` and `update_approximation()`
+- **`node_data`** (`include/moto/ocp/impl/node_data.hpp`): holds the OCP problem formulation, sparse approximation data (`sparse_[field]`), dense merged data (`dense_` of type `lag_data`); provides `for_each(field, cb)` and `update_approximation()`
 - **`ns_riccati_data`** (`include/moto/solver/ns_riccati/ns_riccati_data.hpp`): holds Riccati/nullspace solver state
 
 Additional fields in `data`:
@@ -47,12 +47,12 @@ Additional fields in `data`:
 - `scale_p_[pf]` — per-primal-field cost gradient scales (currently always 1)
 - `scaling_applied_` — true between `compute_and_apply_scaling` and `unscale_duals`
 
-### `merit_data` gradient fields (`include/moto/ocp/impl/merit_data.hpp`)
-`dense_` (of type `merit_data`) holds the per-stage merged gradient data. Key gradient arrays (all indexed by `primal_fields = {__x, __u, __y}`):
+### `lag_data` gradient fields (`include/moto/ocp/impl/lag_data.hpp`)
+`dense_` (of type `lag_data`) holds the per-stage merged gradient data. Key gradient arrays (all indexed by `primal_fields = {__x, __u, __y}`):
 - `cost_jac_[pf]` — **pure cost gradient** w.r.t. primal field `pf`; snapshotted from `merit_jac_` after all cost functions write their gradients but before constraint dual contributions are accumulated. Used for `obj_fullstep_dec` in the line search.
 - `merit_jac_[pf]` — **Lagrangian gradient**: `cost_jac_[pf] + Σ_c approx_[c].jac_[pf]^T · dual_[c]`. Aliased as `Q_x`, `Q_u`, `Q_y` in `data_base`. Used for dual residual / stationarity checks.
 - `merit_jac_modification_[pf]` — pending gradient modifications (PMM soft-constraint and proximal terms); folded into `merit_jac_` by `merge_jacobian_modification()` inside `ns_factorization`.
-- `approx_[cf].jac_[pf]` — per-constraint-field Jacobian w.r.t. primal field `pf` (`func_approx_data::jac_` via `merit_data::approx_data`); **distinct** from the `merit_data` gradient fields above.
+- `approx_[cf].jac_[pf]` — per-constraint-field Jacobian w.r.t. primal field `pf` (`func_approx_data::jac_` via `lag_data::approx_data`); **distinct** from the `lag_data` gradient fields above.
 
 `update_approximation()` build order:
 1. Reset `merit_jac_[pf]` and `merit_jac_modification_[pf]` to zero
@@ -127,7 +127,7 @@ generic_func
 └── generic_constr          (base; holds multiplier_, jac_[], v_)
     └── soft_constr         (adds merit_jac_modification_[], d_multiplier_; data_map_t = approx_data)
 ```
-Note: `jac_[]` here refers to the per-constraint Jacobian rows stored in `func_approx_data` — not the `merit_data` fields below.
+Note: `jac_[]` here refers to the per-constraint Jacobian rows stored in `func_approx_data` — not the `lag_data` fields below.
 ```
         ├── pmm_constr      (proximal augmented Lagrangian / PMM; adds g_, rho_, multiplier_backup_)
         └── ineq_constr     (adds comp_ complementarity residual)
@@ -149,7 +149,7 @@ Soft equality constraint treated via Schur-complement PMM (proximal method of mu
   - `slack_[i]` — slack variable (kept > 0 by IPM); small → approximately active
   - `active_[i]` — always 1.0 in current IPM (not a hard active-set mask)
   - `diag_scaling[i]` — Nesterov-Todd scaling `λ_i / (s_i + ε·λ_i)`
-  - `jac_[arg_idx]` — per-constraint Jacobian rows (matrix_ref, rows = constraint dim, cols = arg dim); this is `func_approx_data::jac_`, distinct from the `merit_data` gradient fields
+  - `jac_[arg_idx]` — per-constraint Jacobian rows (matrix_ref, rows = constraint dim, cols = arg dim); this is `func_approx_data::jac_`, distinct from the `lag_data` gradient fields
 
 To iterate over IPM constraints from a `node_data*` or `data*`:
 ```cpp
@@ -210,7 +210,7 @@ where `u_ref`, `y_ref`, `rho_u`, `rho_y`, `sigma_u`, `sigma_y` are stored in `ns
 **GN mode in `ns_factorization(cur, gauss_newton=true)`** (`src/solver/nsp_impl/presolve.cpp`):
 - Runs the standard factorization preamble: `update_projected_dynamics`, `merge_jacobian_modification`, builds `s_c_stacked`, `lu_eq_`, `s_c_stacked_0_K` (always built unconditionally before the rank branch).
 - **PMM (penalty method) treatment of `__eq_x`/`__eq_xu`**: original running cost Hessians (`Q_uu`, `Q_ux`, `Q_yx`, `Q_xx`, `Q_yy`) and gradients (`Q_u`, `Q_y`) are **kept intact**; equality constraints are removed from the hard-constraint path and instead penalized. IPM/soft-constraint `_mod` terms also retained.
-- Proximal gradient/Hessian are written by `restoration_update` directly into `dense().merit_jac_modification_[__u/y]` and `dense().primal_prox_hess_diagonal_[__u/y].diagonal()` before each `sqp_iter`. `merge_jacobian_modification` folds them into `Q_u`/`Q_y`; the diagonal Hessian lands in `Q_uu_mod`/`Q_yy_mod` via the pre-allocated diagonal sparsity in `hessian_[__u][__u]` (see `merit_data` constructor). GN mode sees proximal already in `Q_u`/`Q_uu_mod`.
+- Proximal gradient/Hessian are written by `restoration_update` directly into `dense().merit_jac_modification_[__u/y]` and `dense().primal_prox_hess_diagonal_[__u/y].diagonal()` before each `sqp_iter`. `merge_jacobian_modification` folds them into `Q_u`/`Q_y`; the diagonal Hessian lands in `Q_uu_mod`/`Q_yy_mod` via the pre-allocated diagonal sparsity in `hessian_[__u][__u]` (see `lag_data` constructor). GN mode sees proximal already in `Q_u`/`Q_uu_mod`.
 - Builds `s_c_stacked_0_k` explicitly after `update_projected_dynamics_residual()` for the PMM gradient.
 - **Gradients** (PMM Schur complement, mirrors `pmm_constr::propagate_jacobian`):
   - `Q_u += (h/rho_eq)^T * s_c_stacked`  where `h = s_c_stacked_0_k`

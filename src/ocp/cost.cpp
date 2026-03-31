@@ -55,7 +55,6 @@ void generic_cost::finalize_impl() {
             };
         }
     }
-    // fmt::print("field_hint for cost {} is {}\n", name_, finalize_hint_.substitute_x_to_y);
     // finalize the base class
     generic_func::finalize_impl();
     return;

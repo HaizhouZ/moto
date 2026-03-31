@@ -345,7 +345,15 @@ class pinCasadiModel(cpin.Model):
 dt_nom = moto.sym.params("dt_nom", 1, default_val=0.02)
 dt = 0.02
 display = True
-go2 = load("go2", display=display, verbose=True)
+try:
+    go2 = load("go2", display=display, verbose=True)
+except Exception as exc:
+    if display:
+        print(f"viewer init failed, retrying with display disabled: {exc}")
+        display = False
+        go2 = load("go2", display=False, verbose=True)
+    else:
+        raise
 q_d = np.copy(go2.q0)
 root_joint = pin.JointModelComposite()
 root_joint.addJoint(pin.JointModelTranslation())
@@ -366,7 +374,6 @@ prob.add(model.dyn)
 prob.add(model.kin_constr)
 if not full:
     prob.add(model.kin_cost)
-# prob.add(model.zf_constr)
 prob.add(model.make_tq_limit_constr())
 prob.add(model.make_joint_limit_constr())
 model.add_dt_constr_and_cost(prob, dt_nom)
@@ -375,7 +382,7 @@ prob.add(model.get_input_cost())
 # prob.add(model.make_foot_lift_cost(lifted=True))
 
 prob_term = prob.clone()
-# prob_term.add(model.get_state_cost(terminal=True))
+# prob_term.add_terminal(model.get_state_cost(terminal=True))
 
 prob.print_summary()
 print("--" * 15)

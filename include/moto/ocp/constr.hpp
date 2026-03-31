@@ -46,12 +46,16 @@ class generic_constr : public generic_func {
         utils::optional_bool is_eq = true; ///< true if equality constraint, false if inequality constraint, default is true
         bool is_soft = false;              ///< true if soft constraint, false if hard constraint, default is false
     } field_hint_;                         ///< type hint for the constraint
+    bool terminal_add_ = false;
+    bool lower_x_to_y_ = false;
 
     /// @brief finalize the constraint, will be called upon added to a problem
     /// @note will set the field (if unset) based on the field hint and substitute __x to __y for pure-state constraints
     void finalize_impl() override;
 
   public:
+    void prepare_add_to_ocp(bool terminal) override { terminal_add_ = terminal; }
+    void set_lower_x_to_y(bool lower) { lower_x_to_y_ = lower; }
     void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const override {
         data.as<approx_data>().ls_cfg = &ws_data->as<solver::linesearch_config>();
     }

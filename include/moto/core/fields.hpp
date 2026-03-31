@@ -1,6 +1,7 @@
 #ifndef __OPT_FIELDS__
 #define __OPT_FIELDS__
 
+#include <cstdint>
 #include <magic_enum/magic_enum.hpp>
 #include <moto/core/fwd.hpp>
 

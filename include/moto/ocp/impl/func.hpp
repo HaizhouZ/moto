@@ -65,7 +65,7 @@ class generic_func : public expr {
     /// @brief setup the ocpwise info for a given ocp,
     /// will be called when accessing active args/dims for the first time
     /// @return true if the info is setup for the ocp, false if the info already exists
-    virtual bool setup_ocpwise_info(const ocp *prob) const;
+    virtual bool setup_ocpwise_info(const ocp_base *prob) const;
 
     std::set<size_t> skip_unused_arg_check_;     ///< set of argument uids to skip unused check
     std::vector<sparsity> jac_sp_;               ///< jacobian sparsity for each arg
@@ -140,13 +140,13 @@ class generic_func : public expr {
     } ///< get the input arguments for a given field
 
     /// get the active arguments for a given field
-    const var_list &active_args(field_t f, const ocp *prob) const;
+    const var_list &active_args(field_t f, const ocp_base *prob) const;
     /// get the dim of active arguments for a given field
-    size_t active_dim(field_t f, const ocp *prob) const;
+    size_t active_dim(field_t f, const ocp_base *prob) const;
     /// get the tangent dim of active arguments for a given field
-    size_t active_tdim(field_t f, const ocp *prob) const;
+    size_t active_tdim(field_t f, const ocp_base *prob) const;
     /// get the num of active arguments for a given field
-    size_t active_num(field_t f, const ocp *prob) const;
+    size_t active_num(field_t f, const ocp_base *prob) const;
 
     auto arg_num(field_t field) const {
         field_read_guard(field);
@@ -194,7 +194,7 @@ class generic_func : public expr {
     }
 
     /// get the enable_if dependencies
-    const bool check_enable(ocp *prob) const;
+    const bool check_enable(ocp_base *prob) const;
     /// enable if all of these args are active
     void enable_if_all(const expr_inarg_list &args);
     /// disable if any of these args is active

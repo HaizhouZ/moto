@@ -211,9 +211,7 @@ class pinCasadiModel(cpin.Model):
             .set_gauss_newton(
                 moto.sym.params(f"W_kin_{self.foot_frames[i]}", 1, default_val=1e3)
             )
-            .as_terminal()
         )
-        pos_cost.name = pos_cost.name.replace("_terminal", "")
         pos_cost.enable_if_all([self.f_f[i]])
         return pos_cost
 
@@ -287,7 +285,7 @@ class pinCasadiModel(cpin.Model):
         state_args = self.pos_args + self.vel_args
         cost = moto.cost.create("c_mpc", state_args + [self.q_nom], state_cost)
         if terminal:
-            return cost.as_terminal()
+            return cost
         return cost
 
     def get_input_cost(self):
@@ -363,7 +361,7 @@ prob.add(model.get_input_cost())
 # prob.add(model.make_foot_lift_cost(lifted=True))
 
 prob_term = prob.clone()
-prob_term.add(model.get_state_cost(terminal=True))
+prob_term.add_terminal(model.get_state_cost(terminal=True))
 
 prob.print_summary()
 print("--" * 15)

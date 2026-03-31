@@ -13,6 +13,7 @@ class generic_cost : public generic_func {
         bool substitute_x_to_y = false;
         bool gauss_newton = false;
     } finalize_hint_;
+    bool terminal_add_ = false;
 
     void finalize_impl() override;
     var gn_weight_; ///< weight for gauss-newton cost
@@ -20,6 +21,7 @@ class generic_cost : public generic_func {
   public:
     using base = generic_func;
     using base::base; ///< inherit base constructor
+    void prepare_add_to_ocp(bool terminal) override { terminal_add_ = terminal; }
 
     generic_cost(const std::string &name, approx_order order = approx_order::second);
     generic_cost(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,

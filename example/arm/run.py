@@ -182,7 +182,6 @@ class pinCasadiModel(cpin.Model):
                 res,
             )
             .set_gauss_newton(self.W_ee_cost)
-            .as_terminal()
         )
         # return [
         #     moto.cost.create(
@@ -230,7 +229,7 @@ class pinCasadiModel(cpin.Model):
             "c", state_args + [self.q_nom], state_cost
         ).set_diag_hess()
         if terminal:
-            return cost.as_terminal()
+            return cost
         return cost
 
     def get_input_cost(self):
@@ -273,8 +272,8 @@ prob.add(model.get_input_cost())
 # prob.add(model.get_dt_reg(dt_nom))
 
 prob_term = prob.clone()
-prob_term.add(model.make_ee_pos_constr())
-prob_term.add(model.get_state_cost(terminal=True))
+prob_term.add_terminal(model.make_ee_pos_constr())
+prob_term.add_terminal(model.get_state_cost(terminal=True))
 
 prob.print_summary()
 prob_term.print_summary()

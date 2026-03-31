@@ -63,7 +63,6 @@ cost = moto.cost.create(
 term_cost = (
     moto.cost.create("term_cost", [x], 0.5 * cs.sumsqr(x.sx))
     .set_diag_hess()
-    .as_terminal()
 )
 
 # equality constraint:  u[0] + x[0] = 0  (__eq_xu, 1-dimensional)
@@ -94,7 +93,7 @@ def _build_sqp(
     horizon=N,
 ):
     prob_term = prob.clone()
-    prob_term.add(term_cost)
+    prob_term.add_terminal(term_cost)
 
     prob.print_summary()
     prob_term.print_summary()

@@ -1,20 +1,68 @@
 #include <algorithm>
+#include <moto/ocp/constr.hpp>
+#include <moto/ocp/cost.hpp>
 #include <moto/ocp/dynamics.hpp>
 #include <moto/ocp/problem.hpp>
 
 namespace moto {
-INIT_UID_(ocp);
-bool ocp::add_impl(expr &ex) {
-    size_t _uid = ex.uid();
-    if (!contains(ex)) { // skip repeated
-        // add dependencies
-        if (!ex.finalize()) {
-            throw std::runtime_error(fmt::format("cannot finalize expr {} uid {}", ex.name(), ex.uid()));
+INIT_UID_(ocp_base);
+
+namespace {
+bool needs_path_state_lowering(const shared_expr &ex, bool terminal) {
+    if (terminal || !ex) {
+        return false;
+    }
+    const auto *func = dynamic_cast<const generic_func *>(ex.get());
+    if (func == nullptr) {
+        return false;
+    }
+    const bool is_supported_field =
+        ex->field() == __cost ||
+        ex->field() == __eq_x ||
+        ex->field() == __ineq_x ||
+        ex->field() == __undefined;
+    if (!is_supported_field) {
+        return false;
+    }
+    bool has_x = false;
+    for (const sym &arg : func->in_args()) {
+        if (arg.field() == __u || arg.field() == __y) {
+            return false;
         }
-        const auto &dep = ex.dep();
+        if (arg.field() == __x) {
+            has_x = true;
+        }
+    }
+    return has_x;
+}
+
+void mark_path_state_term_for_lowering(const shared_expr &ex) {
+    if (auto *cost = dynamic_cast<generic_cost *>(ex.get())) {
+        cost->finalize_hint().substitute_x_to_y = true;
+    } else if (auto *constr = dynamic_cast<generic_constr *>(ex.get())) {
+        constr->set_lower_x_to_y(true);
+    }
+}
+} // namespace
+
+bool ocp_base::add_impl(expr &ex) {
+    return add_impl(shared_expr(ex));
+}
+bool ocp_base::add_impl(shared_expr ex, bool terminal) {
+    if (needs_path_state_lowering(ex, terminal)) {
+        mark_path_state_term_for_lowering(ex);
+    }
+    ex->prepare_add_to_ocp(terminal);
+    size_t _uid = ex->uid();
+    if (!contains(*ex, false)) { // skip repeated in the current problem only
+        // add dependencies
+        if (!ex->finalize()) {
+            throw std::runtime_error(fmt::format("cannot finalize expr {} uid {}", ex->name(), ex->uid()));
+        }
+        const auto &dep = ex->dep();
         if (!dep.empty()) { // this must be done before currect ex
             // check consistency for dynamics, x and y should not be in dep!
-            if (ex.field() == __dyn && !allow_inconsistent_dynamics_)
+            if (ex->field() == __dyn && !allow_inconsistent_dynamics_)
                 for (auto f : {__x, __y})
                     for (const generic_dynamics &dyn : expr_[__dyn]) {
                         auto it = std::ranges::find_if(dep, [&](const sym &s) { return dyn.has_arg(s); });
@@ -23,42 +71,54 @@ bool ocp::add_impl(expr &ex) {
                                 fmt::format("Dynamics {} arg {} uid {} in {} found in dynamics {}. "
                                             "Overlapping state variables in dynamics is not allowed to avoid inconsistency."
                                             " If you want to allow this, set allow_inconsistent_dynamics to true.",
-                                            ex.name(),
+                                            ex->name(),
                                             (*it)->name(), (*it)->uid(), f, dyn.name()));
                         }
                     }
-            add(dep);
+            for (expr &arg : dep) {
+                if (!contains(arg, false)) {
+                    add_impl(arg);
+                }
+            }
         }
         finalized_ = false; // need to reset finalized to allow adding more expr, will be set to true in finalize()
-        if (ex.default_active_status()) {
+        auto *ex_ptr = ex.get();
+        if (ex->default_active_status()) {
             uids_.insert(_uid);
-            expr_[ex.field()].emplace_back(ex);
+            expr_[ex->field()].emplace_back(std::move(ex));
         } else { // add to disabled list
             disabled_uids_.insert(_uid);
-            disabled_expr_[ex.field()].emplace_back(ex);
+            disabled_expr_[ex->field()].emplace_back(std::move(ex));
         }
-        ex.add_to_ocp_callback(this);
+        ex_ptr->add_to_ocp_callback(this);
         return true;
     }
     return false;
 }
-bool ocp::contains(const expr &ex, bool include_sub_prob) const {
+bool ocp_base::add_terminal_impl(expr &ex) {
+    if (ex.finalized()) {
+        auto ex_terminal = shared_expr(ex).clone();
+        return add_impl(std::move(ex_terminal), true);
+    }
+    return add_impl(shared_expr(ex), true);
+}
+bool ocp_base::contains(const expr &ex, bool include_sub_prob) const {
     return uids_.contains(ex.uid()) ||
            disabled_uids_.contains(ex.uid()) ||
            pruned_uids_.contains(ex.uid()) ||
            (include_sub_prob &&
             std::any_of(sub_probs_.begin(),
                         sub_probs_.end(),
-                        [&](const ocp_ptr_t &p) { return p->contains(ex, true); }));
+                        [&](const ocp_base_ptr_t &p) { return p->contains(ex, true); }));
 }
-bool ocp::is_active(const expr &ex, bool include_sub_prob) const {
+bool ocp_base::is_active(const expr &ex, bool include_sub_prob) const {
     return uids_.contains(ex.uid()) ||
            (include_sub_prob &&
             std::any_of(sub_probs_.begin(),
                         sub_probs_.end(),
-                        [&](const ocp_ptr_t &p) { return p->is_active(ex, true); }));
+                        [&](const ocp_base_ptr_t &p) { return p->is_active(ex, true); }));
 }
-void ocp::finalize() {
+void ocp_base::finalize() {
     static std::mutex finalize_mutex_;
     std::lock_guard lock(finalize_mutex_);
     if (!finalized_) {
@@ -68,7 +128,16 @@ void ocp::finalize() {
         this->finalized_ = true;
     }
 }
-void ocp::set_dim_and_idx() {
+void ocp_base::refresh_after_clone(const active_status_config &config) {
+    finalized_ = false;
+    for (auto &p : sub_probs_) {
+        p = p->clone_base(config);
+    }
+    if (!config.empty()) {
+        update_active_status(config, false);
+    }
+}
+void ocp_base::set_dim_and_idx() {
     for (size_t i = 0; i < field::num; i++) {
         dim_[i] = 0;
         if (i < field::num_prim)
@@ -89,7 +158,7 @@ void ocp::set_dim_and_idx() {
         }
     }
 }
-void ocp::maintain_order() {
+void ocp_base::maintain_order() {
     expr_list tmp;
     for (auto f : {__x, __y}) {
         auto &syms = expr_[f];
@@ -117,7 +186,7 @@ void ocp::maintain_order() {
         syms.swap(tmp); // now syms is in the order of dynamics args
     }
 }
-void ocp::print_summary() {
+void ocp_base::print_summary() {
     finalize();
     fmt::print("-------------------------------------------------\n");
     fmt::print("problem uid {}\n", uid_);
@@ -134,7 +203,7 @@ void ocp::print_summary() {
     }
     fmt::print("-------------------------------------------------\n");
 }
-void ocp::wait_until_ready() {
+void ocp_base::wait_until_ready() {
     for (const auto &f : expr_) {
         for (const auto &e : f) {
             if (!e->wait_until_ready()) {
@@ -146,17 +215,53 @@ void ocp::wait_until_ready() {
     }
     finalize();
 }
+bool ocp_base::accepts_term(const shared_expr &ex, bool terminal, std::string *reason) const {
+    static_cast<void>(ex);
+    static_cast<void>(terminal);
+    if (reason != nullptr) {
+        reason->clear();
+    }
+    return true;
+}
 ocp_ptr_t ocp::clone(const active_status_config &config) const {
-    auto prob = std::shared_ptr<ocp>(new ocp(*this));
-    prob->finalized_ = false;          // need to reset finalized
-    for (auto &p : prob->sub_probs_) { // recursively clone sub problems
-        p = p->clone(config);
-    } /// @warning this is not guaranteed to be consistent
-    if (!config.empty())
-        prob->update_active_status(config, false); // only update current problem, because sub_probs_ already updated
+    auto prob = ocp_ptr_t(new ocp(*this));
+    prob->refresh_after_clone(config);
     return prob;
 }
-void ocp::update_active_status(const active_status_config &config, bool update_sub_probs) {
+node_ocp_ptr_t node_ocp::compose(const node_ocp_ptr_t &base_prob) {
+    return base_prob ? base_prob->clone_node() : node_ocp::create();
+}
+node_ocp_ptr_t node_ocp::clone_node(const active_status_config &config) const {
+    auto prob = node_ocp_ptr_t(new node_ocp(*this));
+    prob->refresh_after_clone(config);
+    return prob;
+}
+edge_ocp_ptr_t edge_ocp::clone_edge(const active_status_config &config) const {
+    auto prob = edge_ocp_ptr_t(new edge_ocp(*this));
+    prob->refresh_after_clone(config);
+    return prob;
+}
+edge_ocp_ptr_t edge_ocp::compose(const node_ocp_ptr_t &st_node_prob,
+                                 const edge_ocp_ptr_t &edge_prob) {
+    auto prob = edge_prob ? edge_prob->clone_edge() : edge_ocp::create();
+    prob->bind_nodes(st_node_prob, edge_prob ? edge_prob->ed_node_prob() : node_ocp_ptr_t{});
+    if (st_node_prob) {
+        for (size_t f = 0; f < field::num; ++f) {
+            for (const shared_expr &expr : st_node_prob->exprs(f)) {
+                prob->add(expr);
+            }
+        }
+    }
+    return prob;
+}
+void edge_ocp::bind_nodes(const node_ocp_ptr_t &st, const node_ocp_ptr_t &ed) {
+    st_node_prob_ = st;
+    ed_node_prob_ = ed;
+}
+edge_ocp_ptr_t edge_ocp::compose() const {
+    return compose(st_node_prob_, clone_edge());
+}
+void ocp_base::update_active_status(const active_status_config &config, bool update_sub_probs) {
     if (update_sub_probs) {
         for (auto &p : sub_probs_) {
             p->update_active_status(config, true);
@@ -167,9 +272,21 @@ void ocp::update_active_status(const active_status_config &config, bool update_s
         auto &exprs = expr_[f];
         auto &target_list = prune ? pruned_expr_[f] : disabled_expr_[f];
         auto &target_uids = prune ? pruned_uids_ : disabled_uids_;
-        target_list.emplace_back(ex);
+        auto it = std::find_if(exprs.begin(), exprs.end(),
+                               [&ex](const shared_expr &e) { return e->uid() == ex.uid(); });
+        if (it == exprs.end()) {
+            if (std::ranges::any_of(sub_probs_, [&](const ocp_base_ptr_t &p) {
+                    return p->contains(ex, true);
+                })) {
+                return;
+            }
+            throw std::runtime_error(fmt::format(
+                "Cannot deactivate expression {} uid {}, it does not exist in the active problem",
+                ex.name(), ex.uid()));
+        }
+        target_list.emplace_back(*it);
         target_uids.insert(ex.uid());
-        std::erase_if(exprs, [&ex](const shared_expr &e) { return e->uid() == ex.uid(); });
+        exprs.erase(it);
         uids_.erase(ex.uid());
     };
     /// re-enable previously pruned expressions
@@ -282,6 +399,6 @@ ITER_START:
 }
 } // namespace moto
 
-template void moto::ocp::add<const moto::shared_expr &>(const moto::shared_expr &ex);
-template void moto::ocp::add<moto::shared_expr>(moto::shared_expr &&ex);
-template void moto::ocp::add<const moto::shared_expr>(const moto::shared_expr &&ex);
+template void moto::ocp_base::add<const moto::shared_expr &>(const moto::shared_expr &ex);
+template void moto::ocp_base::add<moto::shared_expr>(moto::shared_expr &&ex);
+template void moto::ocp_base::add<const moto::shared_expr>(const moto::shared_expr &&ex);
