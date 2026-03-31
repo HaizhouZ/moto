@@ -116,6 +116,89 @@ def _build_sqp(
     return sqp
 
 
+def _to_plain_ocp(prob: moto.ocp_base):
+    flat = moto.ocp.create()
+    fields = [
+        moto.field___x,
+        moto.field___u,
+        moto.field___y,
+        moto.field___dyn,
+        moto.field___eq_x,
+        moto.field___eq_x_soft,
+        moto.field___eq_xu,
+        moto.field___eq_xu_soft,
+        moto.field___ineq_x,
+        moto.field___ineq_xu,
+        moto.field___cost,
+        moto.field___p,
+        moto.field___usr_func,
+        moto.field___func_stack,
+        moto.field___pre_comp,
+        moto.field___post_comp,
+    ]
+    for field in fields:
+        for expr in prob.exprs(field):
+            flat.add(expr)
+    return flat
+
+
+def _build_modeled_sqp(
+    prob: moto.ocp,
+    prim_tol=1e-8,
+    dual_tol=1e-8,
+    comp_tol=1e-8,
+    horizon=N,
+):
+    model = moto.graph_model()
+    stage_node = model.add_node()
+    node_fields = [
+        moto.field___cost,
+        moto.field___eq_x,
+        moto.field___eq_x_soft,
+        moto.field___eq_xu,
+        moto.field___eq_xu_soft,
+        moto.field___ineq_x,
+        moto.field___ineq_xu,
+        moto.field___p,
+        moto.field___usr_func,
+        moto.field___func_stack,
+        moto.field___pre_comp,
+        moto.field___post_comp,
+    ]
+    for field in node_fields:
+        for expr in prob.exprs(field):
+            stage_node.add(expr)
+
+    term_node = model.add_node(stage_node.prob.clone())
+    stage_edge = model.connect(stage_node, term_node)
+    for dyn_expr in prob.exprs(moto.field___dyn):
+        stage_edge.add(dyn_expr)
+
+    prob_stage = _to_plain_ocp(stage_edge.compose())
+    prob_term = prob_stage.clone()
+    prob_term.add_terminal(term_cost)
+
+    prob_stage.print_summary()
+    prob_term.print_summary()
+
+    sqp = moto.sqp(n_job=1)
+    g = sqp.graph
+    n0 = g.set_head(g.add(sqp.create_node(prob_stage)))
+    n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
+    g.add_edge(n0, n1, horizon)
+
+    def init(d: moto.sqp.data_type):
+        d.value[x] = x0.copy()
+        d.value[xn] = x0.copy()
+
+    sqp.apply_forward(init)
+
+    sqp.settings.prim_tol = prim_tol
+    sqp.settings.dual_tol = dual_tol
+    sqp.settings.comp_tol = comp_tol
+    return sqp
+
+
 def _solve(
     prob: moto.ocp,
     prim_tol=1e-8,
@@ -177,6 +260,30 @@ def test_eq_one_iter():
     # assert kkt.num_iter == 1, (
     #     f"linear QP should converge in 1 iteration, got {kkt.num_iter}"
     # )
+    print("  PASSED")
+
+
+def test_modeled_eq_converges():
+    print("\n" + "=" * 60)
+    print("Test 1b: modeled node/edge path — expect convergence")
+
+    prob = moto.ocp.create()
+    prob.add(dyn)
+    prob.add(cost)
+    prob.add(eq_constr)
+
+    sqp = _build_modeled_sqp(prob, prim_tol=1e-8, dual_tol=1e-8, comp_tol=1e-8)
+    kkt = sqp.update(50, verbose=True)
+    sol = _first_node_values(sqp)
+
+    print(f"  result   : {kkt.result}")
+    print(f"  num_iter : {kkt.num_iter}")
+    print(f"  prim_res : {kkt.inf_prim_res:.2e}")
+    print(f"  dual_res : {kkt.inf_dual_res:.2e}")
+    print(f"  x[0]     : {sol['x']}")
+    print(f"  u[0]     : {sol['u']}")
+
+    assert kkt.solved, f"expected success, got {kkt.result}"
     print("  PASSED")
 
 
