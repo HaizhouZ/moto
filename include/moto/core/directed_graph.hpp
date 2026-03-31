@@ -174,6 +174,36 @@ class directed_graph {
         return link_new(st, std::move(next), opts);
     }
 
+    std::vector<node *> add_path(std::vector<node> nodes,
+                                 const std::vector<size_t> &steps,
+                                 bool set_head = false,
+                                 bool set_tail = false,
+                                 bool include_st = true,
+                                 bool include_ed = false) {
+        if (nodes.empty()) {
+            return {};
+        }
+        if (steps.size() + 1 != nodes.size()) {
+            throw std::invalid_argument("directed_graph::add_path expects exactly one fewer edge-length than nodes");
+        }
+        std::vector<node *> added;
+        added.reserve(nodes.size());
+        for (auto &node_v : nodes) {
+            auto &added_node = add(std::move(node_v));
+            added.push_back(&added_node);
+        }
+        if (set_head) {
+            this->set_head(*added.front());
+        }
+        if (set_tail) {
+            this->set_tail(*added.back());
+        }
+        for (size_t i = 1; i < added.size(); ++i) {
+            connect(*added[i - 1], *added[i], {steps[i - 1], include_st, include_ed});
+        }
+        return added;
+    }
+
     template <typename... Args>
     node &emplace_after(node &st, edge_options opts, Args &&...args) {
         node &n = emplace(std::forward<Args>(args)...);

@@ -413,8 +413,7 @@ gait_setting = {
     "hopping": [0, 0, 0, 0],
 }
 sqp = moto.sqp(n_job=10)
-g = sqp.graph
-modeled = moto.graph_model()
+modeled = sqp.create_graph()
 
 
 def create_phase_config(step):
@@ -447,17 +446,16 @@ segment_lengths = [stance_length]
 segment_lengths.extend([nodes_per_step] * steps)
 segment_lengths.append(stance_length)
 
-solver_nodes = g.add_path(
-    sqp.create_nodes(stage_edge_template, segment_node_configs),
+solver_nodes = modeled.add_path(
+    stage_edge_template,
+    segment_node_configs,
     segment_lengths[:-1],
     set_head=True,
     include_ed=False,
 )
 for solver_node in solver_nodes[1:]:
     solver_node.data.prob.print_summary()
-terminal_tail = g.add(sqp.create_terminal_node(terminal_edge_template))
-g.add_edge(solver_nodes[-1], terminal_tail, segment_lengths[-1])
-g.set_tail(terminal_tail)
+terminal_tail = modeled.append_terminal(terminal_edge_template, solver_nodes[-1], segment_lengths[-1])
 
 if os.getenv("MOTO_DEBUG_SOLVER_PROBS"):
     print("--" * 15)
@@ -470,7 +468,7 @@ if os.getenv("MOTO_DEBUG_SOLVER_PROBS"):
 
 if os.getenv("MOTO_DEBUG_GRAPH_LAYOUT"):
     print("Flattened solver graph layout:")
-    for idx, node in enumerate(g.flatten_nodes()):
+    for idx, node in enumerate(modeled.flatten_nodes()):
         prob = node.prob
         print(
             f"  node[{idx}] uid={prob.uid} "

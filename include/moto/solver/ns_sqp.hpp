@@ -194,8 +194,55 @@ struct ns_sqp {
     ~ns_sqp() = default;
     using node_type = impl::shooting_node<data>;
 
+    struct model_graph {
+        explicit model_graph(ns_sqp &owner) : owner_(&owner) {}
+
+        model::model_node_ptr_t add_node(const node_ocp_ptr_t &base_prob = node_ocp::create()) {
+            return modeled_.add_node(base_prob);
+        }
+
+        model::model_edge_ptr_t connect(const model::model_node_ptr_t &st,
+                                        const model::model_node_ptr_t &ed,
+                                        const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
+            return modeled_.connect(st, ed, base_prob);
+        }
+
+        std::vector<node_type *> add_path(const model::model_edge_ptr_t &edge_model,
+                                          const std::vector<ocp::active_status_config> &configs,
+                                          const std::vector<size_t> &steps,
+                                          bool set_head = false,
+                                          bool set_tail = false,
+                                          bool include_st = true,
+                                          bool include_ed = false) {
+            return owner_->add_path(edge_model, configs, steps, set_head, set_tail, include_st, include_ed);
+        }
+
+        node_type &append_terminal(const model::model_edge_ptr_t &edge_model,
+                                   node_type &start,
+                                   size_t steps = 2,
+                                   bool include_st = true,
+                                   bool include_ed = true,
+                                   bool set_tail = true) {
+            return owner_->append_terminal(edge_model, start, steps, include_st, include_ed, set_tail);
+        }
+
+        std::vector<data *> &flatten_nodes() {
+            return owner_->graph_.flatten_nodes();
+        }
+
+        size_t num_nodes() const noexcept { return modeled_.num_nodes(); }
+        size_t num_edges() const noexcept { return modeled_.num_edges(); }
+
+        model::graph_model modeled_;
+        ns_sqp *owner_;
+    };
+
     void reset_riccati_solver(solver_type *s) {
         riccati_solver_.reset(s);
+    }
+
+    model_graph create_graph() {
+        return model_graph(*this);
     }
 
     node_type create_node(const ocp_ptr_t &formulation) {
@@ -250,6 +297,26 @@ struct ns_sqp {
             false);
         composed->wait_until_ready();
         return node_type(std::static_pointer_cast<ocp>(composed), mem_);
+    }
+
+    std::vector<node_type *> add_path(const ocp_ptr_t &formulation,
+                                      const std::vector<ocp::active_status_config> &configs,
+                                      const std::vector<size_t> &steps,
+                                      bool set_head = false,
+                                      bool set_tail = false,
+                                      bool include_st = true,
+                                      bool include_ed = false) {
+        return graph_.add_path(create_nodes(formulation, configs), steps, set_head, set_tail, include_st, include_ed);
+    }
+
+    std::vector<node_type *> add_path(const model::model_edge_ptr_t &edge_model,
+                                      const std::vector<ocp::active_status_config> &configs,
+                                      const std::vector<size_t> &steps,
+                                      bool set_head = false,
+                                      bool set_tail = false,
+                                      bool include_st = true,
+                                      bool include_ed = false) {
+        return graph_.add_path(create_nodes(edge_model, configs), steps, set_head, set_tail, include_st, include_ed);
     }
 
     node_type create_terminal_node(const model::model_node_ptr_t &node_model) {
@@ -310,6 +377,52 @@ struct ns_sqp {
         }
         composed->wait_until_ready();
         return node_type(std::static_pointer_cast<ocp>(composed), mem_);
+    }
+
+    node_type &append_terminal(const ocp_ptr_t &formulation,
+                               node_type &start,
+                               size_t steps = 2,
+                               bool include_st = true,
+                               bool include_ed = true,
+                               bool set_tail = true) {
+        auto &tail = graph_.add(create_node(formulation));
+        graph_.connect(start, tail, {steps, include_st, include_ed});
+        if (set_tail) {
+            graph_.set_tail(tail);
+        }
+        return tail;
+    }
+
+    node_type &append_terminal(const model::model_node_ptr_t &node_model,
+                               node_type &start,
+                               size_t steps = 2,
+                               bool include_st = true,
+                               bool include_ed = true,
+                               bool set_tail = true) {
+        auto &tail = graph_.add(create_terminal_node(node_model));
+        graph_.connect(start, tail, {steps, include_st, include_ed});
+        if (set_tail) {
+            graph_.set_tail(tail);
+        }
+        return tail;
+    }
+
+    node_type &append_terminal(const model::model_edge_ptr_t &edge_model,
+                               node_type &start,
+                               size_t steps = 2,
+                               bool include_st = true,
+                               bool include_ed = true,
+                               bool set_tail = true) {
+        auto &tail = graph_.add(create_terminal_node(edge_model));
+        graph_.connect(start, tail, {steps, include_st, include_ed});
+        if (set_tail) {
+            graph_.set_tail(tail);
+        }
+        return tail;
+    }
+
+    std::vector<data *> &flatten_nodes() {
+        return graph_.flatten_nodes();
     }
 
     impl::data_mgr mem_;

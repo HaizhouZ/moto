@@ -21,60 +21,129 @@ void register_submodule_ns_sqp(nb::module_ &m) {
     nb::class_<ns_sqp> sqp(m, "ns_sqp_impl");
     sqp.def(nb::init<size_t>(), "Constructor for the SQP solver with a specified number of jobs")
         .def_prop_ro("graph", [](ns_sqp &self) -> auto & { return self.graph_; })
+        .def("create_graph", &ns_sqp::create_graph, nb::keep_alive<0, 1>(), "Create a graph_model builder that synchronizes staged paths into this SQP solver")
         .def("update", [](ns_sqp &self, size_t n_iter, bool verbose) {
             nb::gil_scoped_release rel;
             return self.update(n_iter, verbose); }, nb::arg("n_iter") = 1, nb::arg("verbose") = true, "Update the SQP solver for a given number of iterations")
         .def_ro("settings", &ns_sqp::settings, "Get the settings of the SQP solver")
         .def("create_node",
-             [](ns_sqp &self, const model::model_edge_ptr_t &edge) { return self.create_node(edge); },
+             static_cast<ns_sqp::node_type (ns_sqp::*)(const model::model_edge_ptr_t &)>(&ns_sqp::create_node),
              nb::arg("edge"),
-             nb::rv_policy::reference,
              "Create a new SQP node by composing a graph_model edge into an interval problem")
         .def("create_node",
-             [](ns_sqp &self, const model::model_edge_ptr_t &edge, const ocp::active_status_config &config) {
-                 return self.create_node(edge, config);
-             },
+             static_cast<ns_sqp::node_type (ns_sqp::*)(const model::model_edge_ptr_t &, const ocp::active_status_config &)>(&ns_sqp::create_node),
              nb::arg("edge"),
              nb::arg("config"),
-             nb::rv_policy::reference,
              "Create a new SQP node by composing a graph_model edge and applying an active-status override")
         .def("create_nodes",
-             [](ns_sqp &self, const model::model_edge_ptr_t &edge, const std::vector<ocp::active_status_config> &configs) {
-                 return self.create_nodes(edge, configs);
-             },
+             static_cast<std::vector<ns_sqp::node_type> (ns_sqp::*)(const model::model_edge_ptr_t &, const std::vector<ocp::active_status_config> &)>(&ns_sqp::create_nodes),
              nb::arg("edge"),
              nb::arg("configs"),
              "Create multiple SQP nodes by reusing one graph_model edge template with per-node active-status overrides")
+        .def("add_path",
+             static_cast<std::vector<ns_sqp::node_type *> (ns_sqp::*)(const model::model_edge_ptr_t &, const std::vector<ocp::active_status_config> &, const std::vector<size_t> &, bool, bool, bool, bool)>(&ns_sqp::add_path),
+             nb::arg("edge"),
+             nb::arg("configs"),
+             nb::arg("steps"),
+             nb::arg("set_head") = false,
+             nb::arg("set_tail") = false,
+             nb::arg("include_st") = true,
+             nb::arg("include_ed") = false,
+             "Create and insert a connected SQP path from one graph_model edge template")
         .def("create_node",
-             [](ns_sqp &self, const ocp_ptr_t &formulation) { return self.create_node(formulation); },
+             static_cast<ns_sqp::node_type (ns_sqp::*)(const ocp_ptr_t &)>(&ns_sqp::create_node),
              nb::arg("formulation"),
-             nb::rv_policy::reference,
              "Create a new node in the SQP graph from an OCP formulation template")
         .def("create_node",
-             [](ns_sqp &self, const ocp_ptr_t &formulation, const ocp::active_status_config &config) {
-                 return self.create_node(formulation, config);
-             },
+             static_cast<ns_sqp::node_type (ns_sqp::*)(const ocp_ptr_t &, const ocp::active_status_config &)>(&ns_sqp::create_node),
              nb::arg("formulation"),
              nb::arg("config"),
-             nb::rv_policy::reference,
              "Create a new node in the SQP graph from an OCP formulation template with an active-status override")
         .def("create_nodes",
-             [](ns_sqp &self, const ocp_ptr_t &formulation, const std::vector<ocp::active_status_config> &configs) {
-                 return self.create_nodes(formulation, configs);
-             },
+             static_cast<std::vector<ns_sqp::node_type> (ns_sqp::*)(const ocp_ptr_t &, const std::vector<ocp::active_status_config> &)>(&ns_sqp::create_nodes),
              nb::arg("formulation"),
              nb::arg("configs"),
              "Create multiple SQP nodes from one OCP formulation template with per-node active-status overrides")
+        .def("add_path",
+             static_cast<std::vector<ns_sqp::node_type *> (ns_sqp::*)(const ocp_ptr_t &, const std::vector<ocp::active_status_config> &, const std::vector<size_t> &, bool, bool, bool, bool)>(&ns_sqp::add_path),
+             nb::arg("formulation"),
+             nb::arg("configs"),
+             nb::arg("steps"),
+             nb::arg("set_head") = false,
+             nb::arg("set_tail") = false,
+             nb::arg("include_st") = true,
+             nb::arg("include_ed") = false,
+             "Create and insert a connected SQP path from one OCP formulation template")
         .def("create_terminal_node",
-             [](ns_sqp &self, const model::model_node_ptr_t &node) { return self.create_terminal_node(node); },
+             static_cast<ns_sqp::node_type (ns_sqp::*)(const model::model_node_ptr_t &)>(&ns_sqp::create_terminal_node),
              nb::arg("node"),
-             nb::rv_policy::reference,
              "Create a terminal SQP node by composing a graph_model terminal node")
         .def("create_terminal_node",
-             [](ns_sqp &self, const model::model_edge_ptr_t &edge) { return self.create_terminal_node(edge); },
+             static_cast<ns_sqp::node_type (ns_sqp::*)(const model::model_edge_ptr_t &)>(&ns_sqp::create_terminal_node),
              nb::arg("edge"),
-             nb::rv_policy::reference,
              "Create a terminal SQP node by composing a graph_model edge and materializing terminal sink costs");
+    sqp.def("append_terminal",
+            static_cast<ns_sqp::node_type & (ns_sqp::*)(const model::model_edge_ptr_t &, ns_sqp::node_type &, size_t, bool, bool, bool)>(&ns_sqp::append_terminal),
+            nb::arg("edge"),
+            nb::arg("start"),
+            nb::arg("steps") = 2,
+            nb::arg("include_st") = true,
+            nb::arg("include_ed") = true,
+            nb::arg("set_tail") = true,
+            nb::rv_policy::reference,
+            "Append a terminal node built from a graph_model edge and connect it from an existing SQP node")
+        .def("append_terminal",
+             static_cast<ns_sqp::node_type & (ns_sqp::*)(const model::model_node_ptr_t &, ns_sqp::node_type &, size_t, bool, bool, bool)>(&ns_sqp::append_terminal),
+             nb::arg("node"),
+             nb::arg("start"),
+             nb::arg("steps") = 2,
+             nb::arg("include_st") = true,
+             nb::arg("include_ed") = true,
+             nb::arg("set_tail") = true,
+             nb::rv_policy::reference,
+             "Append a terminal node built from a graph_model terminal node and connect it from an existing SQP node")
+        .def("append_terminal",
+             static_cast<ns_sqp::node_type & (ns_sqp::*)(const ocp_ptr_t &, ns_sqp::node_type &, size_t, bool, bool, bool)>(&ns_sqp::append_terminal),
+             nb::arg("formulation"),
+             nb::arg("start"),
+             nb::arg("steps") = 2,
+             nb::arg("include_st") = true,
+             nb::arg("include_ed") = true,
+             nb::arg("set_tail") = true,
+             nb::rv_policy::reference,
+             "Append a terminal node built from an OCP formulation template and connect it from an existing SQP node")
+        .def("flatten_nodes", &ns_sqp::flatten_nodes, nb::rv_policy::reference, "Get the flattened SQP node sequence from the internal directed graph");
+
+    nb::class_<ns_sqp::model_graph>(sqp, "model_graph")
+        .def("add_node",
+             static_cast<model::model_node_ptr_t (ns_sqp::model_graph::*)(const node_ocp_ptr_t &)>(&ns_sqp::model_graph::add_node),
+             nb::arg("prob") = node_ocp::create())
+        .def("connect",
+             static_cast<model::model_edge_ptr_t (ns_sqp::model_graph::*)(const model::model_node_ptr_t &, const model::model_node_ptr_t &, const edge_ocp_ptr_t &)>(&ns_sqp::model_graph::connect),
+             nb::arg("st"),
+             nb::arg("ed"),
+             nb::arg("prob") = edge_ocp::create())
+        .def("add_path",
+             static_cast<std::vector<ns_sqp::node_type *> (ns_sqp::model_graph::*)(const model::model_edge_ptr_t &, const std::vector<ocp::active_status_config> &, const std::vector<size_t> &, bool, bool, bool, bool)>(&ns_sqp::model_graph::add_path),
+             nb::arg("edge"),
+             nb::arg("configs"),
+             nb::arg("steps"),
+             nb::arg("set_head") = false,
+             nb::arg("set_tail") = false,
+             nb::arg("include_st") = true,
+             nb::arg("include_ed") = false)
+        .def("append_terminal",
+             static_cast<ns_sqp::node_type & (ns_sqp::model_graph::*)(const model::model_edge_ptr_t &, ns_sqp::node_type &, size_t, bool, bool, bool)>(&ns_sqp::model_graph::append_terminal),
+             nb::arg("edge"),
+             nb::arg("start"),
+             nb::arg("steps") = 2,
+             nb::arg("include_st") = true,
+             nb::arg("include_ed") = true,
+             nb::arg("set_tail") = true,
+             nb::rv_policy::reference)
+        .def("flatten_nodes", &ns_sqp::model_graph::flatten_nodes, nb::rv_policy::reference)
+        .def_prop_ro("num_nodes", &ns_sqp::model_graph::num_nodes)
+        .def_prop_ro("num_edges", &ns_sqp::model_graph::num_edges);
 
     nb::class_<ns_sqp::ipm_config>(sqp, "ipm_config")
         .def_rw("mu0", &ns_sqp::ipm_config::mu0, "Initial barrier parameter for the IPM solver")
@@ -224,18 +293,16 @@ void register_submodule_ns_sqp(nb::module_ &m) {
                 bool include_st,
                 bool include_ed) {
                  if (nodes.empty()) {
-                     return nb::list{};
+                     return std::vector<ns_sqp::node_type *>{};
                  }
                  if (steps.size() + 1 != nodes.size()) {
                      throw std::invalid_argument("graph.add_path expects exactly one fewer edge-length than nodes");
                  }
-                 nb::list out;
                  std::vector<ns_sqp::node_type *> added;
                  added.reserve(nodes.size());
                  for (auto &node : nodes) {
                      auto &added_node = self.add(std::move(node));
                      added.push_back(&added_node);
-                     out.append(nb::cast(&added_node, nb::rv_policy::reference));
                  }
                  if (set_head) {
                      self.set_head(*added.front());
@@ -246,7 +313,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
                  for (size_t i = 1; i < added.size(); ++i) {
                      self.connect(*added[i - 1], *added[i], {steps[i - 1], include_st, include_ed});
                  }
-                 return out;
+                 return added;
              },
              nb::arg("nodes"),
              nb::arg("steps"),

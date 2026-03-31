@@ -13,6 +13,7 @@ This file is a maintainer-oriented map of the `moto` codebase. It is meant to he
 This guide was derived from the code itself, especially:
 
 - `CLAUDE.md`
+- `include/moto/model/graph_model.hpp`
 - `include/moto/solver/ns_sqp.hpp`
 - `src/solver/sqp_impl/*.cpp`
 - `src/solver/nsp_impl/*.cpp`
@@ -64,6 +65,8 @@ The main SQP iteration loop lives in:
 - [`bindings/`](/home/harper/Documents/moto/bindings): Python bindings
 - [`example/`](/home/harper/Documents/moto/example): manual examples
 - [`unittests/`](/home/harper/Documents/moto/unittests): Catch2 tests
+- [`include/moto/model/graph_model.hpp`](/home/harper/Documents/moto/include/moto/model/graph_model.hpp): graph-first modeling layer
+- [`include/moto/core/directed_graph.hpp`](/home/harper/Documents/moto/include/moto/core/directed_graph.hpp): internal expanded solver graph
 
 ## Build And Validation
 
@@ -73,7 +76,7 @@ Top-level build uses CMake:
 mkdir -p build
 cd build
 cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX ..
-cmake --build . -j
+cmake --build . -j8
 ctest --output-on-failure
 ```
 
@@ -92,6 +95,15 @@ Manual runs from the repo docs:
 python example/arm/run.py
 python example/quadruped/run.py
 python example/quadruped/mpc.py
+```
+
+Useful current validation commands:
+
+```bash
+python -m py_compile example/quadruped/run.py
+find gen -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+./build/unittests/graph_model_compose_test
+MOTO_SQP_MAX_ITER=50 python example/quadruped/run.py
 ```
 
 ## Field System
@@ -120,8 +132,9 @@ Important convention:
 
 - pure state-only path terms are modeled by the user on `x`
 - terminal pure-`x` terms should be added with `prob.add_terminal(...)`
-- automatic lowering is no longer considered acceptable for costs or inequalities
-- if lowering remains in the system, it should be limited to selected `__eq_x` terms and should happen during a graph-aware compose pass, not during generic expression finalization
+- `node_ocp` is now an `x/u`-only prototype layer
+- `edge_ocp` is the only place where `y`-dependent terms and `__dyn` belong
+- any required lowering from node semantics to solver storage should happen during graph-aware compose, not during generic expression finalization
 
 Why this is easy to trip over:
 
@@ -163,6 +176,102 @@ Important `ocp` behaviors:
 
 `ocp` is the static formulation. Runtime values and derivatives live elsewhere.
 
+### Problem Types
+
+There are now three related problem containers that matter in practice:
+
+- `ocp`
+  - generic base/container used by solver internals and legacy paths
+- `node_ocp`
+  - node-local modeling prototype
+  - only `x/u/p`-style terms are accepted
+  - rejects `y`-dependent terms
+  - rejects `__dyn`
+- `edge_ocp`
+  - interval/stage problem consumed by the solver
+  - may contain `x/u/y`
+  - dynamics must live here
+
+The key invariant is:
+
+- users model node semantics on `node_ocp`
+- graph compose produces `edge_ocp`
+- the SQP solver ultimately consumes composed interval problems
+
+## Graph Modeling
+
+The current recommended API is graph-first.
+
+Core types:
+
+- [`graph_model`](/home/harper/Documents/moto/include/moto/model/graph_model.hpp)
+- [`model_node`](/home/harper/Documents/moto/include/moto/model/graph_model.hpp)
+- [`model_edge`](/home/harper/Documents/moto/include/moto/model/graph_model.hpp)
+
+Intended semantics:
+
+- `model_node` holds node-local prototype terms
+- `model_edge` holds edge-local terms such as dynamics
+- pure `x` node terms may be lowered during compose onto edge `y` storage if the solver backend wants that
+- explicit terminal terms added with `add_terminal(...)` must stay explicit and not be silently materialized onto regular edges
+
+Important compose rules that are now covered by unit tests:
+
+- intermediate node `__eq_x` lowers onto the predecessor edge `y`
+- sink non-terminal pure-`x` costs may materialize onto the incoming edge `y`
+- explicit terminal costs stay on the terminal node / terminal tail
+- codegen finalization of lowered/materialized clones must be serialized or uniquely named to avoid `.so` races
+
+## SQP Graph Ownership
+
+`ns_sqp` still owns an internal [`directed_graph`](/home/harper/Documents/moto/include/moto/core/directed_graph.hpp), but user-facing code no longer needs to wire it manually.
+
+Current recommended Python flow:
+
+```python
+sqp = moto.sqp(n_job=10)
+modeled = sqp.create_graph()
+
+stage_node = modeled.add_node(stage_node_proto)
+stage_sink = modeled.add_node()
+terminal_node = modeled.add_node(terminal_node_proto)
+
+stage_edge = modeled.connect(stage_node, stage_sink)
+stage_edge.add(model.dyn)
+
+terminal_edge = modeled.connect(stage_node, terminal_node)
+terminal_edge.add(model.dyn)
+
+solver_nodes = modeled.add_path(
+    stage_edge,
+    configs,
+    steps,
+    set_head=True,
+    include_ed=False,
+)
+terminal_tail = modeled.append_terminal(terminal_edge, solver_nodes[-1], tail_steps)
+```
+
+This is the current compromise design:
+
+- user edits only the `model_graph`
+- `ns_sqp::model_graph` forwards graph-building actions into `ns_sqp`'s internal directed graph
+- the raw `sqp.graph` object is still present for compatibility, but new code should prefer `sqp.create_graph()`
+
+Useful `ns_sqp` entry points:
+
+- `create_graph()`
+- `create_node(...)`
+- `create_nodes(...)`
+- `add_path(...)`
+- `append_terminal(...)`
+- `flatten_nodes()`
+
+The design direction is:
+
+- keep `directed_graph` internal to the solver
+- let `graph_model` / `sqp.create_graph()` be the public modeling surface
+
 ## X-U-Y Triplet Formulation
 
 The current stage model is built around three primal blocks:
@@ -188,9 +297,11 @@ That makes stage-local modeling harder than it needs to be.
 
 Keep user code simple:
 
-- define expressions with `constr.create(...)` or `cost.create(...)`
+- define node-local expressions on `node_ocp`
 - add path terms with `prob.add(...)`
 - add terminal terms with `prob.add_terminal(...)`
+- put `__dyn` and any `y`-dependent terms only on `edge_ocp` / `model_edge`
+- build solver paths through `sqp.create_graph()`
 
 This preserves the current solver backend while giving the modeling layer the semantics most users expect:
 
@@ -200,55 +311,7 @@ This preserves the current solver backend while giving the modeling layer the se
 
 This is much clearer than relying on implicit `x -> y` substitution in finalize.
 
-#### 2. Add a lowering pass instead of silent substitution
-
-Instead of mutating the user-authored expression in `generic_constr::finalize_impl()` and `generic_cost::finalize_impl()`, add a lowering step:
-
-- user creates expression in modeling IR terms
-- a graph-aware compose pass maps it into solver fields
-- lowering decides whether a path state equality becomes:
-  - direct `__x`-anchored metadata in modeling IR
-  - or internal predecessor-edge `__y`-anchored solver storage if the solver still wants that
-
-This keeps user intent intact while still supporting the current Riccati implementation.
-
-#### 3. Preserve user intent in metadata
-
-Each `generic_func` / `generic_constr` / `generic_cost` should carry two notions:
-
-- `model_loc`: where the user meant the expression to live
-- `solver_field`: where the solver finally stores it
-
-For example:
-
-```cpp
-struct timing_hint {
-    stage_loc model_loc = stage_loc::path;
-    bool allow_lowering_to_out = true;
-};
-```
-
-Then:
-
-- user writes `g(x_k)` with `model_loc = path`
-- lowering may store selected path equalities on predecessor-edge `y_{k-1}` storage
-- but the original semantic location remains available for docs, debugging, printing, and future backends
-
-#### 4. Recommended staged migration
-
-To minimize churn:
-
-1. Stop automatic substitution by default for new APIs.
-2. Keep old constructors as legacy behavior.
-3. Add explicit helpers:
-   - `constr.create_path(...)`
-   - `constr.create_terminal(...)`
-   - `cost.create_path(...)`
-   - `cost.create_terminal(...)`
-4. Lower those helpers into the existing internal fields.
-5. Once stable, deprecate "pure `x` means substitute to `y`".
-
-#### 5. Best internal mental model
+### Best Internal Mental Model
 
 If the solver keeps the triplet, the cleanest interpretation is:
 
