@@ -430,7 +430,7 @@ def create_phase_config(step):
 stage_node = modeled.create_node(stage_node_proto)
 segment_lengths = [stance_length]
 segment_lengths.extend([nodes_per_step] * steps)
-segment_lengths.append(stance_length - 1)
+segment_lengths.append(stance_length)
 
 
 def add_segment(start, end_prob, n_edges):
