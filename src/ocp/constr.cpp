@@ -2,6 +2,10 @@
 #include <moto/ocp/problem.hpp>
 
 namespace moto {
+void generic_constr::add_to_ocp_callback(ocp_base *prob) {
+    lower_x_to_y_ = dynamic_cast<node_ocp *>(prob) == nullptr &&
+                    dynamic_cast<edge_ocp *>(prob) == nullptr;
+}
 
 generic_constr::approx_data::approx_data(func_approx_data &&d)
     : approx_data(d.lag_data_->prob_->extract(d.lag_data_->dual_[d.func_.field()], d.func_), *d.lag_data_, std::move(d)) {
@@ -72,6 +76,30 @@ void generic_constr::finalize_impl() {
             else
                 throw std::runtime_error(fmt::format("unsupported ineq generic_constr \"{}\" type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set _field or hints?",
                                                      name_, has_[__x], has_[__u], has_[__y], field_hint_.is_soft));
+        }
+    }
+    if ((lower_x_to_y_ || terminal_add_) &&
+        in_field(field_, std::array{__eq_x, __ineq_x, __eq_x_soft})) {
+        try {
+            bool pure_x = true;
+            for (const sym &arg : in_args_) {
+                if (arg.field() == __y && in_field(arg.field(), primal_fields)) {
+                    pure_x = false;
+                    break;
+                }
+            }
+            if (pure_x) {
+                for (sym &arg : in_args_) {
+                    if (arg.field() == __x) {
+                        fmt::print("warning: substitution in generic_constr {} of type {}: inarg {} with {}\n",
+                                   name_, field::name(field_), arg.name(), arg.name() + "_nxt");
+                        substitute(arg, arg.next());
+                    }
+                }
+            }
+        } catch (const std::exception &) {
+            fmt::print("exception during substitution");
+            throw;
         }
     }
     generic_func::finalize_impl();

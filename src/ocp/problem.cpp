@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstdlib>
 #include <moto/ocp/constr.hpp>
 #include <moto/ocp/cost.hpp>
 #include <moto/ocp/dynamics.hpp>
@@ -8,6 +9,11 @@ namespace moto {
 INIT_UID_(ocp_base);
 
 namespace {
+bool compose_trace_enabled() {
+    static const bool enabled = std::getenv("MOTO_TRACE_COMPOSE") != nullptr;
+    return enabled;
+}
+
 bool is_path_state_term(const shared_expr &ex) {
     if (!ex) {
         return false;
@@ -43,8 +49,10 @@ shared_expr lower_path_state_term_for_edge(const shared_expr &ex, const ocp_base
     auto args = func->in_args();
     for (const sym &arg : args) {
         if (arg.field() == __x) {
-            fmt::print("lowering path-state term {} in composed ocp uid {} during edge compose: {} -> {} (x_k -> y_k-1 storage)\n",
-                       ex->name(), prob.uid(), arg.name(), arg.next()->name());
+            if (compose_trace_enabled()) {
+                fmt::print("lowering path-state term {} in composed ocp uid {} during edge compose: {} -> {} (x_k -> y_k-1 storage)\n",
+                           ex->name(), prob.uid(), arg.name(), arg.next()->name());
+            }
             func->substitute_argument(arg, arg.next());
         }
     }
@@ -54,13 +62,18 @@ shared_expr lower_path_state_term_for_edge(const shared_expr &ex, const ocp_base
 void append_node_terms(const node_ocp_ptr_t &node_prob,
                        const edge_ocp_ptr_t &edge_prob,
                        bool lower_path_state_terms,
-                       bool skip_path_state_terms) {
+                       bool skip_path_state_terms,
+                       bool only_path_state_terms = false) {
     if (!node_prob) {
         return;
     }
     for (size_t f = 0; f < field::num; ++f) {
         for (const shared_expr &expr : node_prob->exprs(f)) {
-            if (is_path_state_term(expr)) {
+            const bool is_path_state = is_path_state_term(expr);
+            if (only_path_state_terms && !is_path_state) {
+                continue;
+            }
+            if (is_path_state) {
                 if (skip_path_state_terms) {
                     continue;
                 }
@@ -82,6 +95,8 @@ bool ocp_base::add_impl(shared_expr ex, bool terminal) {
     ex->prepare_add_to_ocp(terminal);
     size_t _uid = ex->uid();
     if (!contains(*ex, false)) { // skip repeated in the current problem only
+        auto *ex_ptr = ex.get();
+        ex_ptr->add_to_ocp_callback(this);
         // add dependencies
         if (!ex->finalize()) {
             throw std::runtime_error(fmt::format("cannot finalize expr {} uid {}", ex->name(), ex->uid()));
@@ -109,7 +124,6 @@ bool ocp_base::add_impl(shared_expr ex, bool terminal) {
             }
         }
         finalized_ = false; // need to reset finalized to allow adding more expr, will be set to true in finalize()
-        auto *ex_ptr = ex.get();
         if (ex->default_active_status()) {
             uids_.insert(_uid);
             expr_[ex->field()].emplace_back(std::move(ex));
@@ -117,7 +131,6 @@ bool ocp_base::add_impl(shared_expr ex, bool terminal) {
             disabled_uids_.insert(_uid);
             disabled_expr_[ex->field()].emplace_back(std::move(ex));
         }
-        ex_ptr->add_to_ocp_callback(this);
         return true;
     }
     return false;
@@ -274,8 +287,22 @@ edge_ocp_ptr_t edge_ocp::compose(const node_ocp_ptr_t &st_node_prob,
                                  bool skip_st_path_state_terms) {
     auto prob = edge_prob ? edge_prob->clone_edge() : edge_ocp::create();
     prob->bind_nodes(st_node_prob, edge_prob ? edge_prob->ed_node_prob() : node_ocp_ptr_t{});
+    if (st_node_prob && edge_prob) {
+        active_status_config config;
+        for (auto primal_field : primal_fields) {
+            for (const shared_expr &expr : edge_prob->exprs(primal_field)) {
+                if (!st_node_prob->contains(*expr, false) || st_node_prob->is_active(*expr, false)) {
+                    continue;
+                }
+                config.deactivate_list.emplace_back(*expr);
+            }
+        }
+        if (!config.empty()) {
+            prob->update_active_status(config, false);
+        }
+    }
     append_node_terms(st_node_prob, prob, false, skip_st_path_state_terms);
-    append_node_terms(lowered_node_prob, prob, true, false);
+    append_node_terms(lowered_node_prob, prob, true, false, true);
     return prob;
 }
 void edge_ocp::bind_nodes(const node_ocp_ptr_t &st, const node_ocp_ptr_t &ed) {

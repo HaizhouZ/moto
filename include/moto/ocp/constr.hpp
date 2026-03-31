@@ -55,6 +55,7 @@ class generic_constr : public generic_func {
 
   public:
     void prepare_add_to_ocp(bool terminal) override { terminal_add_ = terminal; }
+    void add_to_ocp_callback(ocp_base *prob) override;
     void set_lower_x_to_y(bool lower) { lower_x_to_y_ = lower; }
     void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const override {
         data.as<approx_data>().ls_cfg = &ws_data->as<solver::linesearch_config>();

@@ -30,6 +30,7 @@ endfunction()
 
 
 add_moto_test(sym_test)
+add_moto_test(graph_model_compose)
 # add_moto_test(expr_ownership)
 # add_moto_test(constr_cast)
 # add_moto_test(dynamics)

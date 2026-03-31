@@ -238,11 +238,11 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
         }
     }
 
-    // fails, will go to restoration
+    // Signal failure to the outer SQP loop so it can decide whether to trigger
+    // restoration mode or terminate.
     fmt::println(" line search failed, dec_full_pred = {:.3e}, best trial primal res: {:.3e}, dual res: {:.3e}, objective: {:.3e}\n",
                  current_kkt.obj_fullstep_dec, ls.best_trial.prim_res, ls.best_trial.dual_res, ls.best_trial.objective);
     ls.update_filter(current_kkt, settings);
-    throw std::runtime_error("line search failed, fallback to restoration");
     return line_search_action::stop;
 }
 

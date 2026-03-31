@@ -133,8 +133,9 @@ struct ns_sqp {
             : node_data(prob), ns_riccati_data((node_data *)this) {
             for (auto f : primal_fields) {
                 auto &diag_panels = this->dense().lag_hess_[f][f].diag_panels_;
-                assert(!diag_panels.empty() && "expected pre-inserted proximal diagonal panel");
-                primal_prox_hess_diagonal_[f].reset(diag_panels.back().data_);
+                if (!diag_panels.empty()) {
+                    primal_prox_hess_diagonal_[f].reset(diag_panels.back().data_);
+                }
             }
         }
         data(data &&rhs) = default;

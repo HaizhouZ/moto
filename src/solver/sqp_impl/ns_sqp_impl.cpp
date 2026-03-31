@@ -300,24 +300,9 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             }
 
             // ── restoration trigger ───────────────────────────────────────────
-            // if (settings.restoration.enabled) {
-            //     bool ls_failed = (action == line_search_action::stop);
-            //     //  &&
-            //     //                  (kkt_last.inf_prim_res >= inf_prim_before);
-            //     if (ls_failed) {
-            //         ++ls_failure_count_;
-            //     } else {
-            //         ls_failure_count_ = 0;
-            //     }
-            //     if (ls_failure_count_ >= settings.restoration.trigger_on_failure_count) {
-            //         ls_failure_count_ = 0;
-            //         kkt_last = restoration_update(kkt_last, ls);
-            //         if (kkt_last.result == iter_result_t::infeasible_stationary ||
-            //             kkt_last.result == iter_result_t::restoration_failed) {
-            //             break;
-            //         }
-            //     }
-            // }
+            // Keep the historical globalization flow for now: a line-search
+            // stop leaves ls.stop set and lets sqp_iter accept the fallback
+            // trial point on the next pass instead of forcing restoration here.
 
             if (kkt_last.inf_dual_res < settings.dual_tol &&
                 kkt_last.inf_prim_res < settings.prim_tol &&
@@ -509,7 +494,16 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
                     max_field = f;
                     max_step = n->trial_prim_step[f];
                 }
-                kkt.obj_fullstep_dec += (n->dense().cost_jac_[f].transpose() * n->trial_prim_step[f]).value();
+                if (n->dense().cost_jac_[f].size() != n->trial_prim_step[f].size()) {
+                    throw std::runtime_error(fmt::format(
+                        "cost/trial step size mismatch on field {}: cost_jac size {}, trial_prim_step size {}, lag_jac size {}, problem uid {}",
+                        field::name(f),
+                        n->dense().cost_jac_[f].size(),
+                        n->trial_prim_step[f].size(),
+                        n->dense().lag_jac_[f].size(),
+                        n->problem().uid()));
+                }
+                kkt.obj_fullstep_dec += n->dense().cost_jac_[f].dot(n->trial_prim_step[f]);
             }
         }
         // accumulate mu-free barrier quantities: log_slack_sum and barrier_dir_deriv

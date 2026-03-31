@@ -69,6 +69,7 @@ void register_submodule_model(nb::module_ &m) {
             nb::arg("ed"),
             nb::arg("prob") = edge_ocp::create())
         .def("compose", [](graph_model &self, const model_edge_ptr_t &edge) { return self.compose(edge); }, nb::arg("edge"))
+        .def("compose_all", &graph_model::compose_all)
         .def("compose_terminal", [](graph_model &self, const model_node_ptr_t &node) { return self.compose_terminal(node); }, nb::arg("node"))
         .def_prop_ro("num_nodes", &graph_model::num_nodes)
         .def_prop_ro("num_edges", &graph_model::num_edges);
