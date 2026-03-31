@@ -21,6 +21,7 @@ namespace fs = std::filesystem;
 using json = nlohmann::json;
 
 std::string compute_md5(const std::string &file_path);
+std::string compute_md5_from_bytes(std::string_view content);
 
 namespace cs_codegen {
 

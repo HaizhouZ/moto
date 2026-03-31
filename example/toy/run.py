@@ -65,7 +65,7 @@ def build_sqp():
     for edge in modeled.add_path(stage_node, terminal_node, N):
         edge.add(dyn)
 
-    flat_nodes = modeled.flatten_nodes()
+    flat_nodes = sqp.graph.flatten_nodes()
     print("Stage problem")
     flat_nodes[0].prob.print_summary()
     print("Terminal problem")

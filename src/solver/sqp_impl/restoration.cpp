@@ -5,6 +5,7 @@ namespace moto {
 ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_linesearch_data &ls) {
     using namespace solver::ns_riccati;
     const auto &rs = settings.restoration;
+    auto &graph = solver_graph();
     bool resto_accept = false;
     bool resto_converge = false;
     settings.in_restoration = true;
@@ -21,7 +22,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         vector u_ref, y_ref;
         vector sigma_u_sq, sigma_y_sq; // rho-scaled: (1/max(|ref|,1))^2
     };
-    auto &all_nodes = graph_.flatten_nodes();
+    auto &all_nodes = graph.flatten_nodes();
     std::vector<node_prox> prox_data;
     prox_data.reserve(all_nodes.size());
     for (data *np : all_nodes) {

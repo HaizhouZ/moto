@@ -9,7 +9,7 @@
 
 #include <enum_export.hpp>
 using namespace moto;
-using graph_type = decltype(ns_sqp::graph_);
+using graph_type = ns_sqp::solver_graph_type;
 using binary_func_type = std::function<void(ns_sqp::data *, ns_sqp::data *)>;
 using unary_func_type = std::function<void(ns_sqp::data *)>;
 using unary_list = graph_type::unary_view::base;
@@ -21,7 +21,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
 
     nb::class_<ns_sqp> sqp(m, "ns_sqp_impl");
     sqp.def(nb::init<size_t>(), "Constructor for the SQP solver with a specified number of jobs")
-        .def_ro("graph", &ns_sqp::graph_)
+        .def_prop_ro("graph", [](ns_sqp &self) -> graph_type & { return self.graph(); }, nb::rv_policy::reference_internal)
         .def("create_graph", &ns_sqp::create_graph, nb::keep_alive<0, 1>(), "Create a graph_model builder that synchronizes staged paths into this SQP solver")
         .def("update", [](ns_sqp &self, size_t n_iter, bool verbose) {
             nb::gil_scoped_release rel;
@@ -29,47 +29,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def("reset_profile", &ns_sqp::reset_profile, "Clear the last SQP profile report")
         .def("get_profile_report", &ns_sqp::profile, "Get the latest SQP wall-clock profile report")
         .def_prop_ro("profile_report", &ns_sqp::profile, "Get the latest SQP wall-clock profile report")
-        .def_ro("settings", &ns_sqp::settings, "Get the settings of the SQP solver")
-        .def("create_node",
-             static_cast<ns_sqp::node_type (ns_sqp::*)(const model::model_edge_ptr_t &)>(&ns_sqp::create_node),
-             nb::arg("edge"),
-             "Create a new SQP node by composing a graph_model edge into an interval problem")
-        .def("create_node",
-             static_cast<ns_sqp::node_type (ns_sqp::*)(const model::model_edge_ptr_t &, const ocp::active_status_config &)>(&ns_sqp::create_node),
-             nb::arg("edge"),
-             nb::arg("config"),
-             "Create a new SQP node by composing a graph_model edge and applying an active-status override")
-        .def("create_nodes",
-             static_cast<std::vector<ns_sqp::node_type> (ns_sqp::*)(const model::model_edge_ptr_t &, const std::vector<ocp::active_status_config> &)>(&ns_sqp::create_nodes),
-             nb::arg("edge"),
-             nb::arg("configs"),
-             "Create multiple SQP nodes by reusing one graph_model edge template with per-node active-status overrides")
-        .def("create_node",
-             static_cast<ns_sqp::node_type (ns_sqp::*)(const ocp_ptr_t &)>(&ns_sqp::create_node),
-             nb::arg("formulation"),
-             "Create a new node in the SQP graph from an OCP formulation template")
-        .def("create_node",
-             static_cast<ns_sqp::node_type (ns_sqp::*)(const ocp_ptr_t &, const ocp::active_status_config &)>(&ns_sqp::create_node),
-             nb::arg("formulation"),
-             nb::arg("config"),
-             "Create a new node in the SQP graph from an OCP formulation template with an active-status override")
-        .def("create_nodes",
-             static_cast<std::vector<ns_sqp::node_type> (ns_sqp::*)(const ocp_ptr_t &, const std::vector<ocp::active_status_config> &)>(&ns_sqp::create_nodes),
-             nb::arg("formulation"),
-             nb::arg("configs"),
-             "Create multiple SQP nodes from one OCP formulation template with per-node active-status overrides")
-        .def("create_terminal_node",
-             static_cast<ns_sqp::node_type (ns_sqp::*)(const model::model_node_ptr_t &)>(&ns_sqp::create_terminal_node),
-             nb::arg("node"),
-             "Create a terminal SQP node by composing a graph_model terminal node")
-        .def("create_terminal_node",
-             static_cast<ns_sqp::node_type (ns_sqp::*)(const model::model_edge_ptr_t &)>(&ns_sqp::create_terminal_node),
-             nb::arg("edge"),
-             "Create a terminal SQP node by composing a graph_model edge and materializing terminal sink costs");
-    sqp.def("flatten_nodes", &ns_sqp::flatten_nodes, nb::rv_policy::reference, "Get the flattened SQP node sequence from the internal directed graph");
-
-    nb::class_<ns_sqp::model_graph, model::graph_model>(sqp, "model_graph")
-        .def("flatten_nodes", &ns_sqp::model_graph::flatten_nodes, nb::rv_policy::reference);
+        .def_ro("settings", &ns_sqp::settings, "Get the settings of the SQP solver");
 
     nb::class_<ns_sqp::ipm_config>(sqp, "ipm_config")
         .def_rw("mu0", &ns_sqp::ipm_config::mu0, "Initial barrier parameter for the IPM solver")

@@ -256,349 +256,48 @@ struct ns_sqp {
     ns_sqp(const ns_sqp &) = delete;
     ~ns_sqp() = default;
     using node_type = impl::shooting_node<data>;
-
-    struct model_graph : public model::graph_model {
-        model_graph(ns_sqp &owner, std::shared_ptr<model::graph_model_state> state)
-            : model::graph_model(std::move(state)), owner_(&owner) {}
-
-        std::vector<data *> &flatten_nodes() {
-            owner_->ensure_realized(state_ptr());
-            return owner_->graph_.flatten_nodes();
-        }
-
-        ns_sqp *owner_;
-    };
+    using solver_graph_type = directed_graph<node_type>;
 
     void reset_riccati_solver(solver_type *s) {
         riccati_solver_.reset(s);
     }
 
-    model_graph create_graph() {
+    model::graph_model create_graph() {
         active_model_graph_ = std::make_shared<model::graph_model_state>();
-        return model_graph(*this, active_model_graph_);
+        active_model_graph_->template ensure_runtime<solver_graph_type>(graph_n_jobs_);
+        return model::graph_model(active_model_graph_);
     }
 
-    static bool has_terminal_terms(const node_ocp_ptr_t &node_prob) {
-        if (!node_prob) {
-            return false;
-        }
-        for (size_t f = 0; f < field::num; ++f) {
-            for (const shared_expr &expr : node_prob->exprs(f)) {
-                if (const auto *cost_expr = dynamic_cast<const generic_cost *>(expr.get())) {
-                    if (cost_expr->terminal_add()) {
-                        return true;
-                    }
-                }
-                if (const auto *constr_expr = dynamic_cast<const generic_constr *>(expr.get())) {
-                    if (constr_expr->terminal_add()) {
-                        return true;
-                    }
-                }
-            }
-        }
-        return false;
-    }
-
-    static bool is_terminal_term(const shared_expr &expr) {
-        if (const auto *cost_expr = dynamic_cast<const generic_cost *>(expr.get())) {
-            return cost_expr->terminal_add();
-        }
-        if (const auto *constr_expr = dynamic_cast<const generic_constr *>(expr.get())) {
-            return constr_expr->terminal_add();
-        }
-        return false;
-    }
-
-    node_type create_node(const ocp_ptr_t &formulation) {
-        return create_node(formulation, ocp::active_status_config{});
-    }
-
-    std::vector<node_type> create_nodes(const ocp_ptr_t &formulation,
-                                        const std::vector<ocp::active_status_config> &configs) {
-        std::vector<node_type> nodes;
-        nodes.reserve(configs.size());
-        for (const auto &config : configs) {
-            nodes.emplace_back(create_node(formulation, config));
-        }
-        return nodes;
-    }
-
-    node_type create_node(const ocp_ptr_t &formulation, const ocp::active_status_config &config) {
-        auto cloned = std::dynamic_pointer_cast<ocp>(formulation->clone_base(config));
-        if (!cloned) {
-            throw std::runtime_error("ns_sqp::create_node failed to clone formulation as ocp");
-        }
-        cloned->wait_until_ready();
-        return node_type(cloned, mem_);
-    }
-
-    node_type create_node(const model::model_edge_ptr_t &edge_model) {
-        return create_node(edge_model, ocp::active_status_config{});
-    }
-
-    std::vector<node_type> create_nodes(const model::model_edge_ptr_t &edge_model,
-                                        const std::vector<ocp::active_status_config> &configs) {
-        std::vector<node_type> nodes;
-        nodes.reserve(configs.size());
-        for (const auto &config : configs) {
-            nodes.emplace_back(create_node(edge_model, config));
-        }
-        return nodes;
-    }
-
-    node_type create_node(const model::model_edge_ptr_t &edge_model, const ocp::active_status_config &config) {
-        auto composed = compose_regular_edge(edge_model, config, false);
-        return node_type(std::static_pointer_cast<ocp>(composed), mem_);
-    }
-
-    node_type create_terminal_node(const model::model_node_ptr_t &node_model) {
-        if (!node_model) {
-            throw std::runtime_error("ns_sqp::create_terminal_node received a null model_node");
-        }
-        node_model->wait_until_ready();
-        auto composed = node_model->clone_node();
-        sanitize_terminal_node(*composed);
-        composed->wait_until_ready();
-        return node_type(std::static_pointer_cast<ocp>(composed), mem_);
-    }
-
-    node_type create_terminal_node(const model::model_edge_ptr_t &edge_model) {
-        if (!edge_model) {
-            throw std::runtime_error("ns_sqp::create_terminal_node received a null model_edge");
-        }
-        auto composed = compose_regular_edge(edge_model, {}, true, true);
-        return node_type(std::static_pointer_cast<ocp>(composed), mem_);
-    }
-
-    std::vector<data *> &flatten_nodes() {
-        ensure_realized();
-        return graph_.flatten_nodes();
+    solver_graph_type &graph() {
+        return solver_graph();
     }
 
     impl::data_mgr mem_;
-    directed_graph<node_type> graph_;
 
   private:
-    static bool terminal_term_depends_on_u(const shared_expr &expr) {
-        if (!is_terminal_term(expr)) {
-            return false;
+    solver_graph_type &solver_graph() {
+        if (!active_model_graph_) {
+            throw std::runtime_error("ns_sqp has no active model graph; call create_graph() first");
         }
-        const auto *func = dynamic_cast<const generic_func *>(expr.get());
-        if (func == nullptr) {
-            return false;
-        }
-        return std::any_of(func->in_args().begin(), func->in_args().end(), [](const sym &arg) {
-            return arg.field() == __u;
-        });
+        return solver_graph(active_model_graph_);
     }
 
-    static void sanitize_terminal_node(node_ocp &prob) {
-        ocp::active_status_config config;
-        for (size_t f = 0; f < field::num; ++f) {
-            for (const shared_expr &expr : prob.exprs(f)) {
-                if (!terminal_term_depends_on_u(expr)) {
-                    continue;
-                }
-                fmt::print(stderr,
-                           "warning: terminal node term {} depends on u and cannot be applied on a terminal x/u node; ignoring it\n",
-                           expr->name());
-                config.deactivate_list.emplace_back(*expr);
-            }
+    solver_graph_type &solver_graph(const std::shared_ptr<model::graph_model_state> &state) {
+        if (!state) {
+            throw std::runtime_error("ns_sqp has no active model graph; call create_graph() first");
         }
-        if (!config.empty()) {
-            prob.update_active_status(config, false);
+        auto graph = state->template ensure_runtime<solver_graph_type>(graph_n_jobs_);
+        if (state->dirty) {
+            model::graph_model(state).realize_into(*graph, [this](const ocp_ptr_t &formulation) {
+                return node_type(formulation, mem_);
+            });
         }
-    }
-
-    static edge_ocp_ptr_t compose_regular_edge(const model::model_edge_ptr_t &edge_model,
-                                               const ocp::active_status_config &config = {},
-                                               bool materialize_sink_terms = false,
-                                               bool include_terminal_sink_terms = false) {
-        if (!edge_model) {
-            throw std::runtime_error("ns_sqp::compose_regular_edge received a null model_edge");
-        }
-        edge_model->wait_until_ready();
-        auto st_node_prob = edge_model->st_node_prob();
-        if (st_node_prob) {
-            st_node_prob->wait_until_ready();
-        }
-        if (!config.empty()) {
-            st_node_prob = st_node_prob ? st_node_prob->clone_node(config) : node_ocp_ptr_t{};
-        }
-        auto composed = edge_ocp::compose(
-            st_node_prob,
-            edge_model,
-            node_ocp_ptr_t{},
-            false);
-        if (materialize_sink_terms) {
-            if (const auto &sink_node = edge_model->ed_node_prob()) {
-                for (size_t f = 0; f < field::num; ++f) {
-                    if (f == __dyn) {
-                        continue;
-                    }
-                    for (const shared_expr &expr : sink_node->exprs(f)) {
-                        const bool terminal_term = is_terminal_term(expr);
-                        const auto *cost_expr = dynamic_cast<const generic_cost *>(expr.get());
-                        const auto *constr_expr = dynamic_cast<const generic_constr *>(expr.get());
-                        const auto *func = dynamic_cast<const generic_func *>(expr.get());
-                        if ((cost_expr == nullptr && constr_expr == nullptr) || func == nullptr) {
-                            continue;
-                        }
-                        if (terminal_term && !include_terminal_sink_terms) {
-                            continue;
-                        }
-                        bool lowerable_term = true;
-                        bool needs_lower_to_y = false;
-                        bool has_u = false;
-                        for (const sym &arg : func->in_args()) {
-                            if (arg.field() == __x) {
-                                needs_lower_to_y = true;
-                                continue;
-                            }
-                            if (arg.field() == __y || arg.field() == __p) {
-                                continue;
-                            }
-                            if (arg.field() == __u) {
-                                has_u = true;
-                            }
-                            lowerable_term = false;
-                            break;
-                        }
-                        if (terminal_term && has_u) {
-                            fmt::print(stderr,
-                                       "warning: terminal node term {} depends on u and cannot be lowered onto the final edge; ignoring it\n",
-                                       expr->name());
-                            continue;
-                        }
-                        if (!terminal_term && f != __cost) {
-                            continue;
-                        }
-                        if (!lowerable_term) {
-                            continue;
-                        }
-                        auto lowered = expr.clone();
-                        auto *lowered_func = dynamic_cast<generic_func *>(lowered.get());
-                        if (lowered_func == nullptr) {
-                            continue;
-                        }
-                        if (needs_lower_to_y) {
-                            for (const sym &arg : lowered_func->in_args()) {
-                                if (arg.field() == __x) {
-                                    lowered_func->substitute_argument(arg, arg.next());
-                                }
-                            }
-                        }
-                        composed->add(lowered);
-                    }
-                }
-            }
-        }
-        composed->wait_until_ready();
-        return composed;
-    }
-
-    void ensure_realized() {
-        ensure_realized(active_model_graph_);
-    }
-
-    void ensure_realized(const std::shared_ptr<model::graph_model_state> &state) {
-        if (!state || !state->dirty) {
-            return;
-        }
-        graph_.clear();
-        const size_t num_nodes = state->nodes.size();
-        const size_t num_edges = state->edges.size();
-        std::vector<node_type *> solver_nodes_by_edge(num_edges, nullptr);
-        std::vector<std::vector<size_t>> incoming_edge_ids(num_nodes);
-        std::vector<std::vector<size_t>> outgoing_edge_ids(num_nodes);
-        std::vector<size_t> incoming_edge_count(num_nodes, 0);
-        std::vector<size_t> outgoing_edge_count(num_nodes, 0);
-        std::vector<size_t> edge_source_node_ids(num_edges);
-        std::vector<size_t> edge_sink_node_ids(num_edges);
-        std::vector<bool> sink_without_outgoing_by_edge(num_edges, false);
-
-        for (size_t edge_id = 0; edge_id < num_edges; ++edge_id) {
-            const auto &edge_h = state->edges.at(edge_id);
-            if (!edge_h) {
-                throw std::runtime_error("ns_sqp::ensure_realized encountered a null model_edge");
-            }
-            const size_t st_node_id = edge_h->st_id();
-            const size_t ed_node_id = edge_h->ed_id();
-            ++incoming_edge_count.at(ed_node_id);
-            ++outgoing_edge_count.at(st_node_id);
-            edge_source_node_ids.at(edge_id) = st_node_id;
-            edge_sink_node_ids.at(edge_id) = ed_node_id;
-        }
-
-        for (size_t node_id = 0; node_id < num_nodes; ++node_id) {
-            incoming_edge_ids.at(node_id).reserve(incoming_edge_count.at(node_id));
-            outgoing_edge_ids.at(node_id).reserve(outgoing_edge_count.at(node_id));
-        }
-
-        for (size_t edge_id = 0; edge_id < num_edges; ++edge_id) {
-            incoming_edge_ids.at(edge_sink_node_ids.at(edge_id)).push_back(edge_id);
-            outgoing_edge_ids.at(edge_source_node_ids.at(edge_id)).push_back(edge_id);
-        }
-
-        for (size_t edge_id = 0; edge_id < num_edges; ++edge_id) {
-            sink_without_outgoing_by_edge.at(edge_id) = outgoing_edge_ids.at(edge_sink_node_ids.at(edge_id)).empty();
-        }
-
-        for (size_t edge_id = 0; edge_id < num_edges; ++edge_id) {
-            const auto &edge_h = state->edges.at(edge_id);
-            const bool sink_without_outgoing = sink_without_outgoing_by_edge.at(edge_id);
-            const auto formulation = compose_regular_edge(edge_h,
-                                                          {},
-                                                          sink_without_outgoing,
-                                                          sink_without_outgoing);
-            auto &solver_node = graph_.add(node_type(std::static_pointer_cast<ocp>(formulation), mem_));
-            solver_nodes_by_edge[edge_id] = &solver_node;
-        }
-
-        std::vector<node_type *> head_candidates;
-        std::vector<node_type *> tail_candidates;
-        for (size_t node_id = 0; node_id < num_nodes; ++node_id) {
-            const auto &incoming = incoming_edge_ids.at(node_id);
-            const auto &outgoing = outgoing_edge_ids.at(node_id);
-            if (incoming.empty() && outgoing.empty()) {
-                continue;
-            }
-            if (incoming.empty()) {
-                if (outgoing.size() != 1) {
-                    throw std::runtime_error("ns_sqp::ensure_realized currently expects a unique outgoing edge from the source model node");
-                }
-                head_candidates.push_back(solver_nodes_by_edge.at(outgoing.front()));
-                continue;
-            }
-            if (outgoing.empty()) {
-                if (incoming.size() != 1) {
-                    throw std::runtime_error("ns_sqp::ensure_realized currently expects a unique incoming edge for a sink model node");
-                }
-                tail_candidates.push_back(solver_nodes_by_edge.at(incoming.front()));
-                continue;
-            }
-            for (const size_t incoming_edge_id : incoming) {
-                for (const size_t outgoing_edge_id : outgoing) {
-                    graph_.connect(*solver_nodes_by_edge.at(incoming_edge_id),
-                                   *solver_nodes_by_edge.at(outgoing_edge_id),
-                                   {2, true, true});
-                }
-            }
-        }
-
-        if (head_candidates.size() != 1) {
-            throw std::runtime_error("ns_sqp::ensure_realized expects a single source path in model_graph");
-        }
-        if (tail_candidates.size() != 1) {
-            throw std::runtime_error("ns_sqp::ensure_realized expects a single sink path in model_graph");
-        }
-        graph_.set_head(*head_candidates.front());
-        graph_.set_tail(*tail_candidates.front());
-        state->dirty = false;
+        return *graph;
     }
 
     std::unique_ptr<solver_type> riccati_solver_ = nullptr;
     std::shared_ptr<model::graph_model_state> active_model_graph_;
+    size_t graph_n_jobs_ = MAX_THREADS;
 
     template <typename worker_type>
     struct stacked_workers : public std::vector<worker_type> {
@@ -758,14 +457,14 @@ struct ns_sqp {
     void refresh_ls_bounds();
     template <typename Prepare, typename Finalize>
     void run_correction_step(Prepare &&prepare, Finalize &&finalize) {
-        graph_.for_each_parallel(
+        solver_graph().for_each_parallel(
             [prepare = std::forward<Prepare>(prepare)](data *d) mutable {
                 std::invoke(prepare, d);
             });
         post_factorization_correction_step();
         {
             auto phase_profile = profile_scope(profile_phase::correction_finalize);
-            graph_.for_each_parallel(
+            solver_graph().for_each_parallel(
                 [finalize = std::forward<Finalize>(finalize)](data *d) mutable {
                     std::invoke(finalize, d);
                 });

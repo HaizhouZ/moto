@@ -436,7 +436,7 @@ node_idx = 0
 current_time = 0.0
 sqp.apply_forward(stance_ref)
 # n0.data.value[model.k_f] = 0
-nodes = g.flatten_nodes()
+nodes = sqp.graph.flatten_nodes()
 data = go2.model.createData()
 for n in nodes[:10]:
     for f in model.f_f:

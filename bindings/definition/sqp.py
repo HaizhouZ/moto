@@ -18,7 +18,7 @@ class sqp(ns_sqp):
             ndoes: The data nodes from graph_type.flatten_nodes.
             python concurrent: The function to apply to each node.
         """
-        for node in self.flatten_nodes():
+        for node in self.graph.flatten_nodes():
             callback(node)
 
     def __apply(self, forward: bool, callback: Callable[[Any], None], none_on_end: bool = False, early_stop: int = -1):
@@ -29,7 +29,6 @@ class sqp(ns_sqp):
             forward: If True, apply in forward order; otherwise, apply in backward order.
             callback: The function to apply to each node.
         """
-        self.flatten_nodes()
         sig = inspect.signature(callback)
         params = [param.annotation for param in sig.parameters.values()]
         is_unary = params == [ns_sqp.data_type]

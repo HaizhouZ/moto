@@ -98,7 +98,8 @@ void accumulate_row_infnorms(const sparse_mat &mat, Eigen::Ref<vector> norms) {
 // ────────────────────────────────────────────────────────────────────────────
 
 void ns_sqp::reset_scaling() {
-    for (data &d : graph_.nodes()) {
+    auto &graph = solver_graph();
+    for (data &d : graph.nodes()) {
         for (field_t cf : constr_fields)
             d.scale_c_[cf].resize(0);
         d.scale_p_.fill(1.);
@@ -108,6 +109,7 @@ void ns_sqp::reset_scaling() {
 
 void ns_sqp::compute_and_apply_scaling(const kkt_info &kkt) {
     const auto &sc = settings.scaling;
+    auto &graph = solver_graph();
     if (sc.mode == scaling_settings::mode_t::none)
         return;
 
@@ -120,7 +122,7 @@ void ns_sqp::compute_and_apply_scaling(const kkt_info &kkt) {
     bool needs_recompute = (kkt.inf_prim_step >= 1. / sc.update_ratio_threshold);
     // Also recompute if no cached scales exist yet (first call after reset)
     if (!needs_recompute) {
-        for (const data &d : graph_.nodes()) {
+        for (const data &d : graph.nodes()) {
             for (field_t cf : hard_constr_fields_non_dyn) {
                 if (d.dense().approx_[cf].v_.size() > 0 && d.scale_c_[cf].size() == 0) {
                     needs_recompute = true;
@@ -134,7 +136,7 @@ void ns_sqp::compute_and_apply_scaling(const kkt_info &kkt) {
 
     // ── Recompute scale vectors if needed ────────────────────────────────────
     if (needs_recompute) {
-        graph_.for_each_parallel([&](data *d) {
+        graph.for_each_parallel([&](data *d) {
             const scalar_t min_s = sc.min_scale;
 
             for (field_t cf : hard_constr_fields_non_dyn) {
@@ -215,7 +217,7 @@ void ns_sqp::compute_and_apply_scaling(const kkt_info &kkt) {
     // compute_project_jacobians (proj_f_x_, proj_f_u_) and apply_jac_y_inverse_transpose.
     // Inequality constraints (IPM) are also excluded: their Jacobians and duals are aliased
     // into ipm_constr and managed internally by the IPM.
-    graph_.for_each_parallel([&](data *d) {
+    graph.for_each_parallel([&](data *d) {
         for (field_t cf : hard_constr_fields_non_dyn) {
             const auto &s = d->scale_c_[cf];
             if (s.size() == 0)
@@ -243,7 +245,8 @@ void ns_sqp::compute_and_apply_scaling(const kkt_info &kkt) {
 // ────────────────────────────────────────────────────────────────────────────
 
 void ns_sqp::unscale_duals() {
-    graph_.for_each_parallel([](data *d) {
+    auto &graph = solver_graph();
+    graph.for_each_parallel([](data *d) {
         if (!d->scaling_applied_)
             return;
         // Only __eq_x / __eq_xu were scaled — reverse those only.

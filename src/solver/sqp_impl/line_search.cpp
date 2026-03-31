@@ -88,6 +88,7 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
                                fullstep_dec_k, prim_res_k, current_kkt.inf_dual_step);
                 return false;
             }
+        return false;
     };
 
     // reject if the trial point is dominated by any point in the filter

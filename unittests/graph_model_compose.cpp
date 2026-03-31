@@ -225,136 +225,6 @@ TEST_CASE("graph_model composed stages can be consumed by sqp create_node") {
     const auto composed = modeled.compose_all();
     REQUIRE(composed.size() == 1);
 
-    ns_sqp sqp;
-    auto node = sqp.create_node(composed.front());
-
-    REQUIRE(node->problem().uid() != composed.front()->uid());
-    REQUIRE(node->problem().dim(__x) == composed.front()->dim(__x));
-    REQUIRE(node->problem().dim(__u) == composed.front()->dim(__u));
-    REQUIRE(node->problem().dim(__y) == composed.front()->dim(__y));
-}
-
-TEST_CASE("ns_sqp create_node can compose graph_model edges directly") {
-    using namespace moto;
-    using namespace moto::model;
-
-    auto [x, xn] = sym::states("x_solver_direct", 1);
-    auto u = sym::inputs("u_solver_direct", 1);
-    const var_inarg_list dyn_args = var_list{x, xn, u};
-    const var_inarg_list x_args = var_list{x};
-
-    auto dyn = dynamics(new dense_dynamics("dyn_solver_direct", dyn_args, xn - x - u, approx_order::second, __dyn));
-
-    auto st_prob = node_ocp::create();
-    st_prob->add(*cost(new generic_cost("cost_solver_direct_a", x_args, x, approx_order::second)));
-
-    auto ed_prob = node_ocp::create();
-    ed_prob->add(*cost(new generic_cost("cost_solver_direct_b", x_args, x, approx_order::second)));
-    ed_prob->add_terminal(*cost(new generic_cost("cost_solver_direct_terminal", x_args, x, approx_order::second)));
-
-    graph_model modeled;
-    auto n0 = modeled.create_node(st_prob);
-    auto n1 = modeled.create_node(ed_prob);
-    auto e01 = modeled.connect(n0, n1);
-    e01->add(*dyn);
-
-    auto expected_edge = modeled.compose(e01);
-    auto expected_terminal = modeled.compose_terminal(n1);
-
-    ns_sqp sqp;
-    auto edge_node = sqp.create_node(e01);
-    auto terminal_node = sqp.create_terminal_node(n1);
-
-    REQUIRE(edge_node->problem().uid() != expected_edge->uid());
-    REQUIRE(terminal_node->problem().uid() != expected_terminal->uid());
-    REQUIRE(edge_node->problem().dim(__x) == expected_edge->dim(__x));
-    REQUIRE(edge_node->problem().dim(__u) == expected_edge->dim(__u));
-    REQUIRE(edge_node->problem().dim(__y) == expected_edge->dim(__y));
-    REQUIRE_FALSE(contains_name(expr_names(edge_node->problem(), __cost), "cost_solver_direct_terminal"));
-    REQUIRE(contains_name(expr_names(terminal_node->problem(), __cost), "cost_solver_direct_terminal"));
-}
-
-TEST_CASE("ns_sqp create_terminal_node can materialize terminal sink cost from graph_model edge") {
-    using namespace moto;
-    using namespace moto::model;
-
-    auto [x, xn] = sym::states("x_solver_terminal_edge", 1);
-    auto u = sym::inputs("u_solver_terminal_edge", 1);
-    const var_inarg_list dyn_args = var_list{x, xn, u};
-    const var_inarg_list x_args = var_list{x};
-
-    auto dyn = dynamics(new dense_dynamics("dyn_solver_terminal_edge", dyn_args, xn - x - u, approx_order::second, __dyn));
-
-    auto st_prob = node_ocp::create();
-    st_prob->add(*cost(new generic_cost("cost_solver_terminal_stage", x_args, x, approx_order::second)));
-
-    auto terminal_cost = cost(new generic_cost("cost_solver_terminal_sink", x_args, x, approx_order::second));
-    terminal_cost->as_terminal();
-    auto ed_prob = node_ocp::create();
-    ed_prob->add_terminal(*terminal_cost);
-
-    graph_model modeled;
-    auto n0 = modeled.create_node(st_prob);
-    auto n1 = modeled.create_node(ed_prob);
-    auto e01 = modeled.connect(n0, n1);
-    e01->add(*dyn);
-
-    ns_sqp sqp;
-    auto terminal_node = sqp.create_terminal_node(e01);
-
-    REQUIRE(contains_name_prefix(expr_names(terminal_node->problem(), __cost), "cost_solver_terminal_stage"));
-    REQUIRE(contains_name_prefix(expr_names(terminal_node->problem(), __cost), "cost_solver_terminal_sink_terminal"));
-}
-
-TEST_CASE("ns_sqp create_node clones formulation templates") {
-    using namespace moto;
-
-    auto [x, xn] = sym::states("x_clone_template", 1);
-    auto u = sym::inputs("u_clone_template", 1);
-    const var_inarg_list dyn_args = var_list{x, xn, u};
-    const var_inarg_list x_args = var_list{x};
-
-    auto formulation = edge_ocp::create();
-    formulation->add(*dynamics(new dense_dynamics("dyn_clone_template", dyn_args, xn - x - u, approx_order::second, __dyn)));
-    formulation->add(*cost(new generic_cost("cost_clone_template", x_args, x, approx_order::second)));
-    formulation->wait_until_ready();
-
-    ns_sqp sqp;
-    auto n0 = sqp.create_node(formulation);
-    auto n1 = sqp.create_node(formulation);
-
-    REQUIRE(n0->problem().uid() != formulation->uid());
-    REQUIRE(n1->problem().uid() != formulation->uid());
-    REQUIRE(n0->problem().uid() != n1->problem().uid());
-    REQUIRE(n0->problem().dim(__x) == formulation->dim(__x));
-    REQUIRE(n1->problem().dim(__y) == formulation->dim(__y));
-}
-
-TEST_CASE("ns_sqp create_nodes can batch clone formulation templates") {
-    using namespace moto;
-
-    auto [x, xn] = sym::states("x_batch_template", 1);
-    auto u = sym::inputs("u_batch_template", 1);
-    const var_inarg_list dyn_args = var_list{x, xn, u};
-    const var_inarg_list x_args = var_list{x};
-
-    auto formulation = edge_ocp::create();
-    formulation->add(*dynamics(new dense_dynamics("dyn_batch_template", dyn_args, xn - x - u, approx_order::second, __dyn)));
-    formulation->add(*cost(new generic_cost("cost_batch_template", x_args, x, approx_order::second)));
-    formulation->wait_until_ready();
-
-    ns_sqp sqp;
-    std::vector<ocp::active_status_config> configs(3);
-    auto nodes = sqp.create_nodes(formulation, configs);
-
-    REQUIRE(nodes.size() == configs.size());
-    REQUIRE(nodes[0]->problem().uid() != formulation->uid());
-    REQUIRE(nodes[1]->problem().uid() != formulation->uid());
-    REQUIRE(nodes[2]->problem().uid() != formulation->uid());
-    REQUIRE(nodes[0]->problem().uid() != nodes[1]->problem().uid());
-    REQUIRE(nodes[1]->problem().uid() != nodes[2]->problem().uid());
-    REQUIRE(nodes[0]->problem().dim(__x) == formulation->dim(__x));
-    REQUIRE(nodes[2]->problem().dim(__y) == formulation->dim(__y));
 }
 
 TEST_CASE("ns_sqp create_graph can synchronize model graph paths into the internal directed graph") {
@@ -383,7 +253,7 @@ TEST_CASE("ns_sqp create_graph can synchronize model graph paths into the intern
         edge->add(*dyn);
     }
 
-    auto &flat = modeled.flatten_nodes();
+    auto &flat = sqp.graph().flatten_nodes();
     REQUIRE(flat.size() == 5);
     REQUIRE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_path_internal_terminal"));
 }
@@ -415,7 +285,7 @@ TEST_CASE("ns_sqp model_graph add_path returns one edge per requested interval")
         edge->add(*dyn);
     }
 
-    auto &flat = modeled.flatten_nodes();
+    auto &flat = sqp.graph().flatten_nodes();
     REQUIRE(flat.size() == 3);
     REQUIRE(contains_name_prefix(expr_names(flat.front()->problem(), __cost), "cost_path_topology"));
     REQUIRE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_path_topology_terminal"));
@@ -448,7 +318,7 @@ TEST_CASE("ns_sqp model_graph add_path can create key nodes from node prototypes
         edge->add(*dyn);
     }
 
-    auto &flat = modeled.flatten_nodes();
+    auto &flat = sqp.graph().flatten_nodes();
     REQUIRE(flat.size() == 2);
     REQUIRE(contains_name_prefix(expr_names(flat.front()->problem(), __cost), "cost_path_proto"));
     REQUIRE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_path_proto_terminal"));
@@ -480,7 +350,7 @@ TEST_CASE("ns_sqp terminal u-dependent terms are ignored instead of lowered onto
         edge->add(*dyn);
     }
 
-    auto &flat = modeled.flatten_nodes();
+    auto &flat = sqp.graph().flatten_nodes();
     REQUIRE(flat.size() == 2);
     REQUIRE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_terminal_u_guard_terminal_x"));
     REQUIRE_FALSE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_terminal_u_guard_terminal_xu"));
@@ -510,12 +380,12 @@ TEST_CASE("ns_sqp model_graph flatten_nodes reuses realized graph until graph be
         edge->add(*dyn);
     }
 
-    auto &flat_first = modeled.flatten_nodes();
+    auto &flat_first = sqp.graph().flatten_nodes();
     REQUIRE(flat_first.size() == 2);
     const auto first_head_addr = static_cast<const void *>(flat_first.front());
     const auto first_tail_addr = static_cast<const void *>(flat_first.back());
 
-    auto &flat_second = modeled.flatten_nodes();
+    auto &flat_second = sqp.graph().flatten_nodes();
     REQUIRE(flat_second.size() == flat_first.size());
     REQUIRE(static_cast<const void *>(flat_second.front()) == first_head_addr);
     REQUIRE(static_cast<const void *>(flat_second.back()) == first_tail_addr);
@@ -525,7 +395,7 @@ TEST_CASE("ns_sqp model_graph flatten_nodes reuses realized graph until graph be
     REQUIRE(extra_edges.size() == 1);
     extra_edges.front()->add(*dyn);
 
-    auto &flat_after_dirty = modeled.flatten_nodes();
+    auto &flat_after_dirty = sqp.graph().flatten_nodes();
     REQUIRE(flat_after_dirty.size() == 3);
     REQUIRE(static_cast<const void *>(flat_after_dirty.front()) != nullptr);
 }
@@ -588,7 +458,7 @@ TEST_CASE("ns_sqp create_graph realizes a reserved multi-segment path topology")
         edge->add(*dyn);
     }
 
-    auto &flat = modeled.flatten_nodes();
+    auto &flat = sqp.graph().flatten_nodes();
     REQUIRE(flat.size() == 2);
 }
 

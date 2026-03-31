@@ -10,6 +10,7 @@
 namespace moto {
 void ns_sqp::iterative_refinement() {
     auto phase_profile = profile_scope(profile_phase::iterative_refinement);
+    auto &graph = solver_graph();
     // if (info.inf_prim_step < 1e-1 || info.inf_dual_step < 1e-1) {
     size_t iter_refine_max = settings.rf.max_iters;
     size_t iter_refine = 0;
@@ -19,7 +20,7 @@ void ns_sqp::iterative_refinement() {
             auto subphase_profile = profile_scope(profile_phase::iterative_refinement_check_residual);
             detail_timed_block_start("check_residual");
             // finalize the dual step to get the correct dual variables for computing the residual, and compute the residual with the updated dual variables
-            graph_.for_each_parallel(
+            graph.for_each_parallel(
                 [&](data *d) {
                     riccati_solver_->finalize_dual_newton_step(d);
                     riccati_solver_->compute_kkt_residual(d);
@@ -31,7 +32,7 @@ void ns_sqp::iterative_refinement() {
             scalar_t inf_kkt_stat_err_y = 0.;
         } thread_res[settings.n_worker];
         size_t step = 0;
-        graph_.apply_forward<true>([&](size_t tid, data *d, data *next) {
+        graph.apply_forward<true>([&](size_t tid, data *d, data *next) {
             if (d->kkt_stat_err_[__u].size() > 0) {
                 thread_res[tid].inf_kkt_stat_err_u = std::max(thread_res[tid].inf_kkt_stat_err_u, d->kkt_stat_err_[__u].cwiseAbs().maxCoeff());
             }

@@ -448,7 +448,7 @@ current_node = add_segment(current_node, stage_node_proto.clone(), segment_lengt
 add_segment(current_node, terminal_node_proto, segment_lengths[-1])
 
 if os.getenv("MOTO_DEBUG_SOLVER_PROBS"):
-    flat_nodes = modeled.flatten_nodes()
+    flat_nodes = sqp.graph.flatten_nodes()
     print("--" * 15)
     print("Terminal node prototype:")
     terminal_node_proto.print_summary()
@@ -459,7 +459,7 @@ if os.getenv("MOTO_DEBUG_SOLVER_PROBS"):
 
 if os.getenv("MOTO_DEBUG_GRAPH_LAYOUT"):
     print("Flattened solver graph layout:")
-    for idx, node in enumerate(modeled.flatten_nodes()):
+    for idx, node in enumerate(sqp.graph.flatten_nodes()):
         prob = node.prob
         print(
             f"  node[{idx}] uid={prob.uid} "

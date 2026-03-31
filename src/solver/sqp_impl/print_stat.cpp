@@ -33,6 +33,7 @@ void ns_sqp::print_stat_header() {
 }
 
 void ns_sqp::print_stats(const kkt_info &info) {
+    auto &graph = solver_graph();
     scalar_t stats_value[] = {0., info.cost, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res, info.inf_prim_step, info.inf_eq_dual_step, info.inf_ineq_dual_step,
                               settings.ls.alpha_primal, settings.ls.alpha_dual, 0., settings.ipm.mu};
     std::string_view ipm_flags;
@@ -73,7 +74,7 @@ void ns_sqp::print_stats(const kkt_info &info) {
     size_t idx = 0;
     if (i_iter == 0)
         return;
-    for (auto n : graph_.flatten_nodes()) {
+    for (auto n : graph.flatten_nodes()) {
         // fmt::print("    value x at node {}: {:.4}\n", idx, n->trial_prim_state_bak[__x].transpose());
         // fmt::print("    delta x at node {}: {:.4}\n", idx, n->trial_prim_step[__x].transpose());
         // fmt::print("    value u at node {}: {:.4}\n", idx, n->trial_prim_state_bak[__u].transpose());

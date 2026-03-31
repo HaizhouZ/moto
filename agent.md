@@ -240,10 +240,14 @@ Important compose rules that are now covered by unit tests:
 - terminal sink `x`-only terms are now merged into the final real edge problem
 - terminal sink terms depending on `u` are invalid for the final `x/u` terminal node semantics; they emit a warning and are ignored
 - codegen finalization of lowered/materialized clones must be serialized or uniquely named to avoid `.so` races
+- graph realization now lives with `graph_model` itself:
+  - `graph_model::compose_interval(...)` handles interval composition and sink-term materialization
+  - `graph_model::realize_into(...)` expands the modeled topology into a runtime `directed_graph`
+  - `graph_model_state` owns the realized runtime object through a type-erased slot
 
 ## SQP Graph Ownership
 
-`ns_sqp` still owns an internal [`directed_graph`](/home/harper/Documents/moto/include/moto/core/directed_graph.hpp), but user-facing modeling should go through [`graph_model`](/home/harper/Documents/moto/include/moto/model/graph_model.hpp), not through solver graph helpers.
+`ns_sqp` no longer owns a separate solver-graph member. The active [`graph_model_state`](/home/harper/Documents/moto/include/moto/model/graph_model.hpp) owns the realized runtime graph, and `ns_sqp` fetches it as needed through `sqp.graph`.
 
 Current recommended Python flow:
 
@@ -257,7 +261,7 @@ terminal_node = modeled.create_node(terminal_node_proto)
 for edge in modeled.add_path(stage_node, terminal_node, N):
     edge.add(model.dyn)
 
-flat_nodes = modeled.flatten_nodes()
+flat_nodes = sqp.graph.flatten_nodes()
 ```
 
 Important current path semantics:
@@ -270,8 +274,9 @@ Important current path semantics:
 Current division of responsibility:
 
 - user edits only the `graph_model`
-- `sqp.create_graph()` returns a solver-aware graph model that reuses `graph_model`'s API and only adds solver realization via `flatten_nodes()`
-- the raw `sqp.graph` object still exists as solver storage / traversal infrastructure, but it is not the recommended modeling surface
+- `sqp.create_graph()` returns a plain `graph_model` bound to the solver's active model state
+- `graph_model` owns composition and topology realization policy
+- `sqp.graph` is the realized runtime `directed_graph` used for traversal, initialization, and debug inspection
 
 Useful modeling entry points:
 
@@ -279,13 +284,15 @@ Useful modeling entry points:
 - `graph_model.create_node(...)`
 - `graph_model.connect(...)`
 - `graph_model.add_path(...)`
-- `graph_model.flatten_nodes()`
+- `graph_model.compose_interval(...)`
+- `graph_model.realize_into(...)`
+- `sqp.graph.flatten_nodes()`
 
 The design direction is:
 
-- keep `directed_graph` as internal solver storage / traversal machinery
+- keep `directed_graph` as internal runtime storage / traversal machinery
 - let `graph_model` / `sqp.create_graph()` be the public modeling surface
-- avoid re-exposing graph-building APIs directly on `ns_sqp`
+- avoid re-exposing graph-building or realization policy directly on `ns_sqp`
 
 ## X-U-Y Triplet Formulation
 
@@ -316,6 +323,7 @@ Recommended usage:
 - add terminal terms with `prob.add_terminal(...)`
 - put `__dyn` and any `y`-dependent terms only on `edge_ocp` / `model_edge`
 - build solver paths through `sqp.create_graph()`
+- inspect realized stages through `sqp.graph.flatten_nodes()` when needed
 
 ### Best Internal Mental Model
 
@@ -332,9 +340,11 @@ That is better than presenting all three as peer modeling variables.
 Recent refactor work exposed an important design constraint:
 
 - `graph_model` is the modeling-side graph
-- `directed_graph` is the solver/runtime graph
+- `graph_model_state` now owns both the authored topology and the realized runtime payload
+- `directed_graph` is the solver/runtime graph implementation, not a separately-owned solver-side model
 - graph-building APIs should live on `graph_model`
-- `ns_sqp` should consume / realize a graph model rather than mirror its topology API
+- graph realization policy should live on `graph_model`
+- `ns_sqp` should consume a realized graph model rather than mirror its topology or lowering API
 
 This matters for lowering:
 
@@ -353,6 +363,7 @@ Because of that, graph-aware compose should be centered on edges:
 
 Practical implication for future work:
 
+- do not keep adding semantic policy inside `ns_sqp`
 - do not keep adding semantic policy inside `edge_ocp::compose()` alone
 - do not reintroduce finalize-time silent substitution
 - prefer a graph-level lowering/composition pass that:
@@ -365,8 +376,9 @@ Current status of the refactor:
 
 - Python `model_node` / `model_edge` now reuse `node_ocp` / `edge_ocp` APIs through inheritance
 - compose-time logging exists for lowering and should remain explicit because it changes formulation
-- quadruped has been partially migrated to modeled composition, but full formulation parity with the pre-refactor version has not yet been restored
-- the remaining gap is likely because the final compose logic still needs to become truly graph-level and edge-centric rather than per-edge local patching
+- `ns_sqp` no longer exposes graph-building helpers like `create_node(...)` or `flatten_nodes()`
+- `ns_sqp::create_graph()` now returns plain `graph_model`
+- quadruped runs through the modeled composition path and still converges under `MOTO_SQP_MAX_ITER=50`
 
 In short:
 
@@ -604,7 +616,7 @@ Key members:
 
 [`ns_sqp`](/home/harper/Documents/moto/include/moto/solver/ns_sqp.hpp) owns:
 
-- `graph_`: ordered stage graph of `shooting_node<data>`
+- active runtime graph is stored inside `graph_model_state` and accessed through `ns_sqp::graph()`
 - `mem_`: node-data memory pool
 - `riccati_solver_`: `generic_solver`
 - `settings`
