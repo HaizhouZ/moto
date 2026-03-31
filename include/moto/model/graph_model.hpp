@@ -30,6 +30,14 @@ struct graph_model_state {
     std::vector<model_node_ptr_t> nodes;
     std::vector<model_edge_ptr_t> edges;
     bool dirty = true;
+    void reserve(size_t node_capacity, size_t edge_capacity) {
+        if (node_capacity > nodes.capacity()) {
+            nodes.reserve(node_capacity);
+        }
+        if (edge_capacity > edges.capacity()) {
+            edges.reserve(edge_capacity);
+        }
+    }
     bool has_incoming_edge(size_t node_id, size_t exclude_edge_id = static_cast<size_t>(-1)) const;
     bool has_outgoing_edge(size_t node_id, size_t exclude_edge_id = static_cast<size_t>(-1)) const;
 
@@ -64,8 +72,6 @@ class model_node : public node_ocp {
     explicit operator bool() const noexcept { return id_ != static_cast<size_t>(-1); }
 
     size_t id() const noexcept { return id_; }
-    node_ocp_ptr_t compose() const;
-    node_ocp_ptr_t compose_terminal() const;
 };
 
 class model_edge : public edge_ocp {
@@ -88,9 +94,8 @@ class model_edge : public edge_ocp {
     explicit operator bool() const noexcept { return id_ != static_cast<size_t>(-1); }
 
     size_t id() const noexcept { return id_; }
-    model_node_ptr_t st() const;
-    model_node_ptr_t ed() const;
-    edge_ocp_ptr_t compose() const;
+    size_t st_id() const noexcept { return st_id_; }
+    size_t ed_id() const noexcept { return ed_id_; }
 };
 
 class graph_model {
@@ -114,23 +119,17 @@ class graph_model {
         return out;
     }
 
-    model_node_ptr_t create_node(const node_ocp_ptr_t &base_prob = node_ocp::create(),
-                                 const var_inarg_list &x = {},
-                                 const var_inarg_list &u = {}) {
+    void reserve(size_t node_capacity, size_t edge_capacity) {
+        state_->reserve(node_capacity, edge_capacity);
+    }
+
+    model_node_ptr_t create_node(const node_ocp_ptr_t &base_prob = node_ocp::create()) {
         auto node = model_node::create(base_prob);
-        static_cast<void>(x);
-        static_cast<void>(u);
         state_->dirty = true;
         node->owner_ = state_;
         node->id_ = state_->nodes.size();
         state_->nodes.emplace_back(node);
         return node;
-    }
-
-    model_node_ptr_t add_node(const node_ocp_ptr_t &base_prob = node_ocp::create(),
-                              const var_inarg_list &x = {},
-                              const var_inarg_list &u = {}) {
-        return create_node(base_prob, x, u);
     }
 
     model_edge_ptr_t connect(const model_node_ptr_t &st,
@@ -158,6 +157,8 @@ class graph_model {
         if (n_edges == 0) {
             throw std::invalid_argument("graph_model::add_path expects n_edges >= 1");
         }
+        // A path with n_edges introduces n_edges - 1 intermediate key nodes and n_edges edges.
+        reserve(state_->nodes.size() + n_edges - 1, state_->edges.size() + n_edges);
         std::vector<model_edge_ptr_t> edges;
         edges.reserve(n_edges);
         auto prev = st;
@@ -169,40 +170,20 @@ class graph_model {
         return edges;
     }
 
-    std::vector<model_edge_ptr_t> add_path(const model_node_ptr_t &st,
-                                           const node_ocp_ptr_t &ed_prob,
-                                           size_t n_edges,
-                                           const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
-        return add_path(st, create_node(ed_prob), n_edges, base_prob);
-    }
-
-    std::vector<model_edge_ptr_t> add_path(const node_ocp_ptr_t &st_prob,
-                                           const model_node_ptr_t &ed,
-                                           size_t n_edges,
-                                           const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
-        return add_path(create_node(st_prob), ed, n_edges, base_prob);
-    }
-
-    std::vector<model_edge_ptr_t> add_path(const node_ocp_ptr_t &st_prob,
-                                           const node_ocp_ptr_t &ed_prob,
-                                           size_t n_edges,
-                                           const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
-        return add_path(create_node(st_prob), create_node(ed_prob), n_edges, base_prob);
-    }
-
     const model_node_ptr_t &node(size_t id) const { return state_->nodes.at(id); }
     const model_edge_ptr_t &edge(size_t id) const { return state_->edges.at(id); }
 
     node_ocp_ptr_t compose_terminal(const model_node_ptr_t &node_h) const {
         validate_node(node_h);
-        auto composed = node_ocp::compose(node_h);
+        auto composed = node_h->clone_node();
         composed->wait_until_ready();
         return composed;
     }
 
     edge_ocp_ptr_t compose(const model_edge_ptr_t &edge_h) const {
         validate_edge(edge_h);
-        auto composed = edge_h->compose();
+        const bool st_has_previous_edge = state_->has_incoming_edge(edge_h->st_id_, edge_h->id_);
+        auto composed = edge_ocp::compose(edge_h->st_node_prob(), edge_h, edge_h->ed_node_prob(), st_has_previous_edge);
         composed->wait_until_ready();
         return composed;
     }
@@ -286,31 +267,6 @@ inline bool graph_model_state::has_outgoing_edge(size_t node_id, size_t exclude_
     return std::any_of(edges.begin(), edges.end(), [&](const model_edge_ptr_t &edge) {
         return edge && edge->id_ != exclude_edge_id && edge->st_id_ == node_id;
     });
-}
-
-inline node_ocp_ptr_t model_node::compose() const {
-    return node_ocp::compose(clone_node());
-}
-
-inline node_ocp_ptr_t model_node::compose_terminal() const {
-    return compose();
-}
-
-inline model_node_ptr_t model_edge::st() const {
-    return std::dynamic_pointer_cast<model_node>(st_node_prob());
-}
-
-inline model_node_ptr_t model_edge::ed() const {
-    return std::dynamic_pointer_cast<model_node>(ed_node_prob());
-}
-
-inline edge_ocp_ptr_t model_edge::compose() const {
-    const auto owner = owner_.lock();
-    if (!owner) {
-        throw std::runtime_error("graph_model edge is detached from its owner");
-    }
-    const bool st_has_previous_edge = owner->has_incoming_edge(st_id_, id_);
-    return edge_ocp::compose(st_node_prob(), clone_edge(), ed_node_prob(), st_has_previous_edge);
 }
 
 } // namespace moto::model

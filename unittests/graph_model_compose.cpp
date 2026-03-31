@@ -91,8 +91,8 @@ TEST_CASE("graph_model compose lowers node-owned state terms onto outgoing edge 
     node_prob->add(*u_cost);
 
     graph_model modeled;
-    auto n0 = modeled.add_node(node_prob);
-    auto n1 = modeled.add_node();
+    auto n0 = modeled.create_node(node_prob);
+    auto n1 = modeled.create_node();
 
     auto e01 = modeled.connect(n0, n1);
     e01->add(*dyn);
@@ -130,8 +130,8 @@ TEST_CASE("graph_model compose materializes sink node state cost onto incoming e
     sink_prob->add(*sink_cost);
 
     graph_model modeled;
-    auto n0 = modeled.add_node(st_prob);
-    auto n1 = modeled.add_node(sink_prob);
+    auto n0 = modeled.create_node(st_prob);
+    auto n1 = modeled.create_node(sink_prob);
     auto e01 = modeled.connect(n0, n1);
     e01->add(*dyn);
 
@@ -172,8 +172,8 @@ TEST_CASE("graph_model compose keeps explicit terminal sink cost on terminal nod
     sink_prob->add_terminal(*sink_cost);
 
     graph_model modeled;
-    auto n0 = modeled.add_node(st_prob);
-    auto n1 = modeled.add_node(sink_prob);
+    auto n0 = modeled.create_node(st_prob);
+    auto n1 = modeled.create_node(sink_prob);
     auto e01 = modeled.connect(n0, n1);
     e01->add(*dyn);
 
@@ -217,8 +217,8 @@ TEST_CASE("graph_model composed stages can be consumed by sqp create_node") {
     ed_prob->add(*cost(new generic_cost("cost_solver_create_node_smoke_b", x_args, x, approx_order::second)));
 
     graph_model modeled;
-    auto n0 = modeled.add_node(st_prob);
-    auto n1 = modeled.add_node(ed_prob);
+    auto n0 = modeled.create_node(st_prob);
+    auto n1 = modeled.create_node(ed_prob);
     auto e01 = modeled.connect(n0, n1);
     e01->add(*dyn);
 
@@ -253,8 +253,8 @@ TEST_CASE("ns_sqp create_node can compose graph_model edges directly") {
     ed_prob->add_terminal(*cost(new generic_cost("cost_solver_direct_terminal", x_args, x, approx_order::second)));
 
     graph_model modeled;
-    auto n0 = modeled.add_node(st_prob);
-    auto n1 = modeled.add_node(ed_prob);
+    auto n0 = modeled.create_node(st_prob);
+    auto n1 = modeled.create_node(ed_prob);
     auto e01 = modeled.connect(n0, n1);
     e01->add(*dyn);
 
@@ -294,8 +294,8 @@ TEST_CASE("ns_sqp create_terminal_node can materialize terminal sink cost from g
     ed_prob->add_terminal(*terminal_cost);
 
     graph_model modeled;
-    auto n0 = modeled.add_node(st_prob);
-    auto n1 = modeled.add_node(ed_prob);
+    auto n0 = modeled.create_node(st_prob);
+    auto n1 = modeled.create_node(ed_prob);
     auto e01 = modeled.connect(n0, n1);
     e01->add(*dyn);
 
@@ -438,7 +438,9 @@ TEST_CASE("ns_sqp model_graph add_path can create key nodes from node prototypes
 
     ns_sqp sqp;
     auto modeled = sqp.create_graph();
-    auto stage_edges = modeled.add_path(stage_prob, terminal_prob, 2);
+    auto n0 = modeled.create_node(stage_prob);
+    auto nt = modeled.create_node(terminal_prob);
+    auto stage_edges = modeled.add_path(n0, nt, 2);
     REQUIRE(stage_edges.size() == 2);
     REQUIRE(modeled.num_edges() == 2);
     REQUIRE(modeled.num_nodes() == 3);
@@ -471,7 +473,9 @@ TEST_CASE("ns_sqp terminal u-dependent terms are ignored instead of lowered onto
 
     ns_sqp sqp;
     auto modeled = sqp.create_graph();
-    auto edges = modeled.add_path(stage_prob, terminal_prob, 2);
+    auto n0 = modeled.create_node(stage_prob);
+    auto nt = modeled.create_node(terminal_prob);
+    auto edges = modeled.add_path(n0, nt, 2);
     for (const auto &edge : edges) {
         edge->add(*dyn);
     }
@@ -480,6 +484,112 @@ TEST_CASE("ns_sqp terminal u-dependent terms are ignored instead of lowered onto
     REQUIRE(flat.size() == 2);
     REQUIRE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_terminal_u_guard_terminal_x"));
     REQUIRE_FALSE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_terminal_u_guard_terminal_xu"));
+}
+
+TEST_CASE("ns_sqp model_graph flatten_nodes reuses realized graph until graph becomes dirty") {
+    using namespace moto;
+
+    auto [x, xn] = sym::states("x_flatten_cache", 1);
+    auto u = sym::inputs("u_flatten_cache", 1);
+    const var_inarg_list dyn_args = var_list{x, xn, u};
+    const var_inarg_list x_args = var_list{x};
+    auto dyn = dynamics(new dense_dynamics("dyn_flatten_cache", dyn_args, xn - x - u, approx_order::second, __dyn));
+
+    auto stage_prob = node_ocp::create();
+    stage_prob->add(*cost(new generic_cost("cost_flatten_cache_stage", x_args, x, approx_order::second)));
+
+    auto terminal_prob = node_ocp::create();
+    terminal_prob->add_terminal(*cost(new generic_cost("cost_flatten_cache_terminal", x_args, x, approx_order::second)));
+
+    ns_sqp sqp;
+    auto modeled = sqp.create_graph();
+    auto n0 = modeled.create_node(stage_prob);
+    auto nt = modeled.create_node(terminal_prob);
+    auto stage_edges = modeled.add_path(n0, nt, 2);
+    for (const auto &edge : stage_edges) {
+        edge->add(*dyn);
+    }
+
+    auto &flat_first = modeled.flatten_nodes();
+    REQUIRE(flat_first.size() == 2);
+    const auto first_head_addr = static_cast<const void *>(flat_first.front());
+    const auto first_tail_addr = static_cast<const void *>(flat_first.back());
+
+    auto &flat_second = modeled.flatten_nodes();
+    REQUIRE(flat_second.size() == flat_first.size());
+    REQUIRE(static_cast<const void *>(flat_second.front()) == first_head_addr);
+    REQUIRE(static_cast<const void *>(flat_second.back()) == first_tail_addr);
+
+    auto extra_terminal = modeled.create_node(terminal_prob->clone_node());
+    auto extra_edges = modeled.add_path(nt, extra_terminal, 1);
+    REQUIRE(extra_edges.size() == 1);
+    extra_edges.front()->add(*dyn);
+
+    auto &flat_after_dirty = modeled.flatten_nodes();
+    REQUIRE(flat_after_dirty.size() == 3);
+    REQUIRE(static_cast<const void *>(flat_after_dirty.front()) != nullptr);
+}
+
+TEST_CASE("graph_model reserve supports bulk node and edge creation") {
+    using namespace moto;
+    using namespace moto::model;
+
+    auto [x, xn] = sym::states("x_graph_reserve", 1);
+    auto u = sym::inputs("u_graph_reserve", 1);
+    const var_inarg_list dyn_args = var_list{x, xn, u};
+    auto dyn = dynamics(new dense_dynamics("dyn_graph_reserve", dyn_args, xn - x - u, approx_order::second, __dyn));
+
+    graph_model modeled;
+    modeled.reserve(8, 8);
+
+    auto n0 = modeled.create_node(node_ocp::create());
+    auto nt = modeled.create_node(node_ocp::create());
+    auto edges = modeled.add_path(n0, nt, 5);
+    REQUIRE(edges.size() == 5);
+    REQUIRE(modeled.num_nodes() == 6);
+    REQUIRE(modeled.num_edges() == 5);
+    for (const auto &edge : edges) {
+        edge->add(*dyn);
+    }
+
+    auto composed = modeled.compose_all();
+    REQUIRE(composed.size() == 5);
+}
+
+TEST_CASE("ns_sqp create_graph realizes a reserved multi-segment path topology") {
+    using namespace moto;
+
+    auto [x, xn] = sym::states("x_reserved_realize", 1);
+    auto u = sym::inputs("u_reserved_realize", 1);
+    const var_inarg_list dyn_args = var_list{x, xn, u};
+    const var_inarg_list x_args = var_list{x};
+    auto dyn = dynamics(new dense_dynamics("dyn_reserved_realize", dyn_args, xn - x - u, approx_order::second, __dyn));
+
+    auto source_prob = node_ocp::create();
+    source_prob->add(*cost(new generic_cost("cost_reserved_source", x_args, x, approx_order::second)));
+
+    auto mid_prob = node_ocp::create();
+    mid_prob->add(*cost(new generic_cost("cost_reserved_mid", x_args, x, approx_order::second)));
+
+    auto sink_prob = node_ocp::create();
+    sink_prob->add_terminal(*cost(new generic_cost("cost_reserved_sink", x_args, x, approx_order::second)));
+
+    ns_sqp sqp;
+    auto modeled = sqp.create_graph();
+    modeled.reserve(4, 4);
+
+    auto src = modeled.create_node(source_prob);
+    auto mid = modeled.create_node(mid_prob);
+    auto sink = modeled.create_node(sink_prob);
+
+    auto e_src_mid = modeled.connect(src, mid);
+    auto e_mid_sink = modeled.connect(mid, sink);
+    for (const auto &edge : {e_src_mid, e_mid_sink}) {
+        edge->add(*dyn);
+    }
+
+    auto &flat = modeled.flatten_nodes();
+    REQUIRE(flat.size() == 2);
 }
 
 TEST_CASE("node_ocp rejects y-dependent terms and dynamics") {

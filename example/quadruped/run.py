@@ -434,10 +434,11 @@ segment_lengths.append(stance_length - 1)
 
 
 def add_segment(start, end_prob, n_edges):
-    edges = modeled.add_path(start, end_prob, n_edges)
+    end_node = modeled.create_node(end_prob)
+    edges = modeled.add_path(start, end_node, n_edges)
     for edge in edges:
         edge.add(model.dyn)
-    return edges[-1].ed
+    return end_node
 
 
 current_node = stage_node

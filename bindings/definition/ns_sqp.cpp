@@ -20,7 +20,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
 
     nb::class_<ns_sqp> sqp(m, "ns_sqp_impl");
     sqp.def(nb::init<size_t>(), "Constructor for the SQP solver with a specified number of jobs")
-        .def_prop_ro("graph", [](ns_sqp &self) -> auto & { return self.graph_; })
+        .def_ro("graph", &ns_sqp::graph_)
         .def("create_graph", &ns_sqp::create_graph, nb::keep_alive<0, 1>(), "Create a graph_model builder that synchronizes staged paths into this SQP solver")
         .def("update", [](ns_sqp &self, size_t n_iter, bool verbose) {
             nb::gil_scoped_release rel;

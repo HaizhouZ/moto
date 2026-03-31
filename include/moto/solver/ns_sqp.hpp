@@ -294,7 +294,7 @@ struct ns_sqp {
             throw std::runtime_error("ns_sqp::create_terminal_node received a null model_node");
         }
         node_model->wait_until_ready();
-        auto composed = node_model->compose_terminal();
+        auto composed = node_model->clone_node();
         sanitize_terminal_node(*composed);
         composed->wait_until_ready();
         return node_type(std::static_pointer_cast<ocp>(composed), mem_);
@@ -365,7 +365,7 @@ struct ns_sqp {
         }
         auto composed = edge_ocp::compose(
             st_node_prob,
-            edge_model->clone_edge(),
+            edge_model,
             node_ocp_ptr_t{},
             false);
         if (materialize_sink_terms) {
@@ -449,19 +449,42 @@ struct ns_sqp {
         std::vector<node_type *> solver_nodes_by_edge(num_edges, nullptr);
         std::vector<std::vector<size_t>> incoming_edge_ids(num_nodes);
         std::vector<std::vector<size_t>> outgoing_edge_ids(num_nodes);
+        std::vector<size_t> incoming_edge_count(num_nodes, 0);
+        std::vector<size_t> outgoing_edge_count(num_nodes, 0);
+        std::vector<size_t> edge_source_node_ids(num_edges);
+        std::vector<size_t> edge_sink_node_ids(num_edges);
+        std::vector<bool> sink_without_outgoing_by_edge(num_edges, false);
 
         for (size_t edge_id = 0; edge_id < num_edges; ++edge_id) {
             const auto &edge_h = state->edges.at(edge_id);
             if (!edge_h) {
                 throw std::runtime_error("ns_sqp::ensure_realized encountered a null model_edge");
             }
-            incoming_edge_ids.at(edge_h->ed()->id()).push_back(edge_id);
-            outgoing_edge_ids.at(edge_h->st()->id()).push_back(edge_id);
+            const size_t st_node_id = edge_h->st_id();
+            const size_t ed_node_id = edge_h->ed_id();
+            ++incoming_edge_count.at(ed_node_id);
+            ++outgoing_edge_count.at(st_node_id);
+            edge_source_node_ids.at(edge_id) = st_node_id;
+            edge_sink_node_ids.at(edge_id) = ed_node_id;
+        }
+
+        for (size_t node_id = 0; node_id < num_nodes; ++node_id) {
+            incoming_edge_ids.at(node_id).reserve(incoming_edge_count.at(node_id));
+            outgoing_edge_ids.at(node_id).reserve(outgoing_edge_count.at(node_id));
+        }
+
+        for (size_t edge_id = 0; edge_id < num_edges; ++edge_id) {
+            incoming_edge_ids.at(edge_sink_node_ids.at(edge_id)).push_back(edge_id);
+            outgoing_edge_ids.at(edge_source_node_ids.at(edge_id)).push_back(edge_id);
+        }
+
+        for (size_t edge_id = 0; edge_id < num_edges; ++edge_id) {
+            sink_without_outgoing_by_edge.at(edge_id) = outgoing_edge_ids.at(edge_sink_node_ids.at(edge_id)).empty();
         }
 
         for (size_t edge_id = 0; edge_id < num_edges; ++edge_id) {
             const auto &edge_h = state->edges.at(edge_id);
-            const bool sink_without_outgoing = outgoing_edge_ids.at(edge_h->ed()->id()).empty();
+            const bool sink_without_outgoing = sink_without_outgoing_by_edge.at(edge_id);
             const auto formulation = compose_regular_edge(edge_h,
                                                           {},
                                                           sink_without_outgoing,

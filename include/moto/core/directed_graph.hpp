@@ -121,7 +121,7 @@ class directed_graph {
             throw std::invalid_argument("Edge length is too short for the requested endpoint inclusion");
         }
         edges_.emplace_back(&st, &ed, len - included_nodes);
-        flatten_cache_dirty_ = true;
+        invalidate_dispatch_cache();
     }
 
     void connect(node &st, node &ed, edge_options opts = {}) {
@@ -135,13 +135,13 @@ class directed_graph {
      * @return node& reference to the added node
      */
     node &add(node &&d) {
-        flatten_cache_dirty_ = true;
+        invalidate_dispatch_cache();
         return nodes_.emplace_back(std::move(d));
     }
 
     template <typename... Args>
     node &emplace(Args &&...args) {
-        flatten_cache_dirty_ = true;
+        invalidate_dispatch_cache();
         return nodes_.emplace_back(std::forward<Args>(args)...);
     }
 
@@ -205,10 +205,16 @@ class directed_graph {
     }
 
     void clear() {
-        flatten_cache_dirty_ = true;
+        invalidate_dispatch_cache();
         unary_in_.clear();
         unary_view_.clear();
         binary_view_.clear();
+        forward_unary_batches_.clear();
+        backward_unary_batches_.clear();
+        forward_binary_batches_.clear();
+        backward_binary_batches_.clear();
+        forward_binary_batches_with_null_.clear();
+        backward_binary_batches_with_null_.clear();
         edges_.clear();
         nodes_.clear();
         head_ = nullptr;
@@ -259,82 +265,39 @@ class directed_graph {
         using base = std::vector<data_type *>;
         using base::base; ///< inherit constructors from std::vector
         bool update() {
-            if (forward_mode) {
-                forward_update();
-            } else {
-                backward_update();
+            if (batches_ != nullptr) {
+                this->clear();
+                if (batch_idx_ >= batches_->size()) {
+                    return false;
+                }
+                const auto &batch = batches_->at(batch_idx_++);
+                this->insert(this->end(), batch.begin(), batch.end());
+                return !this->empty();
             }
-            return !this->empty();
+            return false;
         }
 
       private:
         friend class directed_graph; ///< allow directed_graph to access private members
-        unary_view(node *head, node *tail, bool forward = true)
-            : head_(head), tail_(tail), forward_mode(forward) {
-            if (head_) {
-                cur_nodes_.push_back(head_);
-            } else if (tail_) {
-                cur_nodes_.push_back(tail_);
+        unary_view(const std::vector<std::vector<data_type *>> *batches)
+            : batches_(batches) {
+            if (batches_ != nullptr && !batches_->empty()) {
+                this->reserve(batches_->front().size());
             }
         }
-        std::vector<node *> cur_nodes_;  ///< current edges in the graph
-        std::vector<node *> next_nodes_; ///< next edges in the graph
-        node *head_ = nullptr;           ///< head node of the graph
-        node *tail_ = nullptr;           ///< tail node of the graph
-        bool forward_mode = true;        ///< if true, apply unary function in forward direction
-        void forward_update() {
-            this->clear();
-            while (!cur_nodes_.empty()) {
-                for (auto n : cur_nodes_) {
-                    // edge forward
-                    this->emplace_back(n->data_);
-                    for (auto out : n->out_edges) {
-                        this->reserve(this->size() + out->nodes.size() + 1);
-                        for (auto &out_node : out->nodes) {
-                            this->emplace_back(out_node.data_);
-                        }
-                        if (--out->ed->in_cnt == 0) {
-                            if (out->ed->out_edges.empty())
-                                this->emplace_back(out->ed->data_);
-                            else
-                                next_nodes_.push_back(out->ed);
-                        }
-                    }
-                }
-                cur_nodes_.swap(next_nodes_);
-                next_nodes_.clear();
-            }
-        }
-        void backward_update() {
-            this->clear();
-            while (!cur_nodes_.empty()) {
-                for (auto n : cur_nodes_) {
-                    // edge backward
-                    this->emplace_back(n->data_);
-                    for (auto in : n->in_edges) {
-                        this->reserve(this->size() + in->nodes.size() + 1);
-                        for (auto it = in->nodes.rbegin(); it != in->nodes.rend(); ++it) {
-                            this->emplace_back(it->data_);
-                        }
-                        if (--in->st->out_cnt == 0) {
-                            if (in->st->in_cnt == 0)
-                                this->emplace_back(in->st->data_);
-                            else
-                                next_nodes_.push_back(in->st);
-                        }
-                    }
-                }
-                cur_nodes_.swap(next_nodes_);
-                next_nodes_.clear();
-            }
-        }
+        const std::vector<std::vector<data_type *>> *batches_ = nullptr;
+        size_t batch_idx_ = 0;
     };
 
     template <bool forward = true>
     unary_view &get_unary_view() {
-        std::ranges::for_each(nodes_, [](auto &p) { p.reset_cnt(); });
         assert(head_ != nullptr && tail_ != nullptr && "head node must be set before applying unary function");
-        return unary_view_ = unary_view(head_, tail_, forward);
+        ensure_dispatch_cache();
+        if constexpr (forward) {
+            return unary_view_ = unary_view(&forward_unary_batches_);
+        } else {
+            return unary_view_ = unary_view(&backward_unary_batches_);
+        }
     }
 
     unary_view forward_view() {
@@ -351,82 +314,39 @@ class directed_graph {
         /// @brief update the binary view, i.e., update the current edges and next edges
         /// @return true if the binary view is updated, false if it is empty
         bool update() {
-            if (forward_mode) {
-                forward_update();
-            } else {
-                backward_update();
+            if (batches_ != nullptr) {
+                this->clear();
+                if (batch_idx_ >= batches_->size()) {
+                    return false;
+                }
+                const auto &batch = batches_->at(batch_idx_++);
+                this->insert(this->end(), batch.begin(), batch.end());
+                return !this->empty();
             }
-            return !this->empty();
+            return false;
         }
 
       private:
         friend class directed_graph;     ///< allow directed_graph to access private members
-        std::vector<edge *> cur_edges_;  ///< current edges in the graph
-        std::vector<edge *> next_edges_; ///< next edges in the graph
-        node *head_ = nullptr;           ///< head node of the graph
-        node *tail_ = nullptr;           ///< tail node of the graph
-        bool null_on_end_ = true;        ///< if true, append null to the end of the binary view
-        bool forward_mode = true;
-        binary_view(node *head, node *tail, bool forward = true, bool null_on_end = true)
-            : head_(head), tail_(tail), forward_mode(forward), null_on_end_(null_on_end) {
-            if (head_ && forward) {
-                cur_edges_.assign(head_->out_edges.begin(), head_->out_edges.end());
-            } else if (tail_ && !forward) {
-                cur_edges_.assign(tail_->in_edges.begin(), tail_->in_edges.end());
-            } else
-                throw std::invalid_argument("head or tail node must be set before applying binary function");
-        }
-        void forward_update() {
-            this->clear();
-            while (!cur_edges_.empty()) {
-                for (auto e : cur_edges_) {
-                    // edge forward
-                    data_type *cur = e->st->data_;
-                    for (auto &next : e->nodes) {
-                        this->emplace_back(cur, next.data_);
-                        cur = next.data_;
-                    }
-                    this->emplace_back(cur, e->ed->data_);
-                    if ((--e->ed->in_cnt) == 0 && !e->ed->out_edges.empty()) { // append ed to the list if no more in edges
-                        next_edges_.insert(next_edges_.end(), e->ed->out_edges.begin(), e->ed->out_edges.end());
-                    }
-                }
-                if (next_edges_.empty() && null_on_end_ && tail_) {
-                    this->emplace_back(tail_->data_, nullptr); // append null to the end if head is set
-                }
-                cur_edges_.swap(next_edges_);
-                next_edges_.clear();
+        binary_view(const std::vector<std::vector<std::pair<data_type *, data_type *>>> *batches)
+            : batches_(batches) {
+            if (batches_ != nullptr && !batches_->empty()) {
+                this->reserve(batches_->front().size());
             }
         }
-        void backward_update() {
-            this->clear();
-            while (!cur_edges_.empty()) {
-                for (auto e : cur_edges_) {
-                    // edge backward
-                    data_type *cur = e->ed->data_;
-                    for (auto &prev : e->nodes | std::views::reverse) {
-                        this->emplace_back(cur, prev.data_);
-                        cur = prev.data_;
-                    }
-                    this->emplace_back(cur, e->st->data_);
-                    if ((--e->st->out_cnt) == 0 && !e->st->in_edges.empty()) { // append st to the list if no more out edges
-                        next_edges_.insert(next_edges_.end(), e->st->in_edges.begin(), e->st->in_edges.end());
-                    }
-                }
-                if (next_edges_.empty() && null_on_end_ && head_) {
-                    this->emplace_back(head_->data_, nullptr); // append null to the end if head is set
-                }
-                cur_edges_.swap(next_edges_);
-                next_edges_.clear();
-            }
-        }
+        const std::vector<std::vector<std::pair<data_type *, data_type *>>> *batches_ = nullptr;
+        size_t batch_idx_ = 0;
     };
 
     template <bool forward = true>
     binary_view &get_binary_view(bool null_on_end = false) {
-        std::ranges::for_each(nodes_, [](auto &p) { p.reset_cnt(); });
         assert(head_ != nullptr && tail_ != nullptr && "head node must be set before applying binary function");
-        return binary_view_ = binary_view(head_, tail_, forward, null_on_end);
+        ensure_dispatch_cache();
+        if constexpr (forward) {
+            return binary_view_ = binary_view(null_on_end ? &forward_binary_batches_with_null_ : &forward_binary_batches_);
+        } else {
+            return binary_view_ = binary_view(null_on_end ? &backward_binary_batches_with_null_ : &backward_binary_batches_);
+        }
     }
 
     binary_view &forward_binary_view(bool null_on_end = false) {
@@ -568,6 +488,138 @@ class directed_graph {
     auto &tail() { return *tail_; } ///< get the tail node of the graph
 
   private:
+    void invalidate_dispatch_cache() {
+        flatten_cache_dirty_ = true;
+        dispatch_cache_dirty_ = true;
+    }
+
+    void ensure_dispatch_cache() {
+        if (!dispatch_cache_dirty_) {
+            return;
+        }
+        build_unary_batches<true>(forward_unary_batches_);
+        build_unary_batches<false>(backward_unary_batches_);
+        build_binary_batches<true, false>(forward_binary_batches_);
+        build_binary_batches<true, true>(forward_binary_batches_with_null_);
+        build_binary_batches<false, false>(backward_binary_batches_);
+        build_binary_batches<false, true>(backward_binary_batches_with_null_);
+        dispatch_cache_dirty_ = false;
+    }
+
+    template <bool forward>
+    void build_unary_batches(std::vector<std::vector<data_type *>> &batches) {
+        batches.clear();
+        if (head_ == nullptr || tail_ == nullptr) {
+            return;
+        }
+        std::ranges::for_each(nodes_, [](auto &p) { p.reset_cnt(); });
+        std::vector<node *> cur_nodes;
+        std::vector<node *> next_nodes;
+        cur_nodes.reserve(nodes_.size());
+        next_nodes.reserve(nodes_.size());
+        if constexpr (forward) {
+            cur_nodes.push_back(head_);
+        } else {
+            cur_nodes.push_back(tail_);
+        }
+        while (!cur_nodes.empty()) {
+            auto &batch = batches.emplace_back();
+            for (auto n : cur_nodes) {
+                batch.emplace_back(n->data_);
+                if constexpr (forward) {
+                    for (auto out : n->out_edges) {
+                        batch.reserve(batch.size() + out->nodes.size() + 1);
+                        for (auto &out_node : out->nodes) {
+                            batch.emplace_back(out_node.data_);
+                        }
+                        if (--out->ed->in_cnt == 0) {
+                            if (out->ed->out_edges.empty()) {
+                                batch.emplace_back(out->ed->data_);
+                            } else {
+                                next_nodes.push_back(out->ed);
+                            }
+                        }
+                    }
+                } else {
+                    for (auto in : n->in_edges) {
+                        batch.reserve(batch.size() + in->nodes.size() + 1);
+                        for (auto it = in->nodes.rbegin(); it != in->nodes.rend(); ++it) {
+                            batch.emplace_back(it->data_);
+                        }
+                        if (--in->st->out_cnt == 0) {
+                            if (in->st->in_cnt == 0) {
+                                batch.emplace_back(in->st->data_);
+                            } else {
+                                next_nodes.push_back(in->st);
+                            }
+                        }
+                    }
+                }
+            }
+            cur_nodes.swap(next_nodes);
+            next_nodes.clear();
+        }
+    }
+
+    template <bool forward, bool null_on_end>
+    void build_binary_batches(std::vector<std::vector<std::pair<data_type *, data_type *>>> &batches) {
+        batches.clear();
+        if (head_ == nullptr || tail_ == nullptr) {
+            return;
+        }
+        std::ranges::for_each(nodes_, [](auto &p) { p.reset_cnt(); });
+        std::vector<edge *> cur_edges;
+        std::vector<edge *> next_edges;
+        cur_edges.reserve(edges_.size());
+        next_edges.reserve(edges_.size());
+        if constexpr (forward) {
+            cur_edges.assign(head_->out_edges.begin(), head_->out_edges.end());
+        } else {
+            cur_edges.assign(tail_->in_edges.begin(), tail_->in_edges.end());
+        }
+        while (!cur_edges.empty()) {
+            auto &batch = batches.emplace_back();
+            for (auto e : cur_edges) {
+                if constexpr (forward) {
+                    data_type *cur = e->st->data_;
+                    batch.reserve(batch.size() + e->nodes.size() + 1);
+                    for (auto &next : e->nodes) {
+                        batch.emplace_back(cur, next.data_);
+                        cur = next.data_;
+                    }
+                    batch.emplace_back(cur, e->ed->data_);
+                    if ((--e->ed->in_cnt) == 0 && !e->ed->out_edges.empty()) {
+                        next_edges.insert(next_edges.end(), e->ed->out_edges.begin(), e->ed->out_edges.end());
+                    }
+                } else {
+                    data_type *cur = e->ed->data_;
+                    batch.reserve(batch.size() + e->nodes.size() + 1);
+                    for (auto &prev : e->nodes | std::views::reverse) {
+                        batch.emplace_back(cur, prev.data_);
+                        cur = prev.data_;
+                    }
+                    batch.emplace_back(cur, e->st->data_);
+                    if ((--e->st->out_cnt) == 0 && !e->st->in_edges.empty()) {
+                        next_edges.insert(next_edges.end(), e->st->in_edges.begin(), e->st->in_edges.end());
+                    }
+                }
+            }
+            if (next_edges.empty() && null_on_end) {
+                if constexpr (forward) {
+                    if (tail_ != nullptr) {
+                        batch.emplace_back(tail_->data_, nullptr);
+                    }
+                } else {
+                    if (head_ != nullptr) {
+                        batch.emplace_back(head_->data_, nullptr);
+                    }
+                }
+            }
+            cur_edges.swap(next_edges);
+            next_edges.clear();
+        }
+    }
+
     size_t n_jobs_ = MAX_THREADS; ///< number of jobs to run in parallel
     bool no_except_ = false;      ///< true if exceptions in parallel jobs are suppressed
     node *head_ = nullptr;        /// < head node of the graph, i.e., the first node in the graph
@@ -578,9 +630,16 @@ class directed_graph {
 
     // temporary storage for unary and binary functions
     bool flatten_cache_dirty_ = true;
+    bool dispatch_cache_dirty_ = true;
     std::vector<data_type *> unary_in_; ///< cached flattened data pointers for unary functions
     unary_view unary_view_;             ///< data pointers for unary functions
     binary_view binary_view_;           ///< data pointers for binary functions
+    std::vector<std::vector<data_type *>> forward_unary_batches_;
+    std::vector<std::vector<data_type *>> backward_unary_batches_;
+    std::vector<std::vector<std::pair<data_type *, data_type *>>> forward_binary_batches_;
+    std::vector<std::vector<std::pair<data_type *, data_type *>>> backward_binary_batches_;
+    std::vector<std::vector<std::pair<data_type *, data_type *>>> forward_binary_batches_with_null_;
+    std::vector<std::vector<std::pair<data_type *, data_type *>>> backward_binary_batches_with_null_;
     std::vector<edge *> cur_edges;      ///< edges for bfs current iteration
     std::vector<edge *> next_edges;     ///< edges for bfs next iteration
 };
