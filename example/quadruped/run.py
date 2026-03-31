@@ -430,41 +430,26 @@ def create_phase_config(step):
 
 
 stage_node = modeled.add_node(stage_node_proto)
+stage_sink = modeled.add_node()
 terminal_node = modeled.add_node(terminal_node_proto)
 
-model_nodes = [stage_node]
-model_edges = []
-segment_lengths = []
-segment_configs = []
-next_segment_config = moto.ocp.active_status_config()
+stage_edge_template = modeled.connect(stage_node, stage_sink)
+stage_edge_template.add(model.dyn)
 
-for step in range(steps):
-    phase_node = modeled.add_node(stage_node_proto.clone())
-    edge = modeled.connect(model_nodes[-1], phase_node)
-    edge.add(model.dyn)
-    model_nodes.append(phase_node)
-    model_edges.append(edge)
-    segment_lengths.append(stance_length if step == 0 else nodes_per_step)
-    segment_configs.append(next_segment_config)
-    next_segment_config = create_phase_config(step + 1)
+terminal_edge_template = modeled.connect(stage_node, terminal_node)
+terminal_edge_template.add(model.dyn)
 
-stop_node = modeled.add_node(stage_node_proto.clone())
-stop_edge = modeled.connect(model_nodes[-1], stop_node)
-stop_edge.add(model.dyn)
-model_nodes.append(stop_node)
-model_edges.append(stop_edge)
-segment_lengths.append(nodes_per_step)
-segment_configs.append(next_segment_config)
+segment_node_configs = [moto.ocp.active_status_config()]
+segment_node_configs.extend(create_phase_config(step + 1) for step in range(steps))
+segment_node_configs.append(moto.ocp.active_status_config())
 
-terminal_edge = modeled.connect(stop_node, terminal_node)
-terminal_edge.add(model.dyn)
-model_edges.append(terminal_edge)
+segment_lengths = [stance_length]
+segment_lengths.extend([nodes_per_step] * steps)
 segment_lengths.append(stance_length)
-segment_configs.append(moto.ocp.active_status_config())
 
 solver_nodes = []
-for idx, edge in enumerate(model_edges):
-    solver_node = sqp.create_node(edge, segment_configs[idx])
+for idx, config in enumerate(segment_node_configs):
+    solver_node = sqp.create_node(stage_edge_template, config)
     solver_nodes.append(g.add(solver_node))
     if idx == 0:
         g.set_head(solver_nodes[-1])
@@ -477,7 +462,7 @@ for idx, edge in enumerate(model_edges):
         )
     if idx > 0:
         solver_nodes[-1].data.prob.print_summary()
-terminal_tail = g.add(sqp.create_terminal_node(terminal_edge))
+terminal_tail = g.add(sqp.create_terminal_node(terminal_edge_template))
 g.add_edge(solver_nodes[-1], terminal_tail, segment_lengths[-1])
 g.set_tail(terminal_tail)
 
