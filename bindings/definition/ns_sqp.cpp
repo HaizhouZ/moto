@@ -215,6 +215,46 @@ void register_submodule_ns_sqp(nb::module_ &m) {
              },
              nb::arg("start"), nb::arg("node"), nb::arg("steps") = 2, nb::arg("include_st") = true, nb::arg("include_ed") = true,
              nb::rv_policy::reference, "Add a new node after the given node and connect it immediately")
+        .def("add_path",
+             [](graph_type &self,
+                std::vector<ns_sqp::node_type> nodes,
+                const std::vector<size_t> &steps,
+                bool set_head,
+                bool set_tail,
+                bool include_st,
+                bool include_ed) {
+                 if (nodes.empty()) {
+                     return nb::list{};
+                 }
+                 if (steps.size() + 1 != nodes.size()) {
+                     throw std::invalid_argument("graph.add_path expects exactly one fewer edge-length than nodes");
+                 }
+                 nb::list out;
+                 std::vector<ns_sqp::node_type *> added;
+                 added.reserve(nodes.size());
+                 for (auto &node : nodes) {
+                     auto &added_node = self.add(std::move(node));
+                     added.push_back(&added_node);
+                     out.append(nb::cast(&added_node, nb::rv_policy::reference));
+                 }
+                 if (set_head) {
+                     self.set_head(*added.front());
+                 }
+                 if (set_tail) {
+                     self.set_tail(*added.back());
+                 }
+                 for (size_t i = 1; i < added.size(); ++i) {
+                     self.connect(*added[i - 1], *added[i], {steps[i - 1], include_st, include_ed});
+                 }
+                 return out;
+             },
+             nb::arg("nodes"),
+             nb::arg("steps"),
+             nb::arg("set_head") = false,
+             nb::arg("set_tail") = false,
+             nb::arg("include_st") = true,
+             nb::arg("include_ed") = false,
+             "Add a sequence of nodes and connect adjacent pairs with the provided path lengths")
         .def("flatten_nodes", &graph_type::flatten_nodes, nb::rv_policy::reference, "Get the unordered flattened list of all nodes in the graph")
         .def_prop_ro("nodes", &graph_type::nodes, nb::rv_policy::reference, "key nodes")
         .def("forward_view", &graph_type::forward_view, nb::rv_policy::reference, "Get a forward view of the graph, i.e., a view of all nodes in forward direction")

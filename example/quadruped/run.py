@@ -447,20 +447,14 @@ segment_lengths = [stance_length]
 segment_lengths.extend([nodes_per_step] * steps)
 segment_lengths.append(stance_length)
 
-solver_nodes = []
-for idx, solver_node in enumerate(sqp.create_nodes(stage_edge_template, segment_node_configs)):
-    solver_nodes.append(g.add(solver_node))
-    if idx == 0:
-        g.set_head(solver_nodes[-1])
-    else:
-        g.add_edge(
-            solver_nodes[-2],
-            solver_nodes[-1],
-            segment_lengths[idx - 1],
-            include_ed=False,
-        )
-    if idx > 0:
-        solver_nodes[-1].data.prob.print_summary()
+solver_nodes = g.add_path(
+    sqp.create_nodes(stage_edge_template, segment_node_configs),
+    segment_lengths[:-1],
+    set_head=True,
+    include_ed=False,
+)
+for solver_node in solver_nodes[1:]:
+    solver_node.data.prob.print_summary()
 terminal_tail = g.add(sqp.create_terminal_node(terminal_edge_template))
 g.add_edge(solver_nodes[-1], terminal_tail, segment_lengths[-1])
 g.set_tail(terminal_tail)
