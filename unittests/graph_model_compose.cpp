@@ -330,6 +330,33 @@ TEST_CASE("ns_sqp create_node clones formulation templates") {
     REQUIRE(n1->problem().dim(__y) == formulation->dim(__y));
 }
 
+TEST_CASE("ns_sqp create_nodes can batch clone formulation templates") {
+    using namespace moto;
+
+    auto [x, xn] = sym::states("x_batch_template", 1);
+    auto u = sym::inputs("u_batch_template", 1);
+    const var_inarg_list dyn_args = var_list{x, xn, u};
+    const var_inarg_list x_args = var_list{x};
+
+    auto formulation = edge_ocp::create();
+    formulation->add(*dynamics(new dense_dynamics("dyn_batch_template", dyn_args, xn - x - u, approx_order::second, __dyn)));
+    formulation->add(*cost(new generic_cost("cost_batch_template", x_args, x, approx_order::second)));
+    formulation->wait_until_ready();
+
+    ns_sqp sqp;
+    std::vector<ocp::active_status_config> configs(3);
+    auto nodes = sqp.create_nodes(formulation, configs);
+
+    REQUIRE(nodes.size() == configs.size());
+    REQUIRE(nodes[0]->problem().uid() != formulation->uid());
+    REQUIRE(nodes[1]->problem().uid() != formulation->uid());
+    REQUIRE(nodes[2]->problem().uid() != formulation->uid());
+    REQUIRE(nodes[0]->problem().uid() != nodes[1]->problem().uid());
+    REQUIRE(nodes[1]->problem().uid() != nodes[2]->problem().uid());
+    REQUIRE(nodes[0]->problem().dim(__x) == formulation->dim(__x));
+    REQUIRE(nodes[2]->problem().dim(__y) == formulation->dim(__y));
+}
+
 TEST_CASE("node_ocp rejects y-dependent terms and dynamics") {
     using namespace moto;
 

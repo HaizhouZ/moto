@@ -202,6 +202,16 @@ struct ns_sqp {
         return create_node(formulation, ocp::active_status_config{});
     }
 
+    std::vector<node_type> create_nodes(const ocp_ptr_t &formulation,
+                                        const std::vector<ocp::active_status_config> &configs) {
+        std::vector<node_type> nodes;
+        nodes.reserve(configs.size());
+        for (const auto &config : configs) {
+            nodes.emplace_back(create_node(formulation, config));
+        }
+        return nodes;
+    }
+
     node_type create_node(const ocp_ptr_t &formulation, const ocp::active_status_config &config) {
         auto cloned = std::dynamic_pointer_cast<ocp>(formulation->clone_base(config));
         if (!cloned) {
@@ -213,6 +223,16 @@ struct ns_sqp {
 
     node_type create_node(const model::model_edge_ptr_t &edge_model) {
         return create_node(edge_model, ocp::active_status_config{});
+    }
+
+    std::vector<node_type> create_nodes(const model::model_edge_ptr_t &edge_model,
+                                        const std::vector<ocp::active_status_config> &configs) {
+        std::vector<node_type> nodes;
+        nodes.reserve(configs.size());
+        for (const auto &config : configs) {
+            nodes.emplace_back(create_node(edge_model, config));
+        }
+        return nodes;
     }
 
     node_type create_node(const model::model_edge_ptr_t &edge_model, const ocp::active_status_config &config) {

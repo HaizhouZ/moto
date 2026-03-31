@@ -38,6 +38,13 @@ void register_submodule_ns_sqp(nb::module_ &m) {
              nb::arg("config"),
              nb::rv_policy::reference,
              "Create a new SQP node by composing a graph_model edge and applying an active-status override")
+        .def("create_nodes",
+             [](ns_sqp &self, const model::model_edge_ptr_t &edge, const std::vector<ocp::active_status_config> &configs) {
+                 return self.create_nodes(edge, configs);
+             },
+             nb::arg("edge"),
+             nb::arg("configs"),
+             "Create multiple SQP nodes by reusing one graph_model edge template with per-node active-status overrides")
         .def("create_node",
              [](ns_sqp &self, const ocp_ptr_t &formulation) { return self.create_node(formulation); },
              nb::arg("formulation"),
@@ -51,6 +58,13 @@ void register_submodule_ns_sqp(nb::module_ &m) {
              nb::arg("config"),
              nb::rv_policy::reference,
              "Create a new node in the SQP graph from an OCP formulation template with an active-status override")
+        .def("create_nodes",
+             [](ns_sqp &self, const ocp_ptr_t &formulation, const std::vector<ocp::active_status_config> &configs) {
+                 return self.create_nodes(formulation, configs);
+             },
+             nb::arg("formulation"),
+             nb::arg("configs"),
+             "Create multiple SQP nodes from one OCP formulation template with per-node active-status overrides")
         .def("create_terminal_node",
              [](ns_sqp &self, const model::model_node_ptr_t &node) { return self.create_terminal_node(node); },
              nb::arg("node"),
