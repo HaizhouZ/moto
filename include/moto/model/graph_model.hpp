@@ -11,29 +11,24 @@
 namespace moto::model {
 
 class graph_model;
-struct node_handle;
-struct edge_handle;
+struct graph_model_state;
 
-struct model_node {
-    node_ocp_ptr_t base_prob = node_ocp::create();
-};
-
-struct model_edge {
-    size_t st = static_cast<size_t>(-1);
-    size_t ed = static_cast<size_t>(-1);
-    edge_ocp_ptr_t base_prob = edge_ocp::create();
-};
+class model_node;
+def_ptr(model_node);
+class model_edge;
+def_ptr(model_edge);
 
 struct graph_model_state {
-    std::vector<model_node> nodes;
-    std::vector<model_edge> edges;
+    std::vector<model_node_ptr_t> nodes;
+    std::vector<model_edge_ptr_t> edges;
+    bool has_incoming_edge(size_t node_id, size_t exclude_edge_id = static_cast<size_t>(-1)) const;
 
     size_t find_node_id(const node_ocp_ptr_t &prob) const {
         if (!prob) {
             throw std::runtime_error("graph_model cannot resolve a null node problem");
         }
-        const auto it = std::find_if(nodes.begin(), nodes.end(), [&](const model_node &node) {
-            return node.base_prob == prob;
+        const auto it = std::find_if(nodes.begin(), nodes.end(), [&](const model_node_ptr_t &node) {
+            return node == prob;
         });
         if (it == nodes.end()) {
             throw std::runtime_error("graph_model cannot resolve node handle from node problem");
@@ -42,38 +37,54 @@ struct graph_model_state {
     }
 };
 
-struct node_handle {
-    std::shared_ptr<graph_model_state> owner;
-    size_t id = static_cast<size_t>(-1);
+class model_node : public node_ocp {
+  protected:
+    model_node() = default;
+    model_node(const node_ocp &rhs) : node_ocp(rhs) {}
+    std::weak_ptr<graph_model_state> owner_;
+    size_t id_ = static_cast<size_t>(-1);
+    friend class graph_model;
 
-    explicit operator bool() const noexcept { return owner != nullptr && id != static_cast<size_t>(-1); }
+  public:
+    static model_node_ptr_t create(const node_ocp_ptr_t &base_prob = {}) {
+        return base_prob ? model_node_ptr_t(new model_node(*base_prob))
+                         : model_node_ptr_t(new model_node());
+    }
 
-    model_node &data() const;
-    node_ocp_ptr_t base_prob() const;
+    explicit operator bool() const noexcept { return id_ != static_cast<size_t>(-1); }
+
+    size_t id() const noexcept { return id_; }
     var_list x() const;
     var_list u() const;
-
-    node_handle &add(const shared_expr &expr);
-    node_handle &add_terminal(const shared_expr &expr);
     node_ocp_ptr_t compose() const;
     node_ocp_ptr_t compose_terminal() const;
 };
 
-struct edge_handle {
-    std::shared_ptr<graph_model_state> owner;
-    size_t id = static_cast<size_t>(-1);
+class model_edge : public edge_ocp {
+  protected:
+    model_edge() = default;
+    model_edge(const edge_ocp &rhs) : edge_ocp(rhs) {}
+    std::weak_ptr<graph_model_state> owner_;
+    size_t id_ = static_cast<size_t>(-1);
+    size_t st_id_ = static_cast<size_t>(-1);
+    size_t ed_id_ = static_cast<size_t>(-1);
+    friend class graph_model;
+    friend struct graph_model_state;
 
-    explicit operator bool() const noexcept { return owner != nullptr && id != static_cast<size_t>(-1); }
+  public:
+    static model_edge_ptr_t create(const edge_ocp_ptr_t &base_prob = {}) {
+        return base_prob ? model_edge_ptr_t(new model_edge(*base_prob))
+                         : model_edge_ptr_t(new model_edge());
+    }
 
-    model_edge &data() const;
-    edge_ocp_ptr_t base_prob() const;
-    node_handle st() const;
-    node_handle ed() const;
+    explicit operator bool() const noexcept { return id_ != static_cast<size_t>(-1); }
+
+    size_t id() const noexcept { return id_; }
+    model_node_ptr_t st() const;
+    model_node_ptr_t ed() const;
     var_list x() const;
     var_list u() const;
     var_list y() const;
-
-    edge_handle &add(const shared_expr &expr);
     edge_ocp_ptr_t compose() const;
 };
 
@@ -98,61 +109,58 @@ class graph_model {
         return out;
     }
 
-    node_handle add_node(const node_ocp_ptr_t &base_prob = node_ocp::create(),
-                         const var_inarg_list &x = {},
-                         const var_inarg_list &u = {}) {
-        model_node node;
-        node.base_prob = base_prob ? base_prob : node_ocp::create();
+    model_node_ptr_t add_node(const node_ocp_ptr_t &base_prob = node_ocp::create(),
+                              const var_inarg_list &x = {},
+                              const var_inarg_list &u = {}) {
+        auto node = model_node::create(base_prob);
         static_cast<void>(x);
         static_cast<void>(u);
-        state_->nodes.emplace_back(std::move(node));
-        return node_handle{state_, state_->nodes.size() - 1};
+        node->owner_ = state_;
+        node->id_ = state_->nodes.size();
+        state_->nodes.emplace_back(node);
+        return node;
     }
 
-    edge_handle connect(node_handle st, node_handle ed, const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
+    model_edge_ptr_t connect(const model_node_ptr_t &st,
+                             const model_node_ptr_t &ed,
+                             const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
         validate_node(st);
         validate_node(ed);
-        model_edge edge;
-        edge.st = st.id;
-        edge.ed = ed.id;
-        edge.base_prob = base_prob ? base_prob : edge_ocp::create();
-        edge.base_prob->bind_nodes(st.base_prob(), ed.base_prob());
-        state_->edges.emplace_back(std::move(edge));
-        return edge_handle{state_, state_->edges.size() - 1};
+        auto edge = model_edge::create(base_prob);
+        edge->owner_ = state_;
+        edge->id_ = state_->edges.size();
+        edge->st_id_ = st->id();
+        edge->ed_id_ = ed->id();
+        edge->bind_nodes(st, ed);
+        state_->edges.emplace_back(edge);
+        return edge;
     }
 
-    model_node &node(size_t id) { return state_->nodes.at(id); }
-    const model_node &node(size_t id) const { return state_->nodes.at(id); }
-    model_edge &edge(size_t id) { return state_->edges.at(id); }
-    const model_edge &edge(size_t id) const { return state_->edges.at(id); }
+    const model_node_ptr_t &node(size_t id) const { return state_->nodes.at(id); }
+    const model_edge_ptr_t &edge(size_t id) const { return state_->edges.at(id); }
 
-    node_ocp_ptr_t compose_terminal(node_handle node_h) const {
+    node_ocp_ptr_t compose_terminal(const model_node_ptr_t &node_h) const {
         validate_node(node_h);
-        const auto &node = state_->nodes.at(node_h.id);
-        return node_ocp::compose(node.base_prob);
+        return node_ocp::compose(node_h);
     }
 
-    edge_ocp_ptr_t compose(edge_handle edge_h) const {
+    edge_ocp_ptr_t compose(const model_edge_ptr_t &edge_h) const {
         validate_edge(edge_h);
-        const auto &edge = state_->edges.at(edge_h.id);
-        return edge.base_prob->compose();
+        return edge_h->compose();
     }
 
     size_t num_nodes() const noexcept { return state_->nodes.size(); }
     size_t num_edges() const noexcept { return state_->edges.size(); }
 
   private:
-    friend struct node_handle;
-    friend struct edge_handle;
-
-    void validate_node(node_handle node_h) const {
-        if (!node_h || node_h.owner.get() != state_.get() || node_h.id >= state_->nodes.size()) {
+    void validate_node(const model_node_ptr_t &node_h) const {
+        if (!node_h || node_h->owner_.lock().get() != state_.get() || node_h->id() >= state_->nodes.size()) {
             throw std::runtime_error("invalid graph_model node handle");
         }
     }
 
-    void validate_edge(edge_handle edge_h) const {
-        if (!edge_h || edge_h.owner.get() != state_.get() || edge_h.id >= state_->edges.size()) {
+    void validate_edge(const model_edge_ptr_t &edge_h) const {
+        if (!edge_h || edge_h->owner_.lock().get() != state_.get() || edge_h->id() >= state_->edges.size()) {
             throw std::runtime_error("invalid graph_model edge handle");
         }
     }
@@ -160,92 +168,55 @@ class graph_model {
     std::shared_ptr<graph_model_state> state_;
 };
 
-inline model_node &node_handle::data() const {
-    if (!owner || id >= owner->nodes.size()) {
-        throw std::runtime_error("invalid graph_model node handle");
+inline bool graph_model_state::has_incoming_edge(size_t node_id, size_t exclude_edge_id) const {
+    return std::any_of(edges.begin(), edges.end(), [&](const model_edge_ptr_t &edge) {
+        return edge && edge->id_ != exclude_edge_id && edge->ed_id_ == node_id;
+    });
+}
+
+inline var_list model_node::x() const {
+    return graph_model::vars_from_prob(clone_node(), __x);
+}
+
+inline var_list model_node::u() const {
+    return graph_model::vars_from_prob(clone_node(), __u);
+}
+
+inline node_ocp_ptr_t model_node::compose() const {
+    return node_ocp::compose(clone_node());
+}
+
+inline node_ocp_ptr_t model_node::compose_terminal() const {
+    return compose();
+}
+
+inline model_node_ptr_t model_edge::st() const {
+    return std::dynamic_pointer_cast<model_node>(st_node_prob());
+}
+
+inline model_node_ptr_t model_edge::ed() const {
+    return std::dynamic_pointer_cast<model_node>(ed_node_prob());
+}
+
+inline var_list model_edge::x() const {
+    return graph_model::vars_from_prob(clone_edge(), __x);
+}
+
+inline var_list model_edge::u() const {
+    return graph_model::vars_from_prob(clone_edge(), __u);
+}
+
+inline var_list model_edge::y() const {
+    return graph_model::vars_from_prob(clone_edge(), __y);
+}
+
+inline edge_ocp_ptr_t model_edge::compose() const {
+    const auto owner = owner_.lock();
+    if (!owner) {
+        throw std::runtime_error("graph_model edge is detached from its owner");
     }
-    return owner->nodes.at(id);
-}
-
-inline node_ocp_ptr_t node_handle::base_prob() const {
-    return data().base_prob;
-}
-
-inline var_list node_handle::x() const {
-    return graph_model::vars_from_prob(base_prob(), __x);
-}
-
-inline var_list node_handle::u() const {
-    return graph_model::vars_from_prob(base_prob(), __u);
-}
-
-inline node_handle &node_handle::add(const shared_expr &expr) {
-    base_prob()->add(expr);
-    return *this;
-}
-
-inline node_handle &node_handle::add_terminal(const shared_expr &expr) {
-    base_prob()->add_terminal(expr);
-    return *this;
-}
-
-inline node_ocp_ptr_t node_handle::compose() const {
-    if (!owner || id >= owner->nodes.size()) {
-        throw std::runtime_error("invalid graph_model node handle");
-    }
-    return node_ocp::compose(base_prob());
-}
-
-inline node_ocp_ptr_t node_handle::compose_terminal() const {
-    if (!owner || id >= owner->nodes.size()) {
-        throw std::runtime_error("invalid graph_model node handle");
-    }
-    graph_model g(owner);
-    return g.compose_terminal(*this);
-}
-
-inline model_edge &edge_handle::data() const {
-    if (!owner || id >= owner->edges.size()) {
-        throw std::runtime_error("invalid graph_model edge handle");
-    }
-    return owner->edges.at(id);
-}
-
-inline edge_ocp_ptr_t edge_handle::base_prob() const {
-    return data().base_prob;
-}
-
-inline node_handle edge_handle::st() const {
-    return node_handle{owner, owner->find_node_id(base_prob()->st_node_prob())};
-}
-
-inline node_handle edge_handle::ed() const {
-    return node_handle{owner, owner->find_node_id(base_prob()->ed_node_prob())};
-}
-
-inline var_list edge_handle::x() const {
-    return graph_model::vars_from_prob(base_prob(), __x);
-}
-
-inline var_list edge_handle::u() const {
-    return graph_model::vars_from_prob(base_prob(), __u);
-}
-
-inline var_list edge_handle::y() const {
-    return graph_model::vars_from_prob(base_prob(), __y);
-}
-
-inline edge_handle &edge_handle::add(const shared_expr &expr) {
-    base_prob()->add(expr);
-    return *this;
-}
-
-inline edge_ocp_ptr_t edge_handle::compose() const {
-    if (!owner || id >= owner->edges.size()) {
-        throw std::runtime_error("invalid graph_model edge handle");
-    }
-    graph_model g(owner);
-    return g.compose(*this);
+    const bool st_has_previous_edge = owner->has_incoming_edge(st_id_, id_);
+    return edge_ocp::compose(st_node_prob(), clone_edge(), ed_node_prob(), st_has_previous_edge);
 }
 
 } // namespace moto::model

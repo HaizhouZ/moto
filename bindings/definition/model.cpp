@@ -25,26 +25,23 @@ void register_submodule_model(nb::module_ &m) {
     using namespace moto;
     using namespace moto::model;
 
-    nb::class_<node_handle>(m, "model_node")
-        .def_prop_ro("id", [](const node_handle &self) { return self.id; })
-        .def_prop_ro("prob", [](const node_handle &self) { return self.base_prob(); })
-        .def_prop_ro("x", [](const node_handle &self) { return to_py_list(self.x()); })
-        .def_prop_ro("u", [](const node_handle &self) { return to_py_list(self.u()); })
-        .def("add", [](node_handle &self, shared_expr expr) -> node_handle & { return self.add(expr); }, nb::arg("expr"), nb::rv_policy::reference_internal)
-        .def("add_terminal", [](node_handle &self, shared_expr expr) -> node_handle & { return self.add_terminal(expr); }, nb::arg("expr"), nb::rv_policy::reference_internal)
-        .def("compose", &node_handle::compose)
-        .def("compose_terminal", &node_handle::compose_terminal);
+    nb::class_<model_node, node_ocp>(m, "model_node")
+        .def_prop_ro("id", &model_node::id)
+        .def_prop_ro("prob", [](const model_node_ptr_t &self) { return self; })
+        .def_prop_ro("x", [](const model_node &self) { return to_py_list(self.x()); })
+        .def_prop_ro("u", [](const model_node &self) { return to_py_list(self.u()); })
+        .def("compose", &model_node::compose)
+        .def("compose_terminal", &model_node::compose_terminal);
 
-    nb::class_<edge_handle>(m, "model_edge")
-        .def_prop_ro("id", [](const edge_handle &self) { return self.id; })
-        .def_prop_ro("prob", [](const edge_handle &self) { return self.base_prob(); })
-        .def_prop_ro("st", &edge_handle::st)
-        .def_prop_ro("ed", &edge_handle::ed)
-        .def_prop_ro("x", [](const edge_handle &self) { return to_py_list(self.x()); })
-        .def_prop_ro("u", [](const edge_handle &self) { return to_py_list(self.u()); })
-        .def_prop_ro("y", [](const edge_handle &self) { return to_py_list(self.y()); })
-        .def("add", [](edge_handle &self, shared_expr expr) -> edge_handle & { return self.add(expr); }, nb::arg("expr"), nb::rv_policy::reference_internal)
-        .def("compose", &edge_handle::compose);
+    nb::class_<model_edge, edge_ocp>(m, "model_edge")
+        .def_prop_ro("id", &model_edge::id)
+        .def_prop_ro("prob", [](const model_edge_ptr_t &self) { return self; })
+        .def_prop_ro("st", &model_edge::st)
+        .def_prop_ro("ed", &model_edge::ed)
+        .def_prop_ro("x", [](const model_edge &self) { return to_py_list(self.x()); })
+        .def_prop_ro("u", [](const model_edge &self) { return to_py_list(self.u()); })
+        .def_prop_ro("y", [](const model_edge &self) { return to_py_list(self.y()); })
+        .def("compose", &model_edge::compose);
 
     nb::class_<graph_model>(m, "graph_model")
         .def(nb::init<>())
@@ -65,14 +62,14 @@ void register_submodule_model(nb::module_ &m) {
             nb::arg("u") = nb::list{})
         .def(
             "connect",
-            [](graph_model &self, node_handle st, node_handle ed, const edge_ocp_ptr_t &prob) {
+            [](graph_model &self, const model_node_ptr_t &st, const model_node_ptr_t &ed, const edge_ocp_ptr_t &prob) {
                 return self.connect(st, ed, prob);
             },
             nb::arg("st"),
             nb::arg("ed"),
             nb::arg("prob") = edge_ocp::create())
-        .def("compose", [](graph_model &self, edge_handle edge) { return self.compose(edge); }, nb::arg("edge"))
-        .def("compose_terminal", [](graph_model &self, node_handle node) { return self.compose_terminal(node); }, nb::arg("node"))
+        .def("compose", [](graph_model &self, const model_edge_ptr_t &edge) { return self.compose(edge); }, nb::arg("edge"))
+        .def("compose_terminal", [](graph_model &self, const model_node_ptr_t &node) { return self.compose_terminal(node); }, nb::arg("node"))
         .def_prop_ro("num_nodes", &graph_model::num_nodes)
         .def_prop_ro("num_edges", &graph_model::num_edges);
 }

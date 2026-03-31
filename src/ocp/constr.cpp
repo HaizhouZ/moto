@@ -74,29 +74,6 @@ void generic_constr::finalize_impl() {
                                                      name_, has_[__x], has_[__u], has_[__y], field_hint_.is_soft));
         }
     }
-    if (in_field(field_, std::array{__eq_x, __ineq_x, __eq_x_soft})) {
-        try {
-            bool pure_x = true;
-            for (const sym &arg : in_args_) {
-                if (arg.field() == __y && in_field(arg.field(), primal_fields)) {
-                    pure_x = false;
-                    break;
-                }
-            }
-            if (pure_x) {
-                for (sym &arg : in_args_) {
-                    if (arg.field() == __x && pure_x) {
-                        fmt::print("warning: substitution in generic_constr {} of type {}: inarg {} with {}\n",
-                                   name_, field::name(field_), arg.name(), arg.name() + "_nxt");
-                        substitute(arg, arg.next());
-                    }
-                }
-            }
-        } catch (const std::exception &) {
-            fmt::print("exception during substitution");
-            throw;
-        }
-    }
     generic_func::finalize_impl();
     assert(field_ >= __dyn && field_ - __dyn < field::num_constr);
 }

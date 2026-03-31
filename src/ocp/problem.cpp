@@ -8,8 +8,8 @@ namespace moto {
 INIT_UID_(ocp_base);
 
 namespace {
-bool needs_path_state_lowering(const shared_expr &ex, bool terminal) {
-    if (terminal || !ex) {
+bool is_path_state_term(const shared_expr &ex) {
+    if (!ex) {
         return false;
     }
     const auto *func = dynamic_cast<const generic_func *>(ex.get());
@@ -17,9 +17,7 @@ bool needs_path_state_lowering(const shared_expr &ex, bool terminal) {
         return false;
     }
     const bool is_supported_field =
-        ex->field() == __cost ||
         ex->field() == __eq_x ||
-        ex->field() == __ineq_x ||
         ex->field() == __undefined;
     if (!is_supported_field) {
         return false;
@@ -36,11 +34,43 @@ bool needs_path_state_lowering(const shared_expr &ex, bool terminal) {
     return has_x;
 }
 
-void mark_path_state_term_for_lowering(const shared_expr &ex) {
-    if (auto *cost = dynamic_cast<generic_cost *>(ex.get())) {
-        cost->finalize_hint().substitute_x_to_y = true;
-    } else if (auto *constr = dynamic_cast<generic_constr *>(ex.get())) {
-        constr->set_lower_x_to_y(true);
+shared_expr lower_path_state_term_for_edge(const shared_expr &ex, const ocp_base &prob) {
+    auto lowered = ex.clone();
+    auto *func = dynamic_cast<generic_func *>(lowered.get());
+    if (func == nullptr) {
+        return lowered;
+    }
+    auto args = func->in_args();
+    for (const sym &arg : args) {
+        if (arg.field() == __x) {
+            fmt::print("lowering path-state term {} in composed ocp uid {} during edge compose: {} -> {} (x_k -> y_k-1 storage)\n",
+                       ex->name(), prob.uid(), arg.name(), arg.next()->name());
+            func->substitute_argument(arg, arg.next());
+        }
+    }
+    return lowered;
+}
+
+void append_node_terms(const node_ocp_ptr_t &node_prob,
+                       const edge_ocp_ptr_t &edge_prob,
+                       bool lower_path_state_terms,
+                       bool skip_path_state_terms) {
+    if (!node_prob) {
+        return;
+    }
+    for (size_t f = 0; f < field::num; ++f) {
+        for (const shared_expr &expr : node_prob->exprs(f)) {
+            if (is_path_state_term(expr)) {
+                if (skip_path_state_terms) {
+                    continue;
+                }
+                if (lower_path_state_terms) {
+                    edge_prob->add(lower_path_state_term_for_edge(expr, *edge_prob));
+                    continue;
+                }
+            }
+            edge_prob->add(expr);
+        }
     }
 }
 } // namespace
@@ -49,9 +79,6 @@ bool ocp_base::add_impl(expr &ex) {
     return add_impl(shared_expr(ex));
 }
 bool ocp_base::add_impl(shared_expr ex, bool terminal) {
-    if (needs_path_state_lowering(ex, terminal)) {
-        mark_path_state_term_for_lowering(ex);
-    }
     ex->prepare_add_to_ocp(terminal);
     size_t _uid = ex->uid();
     if (!contains(*ex, false)) { // skip repeated in the current problem only
@@ -242,16 +269,13 @@ edge_ocp_ptr_t edge_ocp::clone_edge(const active_status_config &config) const {
     return prob;
 }
 edge_ocp_ptr_t edge_ocp::compose(const node_ocp_ptr_t &st_node_prob,
-                                 const edge_ocp_ptr_t &edge_prob) {
+                                 const edge_ocp_ptr_t &edge_prob,
+                                 const node_ocp_ptr_t &lowered_node_prob,
+                                 bool skip_st_path_state_terms) {
     auto prob = edge_prob ? edge_prob->clone_edge() : edge_ocp::create();
     prob->bind_nodes(st_node_prob, edge_prob ? edge_prob->ed_node_prob() : node_ocp_ptr_t{});
-    if (st_node_prob) {
-        for (size_t f = 0; f < field::num; ++f) {
-            for (const shared_expr &expr : st_node_prob->exprs(f)) {
-                prob->add(expr);
-            }
-        }
-    }
+    append_node_terms(st_node_prob, prob, false, skip_st_path_state_terms);
+    append_node_terms(lowered_node_prob, prob, true, false);
     return prob;
 }
 void edge_ocp::bind_nodes(const node_ocp_ptr_t &st, const node_ocp_ptr_t &ed) {

@@ -367,22 +367,51 @@ model = pinCasadiModel(
     model, dt=dt, q_nom=q_d, dense=True, foot_frames=foot_frames, use_fwd_dyn=True
 )
 
-prob = moto.ocp.create()
-prob.add(model.dyn)
-# if full:
-#     prob.add(model.fric)
-prob.add(model.kin_constr)
-if not full:
-    prob.add(model.kin_cost)
-prob.add(model.make_tq_limit_constr())
-prob.add(model.make_joint_limit_constr())
-model.add_dt_constr_and_cost(prob, dt_nom)
-prob.add(model.get_state_cost())
-prob.add(model.get_input_cost())
-# prob.add(model.make_foot_lift_cost(lifted=True))
+def build_stage_node_prob(robot: pinCasadiModel):
+    stage_node_prob = moto.node_ocp.create()
+    # if full:
+    #     stage_node_prob.add(robot.fric)
+    stage_node_prob.add(robot.kin_constr)
+    if not full:
+        stage_node_prob.add(robot.kin_cost)
+    stage_node_prob.add(robot.make_tq_limit_constr())
+    stage_node_prob.add(robot.make_joint_limit_constr())
+    robot.add_dt_constr_and_cost(stage_node_prob, dt_nom)
+    stage_node_prob.add(robot.get_state_cost())
+    stage_node_prob.add(robot.get_input_cost())
+    # stage_node_prob.add(robot.make_foot_lift_cost(lifted=True))
+    return stage_node_prob
 
-prob_term = prob.clone()
-# prob_term.add_terminal(model.get_state_cost(terminal=True))
+
+def compose_modeled_stage_prob(
+    stage_node_prob: moto.node_ocp,
+    robot: pinCasadiModel,
+    has_previous_edge: bool,
+):
+    modeled = moto.graph_model()
+    if has_previous_edge:
+        prev_node = modeled.add_node()
+        stage_node = modeled.add_node(stage_node_prob.clone())
+        modeled.connect(prev_node, stage_node)
+    else:
+        stage_node = modeled.add_node(stage_node_prob.clone())
+
+    terminal_node = modeled.add_node(stage_node.prob.clone())
+    stage_edge = modeled.connect(stage_node, terminal_node)
+    stage_edge.add(robot.dyn)
+    return stage_edge.compose()
+
+
+def build_terminal_prob(stage_prob: moto.ocp, robot: pinCasadiModel):
+    terminal_prob = stage_prob.clone()
+    terminal_prob.add_terminal(robot.get_state_cost(terminal=True))
+    return terminal_prob
+
+
+base_stage_node_prob = build_stage_node_prob(model)
+prob_first = compose_modeled_stage_prob(base_stage_node_prob, model, False)
+prob = compose_modeled_stage_prob(base_stage_node_prob, model, True)
+prob_term = build_terminal_prob(prob, model)
 
 prob.print_summary()
 print("--" * 15)
@@ -404,7 +433,6 @@ gait_setting = {
 }
 sqp = moto.sqp(n_job=10)
 g = sqp.graph
-n0 = g.add_head(sqp.create_node(prob))
 
 
 def create_phase_problem(step):
@@ -416,32 +444,30 @@ def create_phase_problem(step):
         else:
             if gait_setting[gait][idx]:
                 constr_to_disable += [model.f_f[f]]
-    phase_prob = prob.clone(
+    phase_node_prob = base_stage_node_prob.clone(
         moto.ocp.active_status_config(deactivate_list=constr_to_disable)
     )
-    return phase_prob
+    return compose_modeled_stage_prob(phase_node_prob, model, True)
 
 
+stage_probs = [prob_first]
+stage_probs.extend(prob.clone() for _ in range(stance_length - 1))
 for step in range(steps):
-    np = g.insert_after(
-        n0 if step == 0 else n_prev,
-        sqp.create_node(create_phase_problem(step + 1)),
-        stance_length if step == 0 else nodes_per_step,
-        True,
-        False,
-    )
-    np.data.prob.print_summary()
-    n_prev = np
+    phase_prob = create_phase_problem(step + 1)
+    stage_probs.extend(phase_prob.clone() for _ in range(nodes_per_step))
+stage_probs.extend(prob.clone() for _ in range(stance_length))
 
-nstop = g.insert_after(
-    n_prev,
-    sqp.create_node(prob),
-    nodes_per_step,
-    True,
-    False,
-)
+assert len(stage_probs) == N_horizon
+
+n0 = g.add_head(sqp.create_node(stage_probs[0]))
+n_prev = n0
+for stage_prob in stage_probs[1:]:
+    n_next = g.add(sqp.create_node(stage_prob))
+    g.connect(n_prev, n_next, 2, True, True)
+    n_prev = n_next
+
 n1 = g.add_tail(sqp.create_node(prob_term))
-g.connect(nstop, n1, stance_length)
+g.connect(n_prev, n1, 2, True, True)
 # g.add_edge(n0, n1, N_horizon)
 # print(len(g.flatten_nodes()))
 # names = [[] for _ in range(len(g.flatten_nodes()))]

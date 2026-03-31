@@ -228,6 +228,12 @@ class generic_func : public expr {
     std::function<void(func_approx_data &)> hessian;  ///< hessian callback
 
     DEF_DEFAULT_CLONE(generic_func)
+
+    /// Explicit modeling-to-solver lowering hook for cloned expressions.
+    void substitute_argument(const sym &arg, const sym &rhs) {
+        field_write_guard();
+        substitute(arg, rhs);
+    }
 };
 
 } // namespace moto

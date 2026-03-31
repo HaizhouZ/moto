@@ -119,18 +119,18 @@ Core function / constraint fields:
 Important convention:
 
 - pure state-only path terms are modeled by the user on `x`
-- internally, non-terminal pure-`x` costs/constraints are lowered onto predecessor `y`
-- terminal pure-`x` terms should be added with `prob.add_terminal(...)`, which disables the `x -> y` remap for that add
-- after non-terminal finalization, do not assume `__x` Jacobians still exist for those pure state-only terms
+- terminal pure-`x` terms should be added with `prob.add_terminal(...)`
+- automatic lowering is no longer considered acceptable for costs or inequalities
+- if lowering remains in the system, it should be limited to selected `__eq_x` terms and should happen during a graph-aware compose pass, not during generic expression finalization
 
 Why this is easy to trip over:
 
 - a user may write a stage-local constraint `g(x_k)` and expect it to remain attached to the current `x`
-- internally the solver still wants many pure state-only path terms on `y_k`, which is the outgoing state copy of the previous stage
-- that means the user-facing semantics and the solver-facing storage are intentionally different
-- the remap is now keyed off the OCP insertion path:
-  - `prob.add(expr)` means path semantics and allows pure-`x -> y` lowering
-  - `prob.add_terminal(expr)` means terminal semantics and preserves pure-`x` on the terminal node
+- any hidden remap changes formulation, so it must be explicit in logs and scoped by graph topology
+- the intended semantics are edge-centric:
+  - if a node has no predecessor edge, its pure state equality terms stay on that node
+  - if a node has a predecessor edge, selected pure state equality terms may be lowered onto that predecessor edge as `y_{k-1}`-anchored solver storage
+- this decision cannot be made correctly by a local `finalize()` on a standalone expression or a standalone problem
 
 Useful field groups used throughout the solver:
 
@@ -176,11 +176,11 @@ This is a valid solver formulation, but it mixes two different concerns:
 - modeling semantics: "what variables does the user think this stage owns?"
 - solver algebra: "which state copy is most convenient for the nullspace / Riccati factorization?"
 
-Today the solver still stores some path-state algebra on `y_k`, but the intended modeling interface is:
+Today the solver still stores some path-state algebra on `y`, but the intended modeling interface is:
 
 - users write `constr.create(...)` and `cost.create(...)` normally
-- if an expression is pure-`x` and added with `prob.add(...)`, the framework may remap it internally to predecessor `y`
-- if an expression is terminal, the user writes `prob.add_terminal(...)` and that add path suppresses the remap
+- if an expression is terminal, the user writes `prob.add_terminal(...)`
+- if an expression is a path-state equality that the solver wants on predecessor storage, that should be decided during graph compose, not by hidden mutation of the authored expression
 
 That makes stage-local modeling harder than it needs to be.
 
@@ -195,8 +195,8 @@ Keep user code simple:
 This preserves the current solver backend while giving the modeling layer the semantics most users expect:
 
 - `s(x)` still means a state-only term on that stage state semantically
-- the framework is responsible for remapping non-terminal pure-`x` terms onto predecessor `y`
-- terminal terms opt out of that remap through the add path instead of through a separate create-time API
+- terminal terms remain explicit through `add_terminal(...)`
+- any path-state lowering that still exists should be a compose-time lowering pass with topology-aware logging
 
 This is much clearer than relying on implicit `x -> y` substitution in finalize.
 
@@ -205,10 +205,10 @@ This is much clearer than relying on implicit `x -> y` substitution in finalize.
 Instead of mutating the user-authored expression in `generic_constr::finalize_impl()` and `generic_cost::finalize_impl()`, add a lowering step:
 
 - user creates expression in modeling IR terms
-- `ocp::finalize()` or a new `lower_to_solver_ir()` maps it into solver fields
-- lowering decides whether a path state constraint becomes:
+- a graph-aware compose pass maps it into solver fields
+- lowering decides whether a path state equality becomes:
   - direct `__x`-anchored metadata in modeling IR
-  - or internal `__y`-anchored solver storage if the solver still wants that
+  - or internal predecessor-edge `__y`-anchored solver storage if the solver still wants that
 
 This keeps user intent intact while still supporting the current Riccati implementation.
 
@@ -231,7 +231,7 @@ struct timing_hint {
 Then:
 
 - user writes `g(x_k)` with `model_loc = path`
-- lowering may store it under `__eq_x` / `__ineq_x` and internally map it to `y_k`
+- lowering may store selected path equalities on predecessor-edge `y_{k-1}` storage
 - but the original semantic location remains available for docs, debugging, printing, and future backends
 
 #### 4. Recommended staged migration
@@ -257,6 +257,52 @@ If the solver keeps the triplet, the cleanest interpretation is:
 - `y`: predicted outgoing state copy used only by the solver
 
 That is better than presenting all three as peer modeling variables.
+
+## Model Graph And Directed Graph
+
+Recent refactor work exposed an important design constraint:
+
+- `graph_model` is currently the modeling-side graph
+- `directed_graph` is the solver/runtime graph
+- these are not interchangeable, and today they partly duplicate topology semantics
+
+The most important fact about `directed_graph` is:
+
+- the runtime timeline is effectively stored on edges, not just nodes
+- an edge may own implicit intermediate cloned nodes
+- rollout / flatten behavior is therefore edge-centric
+
+This has a direct consequence for lowering:
+
+- lowering is not fundamentally "move a term from one node to another node"
+- it is "assign a node-authored term to the correct solver edge storage"
+- in particular, the intended legacy-compatible interpretation is:
+  - authored `g(x_k)` may lower to predecessor-edge `y_{k-1}` storage
+  - not to `x_{k-1}`
+  - and not merely to the current edge's local `y_k` by a blind argument substitution
+
+Because of that, graph-aware compose should be centered on edges:
+
+- node remains the authoring surface for local costs and constraints
+- edge is the unit that receives solver-local dynamics and lowered path equalities
+- "first point does not lower, subsequent repeated points do lower" must be decided from actual predecessor-edge structure
+
+Practical implication for future work:
+
+- do not keep adding semantic policy inside `edge_ocp::compose()` alone
+- do not reintroduce finalize-time silent substitution
+- prefer a graph-level lowering/composition pass that:
+  - sees the whole modeled graph
+  - assigns eligible node-local `__eq_x` terms onto predecessor edges
+  - leaves costs, inequalities, and terminal terms untouched unless explicitly requested
+  - then materializes solver problems in a form compatible with `directed_graph`
+
+Current status of the refactor:
+
+- Python `model_node` / `model_edge` now reuse `node_ocp` / `edge_ocp` APIs through inheritance
+- compose-time logging exists for lowering and should remain explicit because it changes formulation
+- quadruped has been partially migrated to modeled composition, but full formulation parity with the pre-refactor version has not yet been restored
+- the remaining gap is likely because the final compose logic still needs to become truly graph-level and edge-centric rather than per-edge local patching
 
 In short:
 

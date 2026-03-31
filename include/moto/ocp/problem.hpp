@@ -231,7 +231,9 @@ class edge_ocp : public ocp {
     static auto create() { return std::shared_ptr<edge_ocp>(new edge_ocp()); }
     /// Compose an edge problem by injecting the start-node problem into it.
     static edge_ocp_ptr_t compose(const node_ocp_ptr_t &st_node_prob,
-                                  const edge_ocp_ptr_t &edge_prob);
+                                  const edge_ocp_ptr_t &edge_prob,
+                                  const node_ocp_ptr_t &lowered_node_prob = {},
+                                  bool skip_st_path_state_terms = false);
     /// Clone an edge problem while preserving the concrete type.
     edge_ocp_ptr_t clone_edge(const active_status_config &config = {}) const;
     /// Bind the start/end node problems referenced by this edge.
