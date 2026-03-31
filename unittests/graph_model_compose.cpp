@@ -384,7 +384,7 @@ TEST_CASE("ns_sqp create_graph can synchronize model graph paths into the intern
     }
 
     auto &flat = modeled.flatten_nodes();
-    REQUIRE(flat.size() == 6);
+    REQUIRE(flat.size() == 5);
     REQUIRE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_path_internal_terminal"));
 }
 
@@ -416,7 +416,7 @@ TEST_CASE("ns_sqp model_graph add_path returns one edge per requested interval")
     }
 
     auto &flat = modeled.flatten_nodes();
-    REQUIRE(flat.size() == 4);
+    REQUIRE(flat.size() == 3);
     REQUIRE(contains_name_prefix(expr_names(flat.front()->problem(), __cost), "cost_path_topology"));
     REQUIRE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_path_topology_terminal"));
 }
@@ -447,9 +447,39 @@ TEST_CASE("ns_sqp model_graph add_path can create key nodes from node prototypes
     }
 
     auto &flat = modeled.flatten_nodes();
-    REQUIRE(flat.size() == 3);
+    REQUIRE(flat.size() == 2);
     REQUIRE(contains_name_prefix(expr_names(flat.front()->problem(), __cost), "cost_path_proto"));
     REQUIRE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_path_proto_terminal"));
+}
+
+TEST_CASE("ns_sqp terminal u-dependent terms are ignored instead of lowered onto the final edge") {
+    using namespace moto;
+
+    auto [x, xn] = sym::states("x_terminal_u_guard", 1);
+    auto u = moto::sym::inputs("u_terminal_u_guard", 1);
+    const var_inarg_list dyn_args = var_list{x, xn, u};
+    const var_inarg_list xu_args = var_list{x, u};
+    const var_inarg_list x_args = var_list{x};
+    auto dyn = dynamics(new dense_dynamics("dyn_terminal_u_guard", dyn_args, xn - x - u, approx_order::second, __dyn));
+
+    auto stage_prob = node_ocp::create();
+    stage_prob->add(*cost(new generic_cost("cost_terminal_u_guard_stage", x_args, x, approx_order::second)));
+
+    auto terminal_prob = node_ocp::create();
+    terminal_prob->add_terminal(*cost(new generic_cost("cost_terminal_u_guard_terminal_x", x_args, x, approx_order::second)));
+    terminal_prob->add_terminal(*cost(new generic_cost("cost_terminal_u_guard_terminal_xu", xu_args, x + u, approx_order::second)));
+
+    ns_sqp sqp;
+    auto modeled = sqp.create_graph();
+    auto edges = modeled.add_path(stage_prob, terminal_prob, 2);
+    for (const auto &edge : edges) {
+        edge->add(*dyn);
+    }
+
+    auto &flat = modeled.flatten_nodes();
+    REQUIRE(flat.size() == 2);
+    REQUIRE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_terminal_u_guard_terminal_x"));
+    REQUIRE_FALSE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_terminal_u_guard_terminal_xu"));
 }
 
 TEST_CASE("node_ocp rejects y-dependent terms and dynamics") {

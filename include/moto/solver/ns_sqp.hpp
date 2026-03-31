@@ -237,6 +237,16 @@ struct ns_sqp {
         return false;
     }
 
+    static bool is_terminal_term(const shared_expr &expr) {
+        if (const auto *cost_expr = dynamic_cast<const generic_cost *>(expr.get())) {
+            return cost_expr->terminal_add();
+        }
+        if (const auto *constr_expr = dynamic_cast<const generic_constr *>(expr.get())) {
+            return constr_expr->terminal_add();
+        }
+        return false;
+    }
+
     node_type create_node(const ocp_ptr_t &formulation) {
         return create_node(formulation, ocp::active_status_config{});
     }
@@ -285,6 +295,7 @@ struct ns_sqp {
         }
         node_model->wait_until_ready();
         auto composed = node_model->compose_terminal();
+        sanitize_terminal_node(*composed);
         composed->wait_until_ready();
         return node_type(std::static_pointer_cast<ocp>(composed), mem_);
     }
@@ -306,10 +317,41 @@ struct ns_sqp {
     directed_graph<node_type> graph_;
 
   private:
+    static bool terminal_term_depends_on_u(const shared_expr &expr) {
+        if (!is_terminal_term(expr)) {
+            return false;
+        }
+        const auto *func = dynamic_cast<const generic_func *>(expr.get());
+        if (func == nullptr) {
+            return false;
+        }
+        return std::any_of(func->in_args().begin(), func->in_args().end(), [](const sym &arg) {
+            return arg.field() == __u;
+        });
+    }
+
+    static void sanitize_terminal_node(node_ocp &prob) {
+        ocp::active_status_config config;
+        for (size_t f = 0; f < field::num; ++f) {
+            for (const shared_expr &expr : prob.exprs(f)) {
+                if (!terminal_term_depends_on_u(expr)) {
+                    continue;
+                }
+                fmt::print(stderr,
+                           "warning: terminal node term {} depends on u and cannot be applied on a terminal x/u node; ignoring it\n",
+                           expr->name());
+                config.deactivate_list.emplace_back(*expr);
+            }
+        }
+        if (!config.empty()) {
+            prob.update_active_status(config, false);
+        }
+    }
+
     static edge_ocp_ptr_t compose_regular_edge(const model::model_edge_ptr_t &edge_model,
                                                const ocp::active_status_config &config = {},
-                                               bool materialize_sink_cost = false,
-                                               bool include_terminal_sink_cost = false) {
+                                               bool materialize_sink_terms = false,
+                                               bool include_terminal_sink_terms = false) {
         if (!edge_model) {
             throw std::runtime_error("ns_sqp::compose_regular_edge received a null model_edge");
         }
@@ -326,46 +368,66 @@ struct ns_sqp {
             edge_model->clone_edge(),
             node_ocp_ptr_t{},
             false);
-        if (materialize_sink_cost) {
+        if (materialize_sink_terms) {
             if (const auto &sink_node = edge_model->ed_node_prob()) {
-                for (const shared_expr &expr : sink_node->exprs(__cost)) {
-                    const auto *cost_expr = dynamic_cast<const generic_cost *>(expr.get());
-                    const auto *func = dynamic_cast<const generic_func *>(expr.get());
-                    if (cost_expr == nullptr || func == nullptr) {
+                for (size_t f = 0; f < field::num; ++f) {
+                    if (f == __dyn) {
                         continue;
                     }
-                    if (cost_expr->terminal_add() && !include_terminal_sink_cost) {
-                        continue;
-                    }
-                    bool pure_state_cost = true;
-                    bool needs_lower_to_y = false;
-                    for (const sym &arg : func->in_args()) {
-                        if (arg.field() == __x) {
-                            needs_lower_to_y = true;
+                    for (const shared_expr &expr : sink_node->exprs(f)) {
+                        const bool terminal_term = is_terminal_term(expr);
+                        const auto *cost_expr = dynamic_cast<const generic_cost *>(expr.get());
+                        const auto *constr_expr = dynamic_cast<const generic_constr *>(expr.get());
+                        const auto *func = dynamic_cast<const generic_func *>(expr.get());
+                        if ((cost_expr == nullptr && constr_expr == nullptr) || func == nullptr) {
                             continue;
                         }
-                        if (arg.field() == __y || arg.field() == __p) {
+                        if (terminal_term && !include_terminal_sink_terms) {
                             continue;
                         }
-                        pure_state_cost = false;
-                        break;
-                    }
-                    if (!pure_state_cost) {
-                        continue;
-                    }
-                    auto lowered = expr.clone();
-                    auto *lowered_func = dynamic_cast<generic_func *>(lowered.get());
-                    if (lowered_func == nullptr) {
-                        continue;
-                    }
-                    if (needs_lower_to_y) {
-                        for (const sym &arg : lowered_func->in_args()) {
+                        bool lowerable_term = true;
+                        bool needs_lower_to_y = false;
+                        bool has_u = false;
+                        for (const sym &arg : func->in_args()) {
                             if (arg.field() == __x) {
-                                lowered_func->substitute_argument(arg, arg.next());
+                                needs_lower_to_y = true;
+                                continue;
+                            }
+                            if (arg.field() == __y || arg.field() == __p) {
+                                continue;
+                            }
+                            if (arg.field() == __u) {
+                                has_u = true;
+                            }
+                            lowerable_term = false;
+                            break;
+                        }
+                        if (terminal_term && has_u) {
+                            fmt::print(stderr,
+                                       "warning: terminal node term {} depends on u and cannot be lowered onto the final edge; ignoring it\n",
+                                       expr->name());
+                            continue;
+                        }
+                        if (!terminal_term && f != __cost) {
+                            continue;
+                        }
+                        if (!lowerable_term) {
+                            continue;
+                        }
+                        auto lowered = expr.clone();
+                        auto *lowered_func = dynamic_cast<generic_func *>(lowered.get());
+                        if (lowered_func == nullptr) {
+                            continue;
+                        }
+                        if (needs_lower_to_y) {
+                            for (const sym &arg : lowered_func->in_args()) {
+                                if (arg.field() == __x) {
+                                    lowered_func->substitute_argument(arg, arg.next());
+                                }
                             }
                         }
+                        composed->add(lowered);
                     }
-                    composed->add(lowered);
                 }
             }
         }
@@ -400,8 +462,10 @@ struct ns_sqp {
         for (size_t edge_id = 0; edge_id < num_edges; ++edge_id) {
             const auto &edge_h = state->edges.at(edge_id);
             const bool sink_without_outgoing = outgoing_edge_ids.at(edge_h->ed()->id()).empty();
-            const bool sink_has_terminal = has_terminal_terms(edge_h->ed_node_prob());
-            const auto formulation = compose_regular_edge(edge_h, {}, sink_without_outgoing && !sink_has_terminal);
+            const auto formulation = compose_regular_edge(edge_h,
+                                                          {},
+                                                          sink_without_outgoing,
+                                                          sink_without_outgoing);
             auto &solver_node = graph_.add(node_type(std::static_pointer_cast<ocp>(formulation), mem_));
             solver_nodes_by_edge[edge_id] = &solver_node;
         }
@@ -422,20 +486,10 @@ struct ns_sqp {
                 continue;
             }
             if (outgoing.empty()) {
-                const auto &sink_node = state->nodes.at(node_id);
-                if (has_terminal_terms(sink_node)) {
-                    if (incoming.size() != 1) {
-                        throw std::runtime_error("ns_sqp::ensure_realized currently expects a unique incoming edge for a terminal sink model node");
-                    }
-                    auto &tail = graph_.add(create_terminal_node(state->edges.at(incoming.front())));
-                    graph_.connect(*solver_nodes_by_edge.at(incoming.front()), tail, {2, true, true});
-                    tail_candidates.push_back(&tail);
-                } else {
-                    if (incoming.size() != 1) {
-                        throw std::runtime_error("ns_sqp::ensure_realized currently expects a unique incoming edge for a non-terminal sink model node");
-                    }
-                    tail_candidates.push_back(solver_nodes_by_edge.at(incoming.front()));
+                if (incoming.size() != 1) {
+                    throw std::runtime_error("ns_sqp::ensure_realized currently expects a unique incoming edge for a sink model node");
                 }
+                tail_candidates.push_back(solver_nodes_by_edge.at(incoming.front()));
                 continue;
             }
             for (const size_t incoming_edge_id : incoming) {

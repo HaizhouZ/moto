@@ -219,7 +219,8 @@ Important compose rules that are now covered by unit tests:
 
 - intermediate node `__eq_x` lowers onto the predecessor edge `y`
 - sink non-terminal pure-`x` costs may materialize onto the incoming edge `y`
-- explicit terminal costs stay on the terminal node / terminal tail
+- terminal sink `x`-only terms are now merged into the final real edge problem
+- terminal sink terms depending on `u` are invalid for the final `x/u` terminal node semantics; they emit a warning and are ignored
 - codegen finalization of lowered/materialized clones must be serialized or uniquely named to avoid `.so` races
 
 ## SQP Graph Ownership
@@ -240,6 +241,13 @@ for edge in modeled.add_path(stage_node, terminal_node, N):
 
 flat_nodes = modeled.flatten_nodes()
 ```
+
+Important current path semantics:
+
+- `graph_model.add_path(start, end, N)` means exactly `N` graph edges
+- there is no hidden terminal tail edge anymore
+- if `end` carries terminal `x`-only terms, they are materialized onto the final edge/node realization
+- users should not compensate with `N - 1` just because the sink is terminal
 
 Current division of responsibility:
 
