@@ -263,6 +263,7 @@ ns_sqp::line_search_action ns_sqp::sqp_iter(filter_linesearch_data &ls, kkt_info
 }
 
 ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
+    ensure_realized();
     settings.verbose = verbose;
     graph_.no_except() = settings.no_except;
     settings.n_worker = graph_.n_jobs();

@@ -375,24 +375,81 @@ TEST_CASE("ns_sqp create_graph can synchronize model graph paths into the intern
 
     ns_sqp sqp;
     auto modeled = sqp.create_graph();
-    auto n0 = modeled.add_node(stage_prob);
-    auto n1 = modeled.add_node();
-    auto nt = modeled.add_node(terminal_prob);
-    auto stage_edge = modeled.connect(n0, n1);
-    stage_edge->add(*dyn);
-    auto terminal_edge = modeled.connect(n0, nt);
-    terminal_edge->add(*dyn);
-
-    std::vector<ocp::active_status_config> configs(3);
-    std::vector<size_t> steps{2, 2};
-
-    auto nodes = modeled.add_path(stage_edge, configs, steps, true, false, true, false);
-    REQUIRE(nodes.size() == 3);
-    auto &tail = modeled.append_terminal(terminal_edge, *nodes.back(), 2);
+    auto n0 = modeled.create_node(stage_prob);
+    auto nt = modeled.create_node(terminal_prob);
+    auto stage_edges = modeled.add_path(n0, nt, 5);
+    REQUIRE(stage_edges.size() == 5);
+    for (const auto &edge : stage_edges) {
+        edge->add(*dyn);
+    }
 
     auto &flat = modeled.flatten_nodes();
     REQUIRE(flat.size() == 6);
-    REQUIRE(contains_name_prefix(expr_names(tail->problem(), __cost), "cost_path_internal_terminal"));
+    REQUIRE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_path_internal_terminal"));
+}
+
+TEST_CASE("ns_sqp model_graph add_path returns one edge per requested interval") {
+    using namespace moto;
+
+    auto [x, xn] = sym::states("x_path_topology", 1);
+    auto u = moto::sym::inputs("u_path_topology", 1);
+    const var_inarg_list dyn_args = var_list{x, xn, u};
+    const var_inarg_list x_args = var_list{x};
+    auto dyn = dynamics(new dense_dynamics("dyn_path_topology", dyn_args, xn - x - u, approx_order::second, __dyn));
+
+    auto stage_prob = node_ocp::create();
+    stage_prob->add(*cost(new generic_cost("cost_path_topology", x_args, x, approx_order::second)));
+
+    auto terminal_prob = node_ocp::create();
+    terminal_prob->add_terminal(*cost(new generic_cost("cost_path_topology_terminal", x_args, x, approx_order::second)));
+
+    ns_sqp sqp;
+    auto modeled = sqp.create_graph();
+    auto n0 = modeled.create_node(stage_prob);
+    auto nt = modeled.create_node(terminal_prob);
+    auto stage_edges = modeled.add_path(n0, nt, 3);
+    REQUIRE(stage_edges.size() == 3);
+    REQUIRE(modeled.num_edges() == 3);
+    REQUIRE(modeled.num_nodes() == 4);
+    for (const auto &edge : stage_edges) {
+        edge->add(*dyn);
+    }
+
+    auto &flat = modeled.flatten_nodes();
+    REQUIRE(flat.size() == 4);
+    REQUIRE(contains_name_prefix(expr_names(flat.front()->problem(), __cost), "cost_path_topology"));
+    REQUIRE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_path_topology_terminal"));
+}
+
+TEST_CASE("ns_sqp model_graph add_path can create key nodes from node prototypes") {
+    using namespace moto;
+
+    auto [x, xn] = sym::states("x_path_proto", 1);
+    auto u = moto::sym::inputs("u_path_proto", 1);
+    const var_inarg_list dyn_args = var_list{x, xn, u};
+    const var_inarg_list x_args = var_list{x};
+    auto dyn = dynamics(new dense_dynamics("dyn_path_proto", dyn_args, xn - x - u, approx_order::second, __dyn));
+
+    auto stage_prob = node_ocp::create();
+    stage_prob->add(*cost(new generic_cost("cost_path_proto", x_args, x, approx_order::second)));
+
+    auto terminal_prob = node_ocp::create();
+    terminal_prob->add_terminal(*cost(new generic_cost("cost_path_proto_terminal", x_args, x, approx_order::second)));
+
+    ns_sqp sqp;
+    auto modeled = sqp.create_graph();
+    auto stage_edges = modeled.add_path(stage_prob, terminal_prob, 2);
+    REQUIRE(stage_edges.size() == 2);
+    REQUIRE(modeled.num_edges() == 2);
+    REQUIRE(modeled.num_nodes() == 3);
+    for (const auto &edge : stage_edges) {
+        edge->add(*dyn);
+    }
+
+    auto &flat = modeled.flatten_nodes();
+    REQUIRE(flat.size() == 3);
+    REQUIRE(contains_name_prefix(expr_names(flat.front()->problem(), __cost), "cost_path_proto"));
+    REQUIRE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_path_proto_terminal"));
 }
 
 TEST_CASE("node_ocp rejects y-dependent terms and dynamics") {

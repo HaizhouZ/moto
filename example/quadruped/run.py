@@ -394,8 +394,7 @@ def build_stage_node_prob(robot: pinCasadiModel):
 
 
 stage_node_proto = build_stage_node_prob(model)
-terminal_node_proto = moto.node_ocp.create()
-terminal_node_proto.add_terminal(model.get_state_cost(terminal=True))
+terminal_node_proto = stage_node_proto.clone()
 
 N_horizon = 100
 
@@ -428,43 +427,34 @@ def create_phase_config(step):
     return moto.ocp.active_status_config(deactivate_list=constr_to_disable)
 
 
-stage_node = modeled.add_node(stage_node_proto)
-stage_sink = modeled.add_node()
-terminal_node = modeled.add_node(terminal_node_proto)
-
-stage_edge_template = modeled.connect(stage_node, stage_sink)
-stage_edge_template.add(model.dyn)
-
-terminal_edge_template = modeled.connect(stage_node, terminal_node)
-terminal_edge_template.add(model.dyn)
-
-segment_node_configs = [moto.ocp.active_status_config()]
-segment_node_configs.extend(create_phase_config(step + 1) for step in range(steps))
-segment_node_configs.append(moto.ocp.active_status_config())
-
+stage_node = modeled.create_node(stage_node_proto)
 segment_lengths = [stance_length]
 segment_lengths.extend([nodes_per_step] * steps)
-segment_lengths.append(stance_length)
+segment_lengths.append(stance_length - 1)
 
-solver_nodes = modeled.add_path(
-    stage_edge_template,
-    segment_node_configs,
-    segment_lengths[:-1],
-    set_head=True,
-    include_ed=False,
-)
-for solver_node in solver_nodes[1:]:
-    solver_node.data.prob.print_summary()
-terminal_tail = modeled.append_terminal(terminal_edge_template, solver_nodes[-1], segment_lengths[-1])
+
+def add_segment(start, end_prob, n_edges):
+    edges = modeled.add_path(start, end_prob, n_edges)
+    for edge in edges:
+        edge.add(model.dyn)
+    return edges[-1].ed
+
+
+current_node = stage_node
+for step, n_edges in enumerate(segment_lengths[:-2], start=1):
+    current_node = add_segment(current_node, stage_node_proto.clone(create_phase_config(step)), n_edges)
+current_node = add_segment(current_node, stage_node_proto.clone(), segment_lengths[-2])
+add_segment(current_node, terminal_node_proto, segment_lengths[-1])
 
 if os.getenv("MOTO_DEBUG_SOLVER_PROBS"):
+    flat_nodes = modeled.flatten_nodes()
     print("--" * 15)
     print("Terminal node prototype:")
     terminal_node_proto.print_summary()
     print("Head solver node problem:")
-    solver_nodes[0].data.prob.print_summary()
+    flat_nodes[0].prob.print_summary()
     print("Tail solver node problem:")
-    terminal_tail.data.prob.print_summary()
+    flat_nodes[-1].prob.print_summary()
 
 if os.getenv("MOTO_DEBUG_GRAPH_LAYOUT"):
     print("Flattened solver graph layout:")

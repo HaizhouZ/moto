@@ -204,6 +204,17 @@ class directed_graph {
         return added;
     }
 
+    void clear() {
+        flatten_cache_dirty_ = true;
+        unary_in_.clear();
+        unary_view_.clear();
+        binary_view_.clear();
+        edges_.clear();
+        nodes_.clear();
+        head_ = nullptr;
+        tail_ = nullptr;
+    }
+
     template <typename... Args>
     node &emplace_after(node &st, edge_options opts, Args &&...args) {
         node &n = emplace(std::forward<Args>(args)...);

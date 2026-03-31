@@ -160,7 +160,10 @@ void generic_func::finalize_impl() {
     }
     if (gen_.task_ && !gen_.task_->sx_output.is_empty()) {
         utils::cs_codegen::task &t = *gen_.task_;
-        t.func_name = fmt::format("{}_uid{}", name_, uid());
+        // Function names are already modeled to be stable identifiers.
+        // Reusing the same generated symbol name lets finalized clones share
+        // the compiled artifact instead of forcing a rebuild per expr uid.
+        t.func_name = name_;
         t.sx_inputs = in_args_;
         t.gen_eval = order_ >= approx_order::zero;
         t.gen_jacobian = order_ >= approx_order::first;

@@ -224,7 +224,7 @@ Important compose rules that are now covered by unit tests:
 
 ## SQP Graph Ownership
 
-`ns_sqp` still owns an internal [`directed_graph`](/home/harper/Documents/moto/include/moto/core/directed_graph.hpp), but user-facing code no longer needs to wire it manually.
+`ns_sqp` still owns an internal [`directed_graph`](/home/harper/Documents/moto/include/moto/core/directed_graph.hpp), but user-facing modeling should go through [`graph_model`](/home/harper/Documents/moto/include/moto/model/graph_model.hpp), not through solver graph helpers.
 
 Current recommended Python flow:
 
@@ -232,45 +232,34 @@ Current recommended Python flow:
 sqp = moto.sqp(n_job=10)
 modeled = sqp.create_graph()
 
-stage_node = modeled.add_node(stage_node_proto)
-stage_sink = modeled.add_node()
-terminal_node = modeled.add_node(terminal_node_proto)
+stage_node = modeled.create_node(stage_node_proto)
+terminal_node = modeled.create_node(terminal_node_proto)
 
-stage_edge = modeled.connect(stage_node, stage_sink)
-stage_edge.add(model.dyn)
+for edge in modeled.add_path(stage_node, terminal_node, N):
+    edge.add(model.dyn)
 
-terminal_edge = modeled.connect(stage_node, terminal_node)
-terminal_edge.add(model.dyn)
-
-solver_nodes = modeled.add_path(
-    stage_edge,
-    configs,
-    steps,
-    set_head=True,
-    include_ed=False,
-)
-terminal_tail = modeled.append_terminal(terminal_edge, solver_nodes[-1], tail_steps)
+flat_nodes = modeled.flatten_nodes()
 ```
 
-This is the current compromise design:
+Current division of responsibility:
 
-- user edits only the `model_graph`
-- `ns_sqp::model_graph` forwards graph-building actions into `ns_sqp`'s internal directed graph
-- the raw `sqp.graph` object is still present for compatibility, but new code should prefer `sqp.create_graph()`
+- user edits only the `graph_model`
+- `sqp.create_graph()` returns a solver-aware graph model that reuses `graph_model`'s API and only adds solver realization via `flatten_nodes()`
+- the raw `sqp.graph` object still exists as solver storage / traversal infrastructure, but it is not the recommended modeling surface
 
-Useful `ns_sqp` entry points:
+Useful modeling entry points:
 
 - `create_graph()`
-- `create_node(...)`
-- `create_nodes(...)`
-- `add_path(...)`
-- `append_terminal(...)`
-- `flatten_nodes()`
+- `graph_model.create_node(...)`
+- `graph_model.connect(...)`
+- `graph_model.add_path(...)`
+- `graph_model.flatten_nodes()`
 
 The design direction is:
 
-- keep `directed_graph` internal to the solver
+- keep `directed_graph` as internal solver storage / traversal machinery
 - let `graph_model` / `sqp.create_graph()` be the public modeling surface
+- avoid re-exposing graph-building APIs directly on `ns_sqp`
 
 ## X-U-Y Triplet Formulation
 
@@ -285,7 +274,7 @@ This is a valid solver formulation, but it mixes two different concerns:
 - modeling semantics: "what variables does the user think this stage owns?"
 - solver algebra: "which state copy is most convenient for the nullspace / Riccati factorization?"
 
-Today the solver still stores some path-state algebra on `y`, but the intended modeling interface is:
+Today the solver still stores some path-state algebra on `y`, but the modeling interface should stay simpler:
 
 - users write `constr.create(...)` and `cost.create(...)` normally
 - if an expression is terminal, the user writes `prob.add_terminal(...)`
@@ -293,23 +282,14 @@ Today the solver still stores some path-state algebra on `y`, but the intended m
 
 That makes stage-local modeling harder than it needs to be.
 
-### Current Recommended Usage
-
-Keep user code simple:
+Recommended usage:
 
 - define node-local expressions on `node_ocp`
-- add path terms with `prob.add(...)`
+- create graph nodes with `graph_model.create_node(...)`
+- connect or expand paths with `graph_model.connect(...)` / `graph_model.add_path(...)`
 - add terminal terms with `prob.add_terminal(...)`
 - put `__dyn` and any `y`-dependent terms only on `edge_ocp` / `model_edge`
 - build solver paths through `sqp.create_graph()`
-
-This preserves the current solver backend while giving the modeling layer the semantics most users expect:
-
-- `s(x)` still means a state-only term on that stage state semantically
-- terminal terms remain explicit through `add_terminal(...)`
-- any path-state lowering that still exists should be a compose-time lowering pass with topology-aware logging
-
-This is much clearer than relying on implicit `x -> y` substitution in finalize.
 
 ### Best Internal Mental Model
 
@@ -325,17 +305,12 @@ That is better than presenting all three as peer modeling variables.
 
 Recent refactor work exposed an important design constraint:
 
-- `graph_model` is currently the modeling-side graph
+- `graph_model` is the modeling-side graph
 - `directed_graph` is the solver/runtime graph
-- these are not interchangeable, and today they partly duplicate topology semantics
+- graph-building APIs should live on `graph_model`
+- `ns_sqp` should consume / realize a graph model rather than mirror its topology API
 
-The most important fact about `directed_graph` is:
-
-- the runtime timeline is effectively stored on edges, not just nodes
-- an edge may own implicit intermediate cloned nodes
-- rollout / flatten behavior is therefore edge-centric
-
-This has a direct consequence for lowering:
+This matters for lowering:
 
 - lowering is not fundamentally "move a term from one node to another node"
 - it is "assign a node-authored term to the correct solver edge storage"

@@ -29,6 +29,7 @@ def_ptr(model_edge);
 struct graph_model_state {
     std::vector<model_node_ptr_t> nodes;
     std::vector<model_edge_ptr_t> edges;
+    bool dirty = true;
     bool has_incoming_edge(size_t node_id, size_t exclude_edge_id = static_cast<size_t>(-1)) const;
     bool has_outgoing_edge(size_t node_id, size_t exclude_edge_id = static_cast<size_t>(-1)) const;
 
@@ -63,8 +64,6 @@ class model_node : public node_ocp {
     explicit operator bool() const noexcept { return id_ != static_cast<size_t>(-1); }
 
     size_t id() const noexcept { return id_; }
-    var_list x() const;
-    var_list u() const;
     node_ocp_ptr_t compose() const;
     node_ocp_ptr_t compose_terminal() const;
 };
@@ -91,9 +90,6 @@ class model_edge : public edge_ocp {
     size_t id() const noexcept { return id_; }
     model_node_ptr_t st() const;
     model_node_ptr_t ed() const;
-    var_list x() const;
-    var_list u() const;
-    var_list y() const;
     edge_ocp_ptr_t compose() const;
 };
 
@@ -118,16 +114,23 @@ class graph_model {
         return out;
     }
 
-    model_node_ptr_t add_node(const node_ocp_ptr_t &base_prob = node_ocp::create(),
-                              const var_inarg_list &x = {},
-                              const var_inarg_list &u = {}) {
+    model_node_ptr_t create_node(const node_ocp_ptr_t &base_prob = node_ocp::create(),
+                                 const var_inarg_list &x = {},
+                                 const var_inarg_list &u = {}) {
         auto node = model_node::create(base_prob);
         static_cast<void>(x);
         static_cast<void>(u);
+        state_->dirty = true;
         node->owner_ = state_;
         node->id_ = state_->nodes.size();
         state_->nodes.emplace_back(node);
         return node;
+    }
+
+    model_node_ptr_t add_node(const node_ocp_ptr_t &base_prob = node_ocp::create(),
+                              const var_inarg_list &x = {},
+                              const var_inarg_list &u = {}) {
+        return create_node(base_prob, x, u);
     }
 
     model_edge_ptr_t connect(const model_node_ptr_t &st,
@@ -135,6 +138,7 @@ class graph_model {
                              const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
         validate_node(st);
         validate_node(ed);
+        state_->dirty = true;
         auto edge = model_edge::create(base_prob);
         edge->owner_ = state_;
         edge->id_ = state_->edges.size();
@@ -143,6 +147,47 @@ class graph_model {
         edge->bind_nodes(st, ed);
         state_->edges.emplace_back(edge);
         return edge;
+    }
+
+    std::vector<model_edge_ptr_t> add_path(const model_node_ptr_t &st,
+                                           const model_node_ptr_t &ed,
+                                           size_t n_edges,
+                                           const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
+        validate_node(st);
+        validate_node(ed);
+        if (n_edges == 0) {
+            throw std::invalid_argument("graph_model::add_path expects n_edges >= 1");
+        }
+        std::vector<model_edge_ptr_t> edges;
+        edges.reserve(n_edges);
+        auto prev = st;
+        for (size_t i = 0; i < n_edges; ++i) {
+            auto next = (i + 1 == n_edges) ? ed : create_node(prev->clone_node());
+            edges.emplace_back(connect(prev, next, base_prob));
+            prev = next;
+        }
+        return edges;
+    }
+
+    std::vector<model_edge_ptr_t> add_path(const model_node_ptr_t &st,
+                                           const node_ocp_ptr_t &ed_prob,
+                                           size_t n_edges,
+                                           const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
+        return add_path(st, create_node(ed_prob), n_edges, base_prob);
+    }
+
+    std::vector<model_edge_ptr_t> add_path(const node_ocp_ptr_t &st_prob,
+                                           const model_node_ptr_t &ed,
+                                           size_t n_edges,
+                                           const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
+        return add_path(create_node(st_prob), ed, n_edges, base_prob);
+    }
+
+    std::vector<model_edge_ptr_t> add_path(const node_ocp_ptr_t &st_prob,
+                                           const node_ocp_ptr_t &ed_prob,
+                                           size_t n_edges,
+                                           const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
+        return add_path(create_node(st_prob), create_node(ed_prob), n_edges, base_prob);
     }
 
     const model_node_ptr_t &node(size_t id) const { return state_->nodes.at(id); }
@@ -213,6 +258,7 @@ class graph_model {
 
     size_t num_nodes() const noexcept { return state_->nodes.size(); }
     size_t num_edges() const noexcept { return state_->edges.size(); }
+    const std::shared_ptr<graph_model_state> &state_ptr() const noexcept { return state_; }
 
   private:
     void validate_node(const model_node_ptr_t &node_h) const {
@@ -242,14 +288,6 @@ inline bool graph_model_state::has_outgoing_edge(size_t node_id, size_t exclude_
     });
 }
 
-inline var_list model_node::x() const {
-    return graph_model::vars_from_prob(clone_node(), __x);
-}
-
-inline var_list model_node::u() const {
-    return graph_model::vars_from_prob(clone_node(), __u);
-}
-
 inline node_ocp_ptr_t model_node::compose() const {
     return node_ocp::compose(clone_node());
 }
@@ -264,18 +302,6 @@ inline model_node_ptr_t model_edge::st() const {
 
 inline model_node_ptr_t model_edge::ed() const {
     return std::dynamic_pointer_cast<model_node>(ed_node_prob());
-}
-
-inline var_list model_edge::x() const {
-    return graph_model::vars_from_prob(clone_edge(), __x);
-}
-
-inline var_list model_edge::u() const {
-    return graph_model::vars_from_prob(clone_edge(), __u);
-}
-
-inline var_list model_edge::y() const {
-    return graph_model::vars_from_prob(clone_edge(), __y);
 }
 
 inline edge_ocp_ptr_t model_edge::compose() const {

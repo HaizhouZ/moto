@@ -40,16 +40,6 @@ void register_submodule_ns_sqp(nb::module_ &m) {
              nb::arg("edge"),
              nb::arg("configs"),
              "Create multiple SQP nodes by reusing one graph_model edge template with per-node active-status overrides")
-        .def("add_path",
-             static_cast<std::vector<ns_sqp::node_type *> (ns_sqp::*)(const model::model_edge_ptr_t &, const std::vector<ocp::active_status_config> &, const std::vector<size_t> &, bool, bool, bool, bool)>(&ns_sqp::add_path),
-             nb::arg("edge"),
-             nb::arg("configs"),
-             nb::arg("steps"),
-             nb::arg("set_head") = false,
-             nb::arg("set_tail") = false,
-             nb::arg("include_st") = true,
-             nb::arg("include_ed") = false,
-             "Create and insert a connected SQP path from one graph_model edge template")
         .def("create_node",
              static_cast<ns_sqp::node_type (ns_sqp::*)(const ocp_ptr_t &)>(&ns_sqp::create_node),
              nb::arg("formulation"),
@@ -64,16 +54,6 @@ void register_submodule_ns_sqp(nb::module_ &m) {
              nb::arg("formulation"),
              nb::arg("configs"),
              "Create multiple SQP nodes from one OCP formulation template with per-node active-status overrides")
-        .def("add_path",
-             static_cast<std::vector<ns_sqp::node_type *> (ns_sqp::*)(const ocp_ptr_t &, const std::vector<ocp::active_status_config> &, const std::vector<size_t> &, bool, bool, bool, bool)>(&ns_sqp::add_path),
-             nb::arg("formulation"),
-             nb::arg("configs"),
-             nb::arg("steps"),
-             nb::arg("set_head") = false,
-             nb::arg("set_tail") = false,
-             nb::arg("include_st") = true,
-             nb::arg("include_ed") = false,
-             "Create and insert a connected SQP path from one OCP formulation template")
         .def("create_terminal_node",
              static_cast<ns_sqp::node_type (ns_sqp::*)(const model::model_node_ptr_t &)>(&ns_sqp::create_terminal_node),
              nb::arg("node"),
@@ -82,68 +62,10 @@ void register_submodule_ns_sqp(nb::module_ &m) {
              static_cast<ns_sqp::node_type (ns_sqp::*)(const model::model_edge_ptr_t &)>(&ns_sqp::create_terminal_node),
              nb::arg("edge"),
              "Create a terminal SQP node by composing a graph_model edge and materializing terminal sink costs");
-    sqp.def("append_terminal",
-            static_cast<ns_sqp::node_type & (ns_sqp::*)(const model::model_edge_ptr_t &, ns_sqp::node_type &, size_t, bool, bool, bool)>(&ns_sqp::append_terminal),
-            nb::arg("edge"),
-            nb::arg("start"),
-            nb::arg("steps") = 2,
-            nb::arg("include_st") = true,
-            nb::arg("include_ed") = true,
-            nb::arg("set_tail") = true,
-            nb::rv_policy::reference,
-            "Append a terminal node built from a graph_model edge and connect it from an existing SQP node")
-        .def("append_terminal",
-             static_cast<ns_sqp::node_type & (ns_sqp::*)(const model::model_node_ptr_t &, ns_sqp::node_type &, size_t, bool, bool, bool)>(&ns_sqp::append_terminal),
-             nb::arg("node"),
-             nb::arg("start"),
-             nb::arg("steps") = 2,
-             nb::arg("include_st") = true,
-             nb::arg("include_ed") = true,
-             nb::arg("set_tail") = true,
-             nb::rv_policy::reference,
-             "Append a terminal node built from a graph_model terminal node and connect it from an existing SQP node")
-        .def("append_terminal",
-             static_cast<ns_sqp::node_type & (ns_sqp::*)(const ocp_ptr_t &, ns_sqp::node_type &, size_t, bool, bool, bool)>(&ns_sqp::append_terminal),
-             nb::arg("formulation"),
-             nb::arg("start"),
-             nb::arg("steps") = 2,
-             nb::arg("include_st") = true,
-             nb::arg("include_ed") = true,
-             nb::arg("set_tail") = true,
-             nb::rv_policy::reference,
-             "Append a terminal node built from an OCP formulation template and connect it from an existing SQP node")
-        .def("flatten_nodes", &ns_sqp::flatten_nodes, nb::rv_policy::reference, "Get the flattened SQP node sequence from the internal directed graph");
+    sqp.def("flatten_nodes", &ns_sqp::flatten_nodes, nb::rv_policy::reference, "Get the flattened SQP node sequence from the internal directed graph");
 
-    nb::class_<ns_sqp::model_graph>(sqp, "model_graph")
-        .def("add_node",
-             static_cast<model::model_node_ptr_t (ns_sqp::model_graph::*)(const node_ocp_ptr_t &)>(&ns_sqp::model_graph::add_node),
-             nb::arg("prob") = node_ocp::create())
-        .def("connect",
-             static_cast<model::model_edge_ptr_t (ns_sqp::model_graph::*)(const model::model_node_ptr_t &, const model::model_node_ptr_t &, const edge_ocp_ptr_t &)>(&ns_sqp::model_graph::connect),
-             nb::arg("st"),
-             nb::arg("ed"),
-             nb::arg("prob") = edge_ocp::create())
-        .def("add_path",
-             static_cast<std::vector<ns_sqp::node_type *> (ns_sqp::model_graph::*)(const model::model_edge_ptr_t &, const std::vector<ocp::active_status_config> &, const std::vector<size_t> &, bool, bool, bool, bool)>(&ns_sqp::model_graph::add_path),
-             nb::arg("edge"),
-             nb::arg("configs"),
-             nb::arg("steps"),
-             nb::arg("set_head") = false,
-             nb::arg("set_tail") = false,
-             nb::arg("include_st") = true,
-             nb::arg("include_ed") = false)
-        .def("append_terminal",
-             static_cast<ns_sqp::node_type & (ns_sqp::model_graph::*)(const model::model_edge_ptr_t &, ns_sqp::node_type &, size_t, bool, bool, bool)>(&ns_sqp::model_graph::append_terminal),
-             nb::arg("edge"),
-             nb::arg("start"),
-             nb::arg("steps") = 2,
-             nb::arg("include_st") = true,
-             nb::arg("include_ed") = true,
-             nb::arg("set_tail") = true,
-             nb::rv_policy::reference)
-        .def("flatten_nodes", &ns_sqp::model_graph::flatten_nodes, nb::rv_policy::reference)
-        .def_prop_ro("num_nodes", &ns_sqp::model_graph::num_nodes)
-        .def_prop_ro("num_edges", &ns_sqp::model_graph::num_edges);
+    nb::class_<ns_sqp::model_graph, model::graph_model>(sqp, "model_graph")
+        .def("flatten_nodes", &ns_sqp::model_graph::flatten_nodes, nb::rv_policy::reference);
 
     nb::class_<ns_sqp::ipm_config>(sqp, "ipm_config")
         .def_rw("mu0", &ns_sqp::ipm_config::mu0, "Initial barrier parameter for the IPM solver")
@@ -271,27 +193,29 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def("set_head", &graph_type::set_head, nb::arg("node"), nb::rv_policy::reference)
         .def("set_tail", &graph_type::set_tail, nb::arg("node"), nb::rv_policy::reference)
         .def("connect",
-             [](graph_type &self, ns_sqp::node_type &start, ns_sqp::node_type &to, size_t steps, bool include_st, bool include_ed) {
-                 self.connect(start, to, {steps, include_st, include_ed});
+             [](graph_type &self, ns_sqp::node_type &start, ns_sqp::node_type &to, size_t steps) {
+                 self.connect(start, to, {steps, true, true});
              },
-             nb::arg("start"), nb::arg("to"), nb::arg("steps") = 2, nb::arg("include_st") = true, nb::arg("include_ed") = true,
+             nb::arg("start"), nb::arg("to"), nb::arg("steps") = 2,
              "Connect two existing nodes with a path of the requested length")
-        .def("add_edge", &graph_type::add_edge, nb::arg("start"), nb::arg("to"), nb::arg("steps") = 1, nb::arg("include_st") = true, nb::arg("include_ed") = true,
+        .def("add_edge",
+             [](graph_type &self, ns_sqp::node_type &start, ns_sqp::node_type &to, size_t steps) {
+                 self.add_edge(start, to, steps, true, true);
+             },
+             nb::arg("start"), nb::arg("to"), nb::arg("steps") = 2,
              "Add an edge from one node to another with a given number of steps")
         .def("insert_after",
-             [](graph_type &self, ns_sqp::node_type &start, ns_sqp::node_type next, size_t steps, bool include_st, bool include_ed) -> ns_sqp::node_type & {
-                 return self.insert_after(start, std::move(next), {steps, include_st, include_ed});
+             [](graph_type &self, ns_sqp::node_type &start, ns_sqp::node_type next, size_t steps) -> ns_sqp::node_type & {
+                 return self.insert_after(start, std::move(next), {steps, true, true});
              },
-             nb::arg("start"), nb::arg("node"), nb::arg("steps") = 2, nb::arg("include_st") = true, nb::arg("include_ed") = true,
+             nb::arg("start"), nb::arg("node"), nb::arg("steps") = 2,
              nb::rv_policy::reference, "Add a new node after the given node and connect it immediately")
         .def("add_path",
              [](graph_type &self,
                 std::vector<ns_sqp::node_type> nodes,
                 const std::vector<size_t> &steps,
                 bool set_head,
-                bool set_tail,
-                bool include_st,
-                bool include_ed) {
+                bool set_tail) {
                  if (nodes.empty()) {
                      return std::vector<ns_sqp::node_type *>{};
                  }
@@ -311,7 +235,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
                      self.set_tail(*added.back());
                  }
                  for (size_t i = 1; i < added.size(); ++i) {
-                     self.connect(*added[i - 1], *added[i], {steps[i - 1], include_st, include_ed});
+                     self.connect(*added[i - 1], *added[i], {steps[i - 1], true, false});
                  }
                  return added;
              },
@@ -319,8 +243,6 @@ void register_submodule_ns_sqp(nb::module_ &m) {
              nb::arg("steps"),
              nb::arg("set_head") = false,
              nb::arg("set_tail") = false,
-             nb::arg("include_st") = true,
-             nb::arg("include_ed") = false,
              "Add a sequence of nodes and connect adjacent pairs with the provided path lengths")
         .def("flatten_nodes", &graph_type::flatten_nodes, nb::rv_policy::reference, "Get the unordered flattened list of all nodes in the graph")
         .def_prop_ro("nodes", &graph_type::nodes, nb::rv_policy::reference, "key nodes")

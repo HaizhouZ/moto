@@ -48,39 +48,33 @@ u_box = moto.constr.create(
 ).cast_ineq()
 
 
-def build_modeled_ocp():
-    model = moto.graph_model()
-    stage_node = model.add_node()
-    stage_node.add(running_cost)
-    stage_node.add(u_box)
-
-    terminal_node = model.add_node(stage_node.prob.clone())
-    stage_edge = model.connect(stage_node, terminal_node)
-    stage_edge.add(dyn)
-
-    stage_prob = stage_edge.compose()
-    terminal_prob = stage_prob.clone()
-    terminal_prob.add_terminal(terminal_cost)
-    return stage_prob, terminal_prob
-
-
 def build_sqp():
-    stage_prob, terminal_prob = build_modeled_ocp()
-
-    print("Stage problem")
-    stage_prob.print_summary()
-    print("Terminal problem")
-    terminal_prob.print_summary()
-
     sqp = moto.sqp(n_job=1)
-    graph = sqp.graph
-    head = graph.set_head(graph.add(sqp.create_node(stage_prob)))
-    tail = graph.set_tail(graph.add(sqp.create_node(terminal_prob)))
-    graph.add_edge(head, tail, N)
+    modeled = sqp.create_graph()
+
+    stage_node_prob = moto.node_ocp.create()
+    stage_node_prob.add(running_cost)
+    stage_node_prob.add(u_box)
+
+    terminal_node_prob = stage_node_prob.clone()
+    terminal_node_prob.add_terminal(terminal_cost)
+
+    stage_node = modeled.create_node(stage_node_prob)
+    terminal_node = modeled.create_node(terminal_node_prob)
+
+    for edge in modeled.add_path(stage_node, terminal_node, N):
+        edge.add(dyn)
+
+    flat_nodes = modeled.flatten_nodes()
+    print("Stage problem")
+    flat_nodes[0].prob.print_summary()
+    print("Terminal problem")
+    flat_nodes[-1].prob.print_summary()
 
     def init(node: moto.sqp.data_type):
         node.value[x] = x0.copy()
-        node.value[xn] = x0.copy()
+        if node.prob.dim(moto.field___y) > 0:
+            node.value[xn] = x0.copy()
 
     sqp.apply_forward(init)
     sqp.settings.prim_tol = 1e-8

@@ -259,6 +259,22 @@ void run(
         }
     }
 
+    if (std::getenv("MOTO_DEBUG_CODEGEN") != nullptr) {
+        if (needs_compile) {
+            fmt::print("[codegen] compile {}\n", func_name);
+            fmt::print("  json_exists={} so_exists={} force_recompile={}\n",
+                       json_exists, so_exists, force_recompile);
+            fmt::print("  md5_current={} compile_flag_current={}\n", md5_hash, compile_flag);
+            if (json_exists && so_exists && !data.is_discarded() && !data.empty()) {
+                std::string md5_prev = data.contains("md5") ? std::string(data["md5"]) : "<missing>";
+                std::string flag_prev = data.contains("compile_flag") ? std::string(data["compile_flag"]) : "<missing>";
+                fmt::print("  md5_prev={} compile_flag_prev={}\n", md5_prev, flag_prev);
+            }
+        } else {
+            fmt::print("[codegen] reuse {}\n", func_name);
+        }
+    }
+
     if (needs_compile) {
         std::string eigen_include_path = "/usr/include/eigen3"; // Adjust if necessary
         std::string compile_command = "g++ -shared -fPIC -std=c++20 " + compile_flag +

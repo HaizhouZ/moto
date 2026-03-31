@@ -2,6 +2,7 @@
 #define __NS_SQP__
 
 #include <moto/model/graph_model.hpp>
+#include <moto/ocp/constr.hpp>
 #include <moto/ocp/impl/shooting_node.hpp>
 #include <moto/solver/ipm/ipm_config.hpp>
 #include <moto/solver/linesearch_config.hpp>
@@ -194,46 +195,15 @@ struct ns_sqp {
     ~ns_sqp() = default;
     using node_type = impl::shooting_node<data>;
 
-    struct model_graph {
-        explicit model_graph(ns_sqp &owner) : owner_(&owner) {}
-
-        model::model_node_ptr_t add_node(const node_ocp_ptr_t &base_prob = node_ocp::create()) {
-            return modeled_.add_node(base_prob);
-        }
-
-        model::model_edge_ptr_t connect(const model::model_node_ptr_t &st,
-                                        const model::model_node_ptr_t &ed,
-                                        const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
-            return modeled_.connect(st, ed, base_prob);
-        }
-
-        std::vector<node_type *> add_path(const model::model_edge_ptr_t &edge_model,
-                                          const std::vector<ocp::active_status_config> &configs,
-                                          const std::vector<size_t> &steps,
-                                          bool set_head = false,
-                                          bool set_tail = false,
-                                          bool include_st = true,
-                                          bool include_ed = false) {
-            return owner_->add_path(edge_model, configs, steps, set_head, set_tail, include_st, include_ed);
-        }
-
-        node_type &append_terminal(const model::model_edge_ptr_t &edge_model,
-                                   node_type &start,
-                                   size_t steps = 2,
-                                   bool include_st = true,
-                                   bool include_ed = true,
-                                   bool set_tail = true) {
-            return owner_->append_terminal(edge_model, start, steps, include_st, include_ed, set_tail);
-        }
+    struct model_graph : public model::graph_model {
+        model_graph(ns_sqp &owner, std::shared_ptr<model::graph_model_state> state)
+            : model::graph_model(std::move(state)), owner_(&owner) {}
 
         std::vector<data *> &flatten_nodes() {
+            owner_->ensure_realized(state_ptr());
             return owner_->graph_.flatten_nodes();
         }
 
-        size_t num_nodes() const noexcept { return modeled_.num_nodes(); }
-        size_t num_edges() const noexcept { return modeled_.num_edges(); }
-
-        model::graph_model modeled_;
         ns_sqp *owner_;
     };
 
@@ -242,7 +212,29 @@ struct ns_sqp {
     }
 
     model_graph create_graph() {
-        return model_graph(*this);
+        active_model_graph_ = std::make_shared<model::graph_model_state>();
+        return model_graph(*this, active_model_graph_);
+    }
+
+    static bool has_terminal_terms(const node_ocp_ptr_t &node_prob) {
+        if (!node_prob) {
+            return false;
+        }
+        for (size_t f = 0; f < field::num; ++f) {
+            for (const shared_expr &expr : node_prob->exprs(f)) {
+                if (const auto *cost_expr = dynamic_cast<const generic_cost *>(expr.get())) {
+                    if (cost_expr->terminal_add()) {
+                        return true;
+                    }
+                }
+                if (const auto *constr_expr = dynamic_cast<const generic_constr *>(expr.get())) {
+                    if (constr_expr->terminal_add()) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     node_type create_node(const ocp_ptr_t &formulation) {
@@ -283,46 +275,15 @@ struct ns_sqp {
     }
 
     node_type create_node(const model::model_edge_ptr_t &edge_model, const ocp::active_status_config &config) {
-        if (!edge_model) {
-            throw std::runtime_error("ns_sqp::create_node received a null model_edge");
-        }
-        auto st_node_prob = edge_model->st_node_prob();
-        if (!config.empty()) {
-            st_node_prob = st_node_prob ? st_node_prob->clone_node(config) : node_ocp_ptr_t{};
-        }
-        auto composed = edge_ocp::compose(
-            st_node_prob,
-            edge_model->clone_edge(),
-            node_ocp_ptr_t{},
-            false);
-        composed->wait_until_ready();
+        auto composed = compose_regular_edge(edge_model, config, false);
         return node_type(std::static_pointer_cast<ocp>(composed), mem_);
-    }
-
-    std::vector<node_type *> add_path(const ocp_ptr_t &formulation,
-                                      const std::vector<ocp::active_status_config> &configs,
-                                      const std::vector<size_t> &steps,
-                                      bool set_head = false,
-                                      bool set_tail = false,
-                                      bool include_st = true,
-                                      bool include_ed = false) {
-        return graph_.add_path(create_nodes(formulation, configs), steps, set_head, set_tail, include_st, include_ed);
-    }
-
-    std::vector<node_type *> add_path(const model::model_edge_ptr_t &edge_model,
-                                      const std::vector<ocp::active_status_config> &configs,
-                                      const std::vector<size_t> &steps,
-                                      bool set_head = false,
-                                      bool set_tail = false,
-                                      bool include_st = true,
-                                      bool include_ed = false) {
-        return graph_.add_path(create_nodes(edge_model, configs), steps, set_head, set_tail, include_st, include_ed);
     }
 
     node_type create_terminal_node(const model::model_node_ptr_t &node_model) {
         if (!node_model) {
             throw std::runtime_error("ns_sqp::create_terminal_node received a null model_node");
         }
+        node_model->wait_until_ready();
         auto composed = node_model->compose_terminal();
         composed->wait_until_ready();
         return node_type(std::static_pointer_cast<ocp>(composed), mem_);
@@ -332,96 +293,12 @@ struct ns_sqp {
         if (!edge_model) {
             throw std::runtime_error("ns_sqp::create_terminal_node received a null model_edge");
         }
-        auto composed = edge_ocp::compose(
-            edge_model->st_node_prob(),
-            edge_model->clone_edge(),
-            node_ocp_ptr_t{},
-            false);
-        if (const auto &terminal_node = edge_model->ed_node_prob()) {
-            for (const shared_expr &expr : terminal_node->exprs(__cost)) {
-                const auto *cost_expr = dynamic_cast<const generic_cost *>(expr.get());
-                const auto *func = dynamic_cast<const generic_func *>(expr.get());
-                if (cost_expr == nullptr || func == nullptr) {
-                    continue;
-                }
-                bool pure_state_cost = true;
-                bool needs_lower_to_y = false;
-                for (const sym &arg : func->in_args()) {
-                    if (arg.field() == __x) {
-                        needs_lower_to_y = true;
-                        continue;
-                    }
-                    if (arg.field() == __y || arg.field() == __p) {
-                        continue;
-                    }
-                    pure_state_cost = false;
-                    break;
-                }
-                if (!pure_state_cost) {
-                    continue;
-                }
-                auto lowered = expr.clone();
-                auto *lowered_func = dynamic_cast<generic_func *>(lowered.get());
-                if (lowered_func == nullptr) {
-                    continue;
-                }
-                if (needs_lower_to_y) {
-                    for (const sym &arg : lowered_func->in_args()) {
-                        if (arg.field() == __x) {
-                            lowered_func->substitute_argument(arg, arg.next());
-                        }
-                    }
-                }
-                composed->add(lowered);
-            }
-        }
-        composed->wait_until_ready();
+        auto composed = compose_regular_edge(edge_model, {}, true, true);
         return node_type(std::static_pointer_cast<ocp>(composed), mem_);
     }
 
-    node_type &append_terminal(const ocp_ptr_t &formulation,
-                               node_type &start,
-                               size_t steps = 2,
-                               bool include_st = true,
-                               bool include_ed = true,
-                               bool set_tail = true) {
-        auto &tail = graph_.add(create_node(formulation));
-        graph_.connect(start, tail, {steps, include_st, include_ed});
-        if (set_tail) {
-            graph_.set_tail(tail);
-        }
-        return tail;
-    }
-
-    node_type &append_terminal(const model::model_node_ptr_t &node_model,
-                               node_type &start,
-                               size_t steps = 2,
-                               bool include_st = true,
-                               bool include_ed = true,
-                               bool set_tail = true) {
-        auto &tail = graph_.add(create_terminal_node(node_model));
-        graph_.connect(start, tail, {steps, include_st, include_ed});
-        if (set_tail) {
-            graph_.set_tail(tail);
-        }
-        return tail;
-    }
-
-    node_type &append_terminal(const model::model_edge_ptr_t &edge_model,
-                               node_type &start,
-                               size_t steps = 2,
-                               bool include_st = true,
-                               bool include_ed = true,
-                               bool set_tail = true) {
-        auto &tail = graph_.add(create_terminal_node(edge_model));
-        graph_.connect(start, tail, {steps, include_st, include_ed});
-        if (set_tail) {
-            graph_.set_tail(tail);
-        }
-        return tail;
-    }
-
     std::vector<data *> &flatten_nodes() {
+        ensure_realized();
         return graph_.flatten_nodes();
     }
 
@@ -429,7 +306,160 @@ struct ns_sqp {
     directed_graph<node_type> graph_;
 
   private:
+    static edge_ocp_ptr_t compose_regular_edge(const model::model_edge_ptr_t &edge_model,
+                                               const ocp::active_status_config &config = {},
+                                               bool materialize_sink_cost = false,
+                                               bool include_terminal_sink_cost = false) {
+        if (!edge_model) {
+            throw std::runtime_error("ns_sqp::compose_regular_edge received a null model_edge");
+        }
+        edge_model->wait_until_ready();
+        auto st_node_prob = edge_model->st_node_prob();
+        if (st_node_prob) {
+            st_node_prob->wait_until_ready();
+        }
+        if (!config.empty()) {
+            st_node_prob = st_node_prob ? st_node_prob->clone_node(config) : node_ocp_ptr_t{};
+        }
+        auto composed = edge_ocp::compose(
+            st_node_prob,
+            edge_model->clone_edge(),
+            node_ocp_ptr_t{},
+            false);
+        if (materialize_sink_cost) {
+            if (const auto &sink_node = edge_model->ed_node_prob()) {
+                for (const shared_expr &expr : sink_node->exprs(__cost)) {
+                    const auto *cost_expr = dynamic_cast<const generic_cost *>(expr.get());
+                    const auto *func = dynamic_cast<const generic_func *>(expr.get());
+                    if (cost_expr == nullptr || func == nullptr) {
+                        continue;
+                    }
+                    if (cost_expr->terminal_add() && !include_terminal_sink_cost) {
+                        continue;
+                    }
+                    bool pure_state_cost = true;
+                    bool needs_lower_to_y = false;
+                    for (const sym &arg : func->in_args()) {
+                        if (arg.field() == __x) {
+                            needs_lower_to_y = true;
+                            continue;
+                        }
+                        if (arg.field() == __y || arg.field() == __p) {
+                            continue;
+                        }
+                        pure_state_cost = false;
+                        break;
+                    }
+                    if (!pure_state_cost) {
+                        continue;
+                    }
+                    auto lowered = expr.clone();
+                    auto *lowered_func = dynamic_cast<generic_func *>(lowered.get());
+                    if (lowered_func == nullptr) {
+                        continue;
+                    }
+                    if (needs_lower_to_y) {
+                        for (const sym &arg : lowered_func->in_args()) {
+                            if (arg.field() == __x) {
+                                lowered_func->substitute_argument(arg, arg.next());
+                            }
+                        }
+                    }
+                    composed->add(lowered);
+                }
+            }
+        }
+        composed->wait_until_ready();
+        return composed;
+    }
+
+    void ensure_realized() {
+        ensure_realized(active_model_graph_);
+    }
+
+    void ensure_realized(const std::shared_ptr<model::graph_model_state> &state) {
+        if (!state || !state->dirty) {
+            return;
+        }
+        graph_.clear();
+        const size_t num_nodes = state->nodes.size();
+        const size_t num_edges = state->edges.size();
+        std::vector<node_type *> solver_nodes_by_edge(num_edges, nullptr);
+        std::vector<std::vector<size_t>> incoming_edge_ids(num_nodes);
+        std::vector<std::vector<size_t>> outgoing_edge_ids(num_nodes);
+
+        for (size_t edge_id = 0; edge_id < num_edges; ++edge_id) {
+            const auto &edge_h = state->edges.at(edge_id);
+            if (!edge_h) {
+                throw std::runtime_error("ns_sqp::ensure_realized encountered a null model_edge");
+            }
+            incoming_edge_ids.at(edge_h->ed()->id()).push_back(edge_id);
+            outgoing_edge_ids.at(edge_h->st()->id()).push_back(edge_id);
+        }
+
+        for (size_t edge_id = 0; edge_id < num_edges; ++edge_id) {
+            const auto &edge_h = state->edges.at(edge_id);
+            const bool sink_without_outgoing = outgoing_edge_ids.at(edge_h->ed()->id()).empty();
+            const bool sink_has_terminal = has_terminal_terms(edge_h->ed_node_prob());
+            const auto formulation = compose_regular_edge(edge_h, {}, sink_without_outgoing && !sink_has_terminal);
+            auto &solver_node = graph_.add(node_type(std::static_pointer_cast<ocp>(formulation), mem_));
+            solver_nodes_by_edge[edge_id] = &solver_node;
+        }
+
+        std::vector<node_type *> head_candidates;
+        std::vector<node_type *> tail_candidates;
+        for (size_t node_id = 0; node_id < num_nodes; ++node_id) {
+            const auto &incoming = incoming_edge_ids.at(node_id);
+            const auto &outgoing = outgoing_edge_ids.at(node_id);
+            if (incoming.empty() && outgoing.empty()) {
+                continue;
+            }
+            if (incoming.empty()) {
+                if (outgoing.size() != 1) {
+                    throw std::runtime_error("ns_sqp::ensure_realized currently expects a unique outgoing edge from the source model node");
+                }
+                head_candidates.push_back(solver_nodes_by_edge.at(outgoing.front()));
+                continue;
+            }
+            if (outgoing.empty()) {
+                const auto &sink_node = state->nodes.at(node_id);
+                if (has_terminal_terms(sink_node)) {
+                    if (incoming.size() != 1) {
+                        throw std::runtime_error("ns_sqp::ensure_realized currently expects a unique incoming edge for a terminal sink model node");
+                    }
+                    auto &tail = graph_.add(create_terminal_node(state->edges.at(incoming.front())));
+                    graph_.connect(*solver_nodes_by_edge.at(incoming.front()), tail, {2, true, true});
+                    tail_candidates.push_back(&tail);
+                } else {
+                    if (incoming.size() != 1) {
+                        throw std::runtime_error("ns_sqp::ensure_realized currently expects a unique incoming edge for a non-terminal sink model node");
+                    }
+                    tail_candidates.push_back(solver_nodes_by_edge.at(incoming.front()));
+                }
+                continue;
+            }
+            for (const size_t incoming_edge_id : incoming) {
+                for (const size_t outgoing_edge_id : outgoing) {
+                    graph_.connect(*solver_nodes_by_edge.at(incoming_edge_id),
+                                   *solver_nodes_by_edge.at(outgoing_edge_id),
+                                   {2, true, true});
+                }
+            }
+        }
+
+        if (head_candidates.size() != 1) {
+            throw std::runtime_error("ns_sqp::ensure_realized expects a single source path in model_graph");
+        }
+        if (tail_candidates.size() != 1) {
+            throw std::runtime_error("ns_sqp::ensure_realized expects a single sink path in model_graph");
+        }
+        graph_.set_head(*head_candidates.front());
+        graph_.set_tail(*tail_candidates.front());
+        state->dirty = false;
+    }
+
     std::unique_ptr<solver_type> riccati_solver_ = nullptr;
+    std::shared_ptr<model::graph_model_state> active_model_graph_;
 
     template <typename worker_type>
     struct stacked_workers : public std::vector<worker_type> {
