@@ -91,7 +91,7 @@ class pinCasadiModel(cpin.Model):
             for f in foot_frames
         ]
         self.F_f = [self.foot_jacs[i].T @ self.f_f[i] for i in range(len(foot_frames))]
-        self.z_f = cs.vcat([self.data.oMf[f].translation[2] for f in self.foot_idx])
+        self.v_f, self.z_f = self.compute_foot_kinematics(self.q_stack, self.v_stack)
 
         self.kin_constr = [
             self.make_foot_kin_constr(i, soft) for i in range(len(foot_frames))
@@ -188,19 +188,29 @@ class pinCasadiModel(cpin.Model):
             )
         # return moto.dense_dynamics(self.name + "_fb_fd", args, cs.vcat(out))
 
-    def make_foot_kin_constr(self, i: int, soft: bool = False):
-        self.v_f = cs.hcat(
+    def compute_foot_kinematics(self, q_stack, v_stack):
+        data = self.createData()
+        cpin.forwardKinematics(self, data, q_stack, v_stack)
+        cpin.computeJointJacobians(self, data)
+        cpin.updateFramePlacements(self, data)
+        v_f = cs.hcat(
             [
-                cpin.getFrameVelocity(
-                    self, self.data, f, pin.LOCAL_WORLD_ALIGNED
-                ).linear
+                cpin.getFrameVelocity(self, data, f, pin.LOCAL_WORLD_ALIGNED).linear
                 for f in self.foot_idx
             ]
         )
-        res = cs.vcat([self.v_f[:2, i], self.k_f * self.z_f[i] + self.v_f[2, i]])
+        z_f = cs.vcat([data.oMf[f].translation[2] for f in self.foot_idx])
+        return v_f, z_f
+
+    def make_foot_kin_constr(self, i: int, soft: bool = False):
+        pos_args = self.pos_args
+        vel_args = self.vel_args
+        v_f = self.v_f
+        z_f = self.z_f
+        res = cs.vcat([v_f[:2, i], self.k_f * z_f[i] + v_f[2, i]])
         c = moto.constr.create(
             f"kin_{self.foot_frames[i]}" + ("_soft" if soft else ""),
-            self.pos_args + self.vel_args + [self.k_f],  # self.z_clip],
+            pos_args + vel_args + [self.k_f],  # self.z_clip],
             # [self.q, k_f, *active_foot, z_clip],
             # cs.vcat([self.v_f[:2, i], self.k_f * cs.tanh(self.z_f[i]) * self.z_clip + self.v_f[2, i]]) * self.active_foot[i],
             res,  # if not soft else cs.vcat([-res, res]),
@@ -218,16 +228,16 @@ class pinCasadiModel(cpin.Model):
         return soft_c
 
     def make_foot_kin_cost(self, i: int):
+        pos_args = self.pos_args
+        z_f = self.z_f
         pos_cost = (
             moto.cost.create(
-                f"kin_pos_cost_{self.foot_frames[i]}", self.pos_args, self.z_f[i]
+                f"kin_pos_cost_{self.foot_frames[i]}", pos_args, z_f[i]
             )
             .set_gauss_newton(
                 moto.sym.params(f"W_kin_{self.foot_frames[i]}", 1, default_val=1e3)
             )
-            .as_terminal()
         )
-        pos_cost.name = pos_cost.name.replace("_terminal", "")
         pos_cost.enable_if_all([self.f_f[i]])
         return pos_cost
 
@@ -290,12 +300,14 @@ class pinCasadiModel(cpin.Model):
             prob.add(timing_cost)
 
     def get_state_cost(self, terminal: bool = False):
-        q_nom_res = self.q_stack - self.q_nom
+        q_stack = self.q_stack
+        v_stack = self.v_stack
+        q_nom_res = q_stack - self.q_nom
         state_cost = (
             100.0 * cs.sumsqr(q_nom_res[: self.nqb])
             + 1 * cs.sumsqr(q_nom_res[self.nqb :])
-            + 1.0 * cs.sumsqr(self.v_stack[:6])
-            + 0.01 * cs.sumsqr(self.v_stack[6:])
+            + 1.0 * cs.sumsqr(v_stack[:6])
+            + 0.01 * cs.sumsqr(v_stack[6:])
         )
         state_args = self.pos_args + self.vel_args
         cost = moto.cost.create("c", state_args + [self.q_nom], state_cost)
@@ -367,26 +379,23 @@ model = pinCasadiModel(
     model, dt=dt, q_nom=q_d, dense=True, foot_frames=foot_frames, use_fwd_dyn=True
 )
 
-prob = moto.ocp.create()
-prob.add(model.dyn)
-# if full:
-#     prob.add(model.fric)
-prob.add(model.kin_constr)
-if not full:
-    prob.add(model.kin_cost)
-# prob.add(model.zf_constr)
-# prob.add(model.make_tq_limit_constr())
-# prob.add(model.make_joint_limit_constr())
-model.add_dt_constr_and_cost(prob, dt_nom)
-prob.add(model.get_state_cost())
-prob.add(model.get_input_cost())
-# prob.add(model.make_foot_lift_cost(lifted=True))
+def build_stage_node_prob(robot: pinCasadiModel):
+    stage_node_prob = moto.node_ocp.create()
+    # if full:
+    #     stage_node_prob.add(robot.fric)
+    stage_node_prob.add(robot.kin_constr)
+    if not full:
+        stage_node_prob.add(robot.kin_cost)
+    robot.add_dt_constr_and_cost(stage_node_prob, dt_nom)
+    stage_node_prob.add(robot.get_state_cost())
+    stage_node_prob.add(robot.get_input_cost())
+    # stage_node_prob.add(robot.make_foot_lift_cost(lifted=True))
+    return stage_node_prob
 
-prob_term = prob.clone()
-prob_term.add(model.get_state_cost(terminal=True))
 
-prob.print_summary()
-print("--" * 15)
+stage_node_proto = build_stage_node_prob(model)
+terminal_node_proto = moto.node_ocp.create()
+terminal_node_proto.add_terminal(model.get_state_cost(terminal=True))
 
 N_horizon = 100
 
@@ -405,36 +414,93 @@ gait_setting = {
 }
 sqp = moto.sqp(n_job=10)
 g = sqp.graph
-n0 = g.set_head(g.add(sqp.create_node(prob)))
+modeled = moto.graph_model()
 
 
-def create_phase_problem(step):
+def create_phase_config(step):
     constr_to_disable = []
     for idx, f in enumerate([0, 3, 1, 2]):
         if step % 2 == 0:
             if not gait_setting[gait][idx]:
-                constr_to_disable += [model.f_f[f]]
+                constr_to_disable.append(model.f_f[f])
         else:
             if gait_setting[gait][idx]:
-                constr_to_disable += [model.f_f[f]]
-    phase_prob = prob.clone(
-        moto.ocp.active_status_config(deactivate_list=constr_to_disable)
-    )
-    return phase_prob
+                constr_to_disable.append(model.f_f[f])
+    return moto.ocp.active_status_config(deactivate_list=constr_to_disable)
+
+
+stage_node = modeled.add_node(stage_node_proto)
+terminal_node = modeled.add_node(terminal_node_proto)
+
+model_nodes = [stage_node]
+model_edges = []
+segment_lengths = []
+segment_configs = []
+next_segment_config = moto.ocp.active_status_config()
 
 for step in range(steps):
-    np = g.add(sqp.create_node(create_phase_problem(step + 1)))
-    np.data.prob.print_summary()
-    if step == 0:
-        g.add_edge(n0, np, stance_length, include_ed=False)
-    else:
-        g.add_edge(n_prev, np, nodes_per_step, include_ed=False)
-    n_prev = np
+    phase_node = modeled.add_node(stage_node_proto.clone())
+    edge = modeled.connect(model_nodes[-1], phase_node)
+    edge.add(model.dyn)
+    model_nodes.append(phase_node)
+    model_edges.append(edge)
+    segment_lengths.append(stance_length if step == 0 else nodes_per_step)
+    segment_configs.append(next_segment_config)
+    next_segment_config = create_phase_config(step + 1)
 
-nstop = g.add(sqp.create_node(prob))
-g.add_edge(n_prev, nstop, nodes_per_step, include_ed=False)
-n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
-g.add_edge(nstop, n1, stance_length)
+stop_node = modeled.add_node(stage_node_proto.clone())
+stop_edge = modeled.connect(model_nodes[-1], stop_node)
+stop_edge.add(model.dyn)
+model_nodes.append(stop_node)
+model_edges.append(stop_edge)
+segment_lengths.append(nodes_per_step)
+segment_configs.append(next_segment_config)
+
+terminal_edge = modeled.connect(stop_node, terminal_node)
+terminal_edge.add(model.dyn)
+model_edges.append(terminal_edge)
+segment_lengths.append(stance_length)
+segment_configs.append(moto.ocp.active_status_config())
+
+solver_nodes = []
+for idx, edge in enumerate(model_edges):
+    solver_node = sqp.create_node(edge, segment_configs[idx])
+    solver_nodes.append(g.add(solver_node))
+    if idx == 0:
+        g.set_head(solver_nodes[-1])
+    else:
+        g.add_edge(
+            solver_nodes[-2],
+            solver_nodes[-1],
+            segment_lengths[idx - 1],
+            include_ed=False,
+        )
+    if idx > 0:
+        solver_nodes[-1].data.prob.print_summary()
+terminal_tail = g.add(sqp.create_terminal_node(terminal_edge))
+g.add_edge(solver_nodes[-1], terminal_tail, segment_lengths[-1])
+g.set_tail(terminal_tail)
+
+if os.getenv("MOTO_DEBUG_SOLVER_PROBS"):
+    print("--" * 15)
+    print("Terminal node prototype:")
+    terminal_node_proto.print_summary()
+    print("Head solver node problem:")
+    solver_nodes[0].data.prob.print_summary()
+    print("Tail solver node problem:")
+    terminal_tail.data.prob.print_summary()
+
+if os.getenv("MOTO_DEBUG_GRAPH_LAYOUT"):
+    print("Flattened solver graph layout:")
+    for idx, node in enumerate(g.flatten_nodes()):
+        prob = node.prob
+        print(
+            f"  node[{idx}] uid={prob.uid} "
+            f"x={prob.dim(moto.field___x)} "
+            f"u={prob.dim(moto.field___u)} "
+            f"y={prob.dim(moto.field___y)} "
+            f"dyn={len(prob.exprs(moto.field___dyn))}"
+        )
 # g.add_edge(n0, n1, N_horizon)
 # print(len(g.flatten_nodes()))
 # names = [[] for _ in range(len(g.flatten_nodes()))]

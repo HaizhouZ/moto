@@ -1,6 +1,7 @@
 #ifndef __NS_SQP__
 #define __NS_SQP__
 
+#include <moto/model/graph_model.hpp>
 #include <moto/ocp/impl/shooting_node.hpp>
 #include <moto/solver/ipm/ipm_config.hpp>
 #include <moto/solver/linesearch_config.hpp>
@@ -197,8 +198,98 @@ struct ns_sqp {
         riccati_solver_.reset(s);
     }
 
-    auto create_node(const ocp_ptr_t &formulation) {
-        return node_type(formulation, mem_);
+    node_type create_node(const ocp_ptr_t &formulation) {
+        return create_node(formulation, ocp::active_status_config{});
+    }
+
+    node_type create_node(const ocp_ptr_t &formulation, const ocp::active_status_config &config) {
+        auto cloned = std::dynamic_pointer_cast<ocp>(formulation->clone_base(config));
+        if (!cloned) {
+            throw std::runtime_error("ns_sqp::create_node failed to clone formulation as ocp");
+        }
+        cloned->wait_until_ready();
+        return node_type(cloned, mem_);
+    }
+
+    node_type create_node(const model::model_edge_ptr_t &edge_model) {
+        return create_node(edge_model, ocp::active_status_config{});
+    }
+
+    node_type create_node(const model::model_edge_ptr_t &edge_model, const ocp::active_status_config &config) {
+        if (!edge_model) {
+            throw std::runtime_error("ns_sqp::create_node received a null model_edge");
+        }
+        auto st_node_prob = edge_model->st_node_prob();
+        if (!config.empty()) {
+            st_node_prob = st_node_prob ? st_node_prob->clone_node(config) : node_ocp_ptr_t{};
+        }
+        auto composed = edge_ocp::compose(
+            st_node_prob,
+            edge_model->clone_edge(),
+            node_ocp_ptr_t{},
+            false);
+        composed->wait_until_ready();
+        return node_type(std::static_pointer_cast<ocp>(composed), mem_);
+    }
+
+    node_type create_terminal_node(const model::model_node_ptr_t &node_model) {
+        if (!node_model) {
+            throw std::runtime_error("ns_sqp::create_terminal_node received a null model_node");
+        }
+        auto composed = node_model->compose_terminal();
+        composed->wait_until_ready();
+        return node_type(std::static_pointer_cast<ocp>(composed), mem_);
+    }
+
+    node_type create_terminal_node(const model::model_edge_ptr_t &edge_model) {
+        if (!edge_model) {
+            throw std::runtime_error("ns_sqp::create_terminal_node received a null model_edge");
+        }
+        auto composed = edge_ocp::compose(
+            edge_model->st_node_prob(),
+            edge_model->clone_edge(),
+            node_ocp_ptr_t{},
+            false);
+        if (const auto &terminal_node = edge_model->ed_node_prob()) {
+            for (const shared_expr &expr : terminal_node->exprs(__cost)) {
+                const auto *cost_expr = dynamic_cast<const generic_cost *>(expr.get());
+                const auto *func = dynamic_cast<const generic_func *>(expr.get());
+                if (cost_expr == nullptr || func == nullptr) {
+                    continue;
+                }
+                bool pure_state_cost = true;
+                bool needs_lower_to_y = false;
+                for (const sym &arg : func->in_args()) {
+                    if (arg.field() == __x) {
+                        needs_lower_to_y = true;
+                        continue;
+                    }
+                    if (arg.field() == __y || arg.field() == __p) {
+                        continue;
+                    }
+                    pure_state_cost = false;
+                    break;
+                }
+                if (!pure_state_cost) {
+                    continue;
+                }
+                auto lowered = expr.clone();
+                auto *lowered_func = dynamic_cast<generic_func *>(lowered.get());
+                if (lowered_func == nullptr) {
+                    continue;
+                }
+                if (needs_lower_to_y) {
+                    for (const sym &arg : lowered_func->in_args()) {
+                        if (arg.field() == __x) {
+                            lowered_func->substitute_argument(arg, arg.next());
+                        }
+                    }
+                }
+                composed->add(lowered);
+            }
+        }
+        composed->wait_until_ready();
+        return node_type(std::static_pointer_cast<ocp>(composed), mem_);
     }
 
     impl::data_mgr mem_;

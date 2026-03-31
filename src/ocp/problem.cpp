@@ -24,6 +24,7 @@ bool is_path_state_term(const shared_expr &ex) {
     }
     const bool is_supported_field =
         ex->field() == __eq_x ||
+        ex->field() == __eq_x_soft ||
         ex->field() == __undefined;
     if (!is_supported_field) {
         return false;
@@ -40,7 +41,31 @@ bool is_path_state_term(const shared_expr &ex) {
     return has_x;
 }
 
-shared_expr lower_path_state_term_for_edge(const shared_expr &ex, const ocp_base &prob) {
+bool is_pure_state_cost_term(const shared_expr &ex) {
+    if (!ex || ex->field() != __cost) {
+        return false;
+    }
+    const auto *cost_expr = dynamic_cast<const generic_cost *>(ex.get());
+    if (cost_expr != nullptr && cost_expr->terminal_add()) {
+        return false;
+    }
+    const auto *func = dynamic_cast<const generic_func *>(ex.get());
+    if (func == nullptr) {
+        return false;
+    }
+    bool has_x = false;
+    for (const sym &arg : func->in_args()) {
+        if (arg.field() == __u || arg.field() == __y) {
+            return false;
+        }
+        if (arg.field() == __x) {
+            has_x = true;
+        }
+    }
+    return has_x;
+}
+
+shared_expr lower_node_term_for_edge(const shared_expr &ex, const ocp_base &prob) {
     auto lowered = ex.clone();
     auto *func = dynamic_cast<generic_func *>(lowered.get());
     if (func == nullptr) {
@@ -50,7 +75,7 @@ shared_expr lower_path_state_term_for_edge(const shared_expr &ex, const ocp_base
     for (const sym &arg : args) {
         if (arg.field() == __x) {
             if (compose_trace_enabled()) {
-                fmt::print("lowering path-state term {} in composed ocp uid {} during edge compose: {} -> {} (x_k -> y_k-1 storage)\n",
+                fmt::print("lowering node term {} in composed ocp uid {} during edge compose: {} -> {} (x_k -> y_k storage)\n",
                            ex->name(), prob.uid(), arg.name(), arg.next()->name());
             }
             func->substitute_argument(arg, arg.next());
@@ -70,15 +95,17 @@ void append_node_terms(const node_ocp_ptr_t &node_prob,
     for (size_t f = 0; f < field::num; ++f) {
         for (const shared_expr &expr : node_prob->exprs(f)) {
             const bool is_path_state = is_path_state_term(expr);
-            if (only_path_state_terms && !is_path_state) {
+            const bool is_pure_state_cost = is_pure_state_cost_term(expr);
+            const bool is_lowerable_node_term = is_path_state || is_pure_state_cost;
+            if (only_path_state_terms && !is_lowerable_node_term) {
                 continue;
             }
-            if (is_path_state) {
+            if (is_lowerable_node_term) {
                 if (skip_path_state_terms) {
                     continue;
                 }
                 if (lower_path_state_terms) {
-                    edge_prob->add(lower_path_state_term_for_edge(expr, *edge_prob));
+                    edge_prob->add(lower_node_term_for_edge(expr, *edge_prob));
                     continue;
                 }
             }
@@ -92,6 +119,15 @@ bool ocp_base::add_impl(expr &ex) {
     return add_impl(shared_expr(ex));
 }
 bool ocp_base::add_impl(shared_expr ex, bool terminal) {
+    std::string reason;
+    if (!accepts_term(ex, terminal, &reason)) {
+        if (reason.empty()) {
+            reason = "expression is incompatible with this problem type";
+        }
+        throw std::runtime_error(fmt::format(
+            "Cannot add expression {} uid {} to problem uid {}: {}",
+            ex->name(), ex->uid(), uid_, reason));
+    }
     ex->prepare_add_to_ocp(terminal);
     size_t _uid = ex->uid();
     if (!contains(*ex, false)) { // skip repeated in the current problem only
@@ -276,6 +312,36 @@ node_ocp_ptr_t node_ocp::clone_node(const active_status_config &config) const {
     prob->refresh_after_clone(config);
     return prob;
 }
+bool node_ocp::accepts_term(const shared_expr &ex, bool terminal, std::string *reason) const {
+    static_cast<void>(terminal);
+    if (!ex) {
+        if (reason != nullptr) {
+            *reason = "null expression";
+        }
+        return false;
+    }
+    if (ex->field() == __dyn) {
+        if (reason != nullptr) {
+            *reason = "node_ocp only accepts node-local terms; dynamics must be added to an edge_ocp";
+        }
+        return false;
+    }
+    const auto *func = dynamic_cast<const generic_func *>(ex.get());
+    if (func == nullptr) {
+        return true;
+    }
+    for (const sym &arg : func->in_args()) {
+        if (arg.field() == __y) {
+            if (reason != nullptr) {
+                *reason = fmt::format(
+                    "node_ocp terms may only depend on x/u/p-style node variables; found y argument {}",
+                    arg.name());
+            }
+            return false;
+        }
+    }
+    return true;
+}
 edge_ocp_ptr_t edge_ocp::clone_edge(const active_status_config &config) const {
     auto prob = edge_ocp_ptr_t(new edge_ocp(*this));
     prob->refresh_after_clone(config);
@@ -301,7 +367,7 @@ edge_ocp_ptr_t edge_ocp::compose(const node_ocp_ptr_t &st_node_prob,
             prob->update_active_status(config, false);
         }
     }
-    append_node_terms(st_node_prob, prob, false, skip_st_path_state_terms);
+    append_node_terms(st_node_prob, prob, true, skip_st_path_state_terms);
     append_node_terms(lowered_node_prob, prob, true, false, true);
     return prob;
 }

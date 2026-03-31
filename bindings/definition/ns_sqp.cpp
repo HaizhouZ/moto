@@ -25,7 +25,42 @@ void register_submodule_ns_sqp(nb::module_ &m) {
             nb::gil_scoped_release rel;
             return self.update(n_iter, verbose); }, nb::arg("n_iter") = 1, nb::arg("verbose") = true, "Update the SQP solver for a given number of iterations")
         .def_ro("settings", &ns_sqp::settings, "Get the settings of the SQP solver")
-        .def("create_node", &ns_sqp::create_node, nb::arg("formulation"), nb::rv_policy::reference, "Create a new node in the SQP graph with the given OCP problem formulation");
+        .def("create_node",
+             [](ns_sqp &self, const model::model_edge_ptr_t &edge) { return self.create_node(edge); },
+             nb::arg("edge"),
+             nb::rv_policy::reference,
+             "Create a new SQP node by composing a graph_model edge into an interval problem")
+        .def("create_node",
+             [](ns_sqp &self, const model::model_edge_ptr_t &edge, const ocp::active_status_config &config) {
+                 return self.create_node(edge, config);
+             },
+             nb::arg("edge"),
+             nb::arg("config"),
+             nb::rv_policy::reference,
+             "Create a new SQP node by composing a graph_model edge and applying an active-status override")
+        .def("create_node",
+             [](ns_sqp &self, const ocp_ptr_t &formulation) { return self.create_node(formulation); },
+             nb::arg("formulation"),
+             nb::rv_policy::reference,
+             "Create a new node in the SQP graph from an OCP formulation template")
+        .def("create_node",
+             [](ns_sqp &self, const ocp_ptr_t &formulation, const ocp::active_status_config &config) {
+                 return self.create_node(formulation, config);
+             },
+             nb::arg("formulation"),
+             nb::arg("config"),
+             nb::rv_policy::reference,
+             "Create a new node in the SQP graph from an OCP formulation template with an active-status override")
+        .def("create_terminal_node",
+             [](ns_sqp &self, const model::model_node_ptr_t &node) { return self.create_terminal_node(node); },
+             nb::arg("node"),
+             nb::rv_policy::reference,
+             "Create a terminal SQP node by composing a graph_model terminal node")
+        .def("create_terminal_node",
+             [](ns_sqp &self, const model::model_edge_ptr_t &edge) { return self.create_terminal_node(edge); },
+             nb::arg("edge"),
+             nb::rv_policy::reference,
+             "Create a terminal SQP node by composing a graph_model edge and materializing terminal sink costs");
 
     nb::class_<ns_sqp::ipm_config>(sqp, "ipm_config")
         .def_rw("mu0", &ns_sqp::ipm_config::mu0, "Initial barrier parameter for the IPM solver")

@@ -51,7 +51,9 @@ void generic_func::hessian_impl(func_approx_data &data) const {
 }
 
 void generic_func::load_external_impl(const std::string &path) {
-    auto funcs = load_approx(name_, true, order_ >= approx_order::first, order_ >= approx_order::second);
+    const std::string func_name =
+        (gen_.task_ && !gen_.task_->func_name.empty()) ? gen_.task_->func_name : name_;
+    auto funcs = load_approx(func_name, true, order_ >= approx_order::first, order_ >= approx_order::second);
     value = [eval = std::move(funcs[0])](func_approx_data &d) {
         eval.invoke(d.in_arg_data(), d.v_);
     };
@@ -158,7 +160,7 @@ void generic_func::finalize_impl() {
     }
     if (gen_.task_ && !gen_.task_->sx_output.is_empty()) {
         utils::cs_codegen::task &t = *gen_.task_;
-        t.func_name = name_;
+        t.func_name = fmt::format("{}_uid{}", name_, uid());
         t.sx_inputs = in_args_;
         t.gen_eval = order_ >= approx_order::zero;
         t.gen_jacobian = order_ >= approx_order::first;
@@ -172,12 +174,16 @@ void generic_func::finalize_impl() {
         // constexpr std::string_view debug_compile_flag = "-g -O0 -march=native";
         // t.jac_compile_flag = debug_compile_flag;
         // t.hess_compile_flag = debug_compile_flag;
-        utils::cs_codegen::server::add_job(
-            std::move(utils::cs_codegen::generate_and_compile(t)
-                          .add_finish_callback([this]() {
-                              load_external_impl(); ///< load the generated code
-                              set_ready_status(true);
-                          })));
+        auto jobs = std::move(utils::cs_codegen::generate_and_compile(t)
+                                  .add_finish_callback([this]() {
+                                      load_external_impl(); ///< load the generated code
+                                      set_ready_status(true);
+                                  }));
+        if (std::getenv("MOTO_SYNC_CODEGEN") != nullptr) {
+            jobs.wait_until_finished();
+        } else {
+            utils::cs_codegen::server::add_job(std::move(jobs));
+        }
     } else {
         set_ready_status(true); ///< set the ready status
     }

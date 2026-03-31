@@ -210,6 +210,7 @@ class node_ocp : public ocp {
     static node_ocp_ptr_t compose(const node_ocp_ptr_t &base_prob);
     /// Clone a node problem while preserving the concrete type.
     node_ocp_ptr_t clone_node(const active_status_config &config = {}) const;
+    bool accepts_term(const shared_expr &ex, bool terminal = false, std::string *reason = nullptr) const override;
     ocp_base_ptr_t clone_base(const active_status_config &config = {}) const override {
         return clone_node(config);
     }
