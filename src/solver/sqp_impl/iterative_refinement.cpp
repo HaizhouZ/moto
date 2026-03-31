@@ -9,19 +9,23 @@
 
 namespace moto {
 void ns_sqp::iterative_refinement() {
+    auto phase_profile = profile_scope(profile_phase::iterative_refinement);
     // if (info.inf_prim_step < 1e-1 || info.inf_dual_step < 1e-1) {
     size_t iter_refine_max = settings.rf.max_iters;
     size_t iter_refine = 0;
     detail_timed_block_start("iterative_refinement");
     while (iter_refine < iter_refine_max) {
-        detail_timed_block_start("check_residual");
-        // finalize the dual step to get the correct dual variables for computing the residual, and compute the residual with the updated dual variables
-        graph_.for_each_parallel(
-            [&](data *d) {
-                riccati_solver_->finalize_dual_newton_step(d);
-                riccati_solver_->compute_kkt_residual(d);
-            });
-        detail_timed_block_end("check_residual");
+        {
+            auto subphase_profile = profile_scope(profile_phase::iterative_refinement_check_residual);
+            detail_timed_block_start("check_residual");
+            // finalize the dual step to get the correct dual variables for computing the residual, and compute the residual with the updated dual variables
+            graph_.for_each_parallel(
+                [&](data *d) {
+                    riccati_solver_->finalize_dual_newton_step(d);
+                    riccati_solver_->compute_kkt_residual(d);
+                });
+            detail_timed_block_end("check_residual");
+        }
         struct MOTO_ALIGN_NO_SHARING inf_res_state_worker {
             scalar_t inf_kkt_stat_err_u = 0.;
             scalar_t inf_kkt_stat_err_y = 0.;
@@ -54,19 +58,22 @@ void ns_sqp::iterative_refinement() {
         if (inf_kkt_stat_err_u < settings.rf.prim_res_tol && inf_kkt_stat_err_y < settings.rf.dual_res_tol) {
             break;
         }
-        detail_timed_block_start("iterative_refinement_step");
-        run_correction_step(
-            [](ns_sqp::data *data) {
-                data->first_order_correction_start([data]() {
-                    data->dense().lag_jac_corr_[__u] = data->kkt_stat_err_[__u];
-                    data->dense().lag_jac_corr_[__y] = data->kkt_stat_err_[__y];
+        {
+            auto subphase_profile = profile_scope(profile_phase::iterative_refinement_step);
+            detail_timed_block_start("iterative_refinement_step");
+            run_correction_step(
+                [](ns_sqp::data *data) {
+                    data->first_order_correction_start([data]() {
+                        data->dense().lag_jac_corr_[__u] = data->kkt_stat_err_[__u];
+                        data->dense().lag_jac_corr_[__y] = data->kkt_stat_err_[__y];
+                    });
+                },
+                [this](ns_sqp::data *data) {
+                    data->first_order_correction_end();
+                    finalize_correction(data);
                 });
-            },
-            [this](ns_sqp::data *data) {
-                data->first_order_correction_end();
-                finalize_correction(data);
-            });
-        detail_timed_block_end("iterative_refinement_step");
+            detail_timed_block_end("iterative_refinement_step");
+        }
         iter_refine++;
     }
     detail_timed_block_end("iterative_refinement");

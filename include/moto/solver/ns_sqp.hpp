@@ -8,7 +8,10 @@
 #include <moto/solver/linesearch_config.hpp>
 #include <moto/solver/ns_riccati/generic_solver.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
+#include <array>
+#include <chrono>
 #include <functional>
+#include <string>
 
 namespace moto {
 namespace solver {
@@ -17,6 +20,63 @@ struct generic_solver;
 }
 } // namespace solver
 struct ns_sqp {
+    enum class profile_phase : size_t {
+        initialize_total,
+        initialize_setup_eval,
+        initialize_derivative_eval,
+        initialize_kkt,
+        sqp_iter_total,
+        solve_direction,
+        scaling,
+        ns_factorization,
+        riccati_recursion,
+        post_solve,
+        fwd_linear_rollout,
+        finalize_primal_step,
+        correct_direction,
+        ineq_corrector_step,
+        iterative_refinement,
+        iterative_refinement_check_residual,
+        iterative_refinement_step,
+        correction_post_factorization,
+        correction_riccati_recursion,
+        correction_primal_sensitivity,
+        correction_fwd_rollout,
+        correction_finalize,
+        correction_refresh_ls_bounds,
+        prepare_globalization,
+        run_globalization,
+        evaluate_trial_point,
+        apply_affine_step,
+        update_res_stat,
+        accept_trial_point,
+        update_approx_accepted,
+        count,
+    };
+
+    struct profile_phase_stat {
+        std::string name;
+        double total_ms = 0.0;
+        double avg_ms = 0.0;
+        size_t calls = 0;
+        double share_of_update = 0.0;
+    };
+
+    struct profile_iteration {
+        size_t index = 0;
+        double total_ms = 0.0;
+        size_t ls_steps = 0;
+        size_t trial_evaluations = 0;
+    };
+
+    struct profile_report {
+        double total_ms = 0.0;
+        double initialize_ms = 0.0;
+        size_t sqp_iterations = 0;
+        size_t trial_evaluations = 0;
+        std::vector<profile_phase_stat> phases;
+        std::vector<profile_iteration> iterations;
+    };
 
     struct scaling_settings {
         enum class mode_t : size_t {
@@ -189,6 +249,8 @@ struct ns_sqp {
         scalar_t avg_dual_res = 0.;        // average dual residual: L1 norm of stationarity gradient / number of elements (unscaled)
     } kkt_last;
     kkt_info update(size_t n_iter, bool verbose = true);
+    const profile_report &profile() const { return profile_report_; }
+    void reset_profile();
 
     ns_sqp(size_t n_jobs = MAX_THREADS);
     ns_sqp(const ns_sqp &) = delete;
@@ -550,6 +612,43 @@ struct ns_sqp {
     };
 
     stacked_workers<settings_t::worker> setting_per_thread;
+    using profile_clock = std::chrono::steady_clock;
+
+    struct profile_state {
+        std::array<double, static_cast<size_t>(profile_phase::count)> total_ms{};
+        std::array<size_t, static_cast<size_t>(profile_phase::count)> calls{};
+        std::array<double, static_cast<size_t>(profile_phase::count)> iter_ms{};
+        std::array<size_t, static_cast<size_t>(profile_phase::count)> iter_calls{};
+        profile_clock::time_point update_start{};
+        profile_clock::time_point iter_start{};
+        size_t current_trial_evaluations = 0;
+        size_t total_trial_evaluations = 0;
+        std::vector<profile_iteration> iterations;
+
+        void reset();
+        void start_update();
+        void finish_update(profile_report &report) const;
+        void start_iteration(size_t index);
+        void finish_iteration(size_t ls_steps);
+        void record(profile_phase phase, double elapsed_ms);
+        void bump_trial_evaluation();
+    } profiler_;
+
+    struct scoped_profile {
+        ns_sqp *owner = nullptr;
+        profile_phase phase = profile_phase::initialize_total;
+        profile_clock::time_point start{};
+        scoped_profile(ns_sqp *owner, profile_phase phase);
+        scoped_profile(const scoped_profile &) = delete;
+        scoped_profile &operator=(const scoped_profile &) = delete;
+        scoped_profile(scoped_profile &&rhs) noexcept;
+        scoped_profile &operator=(scoped_profile &&rhs) = delete;
+        ~scoped_profile();
+    };
+
+    scoped_profile profile_scope(profile_phase phase) { return scoped_profile(this, phase); }
+    static const char *profile_phase_name(profile_phase phase);
+    profile_report profile_report_;
 
     /// print inf norms of constraint residuals and Jacobians across all nodes, to diagnose scaling
     void print_scaling_info();
@@ -664,11 +763,17 @@ struct ns_sqp {
                 std::invoke(prepare, d);
             });
         post_factorization_correction_step();
-        graph_.for_each_parallel(
-            [finalize = std::forward<Finalize>(finalize)](data *d) mutable {
-                std::invoke(finalize, d);
-            });
-        refresh_ls_bounds();
+        {
+            auto phase_profile = profile_scope(profile_phase::correction_finalize);
+            graph_.for_each_parallel(
+                [finalize = std::forward<Finalize>(finalize)](data *d) mutable {
+                    std::invoke(finalize, d);
+                });
+        }
+        {
+            auto phase_profile = profile_scope(profile_phase::correction_refresh_ls_bounds);
+            refresh_ls_bounds();
+        }
     }
     void solve_direction(iteration_context &ctx, bool do_scaling, bool gauss_newton);
     void correct_direction(iteration_context &ctx, bool do_refinement);

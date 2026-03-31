@@ -5,6 +5,7 @@
 
 #include <nanobind/stl/bind_vector.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/vector.h>
 
 #include <enum_export.hpp>
 using namespace moto;
@@ -25,6 +26,9 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def("update", [](ns_sqp &self, size_t n_iter, bool verbose) {
             nb::gil_scoped_release rel;
             return self.update(n_iter, verbose); }, nb::arg("n_iter") = 1, nb::arg("verbose") = true, "Update the SQP solver for a given number of iterations")
+        .def("reset_profile", &ns_sqp::reset_profile, "Clear the last SQP profile report")
+        .def("get_profile_report", &ns_sqp::profile, "Get the latest SQP wall-clock profile report")
+        .def_prop_ro("profile_report", &ns_sqp::profile, "Get the latest SQP wall-clock profile report")
         .def_ro("settings", &ns_sqp::settings, "Get the settings of the SQP solver")
         .def("create_node",
              static_cast<ns_sqp::node_type (ns_sqp::*)(const model::model_edge_ptr_t &)>(&ns_sqp::create_node),
@@ -158,6 +162,24 @@ void register_submodule_ns_sqp(nb::module_ &m) {
 
     nb::enum_<moto::solver::ipm_config::adaptive_mu_t> enum_binder(sqp, "adaptive_mu_t");
     moto::export_enum<ns_sqp::iter_result_t>(sqp);
+    nb::class_<ns_sqp::profile_phase_stat>(sqp, "profile_phase_stat")
+        .def_ro("name", &ns_sqp::profile_phase_stat::name)
+        .def_ro("total_ms", &ns_sqp::profile_phase_stat::total_ms)
+        .def_ro("avg_ms", &ns_sqp::profile_phase_stat::avg_ms)
+        .def_ro("calls", &ns_sqp::profile_phase_stat::calls)
+        .def_ro("share_of_update", &ns_sqp::profile_phase_stat::share_of_update);
+    nb::class_<ns_sqp::profile_iteration>(sqp, "profile_iteration")
+        .def_ro("index", &ns_sqp::profile_iteration::index)
+        .def_ro("total_ms", &ns_sqp::profile_iteration::total_ms)
+        .def_ro("ls_steps", &ns_sqp::profile_iteration::ls_steps)
+        .def_ro("trial_evaluations", &ns_sqp::profile_iteration::trial_evaluations);
+    nb::class_<ns_sqp::profile_report>(sqp, "profile_report")
+        .def_ro("total_ms", &ns_sqp::profile_report::total_ms)
+        .def_ro("initialize_ms", &ns_sqp::profile_report::initialize_ms)
+        .def_ro("sqp_iterations", &ns_sqp::profile_report::sqp_iterations)
+        .def_ro("trial_evaluations", &ns_sqp::profile_report::trial_evaluations)
+        .def_ro("phases", &ns_sqp::profile_report::phases)
+        .def_ro("iterations", &ns_sqp::profile_report::iterations);
     nb::class_<ns_sqp::kkt_info>(sqp, "kkt_info")
         .def_ro("result", &ns_sqp::kkt_info::result, "Result of the SQP iteration")
         .def_prop_ro("solved", [](const ns_sqp::kkt_info &self) { return self.result == ns_sqp::iter_result_t::success; }, "Whether the problem is solved")

@@ -10,25 +10,192 @@
 #include <moto/utils/timed_block.hpp>
 
 namespace moto {
+void ns_sqp::profile_state::reset() {
+    total_ms.fill(0.0);
+    calls.fill(0);
+    iter_ms.fill(0.0);
+    iter_calls.fill(0);
+    update_start = {};
+    iter_start = {};
+    current_trial_evaluations = 0;
+    total_trial_evaluations = 0;
+    iterations.clear();
+}
+
+void ns_sqp::profile_state::start_update() {
+    reset();
+    update_start = profile_clock::now();
+}
+
+void ns_sqp::profile_state::finish_update(profile_report &report) const {
+    report = {};
+    report.total_ms = std::chrono::duration<double, std::milli>(profile_clock::now() - update_start).count();
+    report.initialize_ms = total_ms[static_cast<size_t>(profile_phase::initialize_total)];
+    report.sqp_iterations = iterations.size();
+    report.trial_evaluations = total_trial_evaluations;
+    report.iterations = iterations;
+    report.phases.reserve(static_cast<size_t>(profile_phase::count));
+    for (size_t i = 0; i < static_cast<size_t>(profile_phase::count); ++i) {
+        if (calls[i] == 0) {
+            continue;
+        }
+        report.phases.push_back(profile_phase_stat{
+            .name = profile_phase_name(static_cast<profile_phase>(i)),
+            .total_ms = total_ms[i],
+            .avg_ms = total_ms[i] / static_cast<double>(calls[i]),
+            .calls = calls[i],
+            .share_of_update = report.total_ms > 0.0 ? total_ms[i] / report.total_ms : 0.0,
+        });
+    }
+}
+
+void ns_sqp::profile_state::start_iteration(size_t index) {
+    iter_ms.fill(0.0);
+    iter_calls.fill(0);
+    current_trial_evaluations = 0;
+    iter_start = profile_clock::now();
+    iterations.push_back(profile_iteration{.index = index + 1});
+}
+
+void ns_sqp::profile_state::finish_iteration(size_t ls_steps) {
+    auto &iter = iterations.back();
+    iter.total_ms = std::chrono::duration<double, std::milli>(profile_clock::now() - iter_start).count();
+    iter.ls_steps = ls_steps;
+    iter.trial_evaluations = current_trial_evaluations;
+}
+
+void ns_sqp::profile_state::record(profile_phase phase, double elapsed_ms) {
+    const size_t idx = static_cast<size_t>(phase);
+    total_ms[idx] += elapsed_ms;
+    ++calls[idx];
+    iter_ms[idx] += elapsed_ms;
+    ++iter_calls[idx];
+}
+
+void ns_sqp::profile_state::bump_trial_evaluation() {
+    ++current_trial_evaluations;
+    ++total_trial_evaluations;
+}
+
+ns_sqp::scoped_profile::scoped_profile(ns_sqp *owner_, profile_phase phase_)
+    : owner(owner_), phase(phase_), start(profile_clock::now()) {}
+
+ns_sqp::scoped_profile::scoped_profile(scoped_profile &&rhs) noexcept
+    : owner(rhs.owner), phase(rhs.phase), start(rhs.start) {
+    rhs.owner = nullptr;
+}
+
+ns_sqp::scoped_profile::~scoped_profile() {
+    if (owner == nullptr) {
+        return;
+    }
+    const double elapsed_ms = std::chrono::duration<double, std::milli>(profile_clock::now() - start).count();
+    owner->profiler_.record(phase, elapsed_ms);
+}
+
+const char *ns_sqp::profile_phase_name(profile_phase phase) {
+    switch (phase) {
+    case profile_phase::initialize_total:
+        return "initialize_total";
+    case profile_phase::initialize_setup_eval:
+        return "initialize_setup_eval";
+    case profile_phase::initialize_derivative_eval:
+        return "initialize_derivative_eval";
+    case profile_phase::initialize_kkt:
+        return "initialize_kkt";
+    case profile_phase::sqp_iter_total:
+        return "sqp_iter_total";
+    case profile_phase::solve_direction:
+        return "solve_direction";
+    case profile_phase::scaling:
+        return "scaling";
+    case profile_phase::ns_factorization:
+        return "ns_factorization";
+    case profile_phase::riccati_recursion:
+        return "riccati_recursion";
+    case profile_phase::post_solve:
+        return "post_solve";
+    case profile_phase::fwd_linear_rollout:
+        return "fwd_linear_rollout";
+    case profile_phase::finalize_primal_step:
+        return "finalize_primal_step";
+    case profile_phase::correct_direction:
+        return "correct_direction";
+    case profile_phase::ineq_corrector_step:
+        return "ineq_corrector_step";
+    case profile_phase::iterative_refinement:
+        return "iterative_refinement";
+    case profile_phase::iterative_refinement_check_residual:
+        return "iterative_refinement_check_residual";
+    case profile_phase::iterative_refinement_step:
+        return "iterative_refinement_step";
+    case profile_phase::correction_post_factorization:
+        return "correction_post_factorization";
+    case profile_phase::correction_riccati_recursion:
+        return "correction_riccati_recursion";
+    case profile_phase::correction_primal_sensitivity:
+        return "correction_primal_sensitivity";
+    case profile_phase::correction_fwd_rollout:
+        return "correction_fwd_rollout";
+    case profile_phase::correction_finalize:
+        return "correction_finalize";
+    case profile_phase::correction_refresh_ls_bounds:
+        return "correction_refresh_ls_bounds";
+    case profile_phase::prepare_globalization:
+        return "prepare_globalization";
+    case profile_phase::run_globalization:
+        return "run_globalization";
+    case profile_phase::evaluate_trial_point:
+        return "evaluate_trial_point";
+    case profile_phase::apply_affine_step:
+        return "apply_affine_step";
+    case profile_phase::update_res_stat:
+        return "update_res_stat";
+    case profile_phase::accept_trial_point:
+        return "accept_trial_point";
+    case profile_phase::update_approx_accepted:
+        return "update_approx_accepted";
+    case profile_phase::count:
+        return "count";
+    }
+    return "unknown";
+}
+
+void ns_sqp::reset_profile() {
+    profiler_.reset();
+    profile_report_ = {};
+}
+
 ns_sqp::kkt_info ns_sqp::initialize() {
+    auto total_profile = profile_scope(profile_phase::initialize_total);
     if (settings.verbose)
         fmt::print("Initialization for SQP...\n");
     if (!settings.ipm.warm_start)
         settings.ipm.mu = settings.ipm.mu0; // initialize mu before setting up workspace data, as it may be used in the workspace data setup
-    graph_.for_each_parallel([this](data *cur) {
-        // setup solver settings
-        cur->for_each_constr([this](const generic_func &c, func_approx_data &d) { c.setup_workspace_data(d, &settings); });
-        cur->update_approximation(node_data::update_mode::eval_val);
-        // initialize the data
-        if (!settings.ipm.warm_start || !settings.initialized)
-            // if not warm starting but we have already initialized before, we should be in restoration mode
-            solver::ineq_soft::initialize(cur);
-        settings.initialized = true;
-    });
-    graph_.for_each_parallel([](data *cur) {
-        cur->update_approximation(node_data::update_mode::eval_derivatives);
-    });
-    kkt_info kkt = compute_kkt_info();
+    {
+        auto phase_profile = profile_scope(profile_phase::initialize_setup_eval);
+        graph_.for_each_parallel([this](data *cur) {
+            // setup solver settings
+            cur->for_each_constr([this](const generic_func &c, func_approx_data &d) { c.setup_workspace_data(d, &settings); });
+            cur->update_approximation(node_data::update_mode::eval_val);
+            // initialize the data
+            if (!settings.ipm.warm_start || !settings.initialized)
+                // if not warm starting but we have already initialized before, we should be in restoration mode
+                solver::ineq_soft::initialize(cur);
+            settings.initialized = true;
+        });
+    }
+    {
+        auto phase_profile = profile_scope(profile_phase::initialize_derivative_eval);
+        graph_.for_each_parallel([](data *cur) {
+            cur->update_approximation(node_data::update_mode::eval_derivatives);
+        });
+    }
+    kkt_info kkt;
+    {
+        auto phase_profile = profile_scope(profile_phase::initialize_kkt);
+        kkt = compute_kkt_info();
+    }
     reset_scaling(); // clear scale vectors; will be recomputed on first iteration
     ls_failure_count_ = 0;
     // print statistics header
@@ -40,11 +207,21 @@ ns_sqp::kkt_info ns_sqp::initialize() {
     return kkt;
 }
 void ns_sqp::post_factorization_correction_step() {
-    detail_timed_block_start("riccati_recursion_correction");
-    graph_.apply_backward(solver_call(&solver_type::riccati_recursion_correction), true);
-    detail_timed_block_end("riccati_recursion_correction");
-    graph_.for_each_parallel(solver_call(&solver_type::compute_primal_sensitivity_correction));
-    graph_.apply_forward(solver_call(&solver_type::fwd_linear_rollout_correction), true);
+    auto total_profile = profile_scope(profile_phase::correction_post_factorization);
+    {
+        auto phase_profile = profile_scope(profile_phase::correction_riccati_recursion);
+        detail_timed_block_start("riccati_recursion_correction");
+        graph_.apply_backward(solver_call(&solver_type::riccati_recursion_correction), true);
+        detail_timed_block_end("riccati_recursion_correction");
+    }
+    {
+        auto phase_profile = profile_scope(profile_phase::correction_primal_sensitivity);
+        graph_.for_each_parallel(solver_call(&solver_type::compute_primal_sensitivity_correction));
+    }
+    {
+        auto phase_profile = profile_scope(profile_phase::correction_fwd_rollout);
+        graph_.apply_forward(solver_call(&solver_type::fwd_linear_rollout_correction), true);
+    }
 }
 void ns_sqp::finalize_correction(data *d) {
     riccati_solver_->finalize_primal_step_correction(d);
@@ -110,30 +287,46 @@ void ns_sqp::ineq_constr_prediction() {
 }
 
 void ns_sqp::solve_direction(iteration_context &ctx, bool do_scaling, bool gauss_newton) {
+    auto phase_profile = profile_scope(profile_phase::solve_direction);
     if (do_scaling) {
+        auto scaling_profile = profile_scope(profile_phase::scaling);
         detail_timed_block_start("scaling");
         compute_and_apply_scaling(ctx.current);
         detail_timed_block_end("scaling");
     }
 
+    {
+        auto ns_factor_profile = profile_scope(profile_phase::ns_factorization);
     detail_timed_block_start("ns factorization");
     graph_.for_each_parallel([this, gauss_newton](data *d) {
         riccati_solver_->ns_factorization(d, gauss_newton);
     });
     detail_timed_block_end("ns factorization");
+    }
 
+    {
+        auto recursion_profile = profile_scope(profile_phase::riccati_recursion);
     detail_timed_block_start("riccati_recursion");
     graph_.apply_backward(solver_call(&solver_type::riccati_recursion), true);
     detail_timed_block_end("riccati_recursion");
+    }
+    {
+        auto post_solve_profile = profile_scope(profile_phase::post_solve);
     detail_timed_block_start("post solve");
     graph_.for_each_parallel(solver_call(&solver_type::compute_primal_sensitivity));
     detail_timed_block_end("post solve");
+    }
+    {
+        auto rollout_profile = profile_scope(profile_phase::fwd_linear_rollout);
     detail_timed_block_start("fwd_linear_rollout");
     graph_.apply_forward(solver_call(&solver_type::fwd_linear_rollout), true);
     detail_timed_block_end("fwd_linear_rollout");
+    }
 
     if (settings.has_ineq_soft)
         ineq_constr_prediction();
+    {
+        auto finalize_profile = profile_scope(profile_phase::finalize_primal_step);
     detail_timed_block_start("finalize_primal_step");
     graph_.for_each_parallel([this](size_t tid, data *d) {
         riccati_solver_->finalize_primal_step(d);
@@ -141,20 +334,26 @@ void ns_sqp::solve_direction(iteration_context &ctx, bool do_scaling, bool gauss
         solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
     });
     detail_timed_block_end("finalize_primal_step");
+    }
     finalize_ls_bound_and_set_to_max();
 }
 
 void ns_sqp::correct_direction(iteration_context &ctx, bool do_refinement) {
-    detail_timed_block_start("ineq_corrector_step");
-    if (settings.has_ineq_soft)
-        ineq_constr_correction(ctx);
-    detail_timed_block_end("ineq_corrector_step");
+    auto phase_profile = profile_scope(profile_phase::correct_direction);
+    {
+        auto corrector_profile = profile_scope(profile_phase::ineq_corrector_step);
+        detail_timed_block_start("ineq_corrector_step");
+        if (settings.has_ineq_soft)
+            ineq_constr_correction(ctx);
+        detail_timed_block_end("ineq_corrector_step");
+    }
 
     if (do_refinement && settings.rf.enabled && settings.rf.max_iters > 0)
         iterative_refinement();
 }
 
 void ns_sqp::prepare_globalization(filter_linesearch_data &ls, iteration_context &ctx) {
+    auto phase_profile = profile_scope(profile_phase::prepare_globalization);
     ls.reset_per_iter_data();
     ls.initial_alpha_primal = settings.ls.alpha_primal;
     ls.initial_alpha_dual = settings.ls.alpha_dual;
@@ -176,6 +375,10 @@ void ns_sqp::prepare_globalization(filter_linesearch_data &ls, iteration_context
 }
 
 bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context &ctx) {
+    auto phase_profile = profile_scope(profile_phase::evaluate_trial_point);
+    profiler_.bump_trial_evaluation();
+    {
+        auto apply_profile = profile_scope(profile_phase::apply_affine_step);
     detail_timed_block_start("apply_affine_step");
     graph_.for_each_parallel([this](data *d) {
         d->restore_trial_state();
@@ -185,7 +388,10 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
         d->update_approximation(node_data::update_mode::eval_val);
     });
     detail_timed_block_end("apply_affine_step");
+    }
 
+    {
+        auto res_profile = profile_scope(profile_phase::update_res_stat);
     detail_timed_block_start("update_res_stat");
     if (settings.ls.method == linesearch_setting::search_method::merit_backtracking) {
         graph_.for_each_parallel([](data *d) {
@@ -196,23 +402,29 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
         ctx.trial = compute_kkt_info(false);
     }
     detail_timed_block_end("update_res_stat");
+    }
 
     return settings.ls.method == linesearch_setting::search_method::merit_backtracking;
 }
 
 void ns_sqp::accept_trial_point(filter_linesearch_data &ls, iteration_context &ctx) {
-    detail_timed_block_start("update_approx_accepted");
-    if (settings.ls.method != linesearch_setting::search_method::merit_backtracking) {
-        graph_.for_each_parallel([](data *d) {
-            d->update_approximation(node_data::update_mode::eval_derivatives);
-        });
-        ctx.trial = compute_kkt_info();
+    auto phase_profile = profile_scope(profile_phase::accept_trial_point);
+    {
+        auto accepted_profile = profile_scope(profile_phase::update_approx_accepted);
+        detail_timed_block_start("update_approx_accepted");
+        if (settings.ls.method != linesearch_setting::search_method::merit_backtracking) {
+            graph_.for_each_parallel([](data *d) {
+                d->update_approximation(node_data::update_mode::eval_derivatives);
+            });
+            ctx.trial = compute_kkt_info();
+        }
+        detail_timed_block_end("update_approx_accepted");
     }
-    detail_timed_block_end("update_approx_accepted");
     ctx.current = ctx.trial;
 }
 
 ns_sqp::line_search_action ns_sqp::run_globalization(filter_linesearch_data &ls, iteration_context &ctx) {
+    auto phase_profile = profile_scope(profile_phase::run_globalization);
     while (true) {
         bool has_trial_derivatives = evaluate_trial_point(ls, ctx);
 
@@ -252,6 +464,7 @@ ns_sqp::line_search_action ns_sqp::run_globalization(filter_linesearch_data &ls,
 
 ns_sqp::line_search_action ns_sqp::sqp_iter(filter_linesearch_data &ls, kkt_info &kkt_current,
                                             bool do_scaling, bool do_refinement, bool gauss_newton) {
+    auto phase_profile = profile_scope(profile_phase::sqp_iter_total);
     iteration_context ctx{.current = kkt_current};
     reset_ls_workers();
     solve_direction(ctx, do_scaling, gauss_newton);
@@ -264,6 +477,8 @@ ns_sqp::line_search_action ns_sqp::sqp_iter(filter_linesearch_data &ls, kkt_info
 
 ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
     ensure_realized();
+    reset_profile();
+    profiler_.start_update();
     settings.verbose = verbose;
     graph_.no_except() = settings.no_except;
     settings.n_worker = graph_.n_jobs();
@@ -284,6 +499,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
         }
         settings.max_iter = n_iter;
         for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
+            profiler_.start_iteration(i_iter);
             timed_block_start("sqp_single_iter");
             const scalar_t inf_prim_before = kkt_last.inf_prim_res;
             line_search_action action = sqp_iter(ls, kkt_last,
@@ -292,6 +508,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
 
             kkt_last.num_iter = i_iter + 1;
             kkt_last.ls_steps = ls.step_cnt;
+            profiler_.finish_iteration(ls.step_cnt);
 
             if (verbose) {
                 // print_licq_info();
@@ -350,6 +567,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             throw;
         }
     }
+    profiler_.finish_update(profile_report_);
     return kkt_last;
 }
 void ns_sqp::print_dual_res_breakdown() {

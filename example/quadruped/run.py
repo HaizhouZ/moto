@@ -507,7 +507,10 @@ sqp.settings.ls.merit_sigma = 100
 sqp.settings.ls.max_steps = 100
 
 max_update_iter = int(os.getenv("MOTO_SQP_MAX_ITER", "2"))
+warmup_runs = int(os.getenv("MOTO_SQP_WARMUP", "1"))
+bench_runs = int(os.getenv("MOTO_SQP_BENCH_RUNS", "1"))
 print(f"SQP update iters: {max_update_iter}")
+print(f"SQP warmup runs: {warmup_runs}, benchmark runs: {bench_runs}")
 
 # sqp.settings.ls.backtrack_scheme = moto.ns_sqp.backtrack_scheme_geometric
 # cfg = [
@@ -567,14 +570,52 @@ import time
 
 cnt = 0
 iters = 0
+for i in range(warmup_runs):
+    warmup_verbose = os.getenv("MOTO_SQP_WARMUP_VERBOSE") is not None
+    warmup_res = sqp.update(max_update_iter, verbose=warmup_verbose)
+    sqp.settings.ipm.warm_start = True
+    print(
+        f"warmup {i + 1}/{warmup_runs}: "
+        f"iters={warmup_res.num_iter} solved={warmup_res.solved}"
+    )
+
 start = time.perf_counter()
-# while cnt < 50:
-res = sqp.update(50, verbose=True)
-sqp.settings.ipm.warm_start = True
-cnt += 1
-iters += res.num_iter
-print(f"sqp.update() took {(time.perf_counter() - start) / cnt:.3f} seconds")
-print(f"per iteration took {(time.perf_counter() - start) / iters * 1000:.3f} ms")
+res = None
+for i in range(bench_runs):
+    bench_verbose = os.getenv("MOTO_SQP_BENCH_VERBOSE") is not None or i + 1 == bench_runs
+    res = sqp.update(max_update_iter, verbose=bench_verbose)
+    sqp.settings.ipm.warm_start = True
+    cnt += 1
+    iters += res.num_iter
+elapsed = time.perf_counter() - start
+
+print(f"sqp.update() took {elapsed / cnt:.3f} seconds")
+print(f"per iteration took {elapsed / iters * 1000:.3f} ms")
+
+if os.getenv("MOTO_PROFILE_SQP"):
+    report = sqp.get_profile_report()
+    print(
+        f"profile total={report.total_ms:.1f} ms "
+        f"init={report.initialize_ms:.1f} ms "
+        f"iters={report.sqp_iterations} "
+        f"trial_evals={report.trial_evaluations}"
+    )
+    top_phases = sorted(report.phases, key=lambda p: p.total_ms, reverse=True)[:10]
+    print("top profile phases:")
+    for phase in top_phases:
+        print(
+            f"  {phase.name:24s} total={phase.total_ms:9.3f} ms "
+            f"avg={phase.avg_ms:8.3f} ms "
+            f"calls={phase.calls:4d} "
+            f"share={phase.share_of_update * 100:6.2f}%"
+        )
+    print("per-iteration profile:")
+    for it in report.iterations:
+        print(
+            f"  iter {it.index:2d}: total={it.total_ms:9.3f} ms "
+            f"ls_steps={it.ls_steps:3d} "
+            f"trial_evals={it.trial_evaluations:3d}"
+        )
 
 q_res = []
 dt_res = []
