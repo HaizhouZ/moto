@@ -104,7 +104,25 @@ python -m py_compile example/quadruped/run.py
 find gen -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
 ./build/unittests/graph_model_compose_test
 MOTO_SQP_MAX_ITER=50 python example/quadruped/run.py
+KMP_AFFINITY='noverbose,granularity=fine,scatter' OMP_NUM_THREADS=10 MOTO_SQP_WARMUP=1 MOTO_SQP_BENCH_RUNS=1 MOTO_SQP_MAX_ITER=10 python example/quadruped/run.py
 ```
+
+Useful benchmarking / profiling environment variables in `example/quadruped/run.py`:
+
+- `MOTO_SQP_MAX_ITER`: iterations requested per `sqp.update(...)`
+- `MOTO_SQP_WARMUP`: number of warm-up `update(...)` calls before timing
+- `MOTO_SQP_BENCH_RUNS`: number of timed hot-start runs
+- `MOTO_PROFILE_SQP`: print the last run's SQP profile summary
+- `MOTO_SQP_WARMUP_VERBOSE`: if set, print verbose solver logs during warm-up
+- `MOTO_SQP_BENCH_VERBOSE`: if set, print verbose logs for every timed run; otherwise only the last timed run is verbose
+- `MOTO_PARALLEL_BLOCK_ORDER={forward,reverse}`: override chunk assignment order in `parallel_for`
+- `MOTO_PARALLEL_TID_MODE={logical,omp}`: choose whether solver callbacks see logical chunk ids or OpenMP thread ids
+
+Current default parallel behavior:
+
+- chunk order defaults to `forward`
+- tid mode defaults to `logical`
+- this means chunking follows the order of the provided view; for backward passes the view itself is already reversed by `apply_backward(...)`
 
 ## Field System
 
@@ -666,6 +684,35 @@ Its runtime sequence is:
     accept or backtrack
 15. On acceptance, update derivatives if needed and store `kkt_current = kkt_trial`.
 
+## SQP Profiling
+
+`ns_sqp` now keeps a wall-clock profile report for the most recent `update(...)` call.
+
+Relevant surface area:
+
+- [`include/moto/solver/ns_sqp.hpp`](/home/harper/Documents/moto/include/moto/solver/ns_sqp.hpp): profile phase enums and report structs
+- [`src/solver/sqp_impl/ns_sqp_impl.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/ns_sqp_impl.cpp): top-level profiling scopes
+- [`src/solver/sqp_impl/iterative_refinement.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/iterative_refinement.cpp): refinement-specific profiling scopes
+- [`bindings/definition/ns_sqp.cpp`](/home/harper/Documents/moto/bindings/definition/ns_sqp.cpp): Python exposure via `get_profile_report()`
+
+What the report tracks:
+
+- total update time
+- initialization time
+- per-phase total / average milliseconds and call counts
+- per-iteration totals
+- trial evaluation counts
+
+The most useful currently exposed phases for bottleneck work are:
+
+- `solve_direction`
+- `riccati_recursion`
+- `iterative_refinement`
+- `iterative_refinement_step`
+- `correction_post_factorization`
+- `correction_riccati_recursion`
+- `correction_fwd_rollout`
+
 ## Nullspace / Riccati Solve Data Flow
 
 ### 1. Projected dynamics update
@@ -1005,6 +1052,12 @@ When adding or changing settings, enum values, or public solver surface area:
 - update the header
 - update the implementation
 - update bindings and generated stubs if needed
+
+Current profiling-related Python entry points on `ns_sqp_impl`:
+
+- `reset_profile()`
+- `get_profile_report()`
+- `profile_report` (property)
 
 ## Practical Editing Rules
 
