@@ -137,8 +137,6 @@ struct ns_sqp {
     struct restoration_settings {
         bool enabled = true;  ///< whether restoration mode is allowed
         size_t max_iter = 50; ///< max restoration iterations per trigger
-        /// trigger restoration when the filter line search fails this many consecutive outer SQP iters
-        size_t trigger_on_failure_count = 3;
         scalar_t rho_u = 1e-4; ///< proximal weight on u (anchors to point where restoration was triggered)
         scalar_t rho_y = 1e-4; ///< proximal weight on y (anchors to point where restoration was triggered)
         /// dual regularization for GN equality constraints: Hess += (1/rho_eq)*J^T*J;
@@ -146,6 +144,8 @@ struct ns_sqp {
         scalar_t rho_eq = 1e-6;
         /// exit restoration when inf_prim_res drops below this fraction of the entry infeasibility
         scalar_t restoration_improvement_frac = 0.9;
+        /// IPOPT-style tiny-step trigger parameters for switching to restoration.
+        scalar_t alpha_min_factor = 5e-2;
     };
 
     struct ipm_config : public solver::ipm_config {
@@ -381,6 +381,11 @@ struct ns_sqp {
      * @note just for convenient reset
      */
     struct filter_linesearch_per_iter_data {
+        enum class failure_reason_t : uint8_t {
+            none,
+            tiny_step,
+            other,
+        };
         bool recompute_approx = true;
         bool stop = false;                                                  ///< whether to stop the line search
         bool enforce_min = false;                                           ///< whether to enforce the minimum step size
@@ -390,8 +395,10 @@ struct ns_sqp {
         size_t step_cnt = 0;                                                ///< current line search step
         scalar_t initial_alpha_primal = 0.;
         scalar_t initial_alpha_dual = 0.;
+        scalar_t alpha_min = 0.;
         bool switching_condition = false; ///< whether the switching condition for line search is met (used to decide whether to require Armijo decrease in the line search)
         bool armijo_cond_met = false;     ///< whether the Armijo condition is met for the current trial step
+        failure_reason_t failure_reason = failure_reason_t::none;
         void reset_per_iter_data() {
             new (this) filter_linesearch_per_iter_data();
         }
@@ -428,7 +435,7 @@ struct ns_sqp {
         accept,
         backtrack,
         retry_second_order_correction,
-        stop,
+        failure,
     };
 
     struct iteration_context {
@@ -448,9 +455,6 @@ struct ns_sqp {
     /// initialize the solver before the first iteration or after a reset, returns the initial kkt info
     kkt_info initialize();
     kkt_info restoration_update(const kkt_info &kkt_before, filter_linesearch_data &ls);
-    /// Compute restoration objective J_rest = ½Σ(‖F_0‖² + ‖s_c_stacked_0_k‖²) across all nodes.
-    /// Used to track filter progress in the restoration phase instead of the original running cost.
-    size_t ls_failure_count_ = 0; ///< consecutive outer iterations where line search produced no improvement
     void post_factorization_correction_step();
     void finalize_correction(data *d);
     void reset_ls_workers();

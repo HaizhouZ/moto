@@ -73,8 +73,9 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
     /// Proximal cost (gradient + diagonal Hessian) is injected directly into
     /// lag_data by ns_sqp::restoration_update.
     struct restoration_aux_data : aux_data {
-        scalar_t rho_eq = 1.0; ///< dual regularization weight for GN equality constraints:
-                                ///< Hessian += (1/rho_eq)*s_c^T*s_c; dlam = (J*du+h)/rho_eq
+        scalar_t rho_eq = 1.0; ///< elastic exact-penalty weight used in restoration
+        scalar_t mu_bar = 1.0; ///< IPOPT-style restoration barrier parameter
+        bool use_elastic = true;
     };
 
     rank_status rank_status_;

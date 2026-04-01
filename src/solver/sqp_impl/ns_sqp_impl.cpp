@@ -136,7 +136,6 @@ ns_sqp::kkt_info ns_sqp::initialize() {
         kkt = compute_kkt_info();
     }
     reset_scaling(); // clear scale vectors; will be recomputed on first iteration
-    ls_failure_count_ = 0;
     // print statistics header
     if (settings.verbose) {
         // print_scaling_info();
@@ -330,7 +329,8 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
         solver::ineq_soft::restore_trial_state(d);
         riccati_solver_->apply_affine_step(d, &settings);
         solver::ineq_soft::apply_affine_step(d, &settings);
-        d->update_approximation(node_data::update_mode::eval_val);
+        d->update_approximation(node_data::update_mode::eval_val,
+                                !settings.in_restoration);
     });
     detail_timed_block_end("apply_affine_step");
     }
@@ -339,8 +339,9 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
         auto res_profile = profile_scope(profile_phase::update_res_stat);
     detail_timed_block_start("update_res_stat");
     if (settings.ls.method == linesearch_setting::search_method::merit_backtracking) {
-        graph.for_each_parallel([](data *d) {
-            d->update_approximation(node_data::update_mode::eval_derivatives);
+        graph.for_each_parallel([this](data *d) {
+            d->update_approximation(node_data::update_mode::eval_derivatives,
+                                    !settings.in_restoration);
         });
         ctx.trial = compute_kkt_info();
     } else {
@@ -359,8 +360,9 @@ void ns_sqp::accept_trial_point(filter_linesearch_data &ls, iteration_context &c
         auto accepted_profile = profile_scope(profile_phase::update_approx_accepted);
         detail_timed_block_start("update_approx_accepted");
         if (settings.ls.method != linesearch_setting::search_method::merit_backtracking) {
-            graph.for_each_parallel([](data *d) {
-                d->update_approximation(node_data::update_mode::eval_derivatives);
+            graph.for_each_parallel([this](data *d) {
+                d->update_approximation(node_data::update_mode::eval_derivatives,
+                                        !settings.in_restoration);
             });
             ctx.trial = compute_kkt_info();
         }
@@ -397,11 +399,14 @@ ns_sqp::line_search_action ns_sqp::run_globalization(filter_linesearch_data &ls,
             if (!ls.recompute_approx)
                 return ctx.action;
             break;
-        case line_search_action::stop:
+        case line_search_action::failure:
+            if (settings.ls.enabled) {
+                return line_search_action::failure;
+            }
             break;
         }
 
-        if (ctx.action == line_search_action::stop && !settings.ls.enabled) {
+        if (ctx.action == line_search_action::failure && !settings.ls.enabled) {
             accept_trial_point(ls, ctx);
             return line_search_action::accept;
         }
@@ -464,9 +469,29 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             }
 
             // ── restoration trigger ───────────────────────────────────────────
-            // Keep the historical globalization flow for now: a line-search
-            // stop leaves ls.stop set and lets sqp_iter accept the fallback
-            // trial point on the next pass instead of forcing restoration here.
+            const bool tiny_step_trigger =
+                action == line_search_action::failure &&
+                ls.failure_reason == filter_linesearch_per_iter_data::failure_reason_t::tiny_step &&
+                kkt_last.inf_prim_res > settings.prim_tol;
+
+            if (settings.restoration.enabled && tiny_step_trigger) {
+                if (verbose) {
+                    fmt::print("[resto]: triggering after tiny-step line-search failure (alpha_min {:.3e}, alpha_p {:.3e})\n",
+                               ls.alpha_min, settings.ls.alpha_primal);
+                }
+                kkt_last = restoration_update(kkt_last, ls);
+                ls.reset_per_iter_data();
+
+                if (verbose) {
+                    print_stats(kkt_last);
+                }
+
+                if (kkt_last.result == iter_result_t::success ||
+                    kkt_last.result == iter_result_t::restoration_failed ||
+                    kkt_last.result == iter_result_t::infeasible_stationary) {
+                    break;
+                }
+            }
 
             if (kkt_last.inf_dual_res < settings.dual_tol &&
                 kkt_last.inf_prim_res < settings.prim_tol &&
@@ -502,7 +527,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                 settings.ipm.mu = std::max(settings.ipm.mu, 1e-11);
             }
         }
-        if (kkt_last.result != iter_result_t::success) {
+        if (kkt_last.result == iter_result_t::unknown) {
             kkt_last.result = iter_result_t::exceed_max_iter;
         }
     } catch (...) {

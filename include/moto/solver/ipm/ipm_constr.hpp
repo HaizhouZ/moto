@@ -7,7 +7,7 @@
 namespace moto {
 namespace solver {
 
-class ipm_constr final : public ineq_constr {
+class ipm_constr : public ineq_constr {
   private:
     using base = ineq_constr;
 
@@ -37,9 +37,9 @@ class ipm_constr final : public ineq_constr {
     using base::base;
     using ipm_data = data_type<ipm_constr>;
     /// update the IPM slack and residuals
-    void value_impl(func_approx_data &data) const override final;
+    void value_impl(func_approx_data &data) const override;
     /// update the IPM-modified cost jacobian and hessian
-    void jacobian_impl(func_approx_data &data) const override final;
+    void jacobian_impl(func_approx_data &data) const override;
 
     void propagate_jacobian(func_approx_data &d) const override;
     void propagate_hessian(func_approx_data &d) const override;
@@ -51,21 +51,21 @@ class ipm_constr final : public ineq_constr {
         data.as<ipm_data>().ipm_cfg = &settings->as<ipm_config>();
     }
     /// @brief initialize the IPM constraint data
-    void initialize(data_map_t &data) const override final;
+    void initialize(data_map_t &data) const override;
     /// @brief post rollout operation for the IPM constraint to compute the newton step
-    void finalize_newton_step(data_map_t &data) const override final;
+    void finalize_newton_step(data_map_t &data) const override;
     /// @brief finalize the predictor step, should be called after the rollout
-    void finalize_predictor_step(data_map_t &data, workspace_data *cfg) const override final;
+    void finalize_predictor_step(data_map_t &data, workspace_data *cfg) const override;
     /// @brief will compute the cost jacobian correction depending on the IPM settings
-    void apply_corrector_step(data_map_t &data) const override final;
+    void apply_corrector_step(data_map_t &data) const override;
     /// @brief line search step for the IPM constraint
-    void apply_affine_step(data_map_t &data, workspace_data *cfg) const override final;
+    void apply_affine_step(data_map_t &data, workspace_data *cfg) const override;
     /// @brief update the line search configuration (if necessary)
-    void update_ls_bounds(data_map_t &data, workspace_data *cfg) const override final;
+    void update_ls_bounds(data_map_t &data, workspace_data *cfg) const override;
     /// @brief backup the current IPM trial state before a line-search attempt
-    void backup_trial_state(data_map_t &data) const override final;
+    void backup_trial_state(data_map_t &data) const override;
     /// @brief restore the backed-up IPM trial state before the next line-search attempt
-    void restore_trial_state(data_map_t &data) const override final;
+    void restore_trial_state(data_map_t &data) const override;
     /**
      * @brief make the sparse approximation data for the IPM
      * @param primal sym data including states inputs etc

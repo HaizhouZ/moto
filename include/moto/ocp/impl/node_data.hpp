@@ -77,7 +77,8 @@ struct MOTO_ALIGN_NO_SHARING node_data {
      *
      * @param eval_only
      */
-    void update_approximation(update_mode config = update_mode::eval_all);
+    void update_approximation(update_mode config = update_mode::eval_all,
+                              bool include_original_cost = true);
 
     template <typename Callback>
     void for_each(field_t field, Callback &&callback) {

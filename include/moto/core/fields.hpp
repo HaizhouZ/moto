@@ -10,6 +10,7 @@ enum field_t : size_t {
     __x = 0,
     __u,
     __y,
+    __s,          // solver-managed shared slack storage (non-primal)
     __p,          // non-decision parameters
     __dyn,        // dynamic model
     __eq_x,       // "state equality constraints"

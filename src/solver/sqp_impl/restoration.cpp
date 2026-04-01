@@ -4,12 +4,19 @@ namespace moto {
 
 ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_linesearch_data &ls) {
     using namespace solver::ns_riccati;
+    if (settings.ls.method == linesearch_setting::search_method::merit_backtracking) {
+        throw std::runtime_error("restoration mode is incompatible with merit_backtracking");
+    }
     const auto &rs = settings.restoration;
     auto &graph = solver_graph();
     bool resto_accept = false;
     bool resto_converge = false;
     settings.in_restoration = true;
-    fmt::print("[resto]: triggered restoration with rho_u: {:.3e}, rho_y: {:.3e}\n", rs.rho_u, rs.rho_y);
+    const scalar_t mu_regular = settings.ipm.mu;
+    const scalar_t mu_resto = std::max(mu_regular, kkt_before.inf_prim_res);
+    settings.ipm.mu = mu_resto;
+    fmt::print("[resto]: triggered restoration with rho_u: {:.3e}, rho_y: {:.3e}, mu_bar: {:.3e}\n",
+               rs.rho_u, rs.rho_y, mu_resto);
 
     // Snapshot proximal reference points and per-component primal scaling.
     // sigma[i] = 1/max(|ref[i]|, 1) so the proximal cost is on a percentage level.
@@ -23,6 +30,13 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         vector sigma_u_sq, sigma_y_sq; // rho-scaled: (1/max(|ref|,1))^2
     };
     auto &all_nodes = graph.flatten_nodes();
+    const auto cleanup_restoration_state = [&] {
+        for (data *d : all_nodes) {
+            d->aux_.reset();
+        }
+        settings.ipm.mu = mu_regular;
+        settings.in_restoration = false;
+    };
     std::vector<node_prox> prox_data;
     prox_data.reserve(all_nodes.size());
     for (data *np : all_nodes) {
@@ -30,27 +44,42 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         auto &p = prox_data.emplace_back();
         p.u_ref = n.value(__u);
         p.y_ref = n.value(__y);
-        p.sigma_u_sq = p.u_ref.array().abs().max(prox_eps).inverse().square().min(1.);
-        p.sigma_y_sq = p.y_ref.array().abs().max(prox_eps).inverse().square().min(1.);
+        p.sigma_u_sq.resizeLike(p.u_ref);
+        p.sigma_y_sq.resizeLike(p.y_ref);
+        if (p.u_ref.size() > 0) {
+            p.sigma_u_sq = p.u_ref.array().abs().max(prox_eps).inverse().square().min(1.);
+        }
+        if (p.y_ref.size() > 0) {
+            p.sigma_y_sq = p.y_ref.array().abs().max(prox_eps).inverse().square().min(1.);
+        }
 
-        // Mark restoration mode; rho_eq controls GN dual regularization strength.
+        // Mark restoration mode; presolve/rollout will condense the elastic
+        // restoration subproblem onto x/u/y using mu_bar and rho_eq.
         auto *aux = new ns_riccati_data::restoration_aux_data();
         aux->rho_eq = rs.rho_eq;
+        aux->mu_bar = mu_resto;
+        aux->use_elastic = true;
         n.aux_.reset(aux);
+
+        // Reset equality multipliers when entering restoration so the phase
+        // starts from the restoration subproblem's own dual state rather than
+        // carrying over the normal-phase equality multipliers.
+        n.dense().dual_[__dyn].setZero();
+        n.dense().dual_[__eq_x].setZero();
+        n.dense().dual_[__eq_xu].setZero();
     }
 
-    // Dedicated restoration filter: tracks J_rest = ½‖F_0‖² + ½‖s_c_0_k‖² instead of
-    // the original running cost, so filter progress reflects feasibility improvement.
-    // constr_vio_min=0 means pure filter mode (no Armijo switching).
+    // Reuse the outer filter history, but restoration itself does not add new
+    // entries to that filter.
     filter_linesearch_data rls = ls;
 
-    kkt_info kkt_rest = kkt_before;
+    kkt_info kkt_rest = compute_kkt_info();
+    scalar_t phi_prev = kkt_rest.inf_prim_res;
+    size_t stalled_iters = 0;
+    constexpr size_t min_iters_before_infeasible = 2;
+    constexpr scalar_t stall_tol = 1e-12;
 
-    for (size_t i_rest = 0; i_rest < rs.max_iter; ++i_rest) {
-        if (kkt_before.num_iter + i_rest + 1 > settings.max_iter) {
-            fmt::print("[resto]: reached maximum number of iterations without convergence, exiting restoration\n");
-            break;
-        }
+    for (size_t i_rest = 0; kkt_before.num_iter + i_rest + 1 <= settings.max_iter; ++i_rest) {
         // Write proximal gradient corrections into lag_jac_corr_.
         // activate_lag_jac_corr() inside ns_factorization() will fold them
         // into the active stage gradient seen by the linear solve.
@@ -58,12 +87,14 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         for (data *np : all_nodes) {
             data &n = *np;
             const auto &p = prox_data[node_idx++];
-            n.dense().lag_jac_corr_[__u].noalias() +=
-                rho_u * (p.sigma_u_sq.array() * (n.value(__u) - p.u_ref).array()).matrix().transpose();
-            n.dense().lag_jac_corr_[__y].noalias() +=
-                rho_y * (p.sigma_y_sq.array() * (n.value(__y) - p.y_ref).array()).matrix().transpose();
-            n.primal_prox_hess_diagonal_[__u].diagonal() += rho_u * p.sigma_u_sq;
-            n.primal_prox_hess_diagonal_[__y].diagonal() += rho_y * p.sigma_y_sq;
+            if (p.u_ref.size() > 0) {
+                n.dense().lag_jac_corr_[__u].noalias() +=
+                    rho_u * (p.sigma_u_sq.array() * (n.value(__u) - p.u_ref).array()).matrix().transpose();
+            }
+            if (p.y_ref.size() > 0) {
+                n.dense().lag_jac_corr_[__y].noalias() +=
+                    rho_y * (p.sigma_y_sq.array() * (n.value(__y) - p.y_ref).array()).matrix().transpose();
+            }
         }
 
         line_search_action rest_action = sqp_iter(rls, kkt_rest,
@@ -78,22 +109,44 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
             print_stats(kkt_rest);
         }
 
-        if (kkt_rest.inf_dual_res < settings.dual_tol &&
-            !(kkt_rest.inf_prim_res < settings.prim_tol &&
-              kkt_rest.inf_comp_res < settings.comp_tol)) {
-            resto_converge = true;
-            break;
+        if (rest_action == line_search_action::failure) {
+            if (settings.verbose) {
+                fmt::print("[resto]: line search failed at restoration iter {} "
+                           "(prim_res={:.3e}, dual_res={:.3e}, comp_res={:.3e}), continue restoration\n",
+                           i_rest + 1,
+                           kkt_rest.inf_prim_res,
+                           kkt_rest.inf_dual_res,
+                           kkt_rest.inf_comp_res);
+            }
+            ++stalled_iters;
         }
+
         bool prim_improved = (kkt_rest.inf_prim_res < rs.restoration_improvement_frac * kkt_before.inf_prim_res);
-        if (rest_action == line_search_action::accept and prim_improved) {
+        if (rest_action == line_search_action::accept && prim_improved) {
             resto_accept = true;
             break;
         }
+
+        const scalar_t prim_delta = std::abs(phi_prev - kkt_rest.inf_prim_res);
+        const bool stalled = prim_delta <= stall_tol * std::max<scalar_t>(1., phi_prev);
+        if (stalled) {
+            ++stalled_iters;
+        } else {
+            stalled_iters = 0;
+        }
+
+        if (kkt_rest.inf_dual_res < settings.dual_tol &&
+            !(kkt_rest.inf_prim_res < settings.prim_tol &&
+              kkt_rest.inf_comp_res < settings.comp_tol) &&
+            stalled_iters >= min_iters_before_infeasible) {
+            resto_converge = true;
+            break;
+        }
+
+        phi_prev = kkt_rest.inf_prim_res;
     }
 
-    for (data *d : all_nodes) {
-        d->aux_.reset();
-    }
+    cleanup_restoration_state();
 
     if (!resto_accept) {
         if (resto_converge) {
@@ -106,8 +159,6 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     } else {
         fmt::println("[resto]: restoration successful, exiting restoration");
     }
-
-    settings.in_restoration = false;
 
     return kkt_rest;
 }

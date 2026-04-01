@@ -498,7 +498,6 @@ sqp.settings.comp_tol = 1e-3
 sqp.settings.rf.max_iters = 4
 sqp.settings.ls.update_alpha_dual = False
 # sqp.settings.scaling.scaling_mode = moto.sqp.scaling_settings.mode_gradient
-sqp.settings.restoration.trigger_on_failure_count = 1
 sqp.settings.restoration.max_iter = 1000
 sqp.settings.restoration.rho_eq = 1e-6
 sqp.settings.ls.primal_gamma = 1e-4

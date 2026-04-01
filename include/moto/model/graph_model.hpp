@@ -285,7 +285,7 @@ class graph_model {
                                 needs_lower_to_y = true;
                                 continue;
                             }
-                            if (arg.field() == __y || arg.field() == __p) {
+                            if (arg.field() == __y || arg.field() == __p || arg.field() == __s) {
                                 continue;
                             }
                             if (arg.field() == __u) {

@@ -1,5 +1,6 @@
 #define MOTO_NS_RICCATI_IMPL
 #include <moto/solver/ns_riccati/generic_solver.hpp>
+#include <moto/solver/restoration/resto_init.hpp>
 
 // #define ENABLE_TIMED_BLOCK
 #include <moto/utils/timed_block.hpp>
@@ -167,18 +168,24 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
         d.c_x.dump_into(nsp.s_c_stacked_0_K.bottomRows(d.nc));
     }
 
-    // ── Gauss-Newton mode ─────────────────────────────────────────────────────
+    // ── Restoration condensed mode ────────────────────────────────────────────
     // Dynamics remains a hard constraint (handled by ns_factorization_correction via y_y_k = F_0).
-    // __eq_x / __eq_xu are treated as PMM soft constraints (pmm_constr pattern):
-    //   Gradient:      Q_u/Q_x += (h/rho_eq)^T * J
-    //   Hessian:       Q_zz/V_xx += (1/rho_eq) * J^T * J
-    //   Dual recovery: dlam = (J*du + h) / rho_eq  (in finalize_dual_newton_step)
-    // s_c_stacked / s_c_stacked_0_K serve as J_u / J_x; lu_eq_ is preserved for dual recovery.
-    // Original cost and proximal Hessians (Q_uu, Q_ux, ...) are kept intact.
+    // __eq_x / __eq_xu are treated through the elastic restoration model
+    //
+    //   min_x,p,n  rho * sum(p + n) - mu_bar * sum(log p + log n) + prox(x)
+    //   s.t.       c(x) - p + n = 0
+    //
+    // with p,n eliminated at the current linearization point. The resulting
+    // smooth exact-penalty contribution is condensed onto x/u/y:
+    //   Gradient:  += lambda(c)^T * J
+    //   Hessian:   += J^T * diag(weight(c)) * J
+    //
+    // where lambda(c) = d phi_elastic / d c and weight(c) = d lambda / d c.
+    // Original eq multipliers are reset when entering restoration and are not
+    // recovered from this condensed subproblem.
     if (gauss_newton) {
         const size_t ncstr = d.ncstr;
-        const scalar_t rho_eq    = static_cast<ns_riccati_data::restoration_aux_data *>(d.aux_.get())->rho_eq;
-        const scalar_t inv_rho_eq = scalar_t(1) / rho_eq;
+        const auto *aux = static_cast<const ns_riccati_data::restoration_aux_data *>(d.aux_.get());
 
         // Build s_c_stacked_0_k (equality constraint residuals) for the GN gradient.
         cur->update_projected_dynamics_residual();
@@ -193,29 +200,35 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
             nsp.s_c_stacked_0_k.tail(d.nc) = _approx[__eq_xu].v_;
         }
 
-        // ── Gradients: PMM Schur complement for __eq_x / __eq_xu ──
-        // Mirrors pmm_constr::propagate_jacobian: lag_jac_corr_ += (h/rho)^T * J.
-        // Q_u already contains J^T*lambda from the generic_constr base path in update_approximation;
-        // dynamics is a hard constraint handled by ns_factorization_correction (F_0 via y_y_k).
+        // ── Gradients/Hessians: elastic exact-penalty condensation for __eq_x / __eq_xu ──
         if (ncstr > 0) {
-            const vector h_over_rho = inv_rho_eq * nsp.s_c_stacked_0_k;
-            d.Q_u.noalias() += h_over_rho.transpose() * nsp.s_c_stacked;
-            d.Q_x.noalias() += h_over_rho.transpose() * nsp.s_c_stacked_0_K;
-        }
+            vector elastic_lambda(ncstr);
+            vector elastic_weight(ncstr);
+            for (size_t i = 0; i < ncstr; ++i) {
+                const auto pair = restoration::initialize_elastic_pair(nsp.s_c_stacked_0_k(static_cast<Eigen::Index>(i)),
+                                                                       aux->rho_eq,
+                                                                       aux->mu_bar);
+                elastic_lambda(static_cast<Eigen::Index>(i)) = pair.lambda;
+                elastic_weight(static_cast<Eigen::Index>(i)) = pair.weight;
+            }
+            d.Q_u.noalias() += elastic_lambda.transpose() * nsp.s_c_stacked;
+            d.Q_x.noalias() += elastic_lambda.transpose() * nsp.s_c_stacked_0_K;
 
-        // ── Hessians: unconstrain_setup uses existing Q_uu/Q_ux/..., then add (1/rho_eq)*J^T*J ──
-        unconstrain_setup();
+            unconstrain_setup();
 
-        if (ncstr > 0) {
-            nsp.Q_zz.noalias()    += inv_rho_eq * nsp.s_c_stacked.transpose() * nsp.s_c_stacked;
-            nsp.u_0_p_K.noalias() += inv_rho_eq * nsp.s_c_stacked.transpose() * nsp.s_c_stacked_0_K;
+            nsp.Q_zz.noalias() += nsp.s_c_stacked.transpose() * elastic_weight.asDiagonal() * nsp.s_c_stacked;
+            nsp.u_0_p_K.noalias() += nsp.s_c_stacked.transpose() * elastic_weight.asDiagonal() * nsp.s_c_stacked_0_K;
             nsp.z_0_K = nsp.u_0_p_K;
-            d.V_xx.noalias()      += inv_rho_eq * nsp.s_c_stacked_0_K.transpose() * nsp.s_c_stacked_0_K;
+            d.V_xx.noalias() += nsp.s_c_stacked_0_K.transpose() * elastic_weight.asDiagonal() * nsp.s_c_stacked_0_K;
+        } else {
+            unconstrain_setup();
         }
 
         // rank_status_ = unconstrained (set by unconstrain_setup), so
         // ns_factorization_correction takes the early return path.
-        // ns/nc/ncstr are left intact for finalize_dual_newton_step.
+        // ns/nc/ncstr are left intact so restoration bookkeeping can still
+        // report original equality violation, but the elastic model itself is
+        // fully condensed onto x/u/y.
         ns_factorization_correction(cur);
         return;
     }

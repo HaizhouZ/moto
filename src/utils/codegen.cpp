@@ -364,9 +364,9 @@ void task::finalize(job_list &jobs_) {
 
     // excluded = [e.name for e in exclude]
     std::set<size_t> excluded;
-    // # exclude inputs in field p
+    // exclude non-primal storage-only inputs
     for (const sym &s : sx_inputs)
-        if (s.field() == __p)
+        if (s.field() == __p || s.field() == __s)
             excluded.insert(s.uid());
     std::map<size_t, cs::SX> external_jac;
     for (auto &[in_arg, jac] : ext_jac) {

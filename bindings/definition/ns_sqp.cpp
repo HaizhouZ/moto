@@ -96,8 +96,6 @@ void register_submodule_ns_sqp(nb::module_ &m) {
                 "Whether restoration mode is allowed")
         .def_rw("max_iter", &ns_sqp::restoration_settings::max_iter,
                 "Maximum number of restoration iterations per trigger")
-        .def_rw("trigger_on_failure_count", &ns_sqp::restoration_settings::trigger_on_failure_count,
-                "Trigger restoration after this many consecutive line-search failures")
         .def_rw("rho_u", &ns_sqp::restoration_settings::rho_u,
                 "Proximal weight on u (anchors to point where restoration was triggered)")
         .def_rw("rho_y", &ns_sqp::restoration_settings::rho_y,
@@ -106,7 +104,9 @@ void register_submodule_ns_sqp(nb::module_ &m) {
                 "Dual regularization for GN equality constraints: Hess += (1/rho_eq)*J^T*J; "
                 "dlam = (J*du+h)/rho_eq. Smaller -> tighter constraint satisfaction per step (default 1.0)")
         .def_rw("restoration_improvement_frac", &ns_sqp::restoration_settings::restoration_improvement_frac,
-                "Exit restoration when inf_prim_res drops below this fraction of entry infeasibility (default 0.9)");
+                "Exit restoration when inf_prim_res drops below this fraction of entry infeasibility (default 0.9)")
+        .def_rw("alpha_min_factor", &ns_sqp::restoration_settings::alpha_min_factor,
+                "Safety factor used in IPOPT-style tiny-step restoration trigger");
 
     nb::class_<ns_sqp::scaling_settings> sc_setting(sqp, "scaling_settings");
     sc_setting

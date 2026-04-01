@@ -35,7 +35,7 @@ void sym_data::integrate(field_t f, vector &dx, scalar_t alpha) {
 
 void sym_data::print() {
     auto p = prob_;
-    for (auto f : concat_fields(primal_fields, std::array{__p, __usr_var})) {
+    for (auto f : concat_fields(primal_fields, std::array{__s, __p, __usr_var})) {
         if (p->dim(f) == 0)
             continue; // skip empty fields
         fmt::println("Field {}: dim {}", field::name(f), p->dim(f));
@@ -63,7 +63,7 @@ node_data::node_data(const ocp_ptr_t &prob)
         }
     }
 }
-void node_data::update_approximation(update_mode config) {
+void node_data::update_approximation(update_mode config, bool include_original_cost) {
     /// @todo: always eval residual?
     // call to precompute
     bool update_cost = config == update_mode::eval_val || config == update_mode::eval_all;
@@ -76,6 +76,7 @@ void node_data::update_approximation(update_mode config) {
         for (auto field : primal_fields) {
             dense_->lag_jac_[field].setZero();
             dense_->lag_jac_corr_[field].setZero();
+            dense_->cost_jac_[field].setZero();
         }
 
         if (config >= update_mode::eval_hess)
@@ -109,6 +110,10 @@ void node_data::update_approximation(update_mode config) {
     if (config >= update_mode::eval_jac)
         for (auto field : primal_fields){
             dense_->cost_jac_[field] = dense_->lag_jac_[field];
+        }
+    if (config >= update_mode::eval_jac && !include_original_cost)
+        for (auto field : primal_fields) {
+            dense_->lag_jac_[field].setZero();
         }
 
     for (auto f : lag_data::stored_constr_fields) {

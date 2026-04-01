@@ -1148,3 +1148,10 @@ Recommended next step from here:
 3. Only then migrate [`example/quadruped/run.py`](/home/harper/Documents/moto/example/quadruped/run.py) to the new modeling path
 
 This order is important because quadruped is too large to use as the first proving ground for new node/edge semantics.
+
+## Todo
+
+- rename `directed graph` to `graph_storage` in the NS SQP bindings
+  - comment: feature only, not urgent
+- add rank-based backward degeneration test and propagation
+- add automatic inertia correction after ill-conditioning is detected
