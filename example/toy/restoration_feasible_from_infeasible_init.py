@@ -10,16 +10,16 @@ def build_feasible_sqp():
     x, xn = moto.sym.states("x", 1)
     u = moto.sym.inputs("u", 1)
 
-    term_eq = moto.constr.create("xN_eq", [x], x.sx - 1.0)
-    dyn = moto.dense_dynamics.create("integrator_dyn", [x, xn, u], xn.sx - x.sx - u.sx)
+    term_eq = moto.constr.create("toy_feas_init_xN_eq", [x], x.sx - 1.0)
+    dyn = moto.dense_dynamics.create("toy_feas_init_integrator_dyn", [x, xn, u], xn.sx - x.sx - u.sx)
 
     running_cost = moto.cost.create(
-        "running_cost",
+        "toy_feas_init_running_cost",
         [x, u],
         1e-2 * cs.sumsqr(x.sx) + 1e-2 * cs.sumsqr(u.sx),
     ).set_diag_hess()
     terminal_cost = moto.cost.create(
-        "terminal_cost",
+        "toy_feas_init_terminal_cost",
         [x],
         1e-2 * cs.sumsqr(x.sx - 1.0),
     ).set_diag_hess()

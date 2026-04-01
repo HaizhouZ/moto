@@ -1,4 +1,4 @@
-# moto Agent Guide
+# moto AGENTS Guide
 
 ## Purpose
 
@@ -32,6 +32,7 @@ This guide was derived from the code itself, especially:
 - a nullspace / Riccati-based stagewise QP solve
 - optional IPM treatment for inequalities
 - optional PMM treatment for soft equalities
+- an IPOPT-inspired restoration phase with an explicit stage-local elastic KKT condensed onto `w=(x,u,y)`
 - nanobind Python bindings
 
 The main solver entry point is:
@@ -44,7 +45,7 @@ The main SQP iteration loop lives in:
 
 ## Repo Map
 
-- [`include/moto/core/fields.hpp`](/home/harper/Documents/moto/include/moto/core/fields.hpp): field taxonomy like `__x`, `__u`, `__y`, `__dyn`, `__eq_x`, `__ineq_xu`
+- [`include/moto/core/fields.hpp`](/home/harper/Documents/moto/include/moto/core/fields.hpp): field taxonomy like `__x`, `__u`, `__y`, `__s`, `__dyn`, `__eq_x`, `__ineq_xu`
 - [`include/moto/ocp/problem.hpp`](/home/harper/Documents/moto/include/moto/ocp/problem.hpp): stage formulation container
 - [`include/moto/ocp/impl/func.hpp`](/home/harper/Documents/moto/include/moto/ocp/impl/func.hpp): generic function abstraction
 - [`include/moto/ocp/impl/func_data.hpp`](/home/harper/Documents/moto/include/moto/ocp/impl/func_data.hpp): sparse maps from symbolic args to dense storage
@@ -62,6 +63,10 @@ The main SQP iteration loop lives in:
 - [`src/solver/sqp_impl/iterative_refinement.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/iterative_refinement.cpp): residual correction
 - [`include/moto/solver/ipm/ipm_constr.hpp`](/home/harper/Documents/moto/include/moto/solver/ipm/ipm_constr.hpp): IPM inequality implementation
 - [`include/moto/solver/soft_constr/pmm_constr.hpp`](/home/harper/Documents/moto/include/moto/solver/soft_constr/pmm_constr.hpp): PMM soft equality implementation
+- [`include/moto/solver/restoration/resto_local_kkt.hpp`](/home/harper/Documents/moto/include/moto/solver/restoration/resto_local_kkt.hpp): shared explicit elastic restoration math helper
+- [`include/moto/solver/restoration/resto_elastic_constr.hpp`](/home/harper/Documents/moto/include/moto/solver/restoration/resto_elastic_constr.hpp): solver-private stage-local elastic runtime state
+- [`include/moto/solver/restoration/resto_runtime.hpp`](/home/harper/Documents/moto/include/moto/solver/restoration/resto_runtime.hpp): restoration lifecycle integration hooks
+- [`restoration_explicit_checkpoint.md`](/home/harper/Documents/moto/restoration_explicit_checkpoint.md): math checkpoint for the explicit local-KKT restoration derivation
 - [`bindings/`](/home/harper/Documents/moto/bindings): Python bindings
 - [`example/`](/home/harper/Documents/moto/example): manual examples
 - [`unittests/`](/home/harper/Documents/moto/unittests): Catch2 tests
@@ -87,7 +92,7 @@ Important build facts:
 - `WITH_NATIVE_OPT=ON` enables `-march=native`
 - Python bindings are built from [`bindings/CMakeLists.txt`](/home/harper/Documents/moto/bindings/CMakeLists.txt)
 - unit tests are defined in [`unittests/CMakeLists.txt`](/home/harper/Documents/moto/unittests/CMakeLists.txt)
-- only `sym_test` is currently enabled by default in CMake
+- current CMake test registration includes `sym_test`, `graph_model_compose_test`, `restoration_test`, and the Python restoration probes
 
 Manual runs from the repo docs:
 
@@ -140,7 +145,11 @@ Primary primal fields:
 - `__x`: current state
 - `__u`: control
 - `__y`: next state
-- `__p`: parameters
+
+Solver-managed non-primal storage:
+
+- `__s`: internal shared slack storage reserved for solver-owned IPM/restoration state
+- `__p`: non-decision parameters
 
 Core function / constraint fields:
 
@@ -173,6 +182,7 @@ Why this is easy to trip over:
 Useful field groups used throughout the solver:
 
 - `primal_fields = {__x, __u, __y}`
+- `__s` is intentionally not part of `primal_fields`
 - hard constraints = `{__dyn, __eq_x, __eq_xu}`
 - inequalities = `{__ineq_x, __ineq_xu}`
 - soft equalities = `{__eq_x_soft, __eq_xu_soft}`
@@ -430,8 +440,14 @@ Responsibilities:
 - `generic_constr`: multiplier mapping and constraint-field finalization
 - `soft_constr`: Newton-step split state, Jacobian modifications, dual-step storage
 - `ineq_constr`: complementarity residual storage
-- `ipm_constr`: slack, NT scaling, barrier residuals, IPM predictor/corrector logic
+- `ipm_constr`: slack, NT scaling, barrier residuals, IPM predictor/corrector logic; no longer `final`
 - `pmm_constr`: soft-equality PMM Schur-complement terms
+
+Restoration note:
+
+- the active restoration implementation no longer adds a dedicated constraint subclass here
+- instead it uses a solver-private stage runtime plus a shared local-KKT helper under
+  [`include/moto/solver/restoration/`](/home/harper/Documents/moto/include/moto/solver/restoration)
 
 Registry-based conversion:
 
@@ -537,6 +553,12 @@ Its flow is:
    compute `inf_prim_res_`, `prim_res_l1_`, `inf_comp_res_`
    add `cost_` into `lag_`
 
+Important restoration-specific detail:
+
+- `update_approximation(..., include_original_cost=false)` still evaluates the original cost and snapshots `cost_jac_`
+- afterward it zeros the base stage gradient for `primal_fields` before adding constraint-dual terms
+- this means restoration still has the original objective value and directional derivative bookkeeping for filter globalization, but the original cost gradient does not drive the restoration search direction
+
 Mental model:
 
 - every function writes into local sparse refs
@@ -599,7 +621,7 @@ Multiplier-related state:
 Auxiliary mode hook:
 
 - `aux_` can hold mode-specific state
-- restoration uses `restoration_aux_data` with `rho_eq`
+- restoration currently uses `restoration_aux_data` with `rho_eq`, `mu_bar`, an initialization flag, and a stage-local explicit elastic runtime (`p,n,nu_p,nu_n` plus local work buffers)
 
 ### `nullspace_data`
 
@@ -822,9 +844,11 @@ In normal constrained mode:
 
 - solve `lu_eq_.transpose().solve(...)` for hard-equality multipliers
 
-In restoration GN mode:
+In restoration explicit-elastic mode:
 
-- recover `dlam = (h + J_u du + J_x dx) / rho_eq`
+- `__dyn` duals are still recovered through the hard-constraint path
+- `__eq_x` and `__eq_xu` do not use the old PMM-style `dlam = (h + J_u du + J_x dx) / rho_eq` reconstruction
+- instead, presolve condenses the local elastic KKT onto `w=(x,u,y)` and rollout recovers `d_lambda`, `d_p`, `d_n`, `d_nu_p`, and `d_nu_n` from the same local helper
 
 ## KKT Information And Residual Accounting
 
@@ -881,6 +905,8 @@ Key details:
 - `fullstep_dec < 0` must be checked before `pow(...)` to avoid NaNs
 - backtracking can be linear or geometric
 - failure fallback is either minimum step or best trial
+- restoration reuses the same filter acceptance logic, but does not add new points to the outer filter history
+- restoration is triggered only on line-search `failure` with failure reason `tiny_step`, not on arbitrary backtracking failure
 
 The SOC scaffolding exists but is intentionally not implemented:
 
@@ -982,6 +1008,14 @@ PMM line-search state:
 - only multiplier backup/restore is needed
 - no slack variables exist
 
+### Internal slack storage
+
+Current solver direction:
+
+- `__s` exists as solver-managed shared slack storage
+- it is not exposed as a user modeling field and does not participate in code generation like `__x/__u/__y`
+- it is not part of the global Riccati primal state; explicit restoration uses stage-local runtime state and local-KKT condensation instead
+
 ## Predictor-Corrector And Iterative Refinement
 
 ### IPM predictor-corrector
@@ -1011,35 +1045,68 @@ This is a true correction solve on the linearized KKT system, not a full relinea
 
 ## Restoration Mode
 
-[`src/solver/sqp_impl/restoration.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/restoration.cpp) implements a Gauss-Newton-style feasibility-restoration mode.
+[`src/solver/sqp_impl/restoration.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/restoration.cpp) now implements an IPOPT-inspired restoration phase with an explicit local elastic KKT for `__eq_x` and `__eq_xu`, condensed onto the global stage variables `w=(x,u,y)`.
 
-Current status:
+Entry condition:
 
-- restoration logic exists
-- the automatic trigger block in `update()` is commented out
-- it can still be called from code
+- normal globalization must return `line_search_action::failure`
+- the failure reason must be `tiny_step`
+- current primal infeasibility must still exceed `prim_tol`
 
-Restoration setup:
+The tiny-step threshold is an IPOPT-style adaptive minimum step:
 
-- snapshot `u_ref` and `y_ref`
-- compute per-component relative scaling `sigma = 1 / max(|ref|, 1)`
-- allocate `restoration_aux_data` with `rho_eq`
-- inject proximal gradient terms into `lag_jac_corr_`
-- inject diagonal proximal Hessian terms into `ns_sqp::data::primal_prox_hess_diagonal_`
+- `theta(x_k) = prim_res_l1`
+- `theta_min = settings.ls.constr_vio_min`
+- `gamma_theta = settings.ls.primal_gamma`
+- `gamma_phi = settings.ls.dual_gamma`
+- `alpha_min_factor = settings.restoration.alpha_min_factor`
 
-Restoration factorization behavior:
+Restoration initialization:
 
-- dynamics stays hard
-- `__eq_x` and `__eq_xu` are treated like PMM soft constraints in Gauss-Newton mode
-- original cost terms remain intact
-- equality residuals add PMM-like gradient and Hessian contributions
-- Riccati solve proceeds in unconstrained mode while LU data is preserved for dual recovery
+- `mu_bar = max(mu_regular, inf_prim_res)`
+- current iterate is reused as the restoration reference point
+- equality multipliers are reset for `__dyn`, `__eq_x`, and `__eq_xu`
+- `u_ref` and `y_ref` are snapshotted for proximal anchoring
+- `sigma_u`, `sigma_y` use componentwise scaling `1 / max(|ref|, 1)`
+- merit backtracking is intentionally incompatible with restoration
 
-Exit conditions:
+Active restoration model:
 
-- accept if primal infeasibility improves sufficiently
-- mark `infeasible_stationary` if dual residual falls below tolerance without primal feasibility
-- otherwise mark `restoration_failed`
+- dynamics `__dyn` remain hard constraints
+- hard equalities `__eq_x` and `__eq_xu` are moved into an explicit elastic exact-penalty model
+- the elastic variables `p,n,nu_p,nu_n,lambda_c` are stage-local restoration state, not user-visible primal variables
+- presolve condenses the local elastic KKT onto `w=(x,u,y)` using the Hippo-style terms
+  - `M = P N_p^{-1} + T_n N_n^{-1}`
+  - `b_c = r_c + N_p^{-1}(r_{s,p}+P r_p) - N_n^{-1}(r_{s,n}+T_n r_n)`
+  - gradient term `C^T M^{-1} b_c`
+  - curvature term `C^T M^{-1} C`
+- `u` and `y` receive first-order proximal anchoring through `lag_jac_corr_`
+- there is currently no matching proximal Hessian for `u/y`
+
+Original cost semantics during restoration:
+
+- original cost value is still evaluated
+- original `cost_jac_` is still computed so filter/objective directional-derivative logic remains consistent
+- original cost gradient is removed from the base search-direction Jacobian before the restoration solve is assembled
+
+Globalization semantics during restoration:
+
+- restoration still uses the normal filter objective pair `(prim_res_l1, barrier objective)`
+- restoration does not append new points to the outer filter history
+- restoration line-search failure alone is not treated as immediate restoration failure
+
+Current success / failure behavior:
+
+- success requires an accepted restoration step with sufficient primal-infeasibility improvement relative to the entry point
+- `infeasible_stationary` is reserved for small dual residual without recovered feasibility
+- otherwise the phase eventually returns `restoration_failed` or the outer loop exhausts `max_iter`
+
+Current practical status on `example/arm/run.py`:
+
+- restoration is automatically triggered and is thread-consistent between `--n-job 1` and `--n-job 4`
+- the current explicit local-KKT elastic model reliably reduces the problem to a terminal `__eq_x` bottleneck
+- the best tested stable tuning so far is roughly `rho_u = rho_y = 0.1`, `rho_eq = 0.1`
+- even there, the arm example still exits with `iter_result_restoration_failed` rather than full success
 
 ## Diagnostics
 

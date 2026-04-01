@@ -17,14 +17,14 @@ x, xn = moto.sym.states("x", nx)
 u = moto.sym.inputs("u", nu)
 
 dyn = moto.dense_dynamics.create(
-    "double_integrator_dyn",
+    "toy_base_double_integrator_dyn",
     [x, xn, u],
     xn.sx - A @ x.sx - B @ u.sx,
 )
 
 running_cost = (
     moto.cost.create(
-        "running_cost",
+        "toy_base_running_cost",
         [x, u],
         0.5 * cs.sumsqr(x.sx) + 0.05 * cs.sumsqr(u.sx),
     )
@@ -33,7 +33,7 @@ running_cost = (
 
 terminal_cost = (
     moto.cost.create(
-        "terminal_cost",
+        "toy_base_terminal_cost",
         [x],
         5.0 * cs.sumsqr(x.sx),
     )
@@ -42,7 +42,7 @@ terminal_cost = (
 
 u_limit = 0.5
 u_box = moto.constr.create(
-    "u_box",
+    "toy_base_u_box",
     [u],
     cs.vertcat(u.sx - u_limit, -u.sx - u_limit),
 ).cast_ineq()

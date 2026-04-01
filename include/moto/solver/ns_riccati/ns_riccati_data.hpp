@@ -2,6 +2,7 @@
 #define __NS_RICCATI_DATA__
 
 #include <moto/solver/data_base.hpp>
+#include <moto/solver/restoration/resto_elastic_constr.hpp>
 
 #include <Eigen/Cholesky>
 #include <Eigen/LU>
@@ -73,9 +74,12 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
     /// Proximal cost (gradient + diagonal Hessian) is injected directly into
     /// lag_data by ns_sqp::restoration_update.
     struct restoration_aux_data : aux_data {
-        scalar_t rho_eq = 1.0; ///< elastic exact-penalty weight used in restoration
-        scalar_t mu_bar = 1.0; ///< IPOPT-style restoration barrier parameter
-        bool use_elastic = true;
+        scalar_t rho_eq = 1.0;   ///< elastic exact-penalty weight used in restoration
+        scalar_t lambda_reg = 1e-8; ///< Hippo-style local elastic regularization for the explicit elastic local-KKT
+        scalar_t mu_bar = 1.0;   ///< IPOPT-style restoration barrier parameter
+        bool verbose = false;    ///< whether to print local restoration diagnostics
+        bool initialized = false;
+        resto_elastic_constr elastic;
     };
 
     rank_status rank_status_;

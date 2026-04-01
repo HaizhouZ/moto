@@ -10,17 +10,17 @@ def build_infeasible_sqp():
     x, xn = moto.sym.states("x", 1)
     u = moto.sym.inputs("u", 1)
 
-    init_eq = moto.constr.create("x0_eq", [x], x.sx)
-    u_zero = moto.constr.create("u_eq", [u], u.sx)
-    term_eq = moto.constr.create("xN_eq", [x], x.sx - 1.0)
-    dyn = moto.dense_dynamics.create("integrator_dyn", [x, xn, u], xn.sx - x.sx - u.sx)
+    init_eq = moto.constr.create("toy_infeas_x0_eq", [x], x.sx)
+    u_zero = moto.constr.create("toy_infeas_u_eq", [u], u.sx)
+    term_eq = moto.constr.create("toy_infeas_xN_eq", [x], x.sx - 1.0)
+    dyn = moto.dense_dynamics.create("toy_infeas_integrator_dyn", [x, xn, u], xn.sx - x.sx - u.sx)
     running_cost = moto.cost.create(
-        "running_cost",
+        "toy_infeas_running_cost",
         [x, u],
         1e-3 * cs.sumsqr(x.sx) + 1e-3 * cs.sumsqr(u.sx),
     ).set_diag_hess()
     terminal_cost = moto.cost.create(
-        "terminal_cost",
+        "toy_infeas_terminal_cost",
         [x],
         1e-3 * cs.sumsqr(x.sx),
     ).set_diag_hess()

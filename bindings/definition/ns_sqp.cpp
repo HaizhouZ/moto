@@ -1,4 +1,5 @@
 #include <moto/solver/ns_sqp.hpp>
+#include <moto/solver/restoration/resto_runtime.hpp>
 #include <nanobind/stl/function.h>
 #include <nanobind/stl/list.h>
 #include <type_cast.hpp>
@@ -16,6 +17,20 @@ using unary_list = graph_type::unary_view::base;
 using binary_list = graph_type::binary_view::base;
 NB_MAKE_OPAQUE(unary_list);
 NB_MAKE_OPAQUE(binary_list);
+
+namespace {
+auto *get_restoration_aux(ns_sqp::data &self) {
+    return dynamic_cast<ns_sqp::ns_riccati_data::restoration_aux_data *>(self.aux_.get());
+}
+
+const auto *get_restoration_aux(const ns_sqp::data &self) {
+    return dynamic_cast<const ns_sqp::ns_riccati_data::restoration_aux_data *>(self.aux_.get());
+}
+
+vector empty_vector() {
+    return vector{};
+}
+} // namespace
 
 void register_submodule_ns_sqp(nb::module_ &m) {
 
@@ -101,8 +116,11 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("rho_y", &ns_sqp::restoration_settings::rho_y,
                 "Proximal weight on y (anchors to point where restoration was triggered)")
         .def_rw("rho_eq", &ns_sqp::restoration_settings::rho_eq,
-                "Dual regularization for GN equality constraints: Hess += (1/rho_eq)*J^T*J; "
-                "dlam = (J*du+h)/rho_eq. Smaller -> tighter constraint satisfaction per step (default 1.0)")
+                "Elastic exact-penalty weight varrho on p+n in the restoration NLP")
+        .def_rw("lambda_reg", &ns_sqp::restoration_settings::lambda_reg,
+                "Hippo-style local elastic regularization; for lambda_reg > 0 the local condensation uses "
+                "M_rho = P (P + lambda_reg N_p)^-1 + T_n (T_n + lambda_reg N_n)^-1, "
+                "and lambda_reg == 0 falls back to the unregularized explicit elastic local-KKT")
         .def_rw("restoration_improvement_frac", &ns_sqp::restoration_settings::restoration_improvement_frac,
                 "Exit restoration when inf_prim_res drops below this fraction of entry infeasibility (default 0.9)")
         .def_rw("alpha_min_factor", &ns_sqp::restoration_settings::alpha_min_factor,
@@ -165,6 +183,53 @@ void register_submodule_ns_sqp(nb::module_ &m) {
 
     nb::class_<ns_sqp::data, node_data>(sqp, "data_type")
         .def_prop_ro("addr", [](ns_sqp::data &self) { return fmt::format("{:p}", static_cast<const void *>(&self)); }, "Get the data address associated with this node")
+        .def_prop_ro("restoration_active",
+                     [](const ns_sqp::data &self) {
+                         const auto *aux = get_restoration_aux(self);
+                         return aux != nullptr && aux->initialized;
+                     },
+                     "Whether explicit restoration runtime is present and initialized on this stage")
+        .def_prop_ro("restoration_mu_bar",
+                     [](const ns_sqp::data &self) {
+                         const auto *aux = get_restoration_aux(self);
+                         return aux != nullptr ? aux->mu_bar : (self.last_restoration_.valid ? self.last_restoration_.mu_bar : scalar_t(0.));
+                     },
+                     "Restoration barrier parameter on this stage")
+        .def_prop_ro("restoration_has_snapshot",
+                     [](const ns_sqp::data &self) {
+                         return self.last_restoration_.valid;
+                     },
+                     "Whether this stage keeps a snapshot from the last restoration phase")
+        .def_prop_ro("restoration_p",
+                     [](const ns_sqp::data &self) {
+                         const auto *aux = get_restoration_aux(self);
+                         return aux != nullptr ? aux->elastic.p : (self.last_restoration_.valid ? self.last_restoration_.p : empty_vector());
+                     },
+                     "Current explicit elastic p values on this stage")
+        .def_prop_ro("restoration_n",
+                     [](const ns_sqp::data &self) {
+                         const auto *aux = get_restoration_aux(self);
+                         return aux != nullptr ? aux->elastic.n : (self.last_restoration_.valid ? self.last_restoration_.n : empty_vector());
+                     },
+                     "Current explicit elastic n values on this stage")
+        .def_prop_ro("restoration_nu_p",
+                     [](const ns_sqp::data &self) {
+                         const auto *aux = get_restoration_aux(self);
+                         return aux != nullptr ? aux->elastic.nu_p : (self.last_restoration_.valid ? self.last_restoration_.nu_p : empty_vector());
+                     },
+                     "Current explicit elastic nu_p values on this stage")
+        .def_prop_ro("restoration_nu_n",
+                     [](const ns_sqp::data &self) {
+                         const auto *aux = get_restoration_aux(self);
+                         return aux != nullptr ? aux->elastic.nu_n : (self.last_restoration_.valid ? self.last_restoration_.nu_n : empty_vector());
+                     },
+                     "Current explicit elastic nu_n values on this stage")
+        .def_prop_ro("restoration_lambda",
+                     [](const ns_sqp::data &self) {
+                         const auto *aux = get_restoration_aux(self);
+                         return (aux != nullptr && aux->initialized) ? solver::restoration::gather_lambda(self) : (self.last_restoration_.valid ? self.last_restoration_.lambda : empty_vector());
+                     },
+                     "Current explicit elastic lambda_c values on this stage")
         .def(nb::init<ocp_ptr_t>(), nb::arg("prob"), "Constructor for ns_sqp data with OCP problem");
 
     nb::class_<graph_type> graph(sqp, "graph_type");

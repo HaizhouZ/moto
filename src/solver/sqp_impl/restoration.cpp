@@ -1,4 +1,5 @@
 #include <moto/solver/ns_sqp.hpp>
+#include <moto/solver/restoration/resto_runtime.hpp>
 
 namespace moto {
 
@@ -15,8 +16,8 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     const scalar_t mu_regular = settings.ipm.mu;
     const scalar_t mu_resto = std::max(mu_regular, kkt_before.inf_prim_res);
     settings.ipm.mu = mu_resto;
-    fmt::print("[resto]: triggered restoration with rho_u: {:.3e}, rho_y: {:.3e}, mu_bar: {:.3e}\n",
-               rs.rho_u, rs.rho_y, mu_resto);
+    fmt::print("[resto]: triggered restoration with rho_u: {:.3e}, rho_y: {:.3e}, mu_bar: {:.3e}, lambda_reg: {:.3e}\n",
+               rs.rho_u, rs.rho_y, mu_resto, rs.lambda_reg);
 
     // Snapshot proximal reference points and per-component primal scaling.
     // sigma[i] = 1/max(|ref[i]|, 1) so the proximal cost is on a percentage level.
@@ -32,6 +33,15 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     auto &all_nodes = graph.flatten_nodes();
     const auto cleanup_restoration_state = [&] {
         for (data *d : all_nodes) {
+            if (auto *aux = dynamic_cast<ns_riccati_data::restoration_aux_data *>(d->aux_.get()); aux != nullptr && aux->initialized) {
+                d->last_restoration_.valid = true;
+                d->last_restoration_.mu_bar = aux->mu_bar;
+                d->last_restoration_.p = aux->elastic.p;
+                d->last_restoration_.n = aux->elastic.n;
+                d->last_restoration_.nu_p = aux->elastic.nu_p;
+                d->last_restoration_.nu_n = aux->elastic.nu_n;
+                d->last_restoration_.lambda = solver::restoration::gather_lambda(*d);
+            }
             d->aux_.reset();
         }
         settings.ipm.mu = mu_regular;
@@ -53,17 +63,18 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
             p.sigma_y_sq = p.y_ref.array().abs().max(prox_eps).inverse().square().min(1.);
         }
 
-        // Mark restoration mode; presolve/rollout will condense the elastic
-        // restoration subproblem onto x/u/y using mu_bar and rho_eq.
+        // Mark restoration mode; presolve/rollout will initialize and update
+        // the explicit local elastic block using mu_bar, rho_eq, and lambda_reg.
         auto *aux = new ns_riccati_data::restoration_aux_data();
         aux->rho_eq = rs.rho_eq;
+        aux->lambda_reg = rs.lambda_reg;
         aux->mu_bar = mu_resto;
-        aux->use_elastic = true;
+        aux->verbose = settings.verbose;
         n.aux_.reset(aux);
 
-        // Reset equality multipliers when entering restoration so the phase
-        // starts from the restoration subproblem's own dual state rather than
-        // carrying over the normal-phase equality multipliers.
+        // Reset original equality multipliers when entering restoration. The
+        // explicit elastic lambda_c will be initialized from the IPOPT-style
+        // local subproblem on the first restoration factorization.
         n.dense().dual_[__dyn].setZero();
         n.dense().dual_[__eq_x].setZero();
         n.dense().dual_[__eq_xu].setZero();

@@ -1,6 +1,7 @@
 #include <moto/solver/ineq_soft.hpp>
 #include <moto/solver/ipm/ipm_constr.hpp>
 #include <moto/solver/ns_riccati/generic_solver.hpp>
+#include <moto/solver/restoration/resto_runtime.hpp>
 #include <moto/solver/ns_sqp.hpp>
 #include <moto/utils/field_conversion.hpp>
 #include <magic_enum/magic_enum.hpp>
@@ -304,13 +305,21 @@ void ns_sqp::prepare_globalization(filter_linesearch_data &ls, iteration_context
     ls.merit_fullstep = std::numeric_limits<scalar_t>::infinity();
     ls.best_merit_trial = filter_linesearch_data::merit_trial{};
 
-    graph.for_each_parallel([this](data *d) {
+    graph.for_each_parallel([this](size_t tid, data *d) {
         riccati_solver_->finalize_dual_newton_step(d);
+        if (settings.in_restoration) {
+            solver::restoration::finalize_newton_step(*d);
+            solver::restoration::update_ls_bounds(*d, &setting_per_thread[tid]);
+        }
     });
+    if (settings.in_restoration) {
+        finalize_ls_bound_and_set_to_max();
+    }
     unscale_duals();
     graph.for_each_parallel([](data *d) {
         d->backup_trial_state();
         solver::ineq_soft::backup_trial_state(d);
+        solver::restoration::backup_trial_state(*d);
     });
     if (ctx.mu_changed) {
         ls.points.clear(); // the QP objective changed, so old filter points are no longer comparable
@@ -327,8 +336,10 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
     graph.for_each_parallel([this](data *d) {
         d->restore_trial_state();
         solver::ineq_soft::restore_trial_state(d);
+        solver::restoration::restore_trial_state(*d);
         riccati_solver_->apply_affine_step(d, &settings);
         solver::ineq_soft::apply_affine_step(d, &settings);
+        solver::restoration::apply_affine_step(*d, &settings);
         d->update_approximation(node_data::update_mode::eval_val,
                                 !settings.in_restoration);
     });
@@ -401,6 +412,14 @@ ns_sqp::line_search_action ns_sqp::run_globalization(filter_linesearch_data &ls,
             break;
         case line_search_action::failure:
             if (settings.ls.enabled) {
+                if (settings.in_restoration) {
+                    auto &graph = solver_graph();
+                    graph.for_each_parallel([](data *d) {
+                        d->restore_trial_state();
+                        solver::ineq_soft::restore_trial_state(d);
+                        solver::restoration::restore_trial_state(*d);
+                    });
+                }
                 return line_search_action::failure;
             }
             break;

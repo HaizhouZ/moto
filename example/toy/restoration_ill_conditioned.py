@@ -22,19 +22,19 @@ def build_ill_conditioned_sqp(
     x, xn = moto.sym.states("x", nx)
     u = moto.sym.inputs("u", nu)
 
-    dyn = moto.dense_dynamics.create("ill_dyn", [x, xn, u], xn.sx - A @ x.sx - B @ u.sx)
+    dyn = moto.dense_dynamics.create("toy_ill_dyn", [x, xn, u], xn.sx - A @ x.sx - B @ u.sx)
     running_cost = moto.cost.create(
-        "running_cost",
+        "toy_ill_running_cost",
         [x, u],
         0.5 * cs.sumsqr(x.sx) + 1e-4 * cs.sumsqr(u.sx),
     ).set_diag_hess()
     terminal_cost = moto.cost.create(
-        "terminal_cost",
+        "toy_ill_terminal_cost",
         [x],
         1e-2 * cs.sumsqr(x.sx),
     ).set_diag_hess()
     u_box = moto.constr.create(
-        "u_box",
+        "toy_ill_u_box",
         [u],
         cs.vertcat(u.sx - 0.2, -u.sx - 0.2),
     ).cast_ineq()

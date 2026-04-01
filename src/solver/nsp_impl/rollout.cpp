@@ -1,5 +1,6 @@
 #define MOTO_NS_RICCATI_IMPL
 #include <moto/solver/ns_riccati/generic_solver.hpp>
+#include <moto/solver/restoration/resto_runtime.hpp>
 
 #include <moto/utils/field_conversion.hpp>
 
@@ -62,28 +63,17 @@ void generic_solver::finalize_dual_newton_step(ns_riccati_data *cur) {
             d.trial_dual_step[__eq_xu] = d.d_lbd_s_c.tail(d.nc);
         }
     } else if (d.ncstr > 0 && d.aux_ != nullptr) {
-        const auto *aux = static_cast<const ns_riccati_data::restoration_aux_data *>(d.aux_.get());
-        if (aux->use_elastic) {
+        const auto *aux = dynamic_cast<const ns_riccati_data::restoration_aux_data *>(d.aux_.get());
+        if (aux != nullptr) {
+            // Explicit elastic restoration recovers the local dual/slack block
+            // outside of this routine. Leave eq-step storage ready to be
+            // overwritten by restoration::finalize_newton_step().
+            d.d_lbd_s_c.setZero();
             if (d.ns > 0) {
                 d.trial_dual_step[__eq_x].setZero();
             }
             if (d.nc > 0) {
                 d.trial_dual_step[__eq_xu].setZero();
-            }
-            d.d_lbd_s_c.setZero();
-        } else {
-            // GN mode: mirrors pmm_constr::finalize_newton_step — dlam = (h + J*du) / rho_eq
-            const scalar_t rho_eq = aux->rho_eq;
-            d.d_lbd_s_c.noalias() = nsp.s_c_stacked_0_k;                           // h
-            d.d_lbd_s_c.noalias() += nsp.s_c_stacked * d.trial_prim_step[__u];     // + J_u * du
-            d.d_lbd_s_c.noalias() += nsp.s_c_stacked_0_K * d.trial_prim_step[__x]; // + J_x * dx
-            d.d_lbd_s_c *= scalar_t(1) / rho_eq;                                   // / rho_eq
-            if (d.ns > 0) {
-                d.trial_dual_step[__eq_x] = d.d_lbd_s_c.head(d.ns);
-                d.s_y.T_times<false>(d.trial_dual_step[__eq_x], d.d_lbd_f);
-            }
-            if (d.nc > 0) {
-                d.trial_dual_step[__eq_xu] = d.d_lbd_s_c.tail(d.nc);
             }
         }
     }

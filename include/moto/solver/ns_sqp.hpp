@@ -11,6 +11,7 @@
 #include <array>
 #include <chrono>
 #include <functional>
+#include <optional>
 #include <string>
 
 namespace moto {
@@ -139,9 +140,14 @@ struct ns_sqp {
         size_t max_iter = 50; ///< max restoration iterations per trigger
         scalar_t rho_u = 1e-4; ///< proximal weight on u (anchors to point where restoration was triggered)
         scalar_t rho_y = 1e-4; ///< proximal weight on y (anchors to point where restoration was triggered)
-        /// dual regularization for GN equality constraints: Hess += (1/rho_eq)*J^T*J;
-        /// dlam = (J*du + h) / rho_eq. Smaller -> tighter constraint satisfaction per step.
-        scalar_t rho_eq = 1e-6;
+        /// Elastic exact-penalty weight varrho on p+n in the restoration NLP.
+        scalar_t rho_eq = 1000.0;
+        /// Hippo/IPM-style local elastic regularization. For lambda_reg > 0 the
+        /// condensed block uses
+        /// M_rho = P (P + lambda_reg N_p)^{-1} + T_n (T_n + lambda_reg N_n)^{-1}.
+        /// When lambda_reg == 0, the helper falls back to the unregularized
+        /// explicit elastic local-KKT formulas.
+        scalar_t lambda_reg = 1e-8;
         /// exit restoration when inf_prim_res drops below this fraction of the entry infeasibility
         scalar_t restoration_improvement_frac = 0.9;
         /// IPOPT-style tiny-step trigger parameters for switching to restoration.
@@ -191,6 +197,11 @@ struct ns_sqp {
     using ns_riccati_data = solver::ns_riccati::ns_riccati_data;
 
     struct data : public node_data, ns_riccati_data {
+        struct restoration_snapshot {
+            bool valid = false;
+            scalar_t mu_bar = 0.;
+            vector p, n, nu_p, nu_n, lambda;
+        };
         data(const ocp_ptr_t &prob)
             : node_data(prob), ns_riccati_data((node_data *)this) {
             for (auto f : primal_fields) {
@@ -211,6 +222,7 @@ struct ns_sqp {
         array<scalar_t, field::num_prim> scale_p_{};
         /// whether scaling has been applied (and therefore duals must be unscaled)
         bool scaling_applied_ = false;
+        restoration_snapshot last_restoration_;
     };
 
     enum iter_result_t : size_t {
