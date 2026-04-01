@@ -107,6 +107,13 @@ MOTO_SQP_MAX_ITER=50 python example/quadruped/run.py
 KMP_AFFINITY='noverbose,granularity=fine,scatter' OMP_NUM_THREADS=10 MOTO_SQP_WARMUP=1 MOTO_SQP_BENCH_RUNS=1 MOTO_SQP_MAX_ITER=10 python example/quadruped/run.py
 ```
 
+Current practical note from local quadruped profiling:
+
+- when benchmarking `example/quadruped/run.py` with `OMP_NUM_THREADS=10`, keeping `Eigen::setNbThreads(1)` in `ns_sqp` construction was measurably better than leaving Eigen's internal thread count unconstrained
+- the most comparable local check was:
+  - `KMP_AFFINITY='noverbose,granularity=fine,scatter' OMP_NUM_THREADS=10 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 MOTO_PROFILE_SQP=1 MOTO_SQP_WARMUP=0 MOTO_SQP_BENCH_RUNS=1 MOTO_SQP_MAX_ITER=50 python example/quadruped/run.py`
+- on that workload, the version with `Eigen::setNbThreads(1)` reduced total profiled update time from roughly `474 ms` to roughly `415 ms` in one run, and from `526 ms` to `374 ms` after additional iterative-refinement experiments; exact values do vary run-to-run, but the direction was consistently favorable enough to keep the setting in `ns_sqp`
+
 Useful benchmarking / profiling environment variables in `example/quadruped/run.py`:
 
 - `MOTO_SQP_MAX_ITER`: iterations requested per `sqp.update(...)`
