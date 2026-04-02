@@ -450,6 +450,72 @@ TEST_CASE("restoration mu update follows monotone decrease threshold") {
     REQUIRE(aux.mu_bar >= 1e-11);
 }
 
+TEST_CASE("restoration predictor bookkeeping follows normal IPM complementarity accounting") {
+    solver::linesearch_config cfg;
+    cfg.alpha_primal = 0.4;
+    cfg.alpha_dual = 0.7;
+
+    resto_elastic_constr eq;
+    eq.resize(1, 0);
+    eq.p << 2.0;
+    eq.n << 3.0;
+    eq.nu_p << 5.0;
+    eq.nu_n << 7.0;
+    eq.d_p << -0.5;
+    eq.d_n << 0.25;
+    eq.d_nu_p << -1.5;
+    eq.d_nu_n << 0.5;
+
+    resto_ineq_constr iq;
+    iq.resize(1, 0);
+    iq.t << 11.0;
+    iq.p << 13.0;
+    iq.n << 17.0;
+    iq.nu_t << 19.0;
+    iq.nu_p << 23.0;
+    iq.nu_n << 29.0;
+    iq.d_t << -2.0;
+    iq.d_p << 1.5;
+    iq.d_n << -1.0;
+    iq.d_nu_t << -3.0;
+    iq.d_nu_p << 2.0;
+    iq.d_nu_n << -4.0;
+
+    solver::ipm_config::worker worker;
+    eq.finalize_predictor_step(cfg, worker);
+    iq.finalize_predictor_step(cfg, worker);
+
+    REQUIRE(worker.n_ipm_cstr == 5);
+    const scalar_t alpha_d = cfg.dual_alpha_for_ineq();
+    const scalar_t prev_aff =
+        2.0 * 5.0 + 3.0 * 7.0 + 11.0 * 19.0 + 13.0 * 23.0 + 17.0 * 29.0;
+    const scalar_t post_aff =
+        (5.0 + alpha_d * -1.5) * (2.0 + cfg.alpha_primal * -0.5) +
+        (7.0 + alpha_d * 0.5) * (3.0 + cfg.alpha_primal * 0.25) +
+        (19.0 + alpha_d * -3.0) * (11.0 + cfg.alpha_primal * -2.0) +
+        (23.0 + alpha_d * 2.0) * (13.0 + cfg.alpha_primal * 1.5) +
+        (29.0 + alpha_d * -4.0) * (17.0 + cfg.alpha_primal * -1.0);
+    REQUIRE(approx_scalar(worker.prev_aff_comp, prev_aff));
+    REQUIRE(approx_scalar(worker.post_aff_comp, post_aff));
+}
+
+TEST_CASE("restoration mu update prefers predictor worker data when available") {
+    ns_riccati::ns_riccati_data::restoration_aux_data aux;
+    aux.mu_bar = 5.0;
+    aux.predictor_worker.n_ipm_cstr = 2;
+    aux.predictor_worker.prev_aff_comp = 20.0;
+    aux.predictor_worker.post_aff_comp = 5.0;
+
+    solver::ipm_config cfg;
+    cfg.mu_method = solver::ipm_config::mehrotra_predictor_corrector;
+
+    REQUIRE(update_mu_bar(aux, cfg, 10.0, 0.2, 1.0, 1.0));
+    const scalar_t eta = 5.0 / 20.0;
+    const scalar_t sig = std::pow(eta, 3);
+    REQUIRE(approx_scalar(aux.mu_bar, sig * 20.0 / 2.0));
+    REQUIRE(aux.predictor_worker.n_ipm_cstr == 0);
+}
+
 TEST_CASE("restoration correction rhs only loads reduced u and y stationarity") {
     array_type<row_vector, primal_fields> rhs;
     for (auto pf : primal_fields) {

@@ -69,6 +69,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
             });
             kkt_outer_trial = compute_kkt_info_for_phase(iteration_phase::normal, false);
             graph.for_each_parallel([this, &kkt_rest](data *d) {
+                solver::restoration::finalize_predictor_step(*d, settings.ls);
                 solver::restoration::update_mu_bar(*d, settings.ipm,
                                                    settings.ipm.mu_monotone_fraction_threshold,
                                                    settings.ipm.mu_monotone_factor,

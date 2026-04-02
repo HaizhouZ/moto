@@ -80,6 +80,7 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
         bool initialized = false;
         bool verbose = false;
         bool outer_dual_backup_valid = false;
+        solver::ipm_config::worker predictor_worker;
 
         resto_elastic_constr elastic_eq;
         resto_ineq_constr elastic_ineq;

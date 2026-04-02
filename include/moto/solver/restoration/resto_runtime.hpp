@@ -94,6 +94,7 @@ void load_correction_rhs(ns_riccati::ns_riccati_data &d, const reduced_residual_
 
 void prepare_current_constraint_stack(ns_riccati::ns_riccati_data &d);
 void initialize_stage(ns_riccati::ns_riccati_data &d);
+void finalize_predictor_step(ns_riccati::ns_riccati_data &d, const linesearch_config &cfg);
 void assemble_resto_base_problem(ns_riccati::ns_riccati_data &d,
                                  bool update_derivatives,
                                  scalar_t rho_u,

@@ -8,6 +8,25 @@ void resize_zero(vector &v, Eigen::Index n) {
     v.resize(n);
     v.setZero();
 }
+
+template <size_t N>
+void accumulate_predictor_pairs(const std::array<const vector *, N> &value,
+                                const std::array<const vector *, N> &step,
+                                const std::array<const vector *, N> &dual,
+                                const std::array<const vector *, N> &dual_step,
+                                const linesearch_config &cfg,
+                                solver::ipm_config::worker &worker) {
+    const scalar_t alpha_primal = cfg.alpha_primal;
+    const scalar_t alpha_dual = cfg.dual_alpha_for_ineq();
+    for (size_t i = 0; i < N; ++i) {
+        if (value[i]->size() == 0) {
+            continue;
+        }
+        worker.n_ipm_cstr += static_cast<size_t>(value[i]->size());
+        worker.prev_aff_comp += dual[i]->dot(*value[i]);
+        worker.post_aff_comp += (*dual[i] + alpha_dual * *dual_step[i]).dot(*value[i] + alpha_primal * *step[i]);
+    }
+}
 } // namespace
 
 void resto_elastic_constr::resize(size_t ns_dim, size_t nc_dim) {
@@ -40,6 +59,14 @@ void resto_elastic_constr::apply_affine_step(const linesearch_config &cfg) {
 void resto_elastic_constr::update_ls_bounds(linesearch_config &cfg, scalar_t fraction_to_boundary) const {
     positivity::update_pair_bounds(cfg, p, d_p, nu_p, d_nu_p, fraction_to_boundary);
     positivity::update_pair_bounds(cfg, n, d_n, nu_n, d_nu_n, fraction_to_boundary);
+}
+
+void resto_elastic_constr::finalize_predictor_step(const linesearch_config &cfg, solver::ipm_config::worker &worker) const {
+    accumulate_predictor_pairs<2>({&p, &n},
+                                  {&d_p, &d_n},
+                                  {&nu_p, &nu_n},
+                                  {&d_nu_p, &d_nu_n},
+                                  cfg, worker);
 }
 
 scalar_t resto_elastic_constr::penalty_sum() const {
@@ -101,6 +128,14 @@ void resto_ineq_constr::update_ls_bounds(linesearch_config &cfg, scalar_t fracti
     positivity::update_pair_bounds(cfg, t, d_t, nu_t, d_nu_t, fraction_to_boundary);
     positivity::update_pair_bounds(cfg, p, d_p, nu_p, d_nu_p, fraction_to_boundary);
     positivity::update_pair_bounds(cfg, n, d_n, nu_n, d_nu_n, fraction_to_boundary);
+}
+
+void resto_ineq_constr::finalize_predictor_step(const linesearch_config &cfg, solver::ipm_config::worker &worker) const {
+    accumulate_predictor_pairs<3>({&t, &p, &n},
+                                  {&d_t, &d_p, &d_n},
+                                  {&nu_t, &nu_p, &nu_n},
+                                  {&d_nu_t, &d_nu_p, &d_nu_n},
+                                  cfg, worker);
 }
 
 scalar_t resto_ineq_constr::penalty_sum() const {

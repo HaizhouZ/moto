@@ -1,6 +1,7 @@
 #pragma once
 
 #include <moto/core/fwd.hpp>
+#include <moto/solver/ipm/ipm_config.hpp>
 #include <moto/solver/linesearch_config.hpp>
 
 namespace moto::solver {
@@ -42,6 +43,7 @@ struct resto_elastic_constr {
     void restore_trial_state();
     void apply_affine_step(const linesearch_config &cfg);
     void update_ls_bounds(linesearch_config &cfg, scalar_t fraction_to_boundary = scalar_t(0.995)) const;
+    void finalize_predictor_step(const linesearch_config &cfg, solver::ipm_config::worker &worker) const;
     scalar_t penalty_sum() const;
     scalar_t penalty_dir_deriv() const;
     scalar_t barrier_log_sum(scalar_t floor = scalar_t(1e-16)) const;
@@ -95,6 +97,7 @@ struct resto_ineq_constr {
     void restore_trial_state();
     void apply_affine_step(const linesearch_config &cfg);
     void update_ls_bounds(linesearch_config &cfg, scalar_t fraction_to_boundary = scalar_t(0.995)) const;
+    void finalize_predictor_step(const linesearch_config &cfg, solver::ipm_config::worker &worker) const;
     scalar_t penalty_sum() const;
     scalar_t penalty_dir_deriv() const;
     scalar_t barrier_log_sum(scalar_t floor = scalar_t(1e-16)) const;

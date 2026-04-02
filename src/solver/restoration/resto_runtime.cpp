@@ -319,6 +319,9 @@ barrier_stats current_barrier_stats(const ns_riccati::ns_riccati_data &d) {
 }
 
 solver::ipm_config::worker current_barrier_worker(const ns_riccati::ns_riccati_data::restoration_aux_data &aux) {
+    if (aux.predictor_worker.n_ipm_cstr > 0) {
+        return aux.predictor_worker;
+    }
     solver::ipm_config::worker worker;
     const auto accumulate = [&](const vector &value_backup,
                                 const vector &dual_backup,
@@ -411,6 +414,7 @@ bool update_mu_bar(ns_riccati::ns_riccati_data::restoration_aux_data &aux,
     }
 
     aux.mu_bar = std::max(aux.mu_bar, mu_floor);
+    aux.predictor_worker = {};
     return std::abs(aux.mu_bar - mu_old) > scalar_t(1e-15);
 }
 
@@ -551,6 +555,16 @@ void initialize_stage(ns_riccati::ns_riccati_data &d) {
     }
 
     aux->initialized = true;
+}
+
+void finalize_predictor_step(ns_riccati::ns_riccati_data &d, const linesearch_config &cfg) {
+    auto *aux = get_aux(d);
+    if (aux == nullptr || !aux->initialized) {
+        return;
+    }
+    aux->predictor_worker = {};
+    aux->elastic_eq.finalize_predictor_step(cfg, aux->predictor_worker);
+    aux->elastic_ineq.finalize_predictor_step(cfg, aux->predictor_worker);
 }
 
 void assemble_resto_base_problem(ns_riccati::ns_riccati_data &d,
