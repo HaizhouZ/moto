@@ -434,7 +434,7 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
             if (in_restoration_phase()) {
                 assemble_restoration_problem(d, node_data::update_mode::eval_raw_derivatives);
             } else {
-                d->update_approximation(node_data::update_mode::eval_raw_derivatives, true);
+                d->update_approximation(node_data::update_mode::eval_derivatives, true);
             }
         });
         ctx.trial = compute_kkt_info();
@@ -457,7 +457,7 @@ void ns_sqp::accept_trial_point(filter_linesearch_data &ls, iteration_context &c
                 if (in_restoration_phase()) {
                     assemble_restoration_problem(d, node_data::update_mode::eval_raw_derivatives);
                 } else {
-                    d->update_approximation(node_data::update_mode::eval_raw_derivatives, true);
+                    d->update_approximation(node_data::update_mode::eval_derivatives, true);
                 }
             });
             ctx.trial = compute_kkt_info();

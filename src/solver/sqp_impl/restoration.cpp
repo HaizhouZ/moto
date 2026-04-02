@@ -103,7 +103,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
 
         settings.in_restoration = false;
         graph.for_each_parallel([this](data *d) {
-            d->update_approximation(node_data::update_mode::eval_raw_derivatives, true);
+            d->update_approximation(node_data::update_mode::eval_derivatives, true);
         });
     };
 

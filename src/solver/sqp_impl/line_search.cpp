@@ -84,9 +84,12 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
     };
 
     // switching condition based on IPOPT's filter line search paper: https://www.coin-or.org/Ipopt/documentation/node40.html#SECTION00421000000000000000
-    switching_condition =
-        fullstep_dec_k < 0.0 &&
-        settings.ls.alpha_primal * std::pow(-fullstep_dec_k, settings.ls.s_phi) >= std::pow(current_kkt.prim_res_l1, settings.ls.s_theta);
+    const scalar_t switching_lhs =
+        fullstep_dec_k < 0.0
+            ? settings.ls.alpha_primal * std::pow(-fullstep_dec_k, settings.ls.s_phi)
+            : scalar_t(0.0);
+    const scalar_t switching_rhs = std::pow(current_kkt.prim_res_l1, settings.ls.s_theta);
+    switching_condition = fullstep_dec_k < 0.0 && switching_lhs >= switching_rhs;
 
     // Armijo condition for the objective
     scalar_t armijo_target = obj_k +
@@ -96,7 +99,7 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
     if (settings.verbose) {
         fmt::print("  switching condition: {}, armijo condition: {}\n", switching_condition ? "met" : "not met", armijo_cond_met ? "met" : "not met");
         fmt::print("  cost step dec: {:.3e}, full step decrease: {:.3e}, switching lhs: {:.3e}, switching rhs: {:.3e}\n",
-                   current_kkt.obj_fullstep_dec, fullstep_dec_k, settings.ls.alpha_primal * std::pow(-fullstep_dec_k, settings.ls.s_phi), std::pow(current_kkt.prim_res_l1, settings.ls.s_theta));
+                   current_kkt.obj_fullstep_dec, fullstep_dec_k, switching_lhs, switching_rhs);
     }
 
     // Flat-objective accept: when the directional derivative is negligibly small, the iterate is
