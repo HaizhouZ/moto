@@ -96,6 +96,38 @@ TEST_CASE("restoration inequality local KKT recovery satisfies regularized linea
     REQUIRE(approx_zero(res_sn));
 }
 
+TEST_CASE("restoration inequality initializer satisfies local KKT at the central point") {
+    const scalar_t g = -0.35;
+    const scalar_t rho = 3.0;
+    const scalar_t mu_bar = 0.25;
+
+    const auto init = initialize_elastic_ineq_scalar(g, rho, mu_bar);
+
+    resto_ineq_constr iq;
+    iq.resize(1, 0);
+    iq.t << init.t;
+    iq.p << init.p;
+    iq.n << init.n;
+    iq.nu_t << init.nu_t;
+    iq.nu_p << init.nu_p;
+    iq.nu_n << init.nu_n;
+
+    vector g_vec(1);
+    g_vec << g;
+    vector lambda(1);
+    lambda << init.lambda;
+
+    compute_local_model(g_vec, lambda, iq, rho, mu_bar, 0.0);
+
+    REQUIRE(approx_zero(iq.r_d, 1e-10));
+    REQUIRE(approx_zero(iq.r_t, 1e-10));
+    REQUIRE(approx_zero(iq.r_p, 1e-10));
+    REQUIRE(approx_zero(iq.r_n, 1e-10));
+    REQUIRE(approx_zero(iq.r_s_t, 1e-10));
+    REQUIRE(approx_zero(iq.r_s_p, 1e-10));
+    REQUIRE(approx_zero(iq.r_s_n, 1e-10));
+}
+
 TEST_CASE("positivity helper reuses consistent alpha and backup semantics") {
     vector primal(3), primal_step(3), primal_backup(3);
     primal << 1.0, 2.0, 0.5;

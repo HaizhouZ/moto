@@ -459,16 +459,16 @@ void initialize_stage(ns_riccati::ns_riccati_data &d) {
 
     aux->elastic_ineq.resize(d.dense_->approx_[__ineq_x].v_.size(), d.dense_->approx_[__ineq_xu].v_.size());
     if (aux->elastic_ineq.dim() > 0) {
-        aux->elastic_ineq.t = (-aux->g_current).cwiseMax(1.);
-        vector vd = aux->g_current + aux->elastic_ineq.t;
-        vector lambda_d(vd.size());
-        for (Eigen::Index i = 0; i < vd.size(); ++i) {
-            aux->elastic_ineq.nu_t(i) = aux->mu_bar / aux->elastic_ineq.t(i);
-            const auto init = initialize_elastic_pair(vd(i), aux->rho_ineq, aux->mu_bar);
+        vector lambda_d(aux->elastic_ineq.dim());
+        for (Eigen::Index i = 0; i < lambda_d.size(); ++i) {
+            const auto init =
+                initialize_elastic_ineq_scalar(aux->g_current(i), aux->rho_ineq, aux->mu_bar);
+            aux->elastic_ineq.t(i) = init.t;
             aux->elastic_ineq.p(i) = init.p;
             aux->elastic_ineq.n(i) = init.n;
-            aux->elastic_ineq.nu_p(i) = init.z_p;
-            aux->elastic_ineq.nu_n(i) = init.z_n;
+            aux->elastic_ineq.nu_t(i) = init.nu_t;
+            aux->elastic_ineq.nu_p(i) = init.nu_p;
+            aux->elastic_ineq.nu_n(i) = init.nu_n;
             lambda_d(i) = init.lambda;
         }
         scatter_lambda_ineq(d, lambda_d);

@@ -41,6 +41,63 @@ inline elastic_init_pair initialize_elastic_pair(scalar_t c, scalar_t rho, scala
     return out;
 }
 
+struct elastic_init_ineq_scalar {
+    scalar_t t = 0.;
+    scalar_t p = 0.;
+    scalar_t n = 0.;
+    scalar_t nu_t = 0.;
+    scalar_t nu_p = 0.;
+    scalar_t nu_n = 0.;
+    scalar_t lambda = 0.;
+};
+
+inline elastic_init_ineq_scalar initialize_elastic_ineq_scalar(scalar_t g, scalar_t rho, scalar_t mu_bar) {
+    if (!(rho > 0.)) {
+        throw std::runtime_error("initialize_elastic_ineq_scalar requires rho > 0");
+    }
+    if (!(mu_bar > 0.)) {
+        throw std::runtime_error("initialize_elastic_ineq_scalar requires mu_bar > 0");
+    }
+
+    const scalar_t eps = std::max(scalar_t(1e-16), std::min(scalar_t(1e-12), scalar_t(0.25) * rho));
+    const scalar_t lambda_hi = rho - eps;
+    if (!(lambda_hi > eps)) {
+        throw std::runtime_error("initialize_elastic_ineq_scalar requires rho sufficiently larger than epsilon");
+    }
+
+    const auto residual = [&](scalar_t lambda) {
+        return g + mu_bar / lambda - mu_bar / (rho - lambda) + mu_bar / (rho + lambda);
+    };
+
+    scalar_t lo = eps;
+    scalar_t hi = lambda_hi;
+    scalar_t f_lo = residual(lo);
+    scalar_t f_hi = residual(hi);
+    if (!(f_lo > 0.) || !(f_hi < 0.)) {
+        throw std::runtime_error("initialize_elastic_ineq_scalar failed to bracket local KKT root");
+    }
+
+    for (int iter = 0; iter < 80; ++iter) {
+        const scalar_t mid = scalar_t(0.5) * (lo + hi);
+        const scalar_t f_mid = residual(mid);
+        if (f_mid > 0.) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+
+    elastic_init_ineq_scalar out;
+    out.lambda = scalar_t(0.5) * (lo + hi);
+    out.nu_t = out.lambda;
+    out.nu_p = rho - out.lambda;
+    out.nu_n = rho + out.lambda;
+    out.t = mu_bar / out.nu_t;
+    out.p = mu_bar / out.nu_p;
+    out.n = mu_bar / out.nu_n;
+    return out;
+}
+
 struct local_residual_summary {
     scalar_t inf_prim = 0.;
     scalar_t inf_stat = 0.;
