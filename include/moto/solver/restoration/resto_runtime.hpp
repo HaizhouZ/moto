@@ -1,6 +1,7 @@
 #pragma once
 
 #include <moto/core/workspace_data.hpp>
+#include <moto/solver/ipm/ipm_config.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
 #include <moto/solver/restoration/resto_local_kkt.hpp>
 
@@ -23,6 +24,12 @@ struct reduced_residual_info {
     scalar_t inf_primal = 0.;
     scalar_t inf_dual = 0.;
     scalar_t inf_comp = 0.;
+};
+
+struct barrier_stats {
+    scalar_t avg_comp = 0.;
+    scalar_t inf_comp = 0.;
+    size_t n_comp = 0;
 };
 
 vector gather_lambda_eq(const ns_riccati::ns_riccati_data &d);
@@ -55,6 +62,20 @@ reduced_residual_info compute_reduced_residual(
     const vector_const_ref &dyn_residual,
     const ns_riccati::ns_riccati_data::restoration_aux_data &aux);
 reduced_residual_info compute_reduced_residual(const ns_riccati::ns_riccati_data &d);
+barrier_stats current_barrier_stats(const ns_riccati::ns_riccati_data::restoration_aux_data &aux);
+barrier_stats current_barrier_stats(const ns_riccati::ns_riccati_data &d);
+bool update_mu_bar(ns_riccati::ns_riccati_data::restoration_aux_data &aux,
+                   const solver::ipm_config &cfg,
+                   scalar_t mu_monotone_fraction_threshold,
+                   scalar_t mu_monotone_factor,
+                   scalar_t inf_primal,
+                   scalar_t inf_dual);
+bool update_mu_bar(ns_riccati::ns_riccati_data &d,
+                   const solver::ipm_config &cfg,
+                   scalar_t mu_monotone_fraction_threshold,
+                   scalar_t mu_monotone_factor,
+                   scalar_t inf_primal,
+                   scalar_t inf_dual);
 void load_correction_rhs(array_type<row_vector, primal_fields> &lag_jac_corr,
                          const reduced_residual_info &residual);
 void load_correction_rhs(ns_riccati::ns_riccati_data &d, const reduced_residual_info &residual);

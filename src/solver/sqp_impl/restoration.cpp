@@ -68,6 +68,13 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
                 d->update_approximation(node_data::update_mode::eval_val, true);
             });
             kkt_outer_trial = compute_kkt_info_for_phase(iteration_phase::normal, false);
+            graph.for_each_parallel([this, &kkt_rest](data *d) {
+                solver::restoration::update_mu_bar(*d, settings.ipm,
+                                                   settings.ipm.mu_monotone_fraction_threshold,
+                                                   settings.ipm.mu_monotone_factor,
+                                                   kkt_rest.inf_prim_res,
+                                                   kkt_rest.inf_dual_res);
+            });
             graph.for_each_parallel([this](data *d) {
                 assemble_restoration_problem(d, node_data::update_mode::eval_raw_derivatives);
             });

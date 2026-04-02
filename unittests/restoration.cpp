@@ -269,6 +269,63 @@ TEST_CASE("restoration reduced residual combines active w stationarity with loca
     REQUIRE(approx_scalar(residual.inf_comp, 0.7));
 }
 
+TEST_CASE("restoration barrier stats average local complementarity products") {
+    ns_riccati::ns_riccati_data::restoration_aux_data aux;
+    aux.elastic_eq.resize(1, 0);
+    aux.elastic_eq.p << 2.0;
+    aux.elastic_eq.nu_p << 3.0;
+    aux.elastic_eq.n << 5.0;
+    aux.elastic_eq.nu_n << 7.0;
+
+    aux.elastic_ineq.resize(0, 1);
+    aux.elastic_ineq.t << 11.0;
+    aux.elastic_ineq.nu_t << 13.0;
+    aux.elastic_ineq.p << 17.0;
+    aux.elastic_ineq.nu_p << 19.0;
+    aux.elastic_ineq.n << 23.0;
+    aux.elastic_ineq.nu_n << 29.0;
+
+    const auto stats = current_barrier_stats(aux);
+    REQUIRE(stats.n_comp == 5);
+    REQUIRE(approx_scalar(stats.avg_comp, (6.0 + 35.0 + 143.0 + 323.0 + 667.0) / 5.0));
+    REQUIRE(approx_scalar(stats.inf_comp, 667.0));
+}
+
+TEST_CASE("restoration mu update follows local complementarity average in adaptive mode") {
+    ns_riccati::ns_riccati_data::restoration_aux_data aux;
+    aux.mu_bar = 10.0;
+    aux.elastic_eq.resize(1, 0);
+    aux.elastic_eq.p << 2.0;
+    aux.elastic_eq.nu_p << 1.0;
+    aux.elastic_eq.n << 3.0;
+    aux.elastic_eq.nu_n << 2.0;
+
+    solver::ipm_config cfg;
+    cfg.mu_method = solver::ipm_config::mehrotra_predictor_corrector;
+
+    REQUIRE(update_mu_bar(aux, cfg, 10.0, 0.2, 1.0, 1.0));
+    REQUIRE(approx_scalar(aux.mu_bar, 4.0));
+}
+
+TEST_CASE("restoration mu update follows monotone decrease threshold") {
+    ns_riccati::ns_riccati_data::restoration_aux_data aux;
+    aux.mu_bar = 2.0;
+    aux.elastic_eq.resize(1, 0);
+    aux.elastic_eq.p << 1.0;
+    aux.elastic_eq.nu_p << 2.0;
+    aux.elastic_eq.n << 1.0;
+    aux.elastic_eq.nu_n << 2.0;
+
+    solver::ipm_config cfg;
+    cfg.mu_method = solver::ipm_config::monotonic_decrease;
+    const scalar_t mu_monotone_fraction_threshold = 10.0;
+    const scalar_t mu_monotone_factor = 0.2;
+
+    REQUIRE(update_mu_bar(aux, cfg, mu_monotone_fraction_threshold, mu_monotone_factor, 1.0, 1.0));
+    REQUIRE(aux.mu_bar < 2.0);
+    REQUIRE(aux.mu_bar >= 1e-11);
+}
+
 TEST_CASE("restoration correction rhs only loads reduced u and y stationarity") {
     array_type<row_vector, primal_fields> rhs;
     for (auto pf : primal_fields) {

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <moto/solver/ns_sqp.hpp>
 // #define ENABLE_TIMED_BLOCK
 #include <moto/utils/timed_block.hpp>
@@ -26,7 +27,7 @@ scalar_t ns_sqp::outer_fullstep_dec(const kkt_info &kkt) const {
 
 scalar_t ns_sqp::current_phase_alpha_min(const filter_linesearch_per_iter_data &ls) const {
     scalar_t alpha_min = settings.ls.primal.alpha_min;
-    if (!in_restoration_phase() && settings.restoration.enabled) {
+    if (settings.restoration.enabled) {
         alpha_min = std::max(alpha_min,
                              settings.restoration.alpha_min_factor *
                                  std::max(ls.initial_alpha_primal, scalar_t(1e-12)));
@@ -234,6 +235,49 @@ void ns_sqp::step_back_alpha(filter_linesearch_per_iter_data &ls) {
 }
 
 ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt) {
+    const auto restoration_residual_guard = [&]() {
+        if (!in_restoration_phase()) {
+            return true;
+        }
+        const scalar_t current_resto_res =
+            std::max(current_kkt.inf_dual_res, current_kkt.inf_comp_res);
+        const scalar_t trial_resto_res =
+            std::max(trial_kkt.inf_dual_res, trial_kkt.inf_comp_res);
+        if (!(current_resto_res > 0.0) || !std::isfinite(current_resto_res) || !std::isfinite(trial_resto_res)) {
+            return true;
+        }
+        const scalar_t alpha_primal_ratio =
+            ls.initial_alpha_primal > 0.0 ? settings.ls.alpha_primal / ls.initial_alpha_primal : scalar_t(1.0);
+        const scalar_t alpha_dual_ratio =
+            ls.initial_alpha_dual > 0.0 ? settings.ls.alpha_dual / ls.initial_alpha_dual : scalar_t(1.0);
+        const bool nontrivial_step =
+            std::max(alpha_primal_ratio, alpha_dual_ratio) >= scalar_t(1e-4);
+        const bool primal_improved =
+            trial_kkt.inf_prim_res < (scalar_t(1.0) - settings.ls.primal_gamma) * current_kkt.inf_prim_res;
+        const bool objective_improved =
+            trial_kkt.objective < current_kkt.objective - settings.ls.dual_gamma * current_kkt.inf_prim_res;
+        const bool resto_res_improved =
+            trial_resto_res <= scalar_t(0.9) * current_resto_res;
+        if (nontrivial_step && resto_res_improved && (primal_improved || objective_improved)) {
+            if (settings.verbose) {
+                fmt::print("  restoration residual guard passed "
+                           "(prim: {:.3e} -> {:.3e}, objective: {:.3e} -> {:.3e}, resto_res: {:.3e} -> {:.3e})\n",
+                           current_kkt.inf_prim_res, trial_kkt.inf_prim_res,
+                           current_kkt.objective, trial_kkt.objective,
+                           current_resto_res, trial_resto_res);
+            }
+            return true;
+        }
+        if (settings.verbose) {
+            fmt::print("  restoration residual guard rejected "
+                       "(prim: {:.3e} -> {:.3e}, objective: {:.3e} -> {:.3e}, resto_res: {:.3e} -> {:.3e}, alpha_p={:.3e}, alpha_d={:.3e})\n",
+                       current_kkt.inf_prim_res, trial_kkt.inf_prim_res,
+                       current_kkt.objective, trial_kkt.objective, current_resto_res, trial_resto_res,
+                       settings.ls.alpha_primal, settings.ls.alpha_dual);
+        }
+        return false;
+    };
+
     if (ls.step_cnt == 0 && trial_kkt.prim_res_l1 < current_kkt.prim_res_l1) {
         // skip second-order correction if the first trial already shows improvement in primal residual
         ls.skip_soc = true;
@@ -276,6 +320,9 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     }
     print_filter();
     bool accept = ls.try_step(trial_kkt, current_kkt, settings);
+    if (accept) {
+        accept = restoration_residual_guard();
+    }
     /// if the point is acceptable or we have already tried enough steps, stop line search and accept the point if acceptable
     if (accept || ls.stop) {
         ls.recompute_approx = false;

@@ -1,4 +1,5 @@
 #include <moto/ocp/impl/node_data.hpp>
+#include <fmt/format.h>
 #include <moto/solver/ipm/ipm_constr.hpp>
 #include <moto/solver/restoration/resto_local_kkt.hpp>
 #include <moto/solver/restoration/resto_runtime.hpp>
@@ -278,6 +279,80 @@ local_residual_info refinement_local_residuals(const ns_riccati::ns_riccati_data
         return info;
     }
     return refinement_local_residuals(*aux);
+}
+
+barrier_stats current_barrier_stats(const ns_riccati::ns_riccati_data::restoration_aux_data &aux) {
+    barrier_stats stats;
+    const auto accumulate = [&](const vector &value, const vector &dual) {
+        if (value.size() == 0) {
+            return;
+        }
+        const vector comp = value.cwiseProduct(dual);
+        stats.avg_comp += comp.sum();
+        stats.inf_comp = std::max(stats.inf_comp, comp.cwiseAbs().maxCoeff());
+        stats.n_comp += static_cast<size_t>(comp.size());
+    };
+    accumulate(aux.elastic_eq.p, aux.elastic_eq.nu_p);
+    accumulate(aux.elastic_eq.n, aux.elastic_eq.nu_n);
+    accumulate(aux.elastic_ineq.t, aux.elastic_ineq.nu_t);
+    accumulate(aux.elastic_ineq.p, aux.elastic_ineq.nu_p);
+    accumulate(aux.elastic_ineq.n, aux.elastic_ineq.nu_n);
+    if (stats.n_comp > 0) {
+        stats.avg_comp /= static_cast<scalar_t>(stats.n_comp);
+    }
+    return stats;
+}
+
+barrier_stats current_barrier_stats(const ns_riccati::ns_riccati_data &d) {
+    const auto *aux = get_aux(d);
+    if (aux == nullptr) {
+        return {};
+    }
+    return current_barrier_stats(*aux);
+}
+
+bool update_mu_bar(ns_riccati::ns_riccati_data::restoration_aux_data &aux,
+                   const solver::ipm_config &cfg,
+                   scalar_t mu_monotone_fraction_threshold,
+                   scalar_t mu_monotone_factor,
+                   scalar_t inf_primal,
+                   scalar_t inf_dual) {
+    const scalar_t mu_floor = scalar_t(1e-11);
+    const scalar_t mu_old = aux.mu_bar;
+    const auto stats = current_barrier_stats(aux);
+    if (!(mu_old > 0.)) {
+        aux.mu_bar = mu_floor;
+        return true;
+    }
+
+    if (cfg.mu_method == solver::ipm_config::monotonic_decrease) {
+        while (inf_primal < aux.mu_bar * mu_monotone_fraction_threshold &&
+               inf_dual < aux.mu_bar * mu_monotone_fraction_threshold &&
+               stats.inf_comp < aux.mu_bar * mu_monotone_fraction_threshold) {
+            aux.mu_bar *= mu_monotone_factor;
+        }
+    } else if (stats.n_comp > 0 && std::isfinite(stats.avg_comp)) {
+        aux.mu_bar = std::min(aux.mu_bar, std::max(stats.avg_comp, mu_floor));
+    }
+
+    aux.mu_bar = std::max(aux.mu_bar, mu_floor);
+    return std::abs(aux.mu_bar - mu_old) > scalar_t(1e-15);
+}
+
+bool update_mu_bar(ns_riccati::ns_riccati_data &d,
+                   const solver::ipm_config &cfg,
+                   scalar_t mu_monotone_fraction_threshold,
+                   scalar_t mu_monotone_factor,
+                   scalar_t inf_primal,
+                   scalar_t inf_dual) {
+    auto *aux = get_aux(d);
+    if (aux == nullptr) {
+        return false;
+    }
+    return update_mu_bar(*aux, cfg,
+                         mu_monotone_fraction_threshold,
+                         mu_monotone_factor,
+                         inf_primal, inf_dual);
 }
 
 reduced_residual_info compute_reduced_residual(
@@ -570,8 +645,48 @@ void update_ls_bounds(ns_riccati::ns_riccati_data &d, workspace_data *cfg) {
         return;
     }
     auto &ls = cfg->as<linesearch_config>();
+    const scalar_t primal_before = ls.primal.alpha_max;
+    const scalar_t dual_before = ls.dual.alpha_max;
     aux->elastic_eq.update_ls_bounds(ls);
     aux->elastic_ineq.update_ls_bounds(ls);
+    if (!aux->verbose) {
+        return;
+    }
+    if (ls.primal.alpha_max >= scalar_t(1e-8) && ls.dual.alpha_max >= scalar_t(1e-8)) {
+        return;
+    }
+
+    const auto report_pair = [&](std::string_view name,
+                                 const vector &value,
+                                 const vector &step,
+                                 const vector &dual,
+                                 const vector &dual_step) {
+        if (value.size() == 0) {
+            return;
+        }
+        const scalar_t alpha_value = positivity::alpha_max(value, step);
+        const scalar_t alpha_dual = positivity::alpha_max(dual, dual_step);
+        if (alpha_value >= scalar_t(1e-8) && alpha_dual >= scalar_t(1e-8)) {
+            return;
+        }
+        fmt::print("  [resto ls bounds] {} alpha_p_max={:.3e}, alpha_d_max={:.3e},"
+                   " min(value)={:.3e}, min(step)={:.3e}, min(dual)={:.3e}, min(dual_step)={:.3e}\n",
+                   name,
+                   alpha_value,
+                   alpha_dual,
+                   value.size() > 0 ? value.minCoeff() : scalar_t(0.),
+                   step.size() > 0 ? step.minCoeff() : scalar_t(0.),
+                   dual.size() > 0 ? dual.minCoeff() : scalar_t(0.),
+                   dual_step.size() > 0 ? dual_step.minCoeff() : scalar_t(0.));
+    };
+
+    if (ls.primal.alpha_max < primal_before || ls.dual.alpha_max < dual_before) {
+        report_pair("eq.p", aux->elastic_eq.p, aux->elastic_eq.d_p, aux->elastic_eq.nu_p, aux->elastic_eq.d_nu_p);
+        report_pair("eq.n", aux->elastic_eq.n, aux->elastic_eq.d_n, aux->elastic_eq.nu_n, aux->elastic_eq.d_nu_n);
+        report_pair("ineq.t", aux->elastic_ineq.t, aux->elastic_ineq.d_t, aux->elastic_ineq.nu_t, aux->elastic_ineq.d_nu_t);
+        report_pair("ineq.p", aux->elastic_ineq.p, aux->elastic_ineq.d_p, aux->elastic_ineq.nu_p, aux->elastic_ineq.d_nu_p);
+        report_pair("ineq.n", aux->elastic_ineq.n, aux->elastic_ineq.d_n, aux->elastic_ineq.nu_n, aux->elastic_ineq.d_nu_n);
+    }
 }
 
 void backup_trial_state(ns_riccati::ns_riccati_data &d) {
