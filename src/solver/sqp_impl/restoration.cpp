@@ -67,10 +67,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
             graph.for_each_parallel([this](data *d) {
                 d->update_approximation(node_data::update_mode::eval_val, true);
             });
-            const bool old_resto = settings.in_restoration;
-            settings.in_restoration = false;
-            kkt_outer_trial = compute_kkt_info(false);
-            settings.in_restoration = old_resto;
+            kkt_outer_trial = compute_kkt_info_for_phase(iteration_phase::normal, false);
             graph.for_each_parallel([this](data *d) {
                 assemble_restoration_problem(d, node_data::update_mode::eval_raw_derivatives);
             });

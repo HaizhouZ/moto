@@ -520,7 +520,10 @@ ns_sqp::line_search_action ns_sqp::run_globalization(filter_linesearch_data &ls,
 ns_sqp::line_search_action ns_sqp::sqp_iter(filter_linesearch_data &ls, kkt_info &kkt_current,
                                             bool do_scaling, bool do_refinement, bool gauss_newton) {
     auto phase_profile = profile_scope(profile_phase::sqp_iter_total);
-    iteration_context ctx{.current = kkt_current};
+    iteration_context ctx{
+        .current = kkt_current,
+        .phase = in_restoration_phase() ? iteration_phase::restoration : iteration_phase::normal,
+    };
     reset_ls_workers();
     solve_direction(ctx, do_scaling, gauss_newton);
     correct_direction(ctx, do_refinement);
@@ -984,6 +987,15 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
     kkt.objective = kkt.cost - settings.ipm.mu * kkt.log_slack_sum;
     return kkt;
 }
+
+ns_sqp::kkt_info ns_sqp::compute_kkt_info_for_phase(iteration_phase phase, bool update_dual_res) {
+    const bool old_resto = settings.in_restoration;
+    settings.in_restoration = phase == iteration_phase::restoration;
+    kkt_info kkt = compute_kkt_info(update_dual_res);
+    settings.in_restoration = old_resto;
+    return kkt;
+}
+
 void ns_sqp::print_licq_info() {
     // Global LICQ via forward nullspace propagation (DMS staircase structure).
     // Must be called after ns_factorization (nsp_ must be populated).
