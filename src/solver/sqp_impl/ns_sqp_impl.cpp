@@ -756,11 +756,6 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
         scalar_t dual_res_l1 = 0.;
         size_t n_dual_res = 0;
         auto &graph = solver_graph();
-        const auto active_grad = [](const node_data *n, field_t pf) {
-            row_vector out = n->dense().lag_jac_[pf];
-            out += n->dense().lag_jac_corr_[pf];
-            return out;
-        };
         for (auto n : graph.flatten_nodes()) {
             auto *aux = dynamic_cast<ns_riccati_data::restoration_aux_data *>(n->aux_.get());
             if (aux == nullptr) {
@@ -794,8 +789,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
             }
             kkt.prim_res_l1 += n->dense().approx_[__dyn].v_.lpNorm<1>();
             kkt.inf_prim_res = std::max(kkt.inf_prim_res, reduced_res.inf_primal);
-            kkt.inf_dual_res = std::max(kkt.inf_dual_res, std::max(reduced_res.eq_local.inf_stat,
-                                                                    reduced_res.ineq_local.inf_stat));
+            kkt.inf_dual_res = std::max(kkt.inf_dual_res, reduced_res.inf_dual);
             kkt.inf_comp_res = std::max(kkt.inf_comp_res, reduced_res.inf_comp);
             if (update_dual_res && n->dense().lag_jac_[__u].size() > 0) {
                 const row_vector grad_u = reduced_res.w_stationarity[__u];
@@ -839,19 +833,29 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
         if (update_dual_res) {
             graph.apply_forward(
                 [&](node_data *cur, node_data *next) {
+                    const auto *cur_data = dynamic_cast<const data *>(cur);
+                    if (cur_data == nullptr) {
+                        return;
+                    }
+                    const auto cur_res = solver::restoration::compute_reduced_residual(*cur_data);
                     if (next != nullptr) [[likely]] {
+                        const auto *next_data = dynamic_cast<const data *>(next);
+                        if (next_data == nullptr) {
+                            return;
+                        }
+                        const auto next_res = solver::restoration::compute_reduced_residual(*next_data);
                         static row_vector tmp;
-                        tmp.conservativeResize(next->dense().lag_jac_[__x].cols());
-                        tmp.noalias() = active_grad(next, __x) *
+                        tmp.conservativeResize(next_res.w_stationarity[__x].cols());
+                        tmp.noalias() = next_res.w_stationarity[__x] *
                                             utils::permutation_from_y_to_x(&cur->problem(), &next->problem()) +
-                                        active_grad(cur, __y);
+                                        cur_res.w_stationarity[__y];
                         if (tmp.size() > 0) {
                             kkt.inf_dual_res = std::max(kkt.inf_dual_res, tmp.cwiseAbs().maxCoeff());
                             dual_res_l1 += tmp.cwiseAbs().sum();
                             n_dual_res += static_cast<size_t>(tmp.size());
                         }
-                    } else if (cur->dense().lag_jac_[__y].size() > 0) {
-                        const row_vector grad_y = active_grad(cur, __y);
+                    } else if (cur_res.w_stationarity[__y].size() > 0) {
+                        const row_vector grad_y = cur_res.w_stationarity[__y];
                         kkt.inf_dual_res = std::max(kkt.inf_dual_res, grad_y.cwiseAbs().maxCoeff());
                         dual_res_l1 += grad_y.cwiseAbs().sum();
                         n_dual_res += static_cast<size_t>(grad_y.size());
