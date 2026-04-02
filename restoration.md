@@ -158,11 +158,6 @@ $$
 \min_{w,t,p_c,n_c,p_d,n_d}\quad &
 \operatorname{obj}_R(w)
  + \varrho \mathbf{1}^T (p_c+n_c+p_d+n_d)
- - \bar\mu \sum_i \ln t_i
- - \bar\mu \sum_i \ln p_{c,i}
- - \bar\mu \sum_i \ln n_{c,i}
- - \bar\mu \sum_i \ln p_{d,i}
- - \bar\mu \sum_i \ln n_{d,i} \\
 \text{s.t.}\quad &
 F(w)=0, \\
 &
@@ -201,11 +196,11 @@ Important semantic split:
   original restoration NLP
 - instead, `\bar\mu` belongs to the IPM/Newton search model used to compute
   interior steps for those positivity inequalities
-- therefore restoration public objective/KKT summaries should stay barrier-free,
-  while line search and IPM-style step updates may still use the barrier-regularized
+- therefore restoration public objective/KKT summaries should stay on the
+  original restoration NLP, while line search and IPM-style step updates may still use the barrier-regularized
   search model
 
-## Restoration Original NLP
+## Stagewise View Of The Original NLP
 
 For one stage, write the base restoration objective on
 $w_k := (x_k,u_k,y_k)$ as
@@ -214,7 +209,7 @@ $$
 \operatorname{obj}_{R,k}(w_k).
 $$
 
-Then the barrier-free restoration original NLP at one stage is
+Then the corresponding stagewise original restoration NLP is
 
 $$
 \min_{w_k,p_{c,k},n_{c,k},t_k,p_{d,k},n_{d,k}}
@@ -264,7 +259,7 @@ $$
 $$
 
 This search Lagrangian is an internal IPM model for the restoration step. It is
-not the same object as the barrier-free restoration original NLP above.
+not the same object as the original restoration NLP above.
 
 Its base gradient with respect to the global stage variables is
 
@@ -281,7 +276,7 @@ This is the quantity that belongs to the base stage gradient state seen by the
 linear solve. In code it is what `activate_lag_jac_corr()` snapshots into
 `base_lag_grad_backup` before any reduced correction is activated.
 
-The barrier terms should not be conflated with the barrier-free restoration
+The barrier terms should not be conflated with the restoration
 original objective that is reported publicly. They are search-only
 regularization for the positivity inequalities.
 
@@ -373,8 +368,7 @@ $$
 
 These are search-model residuals for the equality-elastic and restoration-owned
 inequality blocks. The complementarity terms are barrier residuals from the IPM
-search model; they are not part of the barrier-free restoration original
-objective.
+search model; they are not part of the original restoration objective.
 
 Introduce
 
