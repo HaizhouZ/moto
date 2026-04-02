@@ -63,6 +63,7 @@ class resto_eq_elastic_constr final : public soft_constr {
 
     resto_eq_elastic_constr(const std::string &name,
                             const constr &source,
+                            size_t source_pos,
                             scalar_t rho,
                             scalar_t lambda_reg);
 
@@ -86,11 +87,14 @@ class resto_eq_elastic_constr final : public soft_constr {
     void restore_trial_state(data_map_t &data) const override;
 
     const constr &source() const { return source_; }
+    field_t source_field() const { return source_->field(); }
+    size_t source_pos() const { return source_pos_; }
 
     DEF_DEFAULT_CLONE(resto_eq_elastic_constr)
 
   private:
     constr source_;
+    size_t source_pos_ = 0;
     scalar_t rho_ = 1000.0;
     scalar_t lambda_reg_ = 1e-8;
 };
@@ -110,6 +114,7 @@ class resto_ineq_elastic_ipm_constr final : public ineq_constr {
 
     resto_ineq_elastic_ipm_constr(const std::string &name,
                                   const constr &source,
+                                  size_t source_pos,
                                   scalar_t rho,
                                   scalar_t lambda_reg);
 
@@ -134,11 +139,14 @@ class resto_ineq_elastic_ipm_constr final : public ineq_constr {
     void restore_trial_state(data_map_t &data) const override;
 
     const constr &source() const { return source_; }
+    field_t source_field() const { return source_->field(); }
+    size_t source_pos() const { return source_pos_; }
 
     DEF_DEFAULT_CLONE(resto_ineq_elastic_ipm_constr)
 
   private:
     constr source_;
+    size_t source_pos_ = 0;
     scalar_t rho_ = 1000.0;
     scalar_t lambda_reg_ = 1e-8;
 };

@@ -42,13 +42,16 @@ void fill_sigma(const vector &ref, vector &sigma_sq, scalar_t eps) {
 
 template <typename Overlay>
 void copy_dual_slice(vector_ref dst, const node_data &outer, const Overlay &overlay) {
-    const auto &source = overlay.source();
-    const field_t source_field = source->field();
+    const field_t source_field = overlay.source_field();
     if (source_field < __dyn || source_field >= field::num) {
         dst.setZero();
         return;
     }
-    dst = outer.problem().extract(outer.dense().dual_[source_field], *source);
+    const auto &exprs = outer.problem().exprs(source_field);
+    if (overlay.source_pos() >= exprs.size()) {
+        throw std::runtime_error("restoration overlay source position out of range");
+    }
+    dst = outer.problem().extract(outer.dense().dual_[source_field], exprs[overlay.source_pos()]);
 }
 
 template <typename Overlay>
@@ -140,10 +143,12 @@ void resto_prox_cost::hessian_impl(func_approx_data &data) const {
 
 resto_eq_elastic_constr::resto_eq_elastic_constr(const std::string &name,
                                                  const constr &source,
+                                                 size_t source_pos,
                                                  scalar_t rho,
                                                  scalar_t lambda_reg)
     : soft_constr(name, approx_order::second, source->dim()),
       source_(source),
+      source_pos_(source_pos),
       rho_(rho),
       lambda_reg_(lambda_reg) {
     field_hint().is_eq = true;
@@ -274,10 +279,12 @@ void resto_eq_elastic_constr::restore_trial_state(data_map_t &data) const {
 
 resto_ineq_elastic_ipm_constr::resto_ineq_elastic_ipm_constr(const std::string &name,
                                                              const constr &source,
+                                                             size_t source_pos,
                                                              scalar_t rho,
                                                              scalar_t lambda_reg)
     : ineq_constr(name, approx_order::second, source->dim()),
       source_(source),
+      source_pos_(source_pos),
       rho_(rho),
       lambda_reg_(lambda_reg) {
     field_hint().is_eq = false;
@@ -437,32 +444,40 @@ ocp_ptr_t build_restoration_overlay_problem(const ocp_ptr_t &source_prob,
     }
 
     for (auto field : std::array{__eq_x, __eq_xu}) {
+        size_t source_pos = 0;
         for (const shared_expr &expr : source_prob->exprs(field)) {
             auto source = std::dynamic_pointer_cast<generic_constr>(expr);
             if (!source) {
+                ++source_pos;
                 continue;
             }
             auto overlay = constr(new resto_eq_elastic_constr(
                 overlay_name(*source, "resto_eq"),
                 source,
+                source_pos,
                 settings.rho_eq,
                 settings.lambda_reg));
             resto_prob->add(*overlay);
+            ++source_pos;
         }
     }
 
     for (auto field : std::array{__ineq_x, __ineq_xu}) {
+        size_t source_pos = 0;
         for (const shared_expr &expr : source_prob->exprs(field)) {
             auto source = std::dynamic_pointer_cast<generic_constr>(expr);
             if (!source) {
+                ++source_pos;
                 continue;
             }
             auto overlay = constr(new resto_ineq_elastic_ipm_constr(
                 overlay_name(*source, "resto_ineq"),
                 source,
+                source_pos,
                 settings.rho_ineq,
                 settings.lambda_reg));
             resto_prob->add(*overlay);
+            ++source_pos;
         }
     }
 

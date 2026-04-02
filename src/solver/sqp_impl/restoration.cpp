@@ -1,45 +1,64 @@
 #include <moto/solver/ns_sqp.hpp>
+#include <moto/solver/ineq_soft.hpp>
+#include <moto/solver/restoration/resto_overlay.hpp>
 #include <moto/solver/restoration/resto_runtime.hpp>
 
 namespace moto {
+namespace {
+
+template <typename Fn>
+void for_each_overlay_pair(ns_sqp::solver_graph_type &outer_graph,
+                           ns_sqp::solver_graph_type &resto_graph,
+                           Fn &&fn) {
+    auto outer_nodes = outer_graph.flatten_nodes();
+    auto resto_nodes = resto_graph.flatten_nodes();
+    if (outer_nodes.size() != resto_nodes.size()) {
+        throw std::runtime_error("restoration overlay graph/node mismatch");
+    }
+    for (size_t i = 0; i < outer_nodes.size(); ++i) {
+        fn(*outer_nodes[i], *resto_nodes[i]);
+    }
+}
+
+void sync_primal_state(node_data &src, node_data &dst) {
+    for (auto field : primal_fields) {
+        dst.sym_val().value_[field] = src.sym_val().value_[field];
+    }
+}
+
+void sync_hard_duals(node_data &src, node_data &dst) {
+    for (auto field : hard_constr_fields) {
+        if (src.dense().dual_[field].size() == 0 || dst.dense().dual_[field].size() == 0) {
+            continue;
+        }
+        dst.dense().dual_[field] = src.dense().dual_[field];
+    }
+}
+
+} // namespace
 
 ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_linesearch_data &ls) {
     if (settings.ls.method == linesearch_setting::search_method::merit_backtracking) {
         throw std::runtime_error("restoration mode is incompatible with merit_backtracking");
     }
 
-    auto &graph = solver_graph();
-    const scalar_t mu_resto = std::max(settings.ipm.mu, kkt_before.inf_prim_res);
+    auto &outer_graph = solver_graph();
+    auto &resto_graph = restoration_graph();
     settings.in_restoration = true;
+    set_phase_graph_override(resto_graph);
 
     const auto prox_eps = scalar_t(1.0);
-    for (data &node : graph.nodes()) {
-        auto aux = std::make_unique<ns_riccati_data::restoration_aux_data>();
-        aux->rho_eq = settings.restoration.rho_eq;
-        aux->rho_ineq = settings.restoration.rho_ineq;
-        aux->rho_u = settings.restoration.rho_u;
-        aux->rho_y = settings.restoration.rho_y;
-        aux->lambda_reg = settings.restoration.lambda_reg;
-        aux->mu_bar = mu_resto;
-        aux->verbose = settings.verbose;
-        aux->outer_dual_backup = node.dense().dual_;
-        aux->outer_dual_backup_valid = true;
-        aux->u_ref = node.value(__u);
-        aux->y_ref = node.value(__y);
-        aux->sigma_u_sq.resizeLike(aux->u_ref);
-        aux->sigma_y_sq.resizeLike(aux->y_ref);
-        if (aux->u_ref.size() > 0) {
-            aux->sigma_u_sq = aux->u_ref.array().abs().max(prox_eps).inverse().square().min(1.);
-        }
-        if (aux->y_ref.size() > 0) {
-            aux->sigma_y_sq = aux->y_ref.array().abs().max(prox_eps).inverse().square().min(1.);
-        }
-        node.aux_ = std::move(aux);
-    }
+    for_each_overlay_pair(outer_graph, resto_graph, [&](data &outer, data &resto) {
+        solver::restoration::sync_restoration_overlay_primal(outer, resto);
+        solver::restoration::sync_restoration_overlay_duals(outer, resto);
+        solver::restoration::seed_restoration_overlay_refs(resto, prox_eps);
+    });
 
-    graph.for_each_parallel([this](data *d) {
-        assemble_restoration_problem(d, node_data::update_mode::eval_val);
-        assemble_restoration_problem(d, node_data::update_mode::eval_raw_derivatives);
+    resto_graph.for_each_parallel([this](data *d) {
+        d->for_each_constr([this](const generic_func &c, func_approx_data &fd) { c.setup_workspace_data(fd, &settings); });
+        d->update_approximation(node_data::update_mode::eval_val, true);
+        solver::ineq_soft::initialize(d);
+        d->update_approximation(node_data::update_mode::eval_derivatives, true);
     });
 
     ls.augment_filter_for_restoration_start(kkt_before, settings);
@@ -64,21 +83,33 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         kkt_rest.ls_steps = rls.step_cnt;
 
         if (action == line_search_action::accept) {
-            graph.for_each_parallel([this](data *d) {
+            resto_graph.for_each_parallel([this](data *d) {
                 d->update_approximation(node_data::update_mode::eval_val, true);
             });
-            kkt_outer_trial = compute_kkt_info_for_phase(iteration_phase::normal, false);
-            graph.for_each_parallel([this, &kkt_rest](data *d) {
-                solver::restoration::finalize_predictor_step(*d, settings.ls);
-                solver::restoration::update_mu_bar(*d, settings.ipm,
-                                                   settings.ipm.mu_monotone_fraction_threshold,
-                                                   settings.ipm.mu_monotone_factor,
-                                                   kkt_rest.inf_prim_res,
-                                                   kkt_rest.inf_dual_res);
+
+            outer_graph.for_each_parallel([](data *d) { d->backup_trial_state(); });
+            for_each_overlay_pair(resto_graph, outer_graph, [&](data &resto, data &outer) {
+                sync_primal_state(resto, outer);
+                sync_hard_duals(resto, outer);
             });
-            graph.for_each_parallel([this](data *d) {
-                assemble_restoration_problem(d, node_data::update_mode::eval_val);
-                assemble_restoration_problem(d, node_data::update_mode::eval_raw_derivatives);
+            outer_graph.for_each_parallel([](data *d) {
+                d->update_approximation(node_data::update_mode::eval_val, true);
+            });
+            clear_phase_graph_override();
+            kkt_outer_trial = compute_kkt_info_for_phase(iteration_phase::normal, false);
+            set_phase_graph_override(resto_graph);
+            outer_graph.for_each_parallel([](data *d) {
+                d->restore_trial_state();
+            });
+
+            resto_graph.for_each_parallel([this](data *d) {
+                d->for_each<ineq_constr_fields>([&](const ineq_constr &c, ineq_constr::data_map_t &id) {
+                    c.finalize_predictor_step(id, &settings);
+                });
+                d->for_each<soft_constr_fields>([&](const soft_constr &c, soft_constr::data_map_t &sd) {
+                    c.finalize_predictor_step(sd, &settings);
+                });
+                d->update_approximation(node_data::update_mode::eval_derivatives, true);
             });
             kkt_rest = compute_kkt_info();
             kkt_rest.num_iter = kkt_before.num_iter + i_rest + 1;
@@ -94,11 +125,9 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         }
 
         if (action == line_search_action::failure) {
-            graph.for_each_parallel([this](data *d) {
+            resto_graph.for_each_parallel([this](data *d) {
                 d->restore_trial_state();
-                solver::restoration::restore_trial_state(*d);
-                assemble_restoration_problem(d, node_data::update_mode::eval_val);
-                assemble_restoration_problem(d, node_data::update_mode::eval_raw_derivatives);
+                d->update_approximation(node_data::update_mode::eval_derivatives, true);
             });
             ++stalled_iters;
         } else {
@@ -108,21 +137,27 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     }
 
     const auto cleanup = [&](bool success) {
-        graph.for_each_parallel([&](data *d) {
-            if (dynamic_cast<ns_riccati_data::restoration_aux_data *>(d->aux_.get()) == nullptr) {
-                return;
-            }
-            solver::restoration::cleanup_restoration_stage(*d,
-                                                           success,
-                                                           settings.restoration.bound_mult_reset_threshold,
-                                                           settings.restoration.constr_mult_reset_threshold);
-            d->aux_.reset();
-        });
-
+        if (success) {
+            for_each_overlay_pair(resto_graph, outer_graph, [&](data &resto, data &outer) {
+                sync_primal_state(resto, outer);
+                sync_hard_duals(resto, outer);
+            });
+            clear_phase_graph_override();
+            outer_graph.for_each_parallel([this](data *d) {
+                d->update_approximation(node_data::update_mode::eval_val, true);
+                solver::ineq_soft::initialize(d);
+                solver::restoration::reset_equality_duals(*d, settings.restoration.constr_mult_reset_threshold);
+                d->update_approximation(node_data::update_mode::eval_derivatives, true);
+            });
+        } else {
+            clear_phase_graph_override();
+        }
         settings.in_restoration = false;
-        graph.for_each_parallel([this](data *d) {
-            d->update_approximation(node_data::update_mode::eval_derivatives, true);
-        });
+        if (!success) {
+            outer_graph.for_each_parallel([this](data *d) {
+                d->update_approximation(node_data::update_mode::eval_derivatives, true);
+            });
+        }
     };
 
     cleanup(resto_accept);

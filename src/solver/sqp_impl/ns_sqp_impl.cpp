@@ -156,6 +156,18 @@ void ns_sqp::assemble_restoration_problem(data *cur, node_data::update_mode mode
         &cur->restoration_prox_hess_diag_[__y]);
 }
 
+void ns_sqp::update_phase_problem(data *d, node_data::update_mode mode) {
+    if (using_restoration_overlay_graph()) {
+        d->update_approximation(mode, true);
+        return;
+    }
+    if (in_restoration_phase()) {
+        assemble_restoration_problem(d, mode);
+        return;
+    }
+    d->update_approximation(mode, true);
+}
+
 ns_sqp::kkt_info ns_sqp::initialize() {
     auto total_profile = profile_scope(profile_phase::initialize_total);
     auto &graph = solver_graph();
@@ -421,9 +433,9 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
             }
             if (in_restoration_phase()) {
                 solver::restoration::apply_affine_step(*d, &settings);
-                assemble_restoration_problem(d, node_data::update_mode::eval_val);
+                update_phase_problem(d, node_data::update_mode::eval_val);
             } else {
-                d->update_approximation(node_data::update_mode::eval_val, true);
+                update_phase_problem(d, node_data::update_mode::eval_val);
             }
         });
     detail_timed_block_end("apply_affine_step");
@@ -435,11 +447,8 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
     if (settings.ls.method == linesearch_setting::search_method::merit_backtracking ||
         in_restoration_phase()) {
         graph.for_each_parallel([this](data *d) {
-            if (in_restoration_phase()) {
-                assemble_restoration_problem(d, node_data::update_mode::eval_raw_derivatives);
-            } else {
-                d->update_approximation(node_data::update_mode::eval_derivatives, true);
-            }
+            update_phase_problem(d, in_restoration_phase() ? node_data::update_mode::eval_raw_derivatives
+                                                           : node_data::update_mode::eval_derivatives);
         });
         ctx.trial = compute_kkt_info();
     } else {
@@ -458,11 +467,8 @@ void ns_sqp::accept_trial_point(filter_linesearch_data &ls, iteration_context &c
         detail_timed_block_start("update_approx_accepted");
         if (settings.ls.method != linesearch_setting::search_method::merit_backtracking) {
             graph.for_each_parallel([this](data *d) {
-                if (in_restoration_phase()) {
-                    assemble_restoration_problem(d, node_data::update_mode::eval_raw_derivatives);
-                } else {
-                    d->update_approximation(node_data::update_mode::eval_derivatives, true);
-                }
+                update_phase_problem(d, in_restoration_phase() ? node_data::update_mode::eval_raw_derivatives
+                                                               : node_data::update_mode::eval_derivatives);
             });
             ctx.trial = compute_kkt_info();
         }

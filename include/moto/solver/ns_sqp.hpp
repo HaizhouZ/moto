@@ -8,6 +8,7 @@
 #include <moto/solver/linesearch_config.hpp>
 #include <moto/solver/ns_riccati/generic_solver.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
+#include <moto/solver/restoration/resto_overlay.hpp>
 #include <moto/solver/restoration/resto_runtime.hpp>
 #include <array>
 #include <chrono>
@@ -280,6 +281,9 @@ struct ns_sqp {
     struct filter_linesearch_data;
 
     solver_graph_type &solver_graph() {
+        if (phase_graph_override_ != nullptr) {
+            return *phase_graph_override_;
+        }
         if (!active_model_graph_) {
             throw std::runtime_error("ns_sqp has no active model graph; call create_graph() first");
         }
@@ -299,8 +303,17 @@ struct ns_sqp {
         return *graph;
     }
 
+    solver_graph_type &restoration_graph();
+    void clear_phase_graph_override() { phase_graph_override_ = nullptr; }
+    void set_phase_graph_override(solver_graph_type &graph) { phase_graph_override_ = &graph; }
+    bool using_restoration_overlay_graph() const {
+        return settings.in_restoration && phase_graph_override_ != nullptr && restoration_graph_.get() == phase_graph_override_;
+    }
+
     std::unique_ptr<solver_type> riccati_solver_ = nullptr;
     std::shared_ptr<model::graph_model_state> active_model_graph_;
+    std::shared_ptr<solver_graph_type> restoration_graph_;
+    solver_graph_type *phase_graph_override_ = nullptr;
     size_t graph_n_jobs_ = MAX_THREADS;
 
     template <typename worker_type>
@@ -365,6 +378,7 @@ struct ns_sqp {
     /// compute the kkt information of the current solution
     kkt_info compute_kkt_info(bool update_dual_res = true);
     kkt_info restoration_update(const kkt_info &kkt_before, filter_linesearch_data &ls);
+    void update_phase_problem(data *d, node_data::update_mode mode);
     void assemble_restoration_problem(data *d, node_data::update_mode mode);
     /// perform iterative refinement to improve the solution accuracy, will modify the current solution in place
     void iterative_refinement();
