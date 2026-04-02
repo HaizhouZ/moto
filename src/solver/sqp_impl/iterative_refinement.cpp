@@ -89,8 +89,10 @@ void ns_sqp::iterative_refinement() {
                 [](ns_sqp::data *data) {
                     data->first_order_correction_start([data]() {
                         if (dynamic_cast<ns_riccati_data::restoration_aux_data *>(data->aux_.get()) != nullptr) {
-                            solver::restoration::load_correction_rhs(
-                                *data, solver::restoration::compute_reduced_residual(*data));
+                            // Restoration's reduced y-stationarity lives on the coupled
+                            // cur.y + next.x chain. Use the already-assembled KKT residual
+                            // (after next.x has been folded into cur.y) as the correction RHS.
+                            solver::restoration::load_correction_rhs_from_kkt_residual(*data);
                             return;
                         }
                         data->dense().lag_jac_corr_[__u] = data->kkt_stat_err_[__u];

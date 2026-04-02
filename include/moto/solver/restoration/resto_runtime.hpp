@@ -79,6 +79,7 @@ bool update_mu_bar(ns_riccati::ns_riccati_data &d,
 void load_correction_rhs(array_type<row_vector, primal_fields> &lag_jac_corr,
                          const reduced_residual_info &residual);
 void load_correction_rhs(ns_riccati::ns_riccati_data &d, const reduced_residual_info &residual);
+void load_correction_rhs_from_kkt_residual(ns_riccati::ns_riccati_data &d);
 
 void prepare_current_constraint_stack(ns_riccati::ns_riccati_data &d);
 void initialize_stage(ns_riccati::ns_riccati_data &d);

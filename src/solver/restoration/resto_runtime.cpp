@@ -411,6 +411,15 @@ void load_correction_rhs(ns_riccati::ns_riccati_data &d, const reduced_residual_
     load_correction_rhs(d.dense_->lag_jac_corr_, residual);
 }
 
+void load_correction_rhs_from_kkt_residual(ns_riccati::ns_riccati_data &d) {
+    for (auto pf : primal_fields) {
+        d.dense_->lag_jac_corr_[pf].setZero();
+    }
+    for (auto pf : std::array{__u, __y}) {
+        d.dense_->lag_jac_corr_[pf] = d.kkt_stat_err_[pf];
+    }
+}
+
 void prepare_current_constraint_stack(ns_riccati::ns_riccati_data &d) {
     auto *aux = get_aux(d);
     if (aux == nullptr) {
