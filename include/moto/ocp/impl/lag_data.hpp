@@ -47,7 +47,7 @@ struct lag_data {
     /// Typical writers are:
     /// - IPM / PMM Schur-complement terms
     /// - iterative refinement residual correction
-    /// - restoration proximal terms
+    /// - explicit restoration reduced-system corrections
     ///
     /// Lifecycle:
     /// - update_approximation() clears this buffer

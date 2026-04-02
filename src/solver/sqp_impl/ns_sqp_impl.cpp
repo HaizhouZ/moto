@@ -165,7 +165,12 @@ void ns_sqp::post_factorization_correction_step() {
 }
 void ns_sqp::finalize_correction(data *d) {
     riccati_solver_->finalize_primal_step_correction(d);
-    solver::ineq_soft::finalize_newton_step(d);
+    if (!settings.in_restoration) {
+        solver::ineq_soft::finalize_newton_step(d);
+    }
+    if (settings.in_restoration) {
+        solver::restoration::finalize_newton_step(*d);
+    }
 }
 
 void ns_sqp::reset_ls_workers() {
@@ -177,7 +182,11 @@ void ns_sqp::refresh_ls_bounds() {
     reset_ls_workers();
     auto &graph = solver_graph();
     graph.for_each_parallel([this](size_t tid, data *d) {
-        solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
+        if (settings.in_restoration) {
+            solver::restoration::update_ls_bounds(*d, &setting_per_thread[tid]);
+        } else {
+            solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
+        }
     });
     finalize_ls_bound_and_set_to_max();
 }
@@ -266,15 +275,17 @@ void ns_sqp::solve_direction(iteration_context &ctx, bool do_scaling, bool gauss
     detail_timed_block_end("fwd_linear_rollout");
     }
 
-    if (settings.has_ineq_soft)
+    if (!settings.in_restoration && settings.has_ineq_soft)
         ineq_constr_prediction();
     {
         auto finalize_profile = profile_scope(profile_phase::finalize_primal_step);
     detail_timed_block_start("finalize_primal_step");
     graph.for_each_parallel([this](size_t tid, data *d) {
         riccati_solver_->finalize_primal_step(d);
-        solver::ineq_soft::finalize_newton_step(d);
-        solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
+        if (!settings.in_restoration) {
+            solver::ineq_soft::finalize_newton_step(d);
+            solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
+        }
     });
     detail_timed_block_end("finalize_primal_step");
     }
@@ -283,16 +294,34 @@ void ns_sqp::solve_direction(iteration_context &ctx, bool do_scaling, bool gauss
 
 void ns_sqp::correct_direction(iteration_context &ctx, bool do_refinement) {
     auto phase_profile = profile_scope(profile_phase::correct_direction);
+    auto &graph = solver_graph();
     {
         auto corrector_profile = profile_scope(profile_phase::ineq_corrector_step);
         detail_timed_block_start("ineq_corrector_step");
-        if (settings.has_ineq_soft)
+        if (!settings.in_restoration && settings.has_ineq_soft)
             ineq_constr_correction(ctx);
         detail_timed_block_end("ineq_corrector_step");
     }
 
     if (do_refinement && settings.rf.enabled && settings.rf.max_iters > 0)
         iterative_refinement();
+
+    if (settings.in_restoration) {
+        // Iterative refinement and correction solves operate on working
+        // first-order systems and leave active lag_jac_ in a correction-updated
+        // state. Before globalization, rebuild the current-point derivatives so
+        // the restoration acceptor sees the true reduced restoration
+        // Lagrangian gradient at the current iterate rather than the last
+        // correction-system work vector.
+        graph.for_each_parallel([this](data *d) {
+            d->update_approximation(node_data::update_mode::eval_raw_derivatives,
+                                    /*include_original_cost=*/false);
+            solver::restoration::assemble_resto_base_lagrangian(*d);
+            solver::restoration::add_resto_prox_term(
+                *d, settings.restoration.rho_u, settings.restoration.rho_y);
+        });
+        ctx.current = compute_kkt_info();
+    }
 }
 
 void ns_sqp::prepare_globalization(filter_linesearch_data &ls, iteration_context &ctx) {
@@ -316,13 +345,30 @@ void ns_sqp::prepare_globalization(filter_linesearch_data &ls, iteration_context
         finalize_ls_bound_and_set_to_max();
     }
     unscale_duals();
-    graph.for_each_parallel([](data *d) {
+    graph.for_each_parallel([this](data *d) {
         d->backup_trial_state();
-        solver::ineq_soft::backup_trial_state(d);
+        if (!settings.in_restoration)
+            solver::ineq_soft::backup_trial_state(d);
         solver::restoration::backup_trial_state(*d);
     });
     if (ctx.mu_changed) {
         ls.points.clear(); // the QP objective changed, so old filter points are no longer comparable
+    }
+    if (settings.in_restoration) {
+        ls.resto.current = compute_restoration_kkt_info();
+        if (!ls.resto.initialized) {
+            if (settings.verbose) {
+                const auto resto_eval = compute_restoration_info();
+                fmt::print("[resto entry] theta_R: {:.3e}, phi_R: {:.3e}, dual_R: {:.3e} (w={:.3e}, rp={:.3e}, rn={:.3e}), comp_R: {:.3e} (p={:.3e}, n={:.3e})\n",
+                           resto_eval.theta, resto_eval.phi, resto_eval.dual,
+                           resto_eval.dual_w, resto_eval.dual_local_p, resto_eval.dual_local_n,
+                           resto_eval.comp, resto_eval.comp_p, resto_eval.comp_n);
+            }
+            ls.resto.entry = ls.resto.current;
+            ls.resto.best_trial = {};
+            ls.resto.points.clear();
+            ls.resto.initialized = true;
+        }
     }
 }
 
@@ -335,10 +381,14 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
     detail_timed_block_start("apply_affine_step");
     graph.for_each_parallel([this](data *d) {
         d->restore_trial_state();
-        solver::ineq_soft::restore_trial_state(d);
+        if (!settings.in_restoration) {
+            solver::ineq_soft::restore_trial_state(d);
+        }
         solver::restoration::restore_trial_state(*d);
         riccati_solver_->apply_affine_step(d, &settings);
-        solver::ineq_soft::apply_affine_step(d, &settings);
+        if (!settings.in_restoration) {
+            solver::ineq_soft::apply_affine_step(d, &settings);
+        }
         solver::restoration::apply_affine_step(*d, &settings);
         d->update_approximation(node_data::update_mode::eval_val,
                                 !settings.in_restoration);
@@ -349,10 +399,15 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
     {
         auto res_profile = profile_scope(profile_phase::update_res_stat);
     detail_timed_block_start("update_res_stat");
-    if (settings.ls.method == linesearch_setting::search_method::merit_backtracking) {
+    if (settings.in_restoration || settings.ls.method == linesearch_setting::search_method::merit_backtracking) {
         graph.for_each_parallel([this](data *d) {
-            d->update_approximation(node_data::update_mode::eval_derivatives,
+            d->update_approximation(node_data::update_mode::eval_raw_derivatives,
                                     !settings.in_restoration);
+            if (settings.in_restoration) {
+                solver::restoration::assemble_resto_base_lagrangian(*d);
+                solver::restoration::add_resto_prox_term(
+                    *d, settings.restoration.rho_u, settings.restoration.rho_y);
+            }
         });
         ctx.trial = compute_kkt_info();
     } else {
@@ -361,7 +416,11 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
     detail_timed_block_end("update_res_stat");
     }
 
-    return settings.ls.method == linesearch_setting::search_method::merit_backtracking;
+    if (settings.in_restoration) {
+        ls.resto.trial = compute_restoration_kkt_info();
+    }
+
+    return settings.in_restoration || settings.ls.method == linesearch_setting::search_method::merit_backtracking;
 }
 
 void ns_sqp::accept_trial_point(filter_linesearch_data &ls, iteration_context &ctx) {
@@ -372,14 +431,22 @@ void ns_sqp::accept_trial_point(filter_linesearch_data &ls, iteration_context &c
         detail_timed_block_start("update_approx_accepted");
         if (settings.ls.method != linesearch_setting::search_method::merit_backtracking) {
             graph.for_each_parallel([this](data *d) {
-                d->update_approximation(node_data::update_mode::eval_derivatives,
+                d->update_approximation(node_data::update_mode::eval_raw_derivatives,
                                         !settings.in_restoration);
+                if (settings.in_restoration) {
+                    solver::restoration::assemble_resto_base_lagrangian(*d);
+                    solver::restoration::add_resto_prox_term(
+                        *d, settings.restoration.rho_u, settings.restoration.rho_y);
+                }
             });
             ctx.trial = compute_kkt_info();
         }
         detail_timed_block_end("update_approx_accepted");
     }
     ctx.current = ctx.trial;
+    if (settings.in_restoration) {
+        ls.resto.current = ls.resto.trial;
+    }
 }
 
 ns_sqp::line_search_action ns_sqp::run_globalization(filter_linesearch_data &ls, iteration_context &ctx) {
@@ -388,7 +455,9 @@ ns_sqp::line_search_action ns_sqp::run_globalization(filter_linesearch_data &ls,
         bool has_trial_derivatives = evaluate_trial_point(ls, ctx);
 
         if (settings.ls.enabled && !ls.stop) {
-            if (settings.ls.method == linesearch_setting::search_method::merit_backtracking)
+            if (settings.in_restoration)
+                ctx.action = restoration_linesearch(ls, ctx.trial, ctx.current);
+            else if (settings.ls.method == linesearch_setting::search_method::merit_backtracking)
                 ctx.action = merit_linesearch(ls, ctx.trial, ctx.current);
             else
                 ctx.action = filter_linesearch(ls, ctx.trial, ctx.current);
@@ -663,6 +732,208 @@ void ns_sqp::print_dual_res_breakdown() {
         if (cu > 1e-10 || cy > 1e-10)
             fmt::print("    [{:12s}]: cross-stage-y={:.3e}  u={:.3e}\n", field::name(cf), cy, cu);
     }
+}
+ns_sqp::restoration_eval_info ns_sqp::compute_restoration_info() {
+    restoration_eval_info info;
+
+    auto &graph = solver_graph();
+    for (auto *n : graph.flatten_nodes()) {
+        const auto *aux = dynamic_cast<const solver::ns_riccati::ns_riccati_data::restoration_aux_data *>(n->aux_.get());
+        if (aux == nullptr || !aux->initialized) {
+            continue;
+        }
+
+        scalar_t theta_stage = 0.;
+        if (n->dense().approx_[__dyn].v_.size() > 0) {
+            theta_stage = std::max(theta_stage, n->dense().approx_[__dyn].v_.cwiseAbs().maxCoeff());
+        }
+        if (aux->elastic.dim() > 0) {
+            vector c(aux->elastic.dim());
+            Eigen::Index offset = 0;
+            if (n->ns > 0) {
+                const auto &eq_x = n->dense().approx_[__eq_x].v_;
+                c.segment(offset, static_cast<Eigen::Index>(n->ns)) = eq_x;
+                offset += static_cast<Eigen::Index>(n->ns);
+            }
+            if (n->nc > 0) {
+                const auto &eq_xu = n->dense().approx_[__eq_xu].v_;
+                c.segment(offset, static_cast<Eigen::Index>(n->nc)) = eq_xu;
+            }
+
+            const vector lambda = solver::restoration::gather_lambda(*n);
+            const vector r_c = c - aux->elastic.p + aux->elastic.n;
+            const vector r_p =
+                vector::Constant(c.size(), aux->rho_eq) - lambda - aux->elastic.nu_p;
+            const vector r_n =
+                vector::Constant(c.size(), aux->rho_eq) + lambda - aux->elastic.nu_n;
+            const vector r_s_p =
+                aux->elastic.nu_p.array() * aux->elastic.p.array() - aux->mu_bar;
+            const vector r_s_n =
+                aux->elastic.nu_n.array() * aux->elastic.n.array() - aux->mu_bar;
+
+            theta_stage = std::max(theta_stage, r_c.cwiseAbs().maxCoeff());
+            // In restoration, dual_R tracks the reduced restoration
+            // stationarity, not the original-NLP dual residual. The local
+            // explicit-elastic block contributes r_p/r_n here; the reduced
+            // w-stationarity is accumulated below directly from lag_jac_.
+            info.dual_local_p = std::max(info.dual_local_p, r_p.cwiseAbs().maxCoeff());
+            info.dual_local_n = std::max(info.dual_local_n, r_n.cwiseAbs().maxCoeff());
+            info.comp_p = std::max(info.comp_p, r_s_p.cwiseAbs().maxCoeff());
+            info.comp_n = std::max(info.comp_n, r_s_n.cwiseAbs().maxCoeff());
+        }
+        info.theta = std::max(info.theta, theta_stage);
+        if (n->dense().lag_jac_[__u].size() > 0) {
+            info.dual_w = std::max(info.dual_w, n->dense().lag_jac_[__u].cwiseAbs().maxCoeff());
+        }
+
+        if (aux->elastic.p.size() > 0) {
+            info.phi += aux->rho_eq * (aux->elastic.p.sum() + aux->elastic.n.sum());
+            info.phi -= aux->mu_bar *
+                        (aux->elastic.p.array().max(scalar_t(1e-16)).log().sum() +
+                         aux->elastic.n.array().max(scalar_t(1e-16)).log().sum());
+        }
+        if (n->restoration_prox_.u_ref.size() > 0) {
+            const vector du = n->value(__u) - n->restoration_prox_.u_ref;
+            info.phi += scalar_t(0.5) * settings.restoration.rho_u *
+                        (n->restoration_prox_.sigma_u_sq.array() * du.array().square()).sum();
+        }
+        if (n->restoration_prox_.y_ref.size() > 0) {
+            const vector dy = n->value(__y) - n->restoration_prox_.y_ref;
+            info.phi += scalar_t(0.5) * settings.restoration.rho_y *
+                        (n->restoration_prox_.sigma_y_sq.array() * dy.array().square()).sum();
+        }
+
+    }
+
+    graph.apply_forward(
+        [&](node_data *cur, node_data *next) {
+            if (next != nullptr) [[likely]] {
+                static row_vector tmp;
+                tmp.conservativeResize(next->dense().lag_jac_[__x].cols());
+                tmp.noalias() = next->dense().lag_jac_[__x] *
+                                    utils::permutation_from_y_to_x(&cur->problem(), &next->problem()) +
+                                cur->dense().lag_jac_[__y];
+                if (tmp.size() > 0) {
+                    info.dual_w = std::max(info.dual_w, tmp.cwiseAbs().maxCoeff());
+                }
+            } else if (cur->dense().lag_jac_[__y].size() > 0) {
+                info.dual_w = std::max(info.dual_w, cur->dense().lag_jac_[__y].cwiseAbs().maxCoeff());
+            }
+        },
+        true);
+
+    info.dual = std::max({info.dual_w, info.dual_local_p, info.dual_local_n});
+    info.comp = std::max({info.comp, info.comp_p, info.comp_n});
+    info.pd_err = std::max({info.theta, info.dual, info.comp});
+    return info;
+}
+ns_sqp::kkt_info ns_sqp::compute_restoration_kkt_info() {
+    kkt_info kkt;
+
+    auto &graph = solver_graph();
+    for (auto *n : graph.flatten_nodes()) {
+        const auto *aux = dynamic_cast<const solver::ns_riccati::ns_riccati_data::restoration_aux_data *>(n->aux_.get());
+        if (aux == nullptr || !aux->initialized) {
+            continue;
+        }
+
+        scalar_t theta_stage = 0.;
+        if (n->dense().approx_[__dyn].v_.size() > 0) {
+            theta_stage = std::max(theta_stage, n->dense().approx_[__dyn].v_.cwiseAbs().maxCoeff());
+        }
+
+        if (aux->elastic.dim() > 0) {
+            vector c(aux->elastic.dim());
+            Eigen::Index offset = 0;
+            if (n->ns > 0) {
+                const auto &eq_x = n->dense().approx_[__eq_x].v_;
+                c.segment(offset, static_cast<Eigen::Index>(n->ns)) = eq_x;
+                offset += static_cast<Eigen::Index>(n->ns);
+            }
+            if (n->nc > 0) {
+                const auto &eq_xu = n->dense().approx_[__eq_xu].v_;
+                c.segment(offset, static_cast<Eigen::Index>(n->nc)) = eq_xu;
+            }
+
+            const vector lambda = solver::restoration::gather_lambda(*n);
+            const vector r_c = c - aux->elastic.p + aux->elastic.n;
+            const vector r_p =
+                vector::Constant(c.size(), aux->rho_eq) - lambda - aux->elastic.nu_p;
+            const vector r_n =
+                vector::Constant(c.size(), aux->rho_eq) + lambda - aux->elastic.nu_n;
+            const vector r_s_p =
+                aux->elastic.nu_p.array() * aux->elastic.p.array() - aux->mu_bar;
+            const vector r_s_n =
+                aux->elastic.nu_n.array() * aux->elastic.n.array() - aux->mu_bar;
+
+            theta_stage = std::max(theta_stage, r_c.cwiseAbs().maxCoeff());
+            kkt.inf_dual_res = std::max({kkt.inf_dual_res,
+                                         r_p.cwiseAbs().maxCoeff(),
+                                         r_n.cwiseAbs().maxCoeff()});
+            kkt.inf_comp_res = std::max({kkt.inf_comp_res,
+                                         r_s_p.cwiseAbs().maxCoeff(),
+                                         r_s_n.cwiseAbs().maxCoeff()});
+
+            kkt.cost += aux->rho_eq * (aux->elastic.p.sum() + aux->elastic.n.sum());
+            kkt.cost -= aux->mu_bar *
+                        (aux->elastic.p.array().max(scalar_t(1e-16)).log().sum() +
+                         aux->elastic.n.array().max(scalar_t(1e-16)).log().sum());
+            kkt.obj_fullstep_dec +=
+                aux->rho_eq * (aux->elastic.d_p.sum() + aux->elastic.d_n.sum());
+            kkt.obj_fullstep_dec -= aux->mu_bar *
+                                    ((aux->elastic.d_p.array() /
+                                      aux->elastic.p.array().max(scalar_t(1e-16))).sum() +
+                                     (aux->elastic.d_n.array() /
+                                      aux->elastic.n.array().max(scalar_t(1e-16))).sum());
+        }
+
+        kkt.inf_prim_res = std::max(kkt.inf_prim_res, theta_stage);
+        kkt.prim_res_l1 += theta_stage;
+
+        if (n->dense().lag_jac_[__u].size() > 0) {
+            kkt.inf_dual_res = std::max(kkt.inf_dual_res, n->dense().lag_jac_[__u].cwiseAbs().maxCoeff());
+        }
+
+        if (n->restoration_prox_.u_ref.size() > 0) {
+            const vector du = n->value(__u) - n->restoration_prox_.u_ref;
+            const vector du_step = n->trial_prim_step[__u];
+            kkt.cost += scalar_t(0.5) * settings.restoration.rho_u *
+                        (n->restoration_prox_.sigma_u_sq.array() * du.array().square()).sum();
+            kkt.obj_fullstep_dec += settings.restoration.rho_u *
+                                    (n->restoration_prox_.sigma_u_sq.array() *
+                                     du.array() * du_step.array()).sum();
+        }
+        if (n->restoration_prox_.y_ref.size() > 0) {
+            const vector dy = n->value(__y) - n->restoration_prox_.y_ref;
+            const vector dy_step = n->trial_prim_step[__y];
+            kkt.cost += scalar_t(0.5) * settings.restoration.rho_y *
+                        (n->restoration_prox_.sigma_y_sq.array() * dy.array().square()).sum();
+            kkt.obj_fullstep_dec += settings.restoration.rho_y *
+                                    (n->restoration_prox_.sigma_y_sq.array() *
+                                     dy.array() * dy_step.array()).sum();
+        }
+
+    }
+
+    graph.apply_forward(
+        [&](node_data *cur, node_data *next) {
+            if (next != nullptr) [[likely]] {
+                static row_vector tmp;
+                tmp.conservativeResize(next->dense().lag_jac_[__x].cols());
+                tmp.noalias() = next->dense().lag_jac_[__x] *
+                                    utils::permutation_from_y_to_x(&cur->problem(), &next->problem()) +
+                                cur->dense().lag_jac_[__y];
+                if (tmp.size() > 0) {
+                    kkt.inf_dual_res = std::max(kkt.inf_dual_res, tmp.cwiseAbs().maxCoeff());
+                }
+            } else if (cur->dense().lag_jac_[__y].size() > 0) {
+                kkt.inf_dual_res = std::max(kkt.inf_dual_res, cur->dense().lag_jac_[__y].cwiseAbs().maxCoeff());
+            }
+        },
+        true);
+
+    kkt.objective = kkt.cost;
+    return kkt;
 }
 ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
     kkt_info kkt;

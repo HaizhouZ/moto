@@ -66,20 +66,24 @@ node_data::node_data(const ocp_ptr_t &prob)
 void node_data::update_approximation(update_mode config, bool include_original_cost) {
     /// @todo: always eval residual?
     // call to precompute
+    const bool raw_derivatives = config == update_mode::eval_raw_derivatives;
     bool update_cost = config == update_mode::eval_val || config == update_mode::eval_all;
     if (update_cost) {
         dense_->cost_ = 0.;
         dense_->lag_ = 0.;
     }
     // set lagrangian gradient to zero
-    if (config > update_mode::eval_val) {
+    if (config != update_mode::eval_val) {
         for (auto field : primal_fields) {
             dense_->lag_jac_[field].setZero();
             dense_->lag_jac_corr_[field].setZero();
             dense_->cost_jac_[field].setZero();
         }
 
-        if (config >= update_mode::eval_hess)
+        if (config == update_mode::eval_hess ||
+            config == update_mode::eval_derivatives ||
+            config == update_mode::eval_raw_derivatives ||
+            config == update_mode::eval_all)
             for (auto &hess_l_0 : dense_->lag_hess_) {
                 for (auto &hess_l_1 : hess_l_0) {
                     hess_l_1.setZero();
@@ -95,8 +99,14 @@ void node_data::update_approximation(update_mode config, bool include_original_c
         f.custom_call((*shared_)[f]); ///< @todo pass update mode
     }
     bool no_eval = config != update_mode::eval_val && config != update_mode::eval_all;
-    bool no_jac = config != update_mode::eval_jac && config != update_mode::eval_derivatives && config != update_mode::eval_all;
-    bool no_hess = config != update_mode::eval_hess && config != update_mode::eval_derivatives && config != update_mode::eval_all;
+    bool no_jac = config != update_mode::eval_jac &&
+                  config != update_mode::eval_derivatives &&
+                  config != update_mode::eval_raw_derivatives &&
+                  config != update_mode::eval_all;
+    bool no_hess = config != update_mode::eval_hess &&
+                   config != update_mode::eval_derivatives &&
+                   config != update_mode::eval_raw_derivatives &&
+                   config != update_mode::eval_all;
     for_each<func_fields>([=, this](const generic_func &_f, func_approx_data &data) {
         _f.compute_approx(data,
                           !no_eval && _f.order() >= approx_order::zero,
@@ -107,14 +117,27 @@ void node_data::update_approximation(update_mode config, bool include_original_c
         f.custom_call((*shared_)[f]); ///< @todo pass update mode
     }
     // snapshot pure cost gradient before adding constraint dual contributions
-    if (config >= update_mode::eval_jac)
+    if (config != update_mode::eval_val)
         for (auto field : primal_fields){
             dense_->cost_jac_[field] = dense_->lag_jac_[field];
         }
-    if (config >= update_mode::eval_jac && !include_original_cost)
+    if (config != update_mode::eval_val && !include_original_cost)
         for (auto field : primal_fields) {
             dense_->lag_jac_[field].setZero();
         }
+
+    if (raw_derivatives) {
+        dense_->lag_ = 0.;
+        for (auto field : primal_fields) {
+            dense_->lag_jac_[field].setZero();
+        }
+        for (auto &hess_l_0 : dense_->lag_hess_) {
+            for (auto &hess_l_1 : hess_l_0) {
+                hess_l_1.setZero();
+            }
+        }
+        return;
+    }
 
     for (auto f : lag_data::stored_constr_fields) {
         if (prob_->dim(f) == 0)

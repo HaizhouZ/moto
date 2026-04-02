@@ -93,7 +93,6 @@ struct generic_solver {
     virtual void apply_affine_step(ns_riccati_data *cur, workspace_data *cfg);
 
     void compute_kkt_residual(ns_riccati_data *cur);
-
 };
 } // namespace ns_riccati
 } // namespace solver

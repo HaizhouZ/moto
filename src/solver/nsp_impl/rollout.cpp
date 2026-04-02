@@ -128,6 +128,7 @@ void generic_solver::compute_kkt_residual(ns_riccati_data *cur) {
         }
     }
 }
+
 } // namespace ns_riccati
 } // namespace solver
 } // namespace moto

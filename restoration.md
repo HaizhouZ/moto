@@ -87,6 +87,16 @@ $$
 \sigma(\xi) = \frac{1}{\max(|\xi|,1)}.
 $$
 
+The restoration loop itself is capped by both the global SQP iteration budget
+and the restoration-local limit:
+
+$$
+N_{\mathrm{resto}}
+\le
+\min\bigl(\texttt{settings.restoration.max\_iter},\,
+\texttt{settings.max\_iter} - k_{\mathrm{entry}}\bigr).
+$$
+
 ## Restoration NLP
 
 Let
@@ -127,12 +137,68 @@ Here:
 
 - `F(w)=0` stays hard throughout restoration.
 - `c(w)` is restored elastically.
+- The current restoration subproblem excludes the normal `__ineq_x` and
+  `__ineq_xu` constraints. They are not part of the restoration base
+  Lagrangian, and they do not contribute to restoration-local barrier or
+  complementarity terms.
 - `\varrho` is the elastic exact-penalty weight, currently stored in
   `settings.restoration.rho_eq`.
 - `\rho_\lambda` is the Hippo-style local elastic regularization, currently stored
   in `settings.restoration.lambda_reg`.
 - `\phi_R(w)` contains the restoration-only terms on `w`, currently the
   proximal anchoring on `u/y`.
+- These proximal terms are assembled only into the restoration base
+  Lagrangian state (`lag_ / lag_jac_ / lag_hess_`); they do not modify the
+  outer-NLP `cost_ / cost_jac_` bookkeeping used by the normal filter/objective.
+
+## Stagewise Restoration Lagrangian
+
+For one stage, write the base restoration objective on
+$w_k := (x_k,u_k,y_k)$ as
+
+$$
+\phi_{R,k}(w_k).
+$$
+
+Before condensing the local elastic block, the implemented stagewise
+restoration Lagrangian is
+
+$$
+\mathcal{L}_{R,k}
+=
+\phi_{R,k}(w_k)
++ \varrho \mathbf{1}^T (p_k+n_k)
+- \bar\mu \sum_i \ln p_{k,i}
+- \bar\mu \sum_i \ln n_{k,i}
++ \lambda_{f,k}^T F_k(w_k)
++ \lambda_{c,k}^T \bigl(c_k(w_k)-p_k+n_k\bigr).
+$$
+
+Its base gradient with respect to the global stage variables is
+
+$$
+g_{R,k}^{\mathrm{base}}
+:=
+\nabla_{w_k}\phi_{R,k}(w_k)
++ A_k^T \lambda_{f,k}
++ C_k^T \lambda_{c,k}.
+$$
+
+This is the quantity that belongs to the base stage gradient state. In code it
+is what `activate_lag_jac_corr()` snapshots into `base_lag_grad_backup` before
+any reduced correction is activated.
+
+The condensed elastic term
+
+$$
+\Delta g_{R,k}^{\mathrm{cond}}
+:=
+C_k^T M_{\rho,k}^{-1} b_{c,k}
+$$
+
+is **not** part of the original restoration Lagrangian. It belongs only to the
+reduced system created after eliminating $(p,n,\nu_p,\nu_n,\lambda_c)$, and so
+it must stay in `lag_jac_corr_` until activation.
 
 ## KKT Residuals
 
@@ -173,6 +239,9 @@ $$
 $$
 r_{s,n} := \nu_n \odot n - \bar\mu \mathbf{1} .
 $$
+
+These are restoration-only local residuals. The normal inequality-IPM
+residuals are excluded from the restoration KKT system.
 
 Introduce
 
@@ -282,6 +351,21 @@ $$
 \delta \lambda_c = M_\rho^{-1}(C\,\delta w + b_c).
 $$
 
+So the reduced stagewise stationarity solved by Riccati is
+
+$$
+g_{R,k}^{\mathrm{base}}
++ \Delta g_{R,k}^{\mathrm{cond}}
++ H_{R,k}\,\delta w_k
++ A_k^T \delta \lambda_{f,k}
++ C_k^T \delta \lambda_{c,k}
+= 0.
+$$
+
+For residual checking, the correct starting point is therefore
+$g_{R,k}^{\mathrm{base}}$, i.e. `base_lag_grad_backup`, not the already
+corrected active `Q_(·)`.
+
 The base stage gradient already contains
 
 $$
@@ -361,7 +445,7 @@ The first-order condensed terms are not written directly into the active stage
 gradient. They are first accumulated into `lag_jac_corr_`, and
 `data_base::activate_lag_jac_corr()` is then responsible for folding them into
 the active `Q_x/Q_u/Q_y` seen by the next Riccati solve, together with the
-other pending first-order corrections.
+other pending reduced-system corrections.
 
 So the global Riccati solve only sees a correction on the existing
 $(x,u,y)$-blocks; it never sees explicit stage variables for $p$ or $n$.
@@ -437,7 +521,7 @@ modification bounded when $p,n$ or their duals approach the boundary.
 
 ## First-Order Correction Lifecycle
 
-All restoration-specific first-order terms now follow the normal correction
+Only reduced-system restoration first-order terms follow the normal correction
 buffer lifecycle:
 
 - the explicit elastic condensed gradient correction
@@ -445,10 +529,14 @@ buffer lifecycle:
   \Delta g_R = C^T M_\rho^{-1} b_c
   $$
   is written into `lag_jac_corr_[__u]` and `lag_jac_corr_[__x]`
-- the restoration proximal terms on `u` and `y` are written into
-  `lag_jac_corr_[__u]` and `lag_jac_corr_[__y]`
-- `activate_lag_jac_corr()` then activates all pending first-order corrections
-  before the stage factorization
+- `activate_lag_jac_corr()` then activates these pending reduced-system
+  first-order corrections before the stage factorization
+
+The restoration proximal terms on `u` and `y` are part of the restoration NLP
+objective on $w=(x,u,y)$ itself. They are therefore added directly to the base
+stage Lagrangian gradient `lag_jac_[__u]` and `lag_jac_[__y]` after each
+restoration derivative evaluation, instead of being routed through
+`lag_jac_corr_`.
 
 So restoration no longer special-cases its first-order condensed term by
 writing directly into the active gradient outside the normal correction path.
@@ -490,13 +578,119 @@ At the same time, the original `__eq_x` and `__eq_xu`:
 
 ## Globalization Semantics
 
-Restoration still uses the **outer problem's** filter semantics:
+The current implementation now uses **two acceptor layers**:
 
-- the objective/filter pair remains the original `(prim_res_l1, barrier objective)`
-- restoration does **not** add points to the outer filter history
-- restoration line-search failure alone is not an immediate restoration failure
+- the **outer** acceptor is still the original filter globalization for the
+  original NLP
+- the **inner restoration** acceptor uses restoration-only quantities
+  $(\theta_R,\phi_R)$
 
-More concretely, the outer barrier objective is still
+At restoration entry, the outer filter is augmented once with the IPOPT-style
+relaxed point derived from the entry iterate:
+
+$$
+\theta_{\mathrm{add}}=(1-\gamma_\theta)\theta_{\mathrm{ref}},
+\qquad
+\phi_{\mathrm{add}}=\phi_{\mathrm{ref}}-\gamma_\phi\theta_{\mathrm{ref}}.
+$$
+
+This relaxed point is inserted into the **outer** filter only once, right when
+restoration starts.
+
+Relative to Ipopt's full restoration phase, the current implementation should
+be viewed as a lighter explicit elastic variant:
+
+- it keeps the outer relaxed-filter augmentation at restoration entry,
+- it uses a restoration-specific inner acceptor and restoration-specific
+  metrics,
+- but it does **not** build a separate nested restoration solver stack,
+- and it does **not** yet perform Ipopt-style multiplier recomputation on
+  successful return.
+
+Inside restoration iterations, line-search acceptance is driven by the
+restoration acceptor, not by the outer filter. The restoration acceptor uses:
+
+$$
+\theta_R
+=
+\max\Bigl(
+\|F(w)\|_\infty,\,
+\|c(w)-p+n\|_\infty
+\Bigr),
+$$
+
+and
+
+$$
+\phi_R
+=
+\phi_{\mathrm{prox}}(w)
+\;+\;
+\varrho\,\mathbf 1^T(p+n)
+\;-\;
+\bar\mu \sum_i \ln p_i
+\;-\;
+\bar\mu \sum_i \ln n_i.
+$$
+
+It also tracks restoration-local dual and complementarity diagnostics:
+
+$$ 
+\mathrm{dual}_R
+=
+\max\Bigl(
+\|r_w^{\mathrm{red}}\|_\infty,
+\|r_p\|_\infty,
+\|r_n\|_\infty
+\Bigr),
+$$
+
+$$
+\mathrm{comp}_R
+=
+\max\Bigl(
+\|r_{s,p}\|_\infty,
+\|r_{s,n}\|_\infty
+\Bigr).
+$$
+
+Normal `__ineq_x / __ineq_xu` violations, barrier terms, and complementarity
+residuals are intentionally excluded from these restoration metrics.
+
+These restoration quantities are evaluated from the **current trial stage
+values**:
+
+- `F(w)` comes from the trial `eval_val` update
+- `c(w)` comes from the current trial values of `__eq_x` / `__eq_xu`
+- `\lambda_c` is read from the current scattered equality dual state
+- `p,n,\nu_p,\nu_n` are read from the restoration runtime after its affine step
+
+Here $r_w^{\mathrm{red}}$ denotes the reduced restoration stationarity on
+$w=(x,u,y)$ as seen by the condensed Riccati system:
+
+- the stage-wise `u` component comes directly from `lag_jac_[__u]`
+- the cross-stage component is the same `y/x` costate cancellation used by the
+  Riccati rollout,
+  $$
+  r_{w,\mathrm{cross},k}^{\mathrm{red}}
+  =
+  \operatorname{lag\_jac}_{y,k}
+  +
+  \operatorname{lag\_jac}_{x,k+1} P_k
+  $$
+
+Once restoration is active, `dual_R` intentionally stops reusing the original
+NLP dual residual as a whole. Instead it uses the reduced restoration
+stationarity on $w$ together with the explicit elastic local stationarity
+residuals $r_p,r_n$.
+
+So the restoration acceptor does **not** rely on cached local residuals from
+the previous factorization.
+
+Accepted restoration iterates update only the **restoration** filter history.
+They do **not** add new points to the outer filter.
+
+The outer barrier objective is still
 
 $$
 \phi(x)=f(x)-\mu\sum_i \log s_i,
@@ -514,10 +708,25 @@ traversal, so they do not pollute:
 This is why the original cost still has to be evaluated during restoration,
 even though it no longer defines the search direction.
 
+The outer filter is consulted again only when restoration wants to **exit**:
+an accepted restoration step is mapped back to the original NLP and must also
+be acceptable to the outer filter logic.
+
 ## Success / Failure
 
-The restoration phase is considered successful when an accepted restoration step
-produces sufficient improvement relative to the entry infeasibility:
+The restoration phase is considered successful only when an accepted
+restoration step satisfies both:
+
+- the step is acceptable to the **outer** globalization logic
+- it produces sufficient improvement relative to the entry infeasibility
+
+That is, success requires
+
+$$
+\mathrm{outer\_acceptable}(x_{\mathrm{resto}})
+$$
+
+and
 
 $$
 \|r_{\mathrm{prim}}(x)\|_\infty

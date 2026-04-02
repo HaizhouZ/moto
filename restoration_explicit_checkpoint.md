@@ -3,93 +3,44 @@
 This document is the math checkpoint for the **currently implemented**
 explicit elastic restoration path. It is meant to be stricter than
 [`restoration.md`](/home/harper/Documents/moto/restoration.md): the goal here is
-to record the exact local equations, the exact condensation used by the code,
-and the exact recovery formulas used after the global solve.
+to record only the pieces that are easier to lose while iterating on the
+implementation:
 
-## Scope
+- the exact local linearized system,
+- the exact condensation formulas used by the code,
+- the exact local step-recovery formulas,
+- and the current implementation boundary versus Ipopt.
 
-The global Riccati/SQP stage variables remain
+For the restoration NLP, stagewise Lagrangian, and globalization semantics,
+see [`restoration.md`](/home/harper/Documents/moto/restoration.md).
 
-$$
-w := (x,u,y), \qquad \delta w .
-$$
-
-The elastic variables
-
-$$
-p \succeq 0, \qquad n \succeq 0
-$$
-
-and their local duals
+The notation used below is the same as in the main note:
 
 $$
-\nu_p, \qquad \nu_n, \qquad \lambda_c
+w := (x,u,y), \qquad
+A := F_w, \qquad
+C := c_w,
 $$
 
-live only in a stage-local restoration runtime. They are **not** user-visible
-primal variables and they are **not** part of the global Riccati state.
-
-The hard dynamics constraints remain
+with local elastic variables and duals
 
 $$
-F(w)=0,
+p,\ n,\ \nu_p,\ \nu_n,\ \lambda_c,
 $$
 
-and the equalities restored elastically are the stage-local stack
+and diagonal matrices
 
 $$
-c(w)=0,
+T_p := \operatorname{diag}(p), \qquad
+T_n := \operatorname{diag}(n), \qquad
+N_p := \operatorname{diag}(\nu_p), \qquad
+N_n := \operatorname{diag}(\nu_n) .
 $$
 
-formed from the current `__eq_x` and `__eq_xu` residuals.
+The normal `__ineq_x / __ineq_xu` constraints are outside the current
+restoration NLP.
 
-## Restoration NLP
-
-The restoration subproblem is
-
-$$
-\begin{aligned}
-\min_{w,p,n}\quad &
-\phi_R(w)
- + \varrho \mathbf{1}^T (p+n)
- - \bar\mu \sum_i \ln p_i
- - \bar\mu \sum_i \ln n_i \\
-\text{s.t.}\quad &
-F(w)=0, \\
-&
-c(w)-p+n=0, \\
-&
-p \succeq 0,\quad n \succeq 0 .
-\end{aligned}
-$$
-
-Here:
-
-- $\phi_R(w)$ is the restoration objective on $w$; in the current code it is
-  the proximal anchoring on `u/y`.
-- $\varrho$ is the elastic exact-penalty weight
-  (`settings.restoration.rho_eq`).
-- $\bar\mu$ is the restoration barrier parameter.
-- $\rho_\lambda$ is a **linearization regularization** used only in the
-  stage-local condensation. It is not part of the NLP above.
-
-## Residual Definitions
-
-Let
-
-$$
-A := F_w, \qquad C := c_w .
-$$
-
-The implemented restoration residuals are
-
-$$
-r_w := \nabla_w \phi_R(w) + A^T \lambda_f + C^T \lambda_c ,
-$$
-
-$$
-r_f := F(w) ,
-$$
+The restoration-local residuals are
 
 $$
 r_c := c(w)-p+n ,
@@ -97,27 +48,14 @@ $$
 
 $$
 r_p := \varrho \mathbf{1} - \lambda_c - \nu_p ,
-$$
-
-$$
+\qquad
 r_n := \varrho \mathbf{1} + \lambda_c - \nu_n ,
 $$
 
 $$
 r_{s,p} := \nu_p \odot p - \bar\mu \mathbf{1} ,
-$$
-
-$$
+\qquad
 r_{s,n} := \nu_n \odot n - \bar\mu \mathbf{1} .
-$$
-
-Introduce the diagonal matrices
-
-$$
-T_p := \operatorname{diag}(p), \qquad
-T_n := \operatorname{diag}(n), \qquad
-N_p := \operatorname{diag}(\nu_p), \qquad
-N_n := \operatorname{diag}(\nu_n) .
 $$
 
 ## Implemented Local Linearized System
@@ -310,6 +248,22 @@ $$
 A \delta w = -r_f .
 $$
 
+Equivalently, the reduced stagewise stationarity solved by Riccati is
+
+$$
+g_{R,k}^{\mathrm{base}}
++ \Delta g_{R,k}^{\mathrm{cond}}
++ H_{R,k}\,\delta w_k
++ A_k^T \delta \lambda_{f,k}
++ C_k^T \delta \lambda_{c,k}
+= 0.
+$$
+
+Any residual check of this equation must start from
+$g_{R,k}^{\mathrm{base}}$, not from an already-corrected active stage
+gradient. That is why the exact restoration diagnostic uses
+`base_lag_grad_backup`.
+
 ## Step Recovery For `lambda_reg > 0`
 
 After the global solve returns $\delta w$, define
@@ -480,3 +434,28 @@ Current implementation files tied to this checkpoint:
 This checkpoint reflects the explicit local-KKT formulation used by the
 current code path. The remaining open question is solver behavior on difficult
 examples such as `arm`, not the intended math represented here.
+
+## Ipopt Comparison Snapshot
+
+Compared with the behavior summarized in
+[`RESTORATION_LINESEARCH.md`](/home/harper/Downloads/Ipopt-stable-3.14/RESTORATION_LINESEARCH.md),
+the current implementation matches Ipopt in these high-level steps:
+
+- restoration is entered from the globalization-failure path,
+- the outer filter is augmented at restoration entry with a relaxed point,
+- restoration uses its own inner acceptor and restoration-specific metrics,
+- restoration exits only after an accepted inner step is also acceptable to
+  the outer globalization logic and the original infeasibility improved enough.
+
+The main differences are:
+
+- Ipopt runs a **nested restoration NLP solve** with its own solver stack;
+  the current implementation stays inside the same `ns_sqp` machinery and
+  switches to an explicit elastic condensed subproblem.
+- Ipopt's restoration problem can cover more than the current implementation;
+  here restoration is limited to hard dynamics and the stacked
+  `__eq_x/__eq_xu` equalities through `c(w)-p+n=0`, while normal
+  `__ineq_x/__ineq_xu` are excluded.
+- Ipopt performs explicit multiplier cleanup on successful return; the current
+  implementation does not yet reset bound multipliers or recompute equality
+  multipliers in an Ipopt-style postprocessing step.
