@@ -76,8 +76,12 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
                                                    kkt_rest.inf_dual_res);
             });
             graph.for_each_parallel([this](data *d) {
+                assemble_restoration_problem(d, node_data::update_mode::eval_val);
                 assemble_restoration_problem(d, node_data::update_mode::eval_raw_derivatives);
             });
+            kkt_rest = compute_kkt_info();
+            kkt_rest.num_iter = kkt_before.num_iter + i_rest + 1;
+            kkt_rest.ls_steps = rls.step_cnt;
 
             const bool outer_accept = outer_filter_accepts(ls, kkt_outer_trial, kkt_before);
             const bool prim_improved =

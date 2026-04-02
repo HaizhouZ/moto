@@ -429,7 +429,8 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
     {
         auto res_profile = profile_scope(profile_phase::update_res_stat);
     detail_timed_block_start("update_res_stat");
-    if (settings.ls.method == linesearch_setting::search_method::merit_backtracking) {
+    if (settings.ls.method == linesearch_setting::search_method::merit_backtracking ||
+        in_restoration_phase()) {
         graph.for_each_parallel([this](data *d) {
             if (in_restoration_phase()) {
                 assemble_restoration_problem(d, node_data::update_mode::eval_raw_derivatives);
