@@ -141,10 +141,8 @@ TEST_CASE("restoration overlay problem keeps dyn and replaces non-dynamics with 
 TEST_CASE("restoration inequality local KKT recovery satisfies regularized linearization") {
     resto_ineq_constr iq;
     iq.resize(2, 1);
-    iq.t << 1.4, 1.1, 0.9;
     iq.p << 0.8, 1.0, 1.3;
     iq.n << 0.9, 0.7, 1.2;
-    iq.nu_t << 0.5, 0.6, 0.8;
     iq.nu_p << 0.9, 0.8, 0.7;
     iq.nu_n << 0.6, 0.9, 0.5;
 
@@ -162,19 +160,15 @@ TEST_CASE("restoration inequality local KKT recovery satisfies regularized linea
     delta_g << 0.08, -0.12, 0.04;
     recover_local_step(delta_g, iq, lambda_reg);
 
-    const vector res_d = delta_g + iq.d_t - iq.d_p + iq.d_n + iq.r_d;
-    const vector res_t = iq.d_t + iq.d_lambda - lambda_reg * iq.d_nu_t + iq.r_t;
+    const vector res_d = delta_g - iq.d_p + iq.d_n + iq.r_d;
     const vector res_p = iq.d_p - iq.d_lambda - lambda_reg * iq.d_nu_p + iq.r_p;
     const vector res_n = iq.d_n + iq.d_lambda - lambda_reg * iq.d_nu_n + iq.r_n;
-    const vector res_st = iq.nu_t.cwiseProduct(iq.d_t) + iq.t.cwiseProduct(iq.d_nu_t) + iq.r_s_t;
     const vector res_sp = iq.nu_p.cwiseProduct(iq.d_p) + iq.p.cwiseProduct(iq.d_nu_p) + iq.r_s_p;
     const vector res_sn = iq.nu_n.cwiseProduct(iq.d_n) + iq.n.cwiseProduct(iq.d_nu_n) + iq.r_s_n;
 
     REQUIRE(approx_zero(res_d));
-    REQUIRE(approx_zero(res_t));
     REQUIRE(approx_zero(res_p));
     REQUIRE(approx_zero(res_n));
-    REQUIRE(approx_zero(res_st));
     REQUIRE(approx_zero(res_sp));
     REQUIRE(approx_zero(res_sn));
 }
@@ -188,10 +182,8 @@ TEST_CASE("restoration inequality initializer satisfies local KKT at the central
 
     resto_ineq_constr iq;
     iq.resize(1, 0);
-    iq.t << init.t;
     iq.p << init.p;
     iq.n << init.n;
-    iq.nu_t << init.nu_t;
     iq.nu_p << init.nu_p;
     iq.nu_n << init.nu_n;
 
@@ -202,13 +194,11 @@ TEST_CASE("restoration inequality initializer satisfies local KKT at the central
 
     compute_local_model(g_vec, lambda, iq, rho, mu_bar, 0.0);
 
-    REQUIRE(approx_zero(iq.r_d, 1e-10));
-    REQUIRE(approx_zero(iq.r_t, 1e-10));
     REQUIRE(approx_zero(iq.r_p, 1e-10));
     REQUIRE(approx_zero(iq.r_n, 1e-10));
-    REQUIRE(approx_zero(iq.r_s_t, 1e-10));
     REQUIRE(approx_zero(iq.r_s_p, 1e-10));
     REQUIRE(approx_zero(iq.r_s_n, 1e-10));
+    REQUIRE(approx_scalar(iq.r_d(0), g, 1e-12));
 }
 
 TEST_CASE("positivity helper reuses consistent alpha and backup semantics") {
@@ -329,22 +319,19 @@ TEST_CASE("restoration elastic blocks own their penalty and barrier bookkeeping"
 
     resto_ineq_constr iq;
     iq.resize(1, 1);
-    iq.t << 11.0, 13.0;
     iq.p << 17.0, 19.0;
     iq.n << 23.0, 29.0;
-    iq.t_backup << 31.0, 37.0;
     iq.p_backup << 41.0, 43.0;
     iq.n_backup << 47.0, 53.0;
-    iq.d_t << 1.0, -2.0;
     iq.d_p << 3.0, 4.0;
     iq.d_n << -5.0, 6.0;
 
     REQUIRE(approx_scalar(iq.penalty_sum(), 88.0));
     REQUIRE(approx_scalar(iq.penalty_dir_deriv(), 8.0));
     REQUIRE(approx_scalar(iq.barrier_log_sum(),
-                          std::log(11.0) + std::log(13.0) + std::log(17.0) + std::log(19.0) + std::log(23.0) + std::log(29.0)));
+                          std::log(17.0) + std::log(19.0) + std::log(23.0) + std::log(29.0)));
     REQUIRE(approx_scalar(iq.barrier_dir_deriv(),
-                          1.0 / 31.0 - 2.0 / 37.0 + 3.0 / 41.0 + 4.0 / 43.0 - 5.0 / 47.0 + 6.0 / 53.0));
+                          3.0 / 41.0 + 4.0 / 43.0 - 5.0 / 47.0 + 6.0 / 53.0));
 }
 
 TEST_CASE("restoration predictor bookkeeping follows normal IPM complementarity accounting") {
@@ -365,16 +352,12 @@ TEST_CASE("restoration predictor bookkeeping follows normal IPM complementarity 
 
     resto_ineq_constr iq;
     iq.resize(1, 0);
-    iq.t << 11.0;
     iq.p << 13.0;
     iq.n << 17.0;
-    iq.nu_t << 19.0;
     iq.nu_p << 23.0;
     iq.nu_n << 29.0;
-    iq.d_t << -2.0;
     iq.d_p << 1.5;
     iq.d_n << -1.0;
-    iq.d_nu_t << -3.0;
     iq.d_nu_p << 2.0;
     iq.d_nu_n << -4.0;
 
@@ -382,14 +365,13 @@ TEST_CASE("restoration predictor bookkeeping follows normal IPM complementarity 
     eq.finalize_predictor_step(cfg, worker);
     iq.finalize_predictor_step(cfg, worker);
 
-    REQUIRE(worker.n_ipm_cstr == 5);
+    REQUIRE(worker.n_ipm_cstr == 4);
     const scalar_t alpha_d = cfg.dual_alpha_for_ineq();
     const scalar_t prev_aff =
-        2.0 * 5.0 + 3.0 * 7.0 + 11.0 * 19.0 + 13.0 * 23.0 + 17.0 * 29.0;
+        2.0 * 5.0 + 3.0 * 7.0 + 13.0 * 23.0 + 17.0 * 29.0;
     const scalar_t post_aff =
         (5.0 + alpha_d * -1.5) * (2.0 + cfg.alpha_primal * -0.5) +
         (7.0 + alpha_d * 0.5) * (3.0 + cfg.alpha_primal * 0.25) +
-        (19.0 + alpha_d * -3.0) * (11.0 + cfg.alpha_primal * -2.0) +
         (23.0 + alpha_d * 2.0) * (13.0 + cfg.alpha_primal * 1.5) +
         (29.0 + alpha_d * -4.0) * (17.0 + cfg.alpha_primal * -1.0);
     REQUIRE(approx_scalar(worker.prev_aff_comp, prev_aff));

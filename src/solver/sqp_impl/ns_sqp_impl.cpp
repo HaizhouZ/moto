@@ -52,6 +52,101 @@ void accumulate_constraint_objective_terms(ns_sqp::kkt_info &kkt,
     });
 }
 
+void accumulate_dual_norms(ns_sqp::kkt_info &kkt,
+                           const array_type<vector, constr_fields> &dual,
+                           bool include_soft_eq_in_eq_norm) {
+    for (auto cf : constr_fields) {
+        const auto &lam = dual[cf];
+        if (lam.size() == 0) {
+            continue;
+        }
+        const scalar_t lam_inf = lam.cwiseAbs().maxCoeff();
+        kkt.max_dual_norm = std::max(kkt.max_dual_norm, lam_inf);
+        if (cf == __dyn || cf == __eq_x || cf == __eq_xu ||
+            (include_soft_eq_in_eq_norm && (cf == __eq_x_soft || cf == __eq_xu_soft))) {
+            kkt.max_eq_dual_norm = std::max(kkt.max_eq_dual_norm, lam_inf);
+        } else if (cf == __ineq_x || cf == __ineq_xu) {
+            kkt.max_ineq_dual_norm = std::max(kkt.max_ineq_dual_norm, lam_inf);
+        }
+    }
+}
+
+void accumulate_dual_norms_and_l1(ns_sqp::kkt_info &kkt,
+                                  const array_type<vector, constr_fields> &dual,
+                                  scalar_t &lambda_l1,
+                                  size_t &n_constr) {
+    for (auto cf : constr_fields) {
+        const auto &lam = dual[cf];
+        if (lam.size() == 0) {
+            continue;
+        }
+        lambda_l1 += lam.lpNorm<1>();
+        n_constr += static_cast<size_t>(lam.size());
+        const scalar_t lam_inf = lam.cwiseAbs().maxCoeff();
+        kkt.max_dual_norm = std::max(kkt.max_dual_norm, lam_inf);
+        if (cf == __dyn || cf == __eq_x || cf == __eq_xu) {
+            kkt.max_eq_dual_norm = std::max(kkt.max_eq_dual_norm, lam_inf);
+        } else if (cf == __ineq_x || cf == __ineq_xu) {
+            kkt.max_ineq_dual_norm = std::max(kkt.max_ineq_dual_norm, lam_inf);
+        }
+    }
+}
+
+void accumulate_primal_step_and_obj_dec(ns_sqp::kkt_info &kkt,
+                                        ns_sqp::data &node,
+                                        bool check_cost_size) {
+    for (auto f : primal_fields) {
+        if (node.trial_prim_step[f].size() == 0) {
+            continue;
+        }
+        const scalar_t step_inf = node.trial_prim_step[f].cwiseAbs().maxCoeff();
+        kkt.inf_prim_step = std::max(kkt.inf_prim_step, step_inf);
+        if (check_cost_size && node.dense().cost_jac_[f].size() != node.trial_prim_step[f].size()) {
+            throw std::runtime_error(fmt::format(
+                "cost/trial step size mismatch on field {}: cost_jac size {}, trial_prim_step size {}, lag_jac size {}, problem uid {}",
+                field::name(f),
+                node.dense().cost_jac_[f].size(),
+                node.trial_prim_step[f].size(),
+                node.dense().lag_jac_[f].size(),
+                node.problem().uid()));
+        }
+        kkt.obj_fullstep_dec += node.dense().cost_jac_[f].dot(node.trial_prim_step[f]);
+    }
+}
+
+void accumulate_dual_step_info(ns_sqp::kkt_info &kkt,
+                               const array_type<vector, constr_fields> &trial_dual_step) {
+    for (auto f : constr_fields) {
+        if (trial_dual_step[f].size() == 0) {
+            continue;
+        }
+        const scalar_t step = trial_dual_step[f].cwiseAbs().maxCoeff();
+        kkt.inf_dual_step = std::max(kkt.inf_dual_step, step);
+        if (in_field(f, ineq_constr_fields)) {
+            kkt.inf_ineq_dual_step = std::max(kkt.inf_ineq_dual_step, step);
+        } else {
+            kkt.inf_eq_dual_step = std::max(kkt.inf_eq_dual_step, step);
+            if (f == __dyn) kkt.inf_dyn_dual_step = std::max(kkt.inf_dyn_dual_step, step);
+            if (f == __eq_x) kkt.inf_eq_x_dual_step = std::max(kkt.inf_eq_x_dual_step, step);
+            if (f == __eq_xu) kkt.inf_eq_xu_dual_step = std::max(kkt.inf_eq_xu_dual_step, step);
+        }
+    }
+}
+
+void accumulate_u_stationarity(const row_vector &r,
+                               ns_sqp::kkt_info &kkt,
+                               scalar_t &dual_res_l1,
+                               size_t &n_dual_res) {
+    kkt.inf_dual_res = std::max(kkt.inf_dual_res, max_abs_or_zero(r));
+    dual_res_l1 += r.cwiseAbs().sum();
+    n_dual_res += static_cast<size_t>(r.size());
+}
+
+void finalize_phase_objectives(ns_sqp::kkt_info &kkt) {
+    kkt.penalized_obj = kkt.objective - kkt.search_barrier_value;
+    kkt.penalized_obj_fullstep_dec = kkt.obj_fullstep_dec - kkt.search_barrier_dir_deriv;
+}
+
 template <class UFn, class XYFn>
 void accumulate_w_stationarity(ns_sqp::solver_graph_type &graph,
                                UFn &&on_u_residual,
@@ -586,9 +681,6 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             if (tiny_step_trigger) {
                 kkt_last = restoration_update(kkt_last, ls);
                 ls.reset_per_iter_data();
-                if (verbose) {
-                    print_stats(kkt_last);
-                }
                 if (kkt_last.result == iter_result_t::success ||
                     kkt_last.result == iter_result_t::restoration_failed ||
                     kkt_last.result == iter_result_t::infeasible_stationary) {
@@ -763,65 +855,28 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
                 kkt.prim_res_l1 += n->prim_res_l1_;
 
                 if (update_dual_res && n->dense().lag_jac_[__u].size() > 0) {
-                    kkt.inf_dual_res = std::max(kkt.inf_dual_res, max_abs_or_zero(n->dense().lag_jac_[__u]));
-                    dual_res_l1 += n->dense().lag_jac_[__u].cwiseAbs().sum();
-                    n_dual_res += static_cast<size_t>(n->dense().lag_jac_[__u].size());
+                    accumulate_u_stationarity(n->dense().lag_jac_[__u], kkt, dual_res_l1, n_dual_res);
                 }
                 accumulate_constraint_objective_terms(kkt, *n);
-
-                for (auto cf : constr_fields) {
-                    const auto &lam = n->dense().dual_[cf];
-                    if (lam.size() > 0) {
-                        const scalar_t lam_inf = lam.cwiseAbs().maxCoeff();
-                        kkt.max_dual_norm = std::max(kkt.max_dual_norm, lam_inf);
-                        if (cf == __dyn || cf == __eq_x || cf == __eq_xu || cf == __eq_x_soft || cf == __eq_xu_soft) {
-                            kkt.max_eq_dual_norm = std::max(kkt.max_eq_dual_norm, lam_inf);
-                        } else if (cf == __ineq_x || cf == __ineq_xu) {
-                            kkt.max_ineq_dual_norm = std::max(kkt.max_ineq_dual_norm, lam_inf);
-                        }
-                    }
-                }
-                for (auto f : primal_fields) {
-                    if (n->trial_prim_step[f].size() > 0) {
-                        kkt.inf_prim_step = std::max(kkt.inf_prim_step, n->trial_prim_step[f].cwiseAbs().maxCoeff());
-                        kkt.obj_fullstep_dec += n->dense().cost_jac_[f].dot(n->trial_prim_step[f]);
-                    }
-                }
-                for (auto f : constr_fields) {
-                    if (n->trial_dual_step[f].size() > 0) {
-                        const scalar_t step = n->trial_dual_step[f].cwiseAbs().maxCoeff();
-                        kkt.inf_dual_step = std::max(kkt.inf_dual_step, step);
-                        if (in_field(f, ineq_constr_fields)) {
-                            kkt.inf_ineq_dual_step = std::max(kkt.inf_ineq_dual_step, step);
-                        } else {
-                            kkt.inf_eq_dual_step = std::max(kkt.inf_eq_dual_step, step);
-                            if (f == __dyn) kkt.inf_dyn_dual_step = std::max(kkt.inf_dyn_dual_step, step);
-                            if (f == __eq_x) kkt.inf_eq_x_dual_step = std::max(kkt.inf_eq_x_dual_step, step);
-                            if (f == __eq_xu) kkt.inf_eq_xu_dual_step = std::max(kkt.inf_eq_xu_dual_step, step);
-                        }
-                    }
-                }
+                accumulate_dual_norms(kkt, n->dense().dual_, true);
+                accumulate_primal_step_and_obj_dec(kkt, *n, false);
+                accumulate_dual_step_info(kkt, n->trial_dual_step);
             }
 
             if (update_dual_res) {
                 accumulate_w_stationarity(
                     graph,
                     [&](const row_vector &r) {
-                        kkt.inf_dual_res = std::max(kkt.inf_dual_res, max_abs_or_zero(r));
-                        dual_res_l1 += r.cwiseAbs().sum();
-                        n_dual_res += static_cast<size_t>(r.size());
+                        accumulate_u_stationarity(r, kkt, dual_res_l1, n_dual_res);
                     },
                     [&](const row_vector &r) {
-                        kkt.inf_dual_res = std::max(kkt.inf_dual_res, max_abs_or_zero(r));
-                        dual_res_l1 += r.cwiseAbs().sum();
-                        n_dual_res += static_cast<size_t>(r.size());
+                        accumulate_u_stationarity(r, kkt, dual_res_l1, n_dual_res);
                     });
                 if (n_dual_res > 0) {
                     kkt.avg_dual_res = dual_res_l1 / static_cast<scalar_t>(n_dual_res);
                 }
             }
-            kkt.penalized_obj = kkt.objective - kkt.search_barrier_value;
-            kkt.penalized_obj_fullstep_dec = kkt.obj_fullstep_dec - kkt.search_barrier_dir_deriv;
+            finalize_phase_objectives(kkt);
             return kkt;
         }
 
@@ -841,88 +896,21 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
         kkt.inf_prim_res = std::max(kkt.inf_prim_res, n->inf_prim_res_);
         kkt.prim_res_l1 += n->prim_res_l1_;
         if (update_dual_res && n->dense().lag_jac_[__u].size() > 0) {
-            kkt.inf_dual_res = std::max(kkt.inf_dual_res, n->dense().lag_jac_[__u].cwiseAbs().maxCoeff());
-            dual_res_l1 += n->dense().lag_jac_[__u].cwiseAbs().sum();
-            n_dual_res += static_cast<size_t>(n->dense().lag_jac_[__u].size());
+            accumulate_u_stationarity(n->dense().lag_jac_[__u], kkt, dual_res_l1, n_dual_res);
         }
         kkt.inf_comp_res = std::max(kkt.inf_comp_res, n->inf_comp_res_);
         if (update_dual_res) {
-            for (auto cf : constr_fields) {
-                const auto &lam = n->dense().dual_[cf];
-                if (lam.size() > 0) {
-                    lambda_l1 += lam.lpNorm<1>();
-                    n_constr += static_cast<size_t>(lam.size());
-                    scalar_t lam_inf = lam.cwiseAbs().maxCoeff();
-                    kkt.max_dual_norm = std::max(kkt.max_dual_norm, lam_inf);
-                    if (cf == __dyn || cf == __eq_x || cf == __eq_xu)
-                        kkt.max_eq_dual_norm = std::max(kkt.max_eq_dual_norm, lam_inf);
-                    else if (cf == __ineq_x || cf == __ineq_xu)
-                        kkt.max_ineq_dual_norm = std::max(kkt.max_ineq_dual_norm, lam_inf);
-                }
-            }
+            accumulate_dual_norms_and_l1(kkt, n->dense().dual_, lambda_l1, n_constr);
         }
         accumulate_constraint_objective_terms(kkt, *n, true);
-        for (auto f : primal_fields) {
-            if (n->trial_prim_step[f].size() > 0) {
-                kkt.inf_prim_step = std::max(kkt.inf_prim_step, n->trial_prim_step[f].cwiseAbs().maxCoeff());
-                if (n->trial_prim_step[f].cwiseAbs().maxCoeff() == kkt.inf_prim_step) {
-                    max_field = f;
-                    max_step = n->trial_prim_step[f];
-                }
-                if (n->dense().cost_jac_[f].size() != n->trial_prim_step[f].size()) {
-                    throw std::runtime_error(fmt::format(
-                        "cost/trial step size mismatch on field {}: cost_jac size {}, trial_prim_step size {}, lag_jac size {}, problem uid {}",
-                        field::name(f),
-                        n->dense().cost_jac_[f].size(),
-                        n->trial_prim_step[f].size(),
-                        n->dense().lag_jac_[f].size(),
-                        n->problem().uid()));
-                }
-                kkt.obj_fullstep_dec += n->dense().cost_jac_[f].dot(n->trial_prim_step[f]);
-            }
-        }
-        for (auto f : constr_fields) {
-            if (n->trial_dual_step[f].size() > 0) {
-                scalar_t step = n->trial_dual_step[f].cwiseAbs().maxCoeff();
-                kkt.inf_dual_step = std::max(kkt.inf_dual_step, step);
-                if (in_field(f, ineq_constr_fields))
-                    kkt.inf_ineq_dual_step = std::max(kkt.inf_ineq_dual_step, step);
-                else {
-                    kkt.inf_eq_dual_step = std::max(kkt.inf_eq_dual_step, step);
-                    if (f == __dyn)
-                        kkt.inf_dyn_dual_step = std::max(kkt.inf_dyn_dual_step, step);
-                    else if (f == __eq_x)
-                        kkt.inf_eq_x_dual_step = std::max(kkt.inf_eq_x_dual_step, step);
-                    else if (f == __eq_xu)
-                        kkt.inf_eq_xu_dual_step = std::max(kkt.inf_eq_xu_dual_step, step);
-                }
-            }
-        }
+        accumulate_primal_step_and_obj_dec(kkt, *n, true);
+        accumulate_dual_step_info(kkt, n->trial_dual_step);
     }
     if (update_dual_res) {
-        graph.apply_forward(
-            [&](node_data *cur, node_data *next) {
-                if (next != nullptr) [[likely]] {
-                    // cancellation of jacobian from y to x
-                    static row_vector tmp;
-                    tmp.conservativeResize(next->dense().lag_jac_[__x].cols());
-                    tmp.noalias() = next->dense().lag_jac_[__x] *
-                                        utils::permutation_from_y_to_x(&cur->problem(), &next->problem()) +
-                                    cur->dense().lag_jac_[__y];
-                    if (tmp.size() > 0) {
-                        kkt.inf_dual_res = std::max(kkt.inf_dual_res, tmp.cwiseAbs().maxCoeff());
-                        dual_res_l1 += tmp.cwiseAbs().sum();
-                        n_dual_res += static_cast<size_t>(tmp.size());
-                    }
-                } else { /// @todo: include initial jac[__x] inf norm if init is optimized
-                    if (cur->dense().lag_jac_[__y].size() > 0) {
-                        kkt.inf_dual_res = std::max(kkt.inf_dual_res, cur->dense().lag_jac_[__y].cwiseAbs().maxCoeff());
-                        dual_res_l1 += cur->dense().lag_jac_[__y].cwiseAbs().sum();
-                        n_dual_res += static_cast<size_t>(cur->dense().lag_jac_[__y].size());
-                    }
-                }
-            },
-            true);
+        accumulate_w_stationarity(
+            graph,
+            [&](const row_vector &r) { accumulate_u_stationarity(r, kkt, dual_res_l1, n_dual_res); },
+            [&](const row_vector &r) { accumulate_u_stationarity(r, kkt, dual_res_l1, n_dual_res); });
         // IPOPT-style dual scaling: s_d = max(s_max, ||λ||_1 / n_constr) / s_max
         if (n_constr > 0) {
             scalar_t s_d = std::max(settings.s_max, lambda_l1 / static_cast<scalar_t>(n_constr)) / settings.s_max;
@@ -934,8 +922,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
     kkt.objective = kkt.cost;
     kkt.search_barrier_value = settings.ipm.mu * kkt.log_slack_sum;
     kkt.search_barrier_dir_deriv = settings.ipm.mu * kkt.barrier_dir_deriv;
-    kkt.penalized_obj = kkt.objective - kkt.search_barrier_value;
-    kkt.penalized_obj_fullstep_dec = kkt.obj_fullstep_dec - kkt.search_barrier_dir_deriv;
+    finalize_phase_objectives(kkt);
     return kkt;
 }
 

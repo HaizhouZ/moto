@@ -42,10 +42,8 @@ inline elastic_init_pair initialize_elastic_pair(scalar_t c, scalar_t rho, scala
 }
 
 struct elastic_init_ineq_scalar {
-    scalar_t t = 0.;
     scalar_t p = 0.;
     scalar_t n = 0.;
-    scalar_t nu_t = 0.;
     scalar_t nu_p = 0.;
     scalar_t nu_n = 0.;
     scalar_t lambda = 0.;
@@ -59,40 +57,11 @@ inline elastic_init_ineq_scalar initialize_elastic_ineq_scalar(scalar_t g, scala
         throw std::runtime_error("initialize_elastic_ineq_scalar requires mu_bar > 0");
     }
 
-    const scalar_t eps = std::max(scalar_t(1e-16), std::min(scalar_t(1e-12), scalar_t(0.25) * rho));
-    const scalar_t lambda_hi = rho - eps;
-    if (!(lambda_hi > eps)) {
-        throw std::runtime_error("initialize_elastic_ineq_scalar requires rho sufficiently larger than epsilon");
-    }
-
-    const auto residual = [&](scalar_t lambda) {
-        return g + mu_bar / lambda - mu_bar / (rho - lambda) + mu_bar / (rho + lambda);
-    };
-
-    scalar_t lo = eps;
-    scalar_t hi = lambda_hi;
-    scalar_t f_lo = residual(lo);
-    scalar_t f_hi = residual(hi);
-    if (!(f_lo > 0.) || !(f_hi < 0.)) {
-        throw std::runtime_error("initialize_elastic_ineq_scalar failed to bracket local KKT root");
-    }
-
-    for (int iter = 0; iter < 80; ++iter) {
-        const scalar_t mid = scalar_t(0.5) * (lo + hi);
-        const scalar_t f_mid = residual(mid);
-        if (f_mid > 0.) {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
-
     elastic_init_ineq_scalar out;
-    out.lambda = scalar_t(0.5) * (lo + hi);
-    out.nu_t = out.lambda;
-    out.nu_p = rho - out.lambda;
-    out.nu_n = rho + out.lambda;
-    out.t = mu_bar / out.nu_t;
+    static_cast<void>(g);
+    out.lambda = 0.;
+    out.nu_p = rho;
+    out.nu_n = rho;
     out.p = mu_bar / out.nu_p;
     out.n = mu_bar / out.nu_n;
     return out;
@@ -197,54 +166,43 @@ inline void compute_local_model(const vector_const_ref &g,
         throw std::runtime_error("compute_local_model(ineq) requires lambda_reg >= 0");
     }
     if (g.size() != lambda.size() ||
-        g.size() != ineq.t.size() ||
         g.size() != ineq.p.size() ||
         g.size() != ineq.n.size()) {
         throw std::runtime_error("compute_local_model(ineq) size mismatch");
     }
 
     ineq.g_current = g;
-    ineq.r_d = g + ineq.t - ineq.p + ineq.n;
-    ineq.r_t = lambda - ineq.nu_t;
+    ineq.r_d = g - ineq.p + ineq.n;
     ineq.r_p = vector::Constant(g.size(), rho) - lambda - ineq.nu_p;
     ineq.r_n = vector::Constant(g.size(), rho) + lambda - ineq.nu_n;
-    ineq.r_s_t = ineq.nu_t.array() * ineq.t.array() - mu_bar;
     ineq.r_s_p = ineq.nu_p.array() * ineq.p.array() - mu_bar;
     ineq.r_s_n = ineq.nu_n.array() * ineq.n.array() - mu_bar;
 
     if (lambda_reg == 0.) {
-        const auto denom_t = ineq.nu_t.array().max(eps);
         const auto denom_p = ineq.nu_p.array().max(eps);
         const auto denom_n = ineq.nu_n.array().max(eps);
-        ineq.combo_t =
-            (ineq.r_s_t.array() + ineq.t.array() * ineq.r_t.array()) / denom_t;
         ineq.combo_p =
             (ineq.r_s_p.array() + ineq.p.array() * ineq.r_p.array()) / denom_p;
         ineq.combo_n =
             (ineq.r_s_n.array() + ineq.n.array() * ineq.r_n.array()) / denom_n;
         ineq.minv_diag =
-            (ineq.t.array() / denom_t +
-             ineq.p.array() / denom_p +
+            (ineq.p.array() / denom_p +
              ineq.n.array() / denom_n)
                 .inverse();
     } else {
-        const auto denom_t = (ineq.t.array() + lambda_reg * ineq.nu_t.array()).max(eps);
         const auto denom_p = (ineq.p.array() + lambda_reg * ineq.nu_p.array()).max(eps);
         const auto denom_n = (ineq.n.array() + lambda_reg * ineq.nu_n.array()).max(eps);
-        ineq.combo_t =
-            (ineq.t.array() * ineq.r_t.array() + lambda_reg * ineq.r_s_t.array()) / denom_t;
         ineq.combo_p =
             (ineq.p.array() * ineq.r_p.array() + lambda_reg * ineq.r_s_p.array()) / denom_p;
         ineq.combo_n =
             (ineq.n.array() * ineq.r_n.array() + lambda_reg * ineq.r_s_n.array()) / denom_n;
         ineq.minv_diag =
-            (ineq.t.array() / denom_t +
-             ineq.p.array() / denom_p +
+            (ineq.p.array() / denom_p +
              ineq.n.array() / denom_n)
                 .inverse();
     }
 
-    ineq.b_d = ineq.r_d - ineq.combo_t + ineq.combo_p - ineq.combo_n;
+    ineq.b_d = ineq.r_d + ineq.combo_p - ineq.combo_n;
     ineq.minv_bd = ineq.minv_diag.array() * ineq.b_d.array();
 }
 
@@ -257,12 +215,8 @@ inline void recover_local_step(const vector_const_ref &delta_g,
     }
     ineq.d_lambda = ineq.minv_diag.array() * (delta_g.array() + ineq.b_d.array());
     if (lambda_reg == 0.) {
-        ineq.d_nu_t = ineq.r_t + ineq.d_lambda;
         ineq.d_nu_p = ineq.r_p - ineq.d_lambda;
         ineq.d_nu_n = ineq.r_n + ineq.d_lambda;
-        ineq.d_t =
-            -(ineq.r_s_t.array() + ineq.t.array() * ineq.d_nu_t.array()) /
-            ineq.nu_t.array().max(eps);
         ineq.d_p =
             -(ineq.r_s_p.array() + ineq.p.array() * ineq.d_nu_p.array()) /
             ineq.nu_p.array().max(eps);
@@ -270,20 +224,14 @@ inline void recover_local_step(const vector_const_ref &delta_g,
             -(ineq.r_s_n.array() + ineq.n.array() * ineq.d_nu_n.array()) /
             ineq.nu_n.array().max(eps);
     } else {
-        const auto denom_t = (ineq.t.array() + lambda_reg * ineq.nu_t.array()).max(eps);
         const auto denom_p = (ineq.p.array() + lambda_reg * ineq.nu_p.array()).max(eps);
         const auto denom_n = (ineq.n.array() + lambda_reg * ineq.nu_n.array()).max(eps);
-        ineq.d_nu_t =
-            (ineq.nu_t.array() * (ineq.r_t.array() + ineq.d_lambda.array()) - ineq.r_s_t.array()) /
-            denom_t;
         ineq.d_nu_p =
             (ineq.nu_p.array() * (ineq.r_p.array() - ineq.d_lambda.array()) - ineq.r_s_p.array()) /
             denom_p;
         ineq.d_nu_n =
             (ineq.nu_n.array() * (ineq.r_n.array() + ineq.d_lambda.array()) - ineq.r_s_n.array()) /
             denom_n;
-        ineq.d_t =
-            -ineq.d_lambda.array() + lambda_reg * ineq.d_nu_t.array() - ineq.r_t.array();
         ineq.d_p =
             ineq.d_lambda.array() + lambda_reg * ineq.d_nu_p.array() - ineq.r_p.array();
         ineq.d_n =
@@ -308,11 +256,9 @@ inline local_residual_summary current_local_residuals(const resto_ineq_constr &i
         return out;
     }
     out.inf_prim = ineq.r_d.cwiseAbs().maxCoeff();
-    out.inf_stat = std::max({ineq.r_t.cwiseAbs().maxCoeff(),
-                             ineq.r_p.cwiseAbs().maxCoeff(),
+    out.inf_stat = std::max({ineq.r_p.cwiseAbs().maxCoeff(),
                              ineq.r_n.cwiseAbs().maxCoeff()});
-    out.inf_comp = std::max({ineq.r_s_t.cwiseAbs().maxCoeff(),
-                             ineq.r_s_p.cwiseAbs().maxCoeff(),
+    out.inf_comp = std::max({ineq.r_s_p.cwiseAbs().maxCoeff(),
                              ineq.r_s_n.cwiseAbs().maxCoeff()});
     return out;
 }

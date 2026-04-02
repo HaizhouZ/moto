@@ -1,312 +1,276 @@
 # Normal vs Restoration: Computation Path Comparison
 
 This document compares the **currently implemented** `normal` and
-`restoration` phases in `moto`, using the code as the source of truth.
+`restoration` phases in `moto`, using the current code as the source of truth.
 
-It is meant to answer one narrow question:
+It focuses on one question:
 
-- for the same top-level SQP skeleton, what does each phase treat as
-  its original problem, its internal linear solve, its iterative-refinement
-  residual, its public KKT summary, and its globalization logic?
+- for the same SQP shell, what differs between normal and restoration in
+  problem definition, assembly, refinement, public summaries, and globalization?
 
-The main files checked while writing this note are:
+Checked files:
 
 - [src/solver/sqp_impl/ns_sqp_impl.cpp](/home/harper/Documents/moto/src/solver/sqp_impl/ns_sqp_impl.cpp)
 - [src/solver/sqp_impl/restoration.cpp](/home/harper/Documents/moto/src/solver/sqp_impl/restoration.cpp)
 - [src/solver/sqp_impl/iterative_refinement.cpp](/home/harper/Documents/moto/src/solver/sqp_impl/iterative_refinement.cpp)
 - [src/solver/sqp_impl/line_search.cpp](/home/harper/Documents/moto/src/solver/sqp_impl/line_search.cpp)
-- [src/solver/nsp_impl/rollout.cpp](/home/harper/Documents/moto/src/solver/nsp_impl/rollout.cpp)
-- [src/solver/restoration/resto_runtime.cpp](/home/harper/Documents/moto/src/solver/restoration/resto_runtime.cpp)
-- [restoration.md](/home/harper/Documents/moto/restoration.md)
+- [src/solver/sqp_impl/print_stat.cpp](/home/harper/Documents/moto/src/solver/sqp_impl/print_stat.cpp)
+- [src/solver/restoration/resto_overlay.cpp](/home/harper/Documents/moto/src/solver/restoration/resto_overlay.cpp)
 - [normal_iteration.md](/home/harper/Documents/moto/normal_iteration.md)
+- [restoration.md](/home/harper/Documents/moto/restoration.md)
 
 ## 1. Shared Outer Skeleton
 
-Both phases reuse the same broad SQP skeleton:
+Both phases reuse the same outer SQP shell:
 
 1. assemble stage data
-2. factorize / run Riccati
+2. solve the stagewise NSP / Riccati subproblem
 3. recover primal and dual Newton steps
 4. optionally run iterative refinement
-5. finalize dual step
-6. backtracking line search with trial evaluation
-7. accept, reject, or fail
+5. run backtracking line search
+6. accept, reject, or fail
 
-The difference is not the outer control flow.
-The difference is what each phase places into that flow.
+So the implementation difference is not the shell.
+It is the active problem definition and the phase-specific globalization rules.
 
 ## 2. Original Problem Layer
 
 ### 2.1 Normal
 
-The original `normal` phase problem is the barrierized user NLP:
+Normal uses the standard barrierized user NLP:
 
 - original stage cost
 - hard constraints
-- inequalities handled through the normal IPM layer
-- soft equalities handled through the normal PMM layer
+- normal inequalities under the normal IPM layer
+- normal soft equalities under the normal PMM layer
 
-Public quantities such as `compute_kkt_info()` and `print_stats()` are meant
-to summarize this original normal-phase problem, not the Riccati subproblem.
+`compute_kkt_info()` and `print_stats()` report public summaries of this normal
+phase problem.
 
 ### 2.2 Restoration
 
-The original `restoration` phase problem is the restoration NLP described in
-[restoration.md](/home/harper/Documents/moto/restoration.md):
+Restoration now runs on a separate **overlay graph**.
+Its original problem is:
 
 - hard dynamics remain hard
-- equalities become elastic through `(p_c, n_c)`
-- inequalities become restoration-owned elastic constraints through
-  `(t, p_d, n_d)`
-- the phase objective is the restoration objective:
-  - proximal `u/y` cost
-  - exact `L1` elastic penalty
-  - restoration barrier terms
+- original non-dynamics constraints are replaced by elastic wrappers
+- cost becomes `proximal + exact elastic penalty`
 
-Public quantities in restoration should summarize this restoration problem,
-not the Riccati subproblem.
+So restoration differs from normal only by:
 
-## 3. Stage Assembly
+1. active cost
+2. active non-dynamics constraints
+
+The solver shell is otherwise the same.
+
+## 3. Graph / Storage Ownership
 
 ### 3.1 Normal
 
-`normal` stage assembly comes from
-[node_data.cpp](/home/harper/Documents/moto/src/ocp/node_data.cpp)
-plus normal solver corrections:
-
-- base cost / Jacobian / Hessian
-- hard constraint residuals and Jacobians
-- IPM / PMM first-order terms into `lag_jac_corr_`
-- IPM / PMM second-order terms into `hessian_modification_`
-
-The key storage split is:
-
-- base Hessian: `lag_hess_`
-- solver correction Hessian: `hessian_modification_`
+Normal uses the main realized solver graph stored in the active `graph_model_state`.
 
 ### 3.2 Restoration
 
-`restoration` stage assembly is performed by
-[assemble_restoration_problem()](/home/harper/Documents/moto/src/solver/sqp_impl/ns_sqp_impl.cpp)
-and
-[assemble_resto_base_problem()](/home/harper/Documents/moto/src/solver/restoration/resto_runtime.cpp).
+Restoration does **not** mutate the normal graph in place.
 
-The implemented split is:
+It creates a separate graph from composed finalized interval `edge_ocp`s and
+then builds restoration overlays on top of them.
 
-- raw function evaluation still comes from `update_approximation(...)`
-  with normal IPM corrections disabled
-- restoration prox on `u/y` is assembled as base restoration cost:
-  - value into `cost_`
-  - gradient into `cost_jac_` and `lag_jac_`
-  - diagonal Hessian into `restoration_prox_hess_diag_`
-- restoration elastic equality and inequality blocks are condensed locally and
-  contribute:
-  - first-order terms into `lag_jac_corr_`
-  - second-order terms into `hessian_modification_`
+Therefore normal and restoration do **not** share:
 
-So restoration already mirrors normal's base-vs-correction split:
+- `node_data`
+- `lag_data`
+- KKT summaries
+- line-search trial storage
 
-- base object: restoration cost and hard-constraint Lagrangian terms
-- correction object: condensed elastic local reductions
+They synchronize only selected primal and dual state at restoration entry/exit.
 
-## 4. Internal Linear Solve
+## 4. Stage Assembly
 
 ### 4.1 Normal
 
-`normal` solves the nullspace / Riccati-reduced stagewise QP:
+Normal stage assembly is the usual one:
 
-- projected dynamics
-- hard equality elimination
-- reduced control-space solve in `Q_zz`
-
-This path is implemented by:
-
-- [presolve.cpp](/home/harper/Documents/moto/src/solver/nsp_impl/presolve.cpp)
-- [backward.cpp](/home/harper/Documents/moto/src/solver/nsp_impl/backward.cpp)
-- [rollout.cpp](/home/harper/Documents/moto/src/solver/nsp_impl/rollout.cpp)
+- base cost into `cost_ / cost_jac_ / lag_hess_`
+- constraint residuals into `approx_[cf]`
+- solver-owned first-order corrections into `lag_jac_corr_`
+- solver-owned second-order corrections into `hessian_modification_`
 
 ### 4.2 Restoration
 
-`restoration` reuses the same Riccati machinery.
+Restoration stage assembly now also goes entirely through standard `cost/constr`
+objects:
 
-What changes is the assembled stage system:
+- `resto_prox_cost` is a real `__cost`
+- `resto_eq_elastic_constr` is a real soft-constraint wrapper
+- `resto_ineq_elastic_ipm_constr` is a real inequality wrapper
 
-- hard dynamics still define the hard part of the linear solve
-- restoration base cost replaces the normal barrier objective in the phase solve
-- restoration elastic blocks are already condensed into
-  `lag_jac_corr_ + hessian_modification_`
+So restoration no longer injects framework-external stage algebra.
 
-So restoration does not currently use a second Riccati implementation.
-It uses the same linear solver on a different assembled phase system.
+The split is:
 
-## 5. Iterative Refinement Target
+- prox Hessian -> base `lag_hess_`
+- elastic condensed first-order terms -> `lag_jac_corr_`
+- elastic condensed second-order terms -> `hessian_modification_`
+
+That is the same structural split as normal.
+
+## 5. Internal Linear Solve
 
 ### 5.1 Normal
 
-`normal` iterative refinement does **not** reduce the Riccati-internal `z`
-residual.
-
-From
-[rollout.cpp](/home/harper/Documents/moto/src/solver/nsp_impl/rollout.cpp)
-and
-[iterative_refinement.cpp](/home/harper/Documents/moto/src/solver/sqp_impl/iterative_refinement.cpp),
-the current implementation does:
-
-- build `kkt_stat_err_[x/u/y]` from
-  - `base_lag_grad_backup`
-  - Hessian action on the recovered Newton step
-  - `J^T * d_lambda`
-- then fold `next.x` onto `cur.y`
-
-So the `normal` IR target is:
-
-- the recovered original-phase Lagrangian stationarity residual
-- expressed in stage `x/u/y` coordinates
-- not the Riccati-internal reduced coordinate residual
+Normal solves the stagewise NSP / Riccati reduced system built from the
+assembled stage QP.
 
 ### 5.2 Restoration
 
-`restoration` currently reuses the same IR machinery, but with a phase-specific
-RHS loader in
-[resto_runtime.cpp](/home/harper/Documents/moto/src/solver/restoration/resto_runtime.cpp).
+Restoration uses the **same** NSP / Riccati machinery.
 
-Today the restoration IR path behaves as follows:
+It does not use a second Riccati implementation.
+The only difference is that the assembled stage problem comes from the
+restoration overlay graph rather than the normal graph.
 
-- `kkt_stat_err_[x/u/y]` is still built by the generic rollout residual path
-- restoration correction RHS is loaded from `kkt_stat_err_[u/y]`
-- local elastic residuals are checked separately through
-  `refinement_local_residuals(...)`
-
-This means restoration is **not yet fully aligned** with normal:
-
-- normal IR targets a recovered original-phase stationarity residual
-- restoration currently mixes:
-  - recovered `w=(x,u,y)` residual pieces
-  - separately monitored local elastic residuals
-
-That is the current main mathematical gap.
-
-## 6. Public KKT Summary
+## 6. Iterative Refinement
 
 ### 6.1 Normal
 
-In `normal`, [compute_kkt_info()](/home/harper/Documents/moto/src/solver/sqp_impl/ns_sqp_impl.cpp)
-reports a public summary of the original barrierized phase problem:
+Normal iterative refinement reduces the recovered original-phase Lagrangian
+stationarity residual in stage `x/u/y` coordinates.
 
-- `objective = cost - mu * log_slack_sum`
-- primal violation summary
-- stationarity summary
-- complementarity summary
-
-It is not the IR residual itself.
+That is the contract documented in
+[normal_iteration.md](/home/harper/Documents/moto/normal_iteration.md).
 
 ### 6.2 Restoration
 
-In `restoration`, `compute_kkt_info()` now follows the same public-summary rule:
+Restoration reuses the same iterative-refinement shell on the overlay graph.
 
-- `objective` is the restoration phase objective
-- primal residual includes hard dynamics and elastic primal residual summaries
-- public stationarity summary is computed from the current iterate's active
-  gradients, with the same `next.x -> cur.y` folding pattern as normal
-- local elastic stat/comp summaries are included as restoration-problem data,
-  not treated as Riccati residuals
+Important current behavior:
 
-This is one place where restoration is now intentionally aligned with normal.
+- there is no longer any framework-external `resto_runtime` residual path
+- restoration local residual summaries, when used, are aggregated from the
+  active overlay wrappers themselves
 
-## 7. Globalization
+So restoration IR is now structurally aligned with normal:
+
+- same solver shell
+- same correction infrastructure
+- different active phase problem
+
+## 7. Public Objective Summary
 
 ### 7.1 Normal
 
-`normal` uses the usual filter globalization in
-[line_search.cpp](/home/harper/Documents/moto/src/solver/sqp_impl/line_search.cpp):
+Normal now distinguishes:
 
-- public objective
-- public primal violation
-- filter / Armijo switching logic
+- `objective`
+- `penalized_obj`
 
-`inf_dual_res` is a public statistic, but it is not the main filter driver.
+The printed `obj` column is `objective`.
+The line-search logic uses `penalized_obj`.
 
 ### 7.2 Restoration
 
-`restoration` uses a restoration-specific acceptor in the same line-search file.
+Restoration uses the same split:
 
-Its current trial logic uses:
-
-- `inf_prim_res`
 - `objective`
-- `max(inf_dual_res, inf_comp_res)` as `resto_res`
+  - restoration original objective
+  - currently `prox + exact penalty`
+- `penalized_obj`
+  - restoration search objective used by line search
+  - `objective - search_barrier_value`
 
-and then separately requires successful return to the outer filter in
-[restoration.cpp](/home/harper/Documents/moto/src/solver/sqp_impl/restoration.cpp).
+This distinction matters because restoration logs can legitimately show:
 
-So restoration currently has two globalization layers:
+- moderate `objective`
+- much larger `search_obj`
 
-- inner restoration acceptor
-- outer return-to-normal acceptor
+without that implying a mismatch in stage re-evaluation.
 
-## 8. Entry And Exit
+## 8. Globalization
 
 ### 8.1 Normal
 
-`normal` is the default phase.
+Normal filter globalization uses:
 
-If line search returns a tiny-step failure while primal infeasibility is still
-large, the outer loop may enter restoration.
+- normal primal metric
+- normal search objective
+- standard filter / Armijo switching logic
 
 ### 8.2 Restoration
 
-At entry, restoration:
+Restoration uses the same backtracking shell, but a restoration phase adapter:
 
-- snapshots outer duals
-- snapshots prox references
-- initializes `mu_bar`
-- initializes elastic equality and inequality local state
-- reassembles the restoration phase problem
+- primal metric: `inf_prim_res`
+- dual metric: `max(inf_dual_res, inf_comp_res)`
+- objective metric: `penalized_obj`
 
-At exit, restoration:
+Restoration also has a second outer return check:
 
-- either accepts and returns to normal
-- or fails and cleans up
+- a restoration candidate must additionally be acceptable to the outer normal
+  filter before restoration returns successfully
 
-Cleanup currently includes:
+## 9. `alpha_min`
 
-- restore outer dual semantics
-- copy back restoration-owned bound state on success
-- reset equality multipliers according to the restoration cleanup policy
-- recompute normal derivatives after leaving restoration
+### 9.1 Normal
 
-## 9. Current Alignment Status
+Normal uses the usual line-search `alpha_min`.
 
-The current state is:
+### 9.2 Restoration
 
-### Already Aligned
+Restoration does not currently use an independent absolute minimum step size.
+Its effective lower bound is:
 
-- both phases share the same outer SQP skeleton
-- both phases distinguish public phase summary from internal linear solve
-- both phases use the same Riccati machinery on phase-specific assembled systems
-- restoration public `compute_kkt_info()` is now much closer to normal semantics
+$$
+\alpha_{\min}
+=
+\max\!\Bigl(
+\texttt{settings.ls.primal.alpha\_min},
+\texttt{settings.restoration.alpha\_min\_factor}\cdot \alpha_{\mathrm{init}}
+\Bigr).
+$$
 
-### Not Yet Fully Aligned
+So if the restoration initial step is already tiny, the restoration
+`alpha_min` can still be tiny.
 
-- `normal` IR target is the recovered original-phase Lagrangian stationarity residual
-- `restoration` IR currently still mixes:
-  - recovered `w` residuals used for correction
-  - separate local elastic residual checks
-- so restoration still does not have a single completely unified
-  "solve this system, refine this same residual" contract
+This is visible in the current `arm` logs.
 
-That unresolved point is the main remaining difference between the two paths.
+## 10. Logging / Iteration Display
 
-## 10. Practical Next Step
+### 10.1 Normal
 
-If restoration is to fully match normal's computation-path contract, the next
-step should be:
+Normal prints one line per accepted SQP iteration through `print_stats(...)`.
 
-1. define a single restoration IR target object with the same role that
-   normal's recovered stationarity residual plays in normal mode
-2. derive the restoration correction RHS from that same object
-3. use that same object for restoration IR stop checks
-4. keep `compute_kkt_info()` and `print_stats()` as public restoration-problem
-   summaries, not as aliases of the internal IR residual
+### 10.2 Restoration
 
-That is the cleanest way to finish the alignment.
+Restoration now also uses `print_stats(...)` for each restoration iteration.
+
+Differences in the log:
+
+- restoration entry prints `=== enter restoration ===`
+- restoration iteration numbers have an `r` suffix such as `25r`
+- restoration prints an extra line with:
+  - `objective`
+  - `search_obj`
+  - `barrier`
+- restoration exit prints `=== leave restoration: ... ===`
+
+So the logs now make phase transitions explicit.
+
+## 11. Current Alignment Status
+
+The current implementation is now aligned in these ways:
+
+- same SQP shell
+- same `cost/constr` framework
+- same `lag_jac / lag_jac_corr / hessian_modification_` lifecycle
+- same NSP / Riccati machinery
+- same iterative-refinement shell
+- same top-level `print_stats(...)` formatting path
+
+The current remaining issue is no longer dataflow ambiguity.
+It is numerical:
+
+- in the current `arm` case, restoration reaches the overlay graph correctly
+- restoration objective and search objective are re-evaluated correctly
+- but restoration still ends in tiny-step failure because useful primal progress
+  only appears at extremely small accepted steps

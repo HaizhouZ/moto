@@ -56,7 +56,7 @@ void ns_sqp::print_stats(const kkt_info &info) {
     if (!restoration_active && !settings.has_ineq_soft) {
         mu_info.valid = false;
     }
-    scalar_t stats_value[] = {0., info.penalized_obj, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res, info.inf_prim_step, info.inf_eq_dual_step, info.inf_ineq_dual_step,
+    scalar_t stats_value[] = {0., info.objective, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res, info.inf_prim_step, info.inf_eq_dual_step, info.inf_ineq_dual_step,
                               settings.ls.alpha_primal, settings.ls.alpha_dual, 0., mu_info.display};
     std::string_view ipm_flags;
     if (!restoration_active && settings.has_ineq_soft && settings.ipm.ipm_enable_corrector()) {
@@ -68,9 +68,11 @@ void ns_sqp::print_stats(const kkt_info &info) {
     }
     size_t idx_stat = 0;
     size_t i_iter = static_cast<size_t>(info.num_iter);
+    const std::string iter_label =
+        i_iter == 0 ? "--" : restoration_active ? fmt::format("{}r", i_iter) : std::to_string(i_iter);
     for (auto &item : stats) {
         if (item.name == "no.") {
-            fmt::print("| {:<{}} |", i_iter == 0 ? "--" : std::to_string(i_iter), item.width);
+            fmt::print("| {:<{}} |", iter_label, item.width);
         } else if (item.name == "ls") {
             fmt::print("| {:<{}} |", info.ls_steps < 0 ? "--" : std::to_string(info.ls_steps), item.width);
         } else if (item.name == "mu(max)") {
@@ -89,6 +91,13 @@ void ns_sqp::print_stats(const kkt_info &info) {
         idx_stat++;
     }
     fmt::print("\n");
+    if (restoration_active) {
+        fmt::print("    phase=restoration  objective={:.3e}  search_obj={:.3e}  barrier={:.3e}\n",
+                   info.objective, info.penalized_obj, info.search_barrier_value);
+    } else if (std::abs(info.penalized_obj - info.objective) > scalar_t(1e-12) * (scalar_t(1.0) + std::abs(info.objective))) {
+        fmt::print("    phase=normal  objective={:.3e}  search_obj={:.3e}  penalty={:.3e}\n",
+                   info.objective, info.penalized_obj, info.penalized_obj - info.objective);
+    }
     fmt::print("    ||lam_eq||={:.3e}  ||lam_ineq||={:.3e}  diag_scl={:.3e}  ||lam||={:.3e}\n",
                info.max_eq_dual_norm, info.max_ineq_dual_norm, info.max_diag_scaling, info.max_dual_norm);
     fmt::print("    d_eq: dyn={:.3e}  eq_x={:.3e}  eq_xu={:.3e}\n",

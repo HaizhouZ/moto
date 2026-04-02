@@ -12,6 +12,12 @@ scalar_t max_abs_or_zero(const vector &v) {
     return v.size() > 0 ? v.cwiseAbs().maxCoeff() : scalar_t(0.);
 }
 
+scalar_t alpha_candidate(const vector &value,
+                         const vector &step,
+                         scalar_t fraction_to_boundary = scalar_t(0.995)) {
+    return solver::positivity::alpha_max(value, step, fraction_to_boundary);
+}
+
 template <typename Src>
 void forward_source_value(const Src &source, func_approx_data &data) {
     dynamic_cast<const generic_func &>(*source).value(data);
@@ -262,7 +268,18 @@ void resto_eq_elastic_constr::apply_affine_step(data_map_t &data, workspace_data
 }
 
 void resto_eq_elastic_constr::update_ls_bounds(data_map_t &data, workspace_data *cfg) const {
-    data.as<approx_data>().elastic.update_ls_bounds(cfg->as<linesearch_config>());
+    auto &ls = cfg->as<linesearch_config>();
+    auto &d = data.as<approx_data>();
+    const scalar_t before_primal = ls.primal.alpha_max;
+    const scalar_t alpha_p = alpha_candidate(d.elastic.p, d.elastic.d_p);
+    const scalar_t alpha_n = alpha_candidate(d.elastic.n, d.elastic.d_n);
+    d.elastic.update_ls_bounds(ls);
+    if (ls.primal.alpha_max < before_primal) {
+        fmt::print("    [resto-ls:eq:{}] alpha_p={:.3e} (p={:.3e}, dp={:.3e}) alpha_n={:.3e} (n={:.3e}, dn={:.3e}) -> primal.alpha_max={:.3e}\n",
+                   name(), alpha_p, d.elastic.p.minCoeff(), d.elastic.d_p.minCoeff(),
+                   alpha_n, d.elastic.n.minCoeff(), d.elastic.d_n.minCoeff(),
+                   ls.primal.alpha_max);
+    }
 }
 
 void resto_eq_elastic_constr::backup_trial_state(data_map_t &data) const {
@@ -349,7 +366,7 @@ void resto_ineq_elastic_ipm_constr::value_impl(func_approx_data &data) const {
         return;
     }
     d.elastic.g_current = d.base_residual;
-    d.v_ = d.base_residual + d.elastic.t - d.elastic.p + d.elastic.n;
+    d.v_ = d.base_residual - d.elastic.p + d.elastic.n;
     d.comp_ = d.multiplier_.cwiseProduct(d.v_);
 }
 
@@ -411,10 +428,8 @@ void resto_ineq_elastic_ipm_constr::initialize(data_map_t &data) const {
     d.elastic.resize(d.func_.dim(), 0);
     for (Eigen::Index i = 0; i < d.base_residual.size(); ++i) {
         const auto init = initialize_elastic_ineq_scalar(d.base_residual(i), d.rho, d.ipm_cfg->mu);
-        d.elastic.t(i) = init.t;
         d.elastic.p(i) = init.p;
         d.elastic.n(i) = init.n;
-        d.elastic.nu_t(i) = init.nu_t;
         d.elastic.nu_p(i) = init.nu_p;
         d.elastic.nu_n(i) = init.nu_n;
         d.multiplier_(i) = init.lambda;
@@ -454,7 +469,19 @@ void resto_ineq_elastic_ipm_constr::apply_affine_step(data_map_t &data, workspac
 }
 
 void resto_ineq_elastic_ipm_constr::update_ls_bounds(data_map_t &data, workspace_data *cfg) const {
-    data.as<approx_data>().elastic.update_ls_bounds(cfg->as<linesearch_config>());
+    auto &ls = cfg->as<linesearch_config>();
+    auto &d = data.as<approx_data>();
+    const scalar_t before_primal = ls.primal.alpha_max;
+    const scalar_t alpha_p = alpha_candidate(d.elastic.p, d.elastic.d_p);
+    const scalar_t alpha_n = alpha_candidate(d.elastic.n, d.elastic.d_n);
+    d.elastic.update_ls_bounds(ls);
+    if (ls.primal.alpha_max < before_primal) {
+        fmt::print("    [resto-ls:ineq:{}] alpha_p={:.3e} (p={:.3e}, dp={:.3e}) alpha_n={:.3e} (n={:.3e}, dn={:.3e}) -> primal.alpha_max={:.3e}\n",
+                   name(),
+                   alpha_p, d.elastic.p.minCoeff(), d.elastic.d_p.minCoeff(),
+                   alpha_n, d.elastic.n.minCoeff(), d.elastic.d_n.minCoeff(),
+                   ls.primal.alpha_max);
+    }
 }
 
 void resto_ineq_elastic_ipm_constr::backup_trial_state(data_map_t &data) const {
@@ -493,15 +520,13 @@ scalar_t resto_ineq_elastic_ipm_constr::search_penalty_dir_deriv(const func_appr
 
 scalar_t resto_ineq_elastic_ipm_constr::local_stat_residual_inf(const func_approx_data &data) const {
     const auto &d = static_cast<const approx_data &>(data);
-    return std::max({max_abs_or_zero(d.elastic.r_t),
-                     max_abs_or_zero(d.elastic.r_p),
+    return std::max({max_abs_or_zero(d.elastic.r_p),
                      max_abs_or_zero(d.elastic.r_n)});
 }
 
 scalar_t resto_ineq_elastic_ipm_constr::local_comp_residual_inf(const func_approx_data &data) const {
     const auto &d = static_cast<const approx_data &>(data);
-    return std::max({max_abs_or_zero(d.elastic.r_s_t),
-                     max_abs_or_zero(d.elastic.r_s_p),
+    return std::max({max_abs_or_zero(d.elastic.r_s_p),
                      max_abs_or_zero(d.elastic.r_s_n)});
 }
 

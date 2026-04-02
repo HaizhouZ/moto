@@ -43,6 +43,12 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
 
     auto &outer_graph = solver_graph();
     auto &resto_graph = restoration_graph();
+    if (settings.verbose) {
+        fmt::print("\n=== enter restoration ===\n");
+        fmt::print("  entry iter={}  outer objective={:.3e}  outer search_obj={:.3e}  prim={:.3e}  dual={:.3e}  comp={:.3e}\n",
+                   kkt_before.num_iter, kkt_before.objective, kkt_before.penalized_obj,
+                   kkt_before.inf_prim_res, kkt_before.inf_dual_res, kkt_before.inf_comp_res);
+    }
     settings.in_restoration = true;
     set_phase_graph_override(resto_graph);
 
@@ -80,6 +86,9 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
                                              /*gauss_newton=*/false);
         kkt_rest.num_iter = kkt_before.num_iter + i_rest + 1;
         kkt_rest.ls_steps = rls.step_cnt;
+        if (settings.verbose) {
+            print_stats(kkt_rest);
+        }
 
         if (action == line_search_action::accept) {
             resto_graph.for_each_parallel([this](data *d) {
@@ -169,6 +178,11 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         result.result = iter_result_t::infeasible_stationary;
     } else {
         result.result = iter_result_t::restoration_failed;
+    }
+    if (settings.verbose) {
+        fmt::print("=== leave restoration: {} ===\n\n",
+                   resto_accept ? "success" :
+                                  (result.result == iter_result_t::infeasible_stationary ? "infeasible_stationary" : "failed"));
     }
     return result;
 }
