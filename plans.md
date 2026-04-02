@@ -27,6 +27,7 @@
   - trial acceptance / filter update
   是否会同时推进 normal 与 restoration 两套状态；若会，则必须拆分或显式短路。
 - 代码层面优先把这类 phase gate 收敛成少量公共 helper，而不是把 `if (settings.in_restoration)` 散落到各处，避免未来继续复用时再引入混淆。
+- restoration 的 entry/exit cleanup 也必须集中到 helper：outer dual 恢复、bound/slack 映回、equality multiplier reset 不能散落在主循环和 line-search 分支里分别实现。
 
 ### 1. 求解目标固定为 restoration Lagrangian
 - restoration 子问题固定采用 [restoration.md](/home/harper/Documents/moto/restoration.md) 中的 stagewise restoration Lagrangian：

@@ -133,3 +133,66 @@ TEST_CASE("restoration multiplier reset helper follows threshold policy") {
     REQUIRE(approx_scalar(multiplier(1), 1.0));
     REQUIRE(approx_scalar(multiplier(2), 1.0));
 }
+
+TEST_CASE("restoration exit helper restores outer dual arrays") {
+    array_type<vector, constr_fields> dual;
+    array_type<vector, constr_fields> backup;
+
+    scalar_t seed = 1.0;
+    for (auto f : constr_fields) {
+        dual[f] = vector::Constant(2, seed);
+        backup[f] = vector::Constant(2, 10.0 + seed);
+        seed += 1.0;
+    }
+
+    restore_outer_duals(dual, backup);
+
+    for (auto f : constr_fields) {
+        REQUIRE(dual[f].isApprox(backup[f]));
+    }
+}
+
+TEST_CASE("restoration exit helper copies slack and resets bound multiplier when threshold exceeded") {
+    vector slack(3), multiplier(3), resto_slack(3), resto_multiplier(3);
+    slack << 1.0, 1.0, 1.0;
+    multiplier << 2.0, 2.0, 2.0;
+    resto_slack << 0.6, 0.7, 0.8;
+    resto_multiplier << 5.0, -3.0, 2.0;
+
+    commit_bound_state(slack, multiplier, resto_slack, resto_multiplier, 4.0, 1.0);
+
+    REQUIRE(slack.isApprox(resto_slack));
+    REQUIRE(approx_scalar(multiplier(0), 1.0));
+    REQUIRE(approx_scalar(multiplier(1), 1.0));
+    REQUIRE(approx_scalar(multiplier(2), 1.0));
+}
+
+TEST_CASE("restoration exit helper preserves bound multiplier when below threshold") {
+    vector slack(2), multiplier(2), resto_slack(2), resto_multiplier(2);
+    slack << 1.0, 1.0;
+    multiplier << 2.0, 2.0;
+    resto_slack << 0.6, 0.7;
+    resto_multiplier << 3.0, -2.0;
+
+    commit_bound_state(slack, multiplier, resto_slack, resto_multiplier, 4.0, 1.0);
+
+    REQUIRE(slack.isApprox(resto_slack));
+    REQUIRE(multiplier.isApprox(resto_multiplier));
+}
+
+TEST_CASE("restoration equality dual reset helper only clears equality fields") {
+    array_type<vector, constr_fields> dual;
+    dual[__dyn] = vector::Constant(2, 7.0);
+    dual[__eq_x] = vector::Constant(2, 3.0);
+    dual[__eq_xu] = vector::Constant(1, -5.0);
+    dual[__ineq_x] = vector::Constant(2, 11.0);
+    dual[__ineq_xu] = vector::Constant(1, -13.0);
+
+    reset_equality_duals(dual, 4.0);
+
+    REQUIRE(dual[__dyn].isConstant(7.0));
+    REQUIRE(dual[__eq_x].isZero());
+    REQUIRE(dual[__eq_xu].isZero());
+    REQUIRE(dual[__ineq_x].isConstant(11.0));
+    REQUIRE(dual[__ineq_xu].isConstant(-13.0));
+}

@@ -168,6 +168,27 @@ vector gather_lambda_ineq(const ns_riccati::ns_riccati_data &d) {
     return gather_field_dual(d, __ineq_x, __ineq_xu);
 }
 
+void restore_outer_duals(array_type<vector, constr_fields> &dual,
+                         const array_type<vector, constr_fields> &backup) {
+    for (auto f : constr_fields) {
+        dual[f] = backup[f];
+    }
+}
+
+void commit_bound_state(vector_ref slack,
+                        vector_ref multiplier,
+                        const vector_const_ref &resto_slack,
+                        const vector_const_ref &resto_multiplier,
+                        scalar_t threshold,
+                        scalar_t reset_value) {
+    if (slack.size() != resto_slack.size() || multiplier.size() != resto_multiplier.size()) {
+        throw std::runtime_error("commit_bound_state size mismatch");
+    }
+    slack = resto_slack;
+    multiplier = resto_multiplier;
+    maybe_reset_multiplier(multiplier, threshold, reset_value);
+}
+
 bool should_reset_multiplier(const vector_const_ref &multiplier, scalar_t threshold) {
     return threshold <= 0. ||
            (multiplier.size() > 0 && multiplier.cwiseAbs().maxCoeff() > threshold);
@@ -179,13 +200,26 @@ void maybe_reset_multiplier(vector_ref multiplier, scalar_t threshold, scalar_t 
     }
 }
 
-void reset_equality_duals(ns_riccati::ns_riccati_data &d, scalar_t threshold) {
-    auto lambda_eq = gather_lambda_eq(d);
+void reset_equality_duals(array_type<vector, constr_fields> &dual, scalar_t threshold) {
+    vector lambda_eq(static_cast<Eigen::Index>(dual[__eq_x].size() + dual[__eq_xu].size()));
+    Eigen::Index offset = 0;
+    for (auto f : std::array{__eq_x, __eq_xu}) {
+        if (dual[f].size() > 0) {
+            lambda_eq.segment(offset, dual[f].size()) = dual[f];
+            offset += dual[f].size();
+        }
+    }
+    lambda_eq.conservativeResize(offset);
     if (!should_reset_multiplier(lambda_eq, threshold)) {
         return;
     }
-    d.dense_->dual_[__eq_x].setZero();
-    d.dense_->dual_[__eq_xu].setZero();
+    for (auto f : std::array{__eq_x, __eq_xu}) {
+        dual[f].setZero();
+    }
+}
+
+void reset_equality_duals(ns_riccati::ns_riccati_data &d, scalar_t threshold) {
+    reset_equality_duals(d.dense_->dual_, threshold);
 }
 
 void scatter_lambda_eq(ns_riccati::ns_riccati_data &d, const vector_const_ref &lambda) {
@@ -202,6 +236,40 @@ void scatter_lambda_ineq(ns_riccati::ns_riccati_data &d, const vector_const_ref 
 
 void scatter_lambda_ineq_step(ns_riccati::ns_riccati_data &d, const vector_const_ref &delta_lambda) {
     scatter_field_dual(d, __ineq_x, __ineq_xu, delta_lambda, true);
+}
+
+void cleanup_restoration_stage(ns_riccati::ns_riccati_data &d,
+                               bool success,
+                               scalar_t bound_mult_reset_threshold,
+                               scalar_t constr_mult_reset_threshold) {
+    auto *aux = get_aux(d);
+    if (aux == nullptr) {
+        return;
+    }
+
+    restore_outer_duals(d.dense_->dual_, aux->outer_dual_backup);
+    if (!success) {
+        return;
+    }
+
+    if (aux->elastic_ineq.dim() > 0) {
+        Eigen::Index offset = 0;
+        d.full_data_->for_each<ineq_constr_fields>([&](const soft_constr &, soft_constr::data_map_t &sd) {
+            auto *ipm = dynamic_cast<solver::ipm_constr::approx_data *>(&sd);
+            const Eigen::Index dim = static_cast<Eigen::Index>(sd.v_.size());
+            if (ipm != nullptr) {
+                commit_bound_state(ipm->slack_,
+                                   ipm->multiplier_,
+                                   aux->elastic_ineq.t.segment(offset, dim),
+                                   aux->elastic_ineq.nu_t.segment(offset, dim),
+                                   bound_mult_reset_threshold,
+                                   scalar_t(1.));
+            }
+            offset += dim;
+        });
+    }
+
+    reset_equality_duals(d, constr_mult_reset_threshold);
 }
 
 void prepare_current_constraint_stack(ns_riccati::ns_riccati_data &d) {

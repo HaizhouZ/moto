@@ -16,9 +16,22 @@ void scatter_lambda_eq(ns_riccati::ns_riccati_data &d, const vector_const_ref &l
 void scatter_lambda_eq_step(ns_riccati::ns_riccati_data &d, const vector_const_ref &delta_lambda);
 void scatter_lambda_ineq(ns_riccati::ns_riccati_data &d, const vector_const_ref &lambda);
 void scatter_lambda_ineq_step(ns_riccati::ns_riccati_data &d, const vector_const_ref &delta_lambda);
+void restore_outer_duals(array_type<vector, constr_fields> &dual,
+                         const array_type<vector, constr_fields> &backup);
+void commit_bound_state(vector_ref slack,
+                        vector_ref multiplier,
+                        const vector_const_ref &resto_slack,
+                        const vector_const_ref &resto_multiplier,
+                        scalar_t threshold,
+                        scalar_t reset_value = scalar_t(1.));
 bool should_reset_multiplier(const vector_const_ref &multiplier, scalar_t threshold);
 void maybe_reset_multiplier(vector_ref multiplier, scalar_t threshold, scalar_t reset_value);
+void reset_equality_duals(array_type<vector, constr_fields> &dual, scalar_t threshold);
 void reset_equality_duals(ns_riccati::ns_riccati_data &d, scalar_t threshold);
+void cleanup_restoration_stage(ns_riccati::ns_riccati_data &d,
+                               bool success,
+                               scalar_t bound_mult_reset_threshold,
+                               scalar_t constr_mult_reset_threshold);
 
 void prepare_current_constraint_stack(ns_riccati::ns_riccati_data &d);
 void initialize_stage(ns_riccati::ns_riccati_data &d);

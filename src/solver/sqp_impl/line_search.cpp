@@ -7,6 +7,23 @@
 
 namespace moto {
 
+scalar_t ns_sqp::current_phase_objective(const kkt_info &kkt) const {
+    return in_restoration_phase() ? kkt.objective : kkt.cost - settings.ipm.mu * kkt.log_slack_sum;
+}
+
+scalar_t ns_sqp::current_phase_fullstep_dec(const kkt_info &kkt) const {
+    return in_restoration_phase() ? kkt.obj_fullstep_dec
+                                  : kkt.obj_fullstep_dec - settings.ipm.mu * kkt.barrier_dir_deriv;
+}
+
+scalar_t ns_sqp::outer_objective(const kkt_info &kkt) const {
+    return kkt.cost - settings.ipm.mu * kkt.log_slack_sum;
+}
+
+scalar_t ns_sqp::outer_fullstep_dec(const kkt_info &kkt) const {
+    return kkt.obj_fullstep_dec - settings.ipm.mu * kkt.barrier_dir_deriv;
+}
+
 void ns_sqp::finalize_ls_bound_and_set_to_max() {
     // merge line search bounds from each thread
     for (solver::linesearch_config &s : setting_per_thread) {
@@ -154,19 +171,18 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
 bool ns_sqp::outer_filter_accepts(const filter_linesearch_data &ls,
                                   const kkt_info &trial_kkt,
                                   const kkt_info &reference_kkt) {
-    const scalar_t mu = settings.ipm.mu;
-    const scalar_t obj_trial = trial_kkt.objective;
-    const scalar_t obj_k = reference_kkt.cost - mu * reference_kkt.log_slack_sum;
-    const scalar_t fullstep_dec_k = reference_kkt.obj_fullstep_dec - mu * reference_kkt.barrier_dir_deriv;
+    const scalar_t obj_trial = outer_objective(trial_kkt);
+    const scalar_t obj_k = outer_objective(reference_kkt);
+    const scalar_t fullstep_dec_k = outer_fullstep_dec(reference_kkt);
     const filter_linesearch_data::point trial_point{
         .prim_res = trial_kkt.prim_res_l1,
         .dual_res = trial_kkt.inf_dual_res,
-        .objective = trial_kkt.objective,
+        .objective = obj_trial,
     };
     const filter_linesearch_data::point reference_point{
         .prim_res = reference_kkt.prim_res_l1,
         .dual_res = reference_kkt.inf_dual_res,
-        .objective = reference_kkt.objective,
+        .objective = obj_k,
     };
 
     for (const auto &p : ls.points) {
@@ -209,8 +225,7 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
         // skip second-order correction if the first trial already shows improvement in primal residual
         ls.skip_soc = true;
     }
-    scalar_t mu = settings.ipm.mu;
-    scalar_t fullstep_dec_k = current_kkt.obj_fullstep_dec - mu * current_kkt.barrier_dir_deriv;
+    scalar_t fullstep_dec_k = current_phase_fullstep_dec(current_kkt);
     ls.alpha_min = settings.ls.primal.alpha_min;
 
     const auto record_best_trial = [&] {

@@ -1,4 +1,3 @@
-#include <moto/solver/ipm/ipm_constr.hpp>
 #include <moto/solver/ns_sqp.hpp>
 #include <moto/solver/restoration/resto_runtime.hpp>
 
@@ -66,11 +65,11 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
 
         if (action == line_search_action::accept) {
             graph.for_each_parallel([this](data *d) {
-                d->update_approximation(node_data::update_mode::eval_raw_derivatives, true);
+                d->update_approximation(node_data::update_mode::eval_val, true);
             });
             const bool old_resto = settings.in_restoration;
             settings.in_restoration = false;
-            kkt_outer_trial = compute_kkt_info();
+            kkt_outer_trial = compute_kkt_info(false);
             settings.in_restoration = old_resto;
             graph.for_each_parallel([this](data *d) {
                 assemble_restoration_problem(d, node_data::update_mode::eval_raw_derivatives);
@@ -95,31 +94,13 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
 
     const auto cleanup = [&](bool success) {
         graph.for_each_parallel([&](data *d) {
-            auto *aux = dynamic_cast<ns_riccati_data::restoration_aux_data *>(d->aux_.get());
-            if (aux == nullptr) {
+            if (dynamic_cast<ns_riccati_data::restoration_aux_data *>(d->aux_.get()) == nullptr) {
                 return;
             }
-
-            d->dense().dual_ = aux->outer_dual_backup;
-
-            if (success && aux->elastic_ineq.dim() > 0) {
-                Eigen::Index offset = 0;
-                d->for_each<ineq_constr_fields>([&](const soft_constr &, soft_constr::data_map_t &sd) {
-                    auto *ipm = dynamic_cast<solver::ipm_constr::approx_data *>(&sd);
-                    if (ipm == nullptr) {
-                        offset += sd.v_.size();
-                        return;
-                    }
-                    const Eigen::Index dim = ipm->slack_.size();
-                    ipm->slack_ = aux->elastic_ineq.t.segment(offset, dim);
-                    ipm->multiplier_ = aux->elastic_ineq.nu_t.segment(offset, dim);
-                    solver::restoration::maybe_reset_multiplier(ipm->multiplier_,
-                                                                settings.restoration.bound_mult_reset_threshold,
-                                                                scalar_t(1.));
-                    offset += dim;
-                });
-                solver::restoration::reset_equality_duals(*d, settings.restoration.constr_mult_reset_threshold);
-            }
+            solver::restoration::cleanup_restoration_stage(*d,
+                                                           success,
+                                                           settings.restoration.bound_mult_reset_threshold,
+                                                           settings.restoration.constr_mult_reset_threshold);
             d->aux_.reset();
         });
 

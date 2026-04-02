@@ -469,6 +469,10 @@ struct ns_sqp {
     line_search_action filter_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
     line_search_action merit_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
     bool outer_filter_accepts(const filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &reference_kkt);
+    scalar_t current_phase_objective(const kkt_info &kkt) const;
+    scalar_t current_phase_fullstep_dec(const kkt_info &kkt) const;
+    scalar_t outer_objective(const kkt_info &kkt) const;
+    scalar_t outer_fullstep_dec(const kkt_info &kkt) const;
     bool in_restoration_phase() const { return settings.in_restoration; }
     bool use_normal_soft_phase() const { return !settings.in_restoration; }
 
