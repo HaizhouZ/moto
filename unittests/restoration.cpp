@@ -258,12 +258,32 @@ TEST_CASE("restoration inequality local KKT recovery satisfies regularized linea
     REQUIRE(summary.inf_comp < 1e-12);
 }
 
-TEST_CASE("restoration inequality initializer satisfies local KKT at the central point") {
+TEST_CASE("restoration inequality initialization follows slack-plus-elastic centering") {
+    const scalar_t g = -0.25;
+    const scalar_t rho = 3.0;
+    const scalar_t mu_bar = 0.2;
+    const scalar_t nu_t0 = 0.7;
+
+    const auto init = initialize_elastic_ineq_scalar(g, rho, mu_bar, nu_t0);
+
+    REQUIRE(approx_scalar(init.nu_t, nu_t0));
+    REQUIRE(approx_scalar(init.t, mu_bar / nu_t0));
+    REQUIRE(init.p > 0.);
+    REQUIRE(init.n > 0.);
+    REQUIRE(init.nu_p > 0.);
+    REQUIRE(init.nu_n > 0.);
+    REQUIRE(approx_scalar(init.nu_p * init.p, mu_bar, 1e-10));
+    REQUIRE(approx_scalar(init.nu_n * init.n, mu_bar, 1e-10));
+    REQUIRE(approx_scalar(g + init.t - init.p + init.n, 0., 1e-10));
+}
+
+TEST_CASE("restoration inequality initializer centers primal and complementarity") {
     const scalar_t g = -0.35;
     const scalar_t rho = 3.0;
     const scalar_t mu_bar = 0.25;
+    const scalar_t nu_t0 = 0.8;
 
-    const auto init = initialize_elastic_ineq_scalar(g, rho, mu_bar);
+    const auto init = initialize_elastic_ineq_scalar(g, rho, mu_bar, nu_t0);
 
     detail::ineq_local_state iq;
     iq.resize(1, 0);
@@ -279,11 +299,11 @@ TEST_CASE("restoration inequality initializer satisfies local KKT at the central
     compute_local_model(g_vec, iq, rho, mu_bar, 0.0);
 
     REQUIRE(approx_zero(iq.r_d, 1e-10));
-    REQUIRE(approx_zero(iq.r_p, 1e-10));
-    REQUIRE(approx_zero(iq.r_n, 1e-10));
     REQUIRE(approx_zero(iq.r_s_t, 1e-10));
     REQUIRE(approx_zero(iq.r_s_p, 1e-10));
     REQUIRE(approx_zero(iq.r_s_n, 1e-10));
+    REQUIRE(iq.r_p.allFinite());
+    REQUIRE(iq.r_n.allFinite());
 }
 
 TEST_CASE("positivity helper reuses consistent alpha and backup semantics") {

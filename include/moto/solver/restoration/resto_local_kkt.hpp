@@ -230,35 +230,29 @@ struct elastic_init_ineq_scalar {
     scalar_t nu_n = 0.;
 };
 
-inline elastic_init_ineq_scalar initialize_elastic_ineq_scalar(scalar_t g, scalar_t rho, scalar_t mu_bar) {
+inline elastic_init_ineq_scalar initialize_elastic_ineq_scalar(scalar_t g,
+                                                               scalar_t rho,
+                                                               scalar_t mu_bar,
+                                                               scalar_t nu_t_init) {
     if (!(rho > 0.)) {
         throw std::runtime_error("initialize_elastic_ineq_scalar requires rho > 0");
     }
     if (!(mu_bar > 0.)) {
         throw std::runtime_error("initialize_elastic_ineq_scalar requires mu_bar > 0");
     }
+    if (!(nu_t_init > 0.)) {
+        throw std::runtime_error("initialize_elastic_ineq_scalar requires nu_t_init > 0");
+    }
 
     elastic_init_ineq_scalar out;
-    const scalar_t eps = 1e-12;
-    const auto f = [&](scalar_t nu_t) {
-        return g + mu_bar / nu_t - mu_bar / (rho - nu_t) + mu_bar / (rho + nu_t);
-    };
-    scalar_t lo = eps;
-    scalar_t hi = rho - eps;
-    for (int iter = 0; iter < 100; ++iter) {
-        const scalar_t mid = scalar_t(0.5) * (lo + hi);
-        if (f(mid) > 0.) {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
-    out.nu_t = scalar_t(0.5) * (lo + hi);
-    out.nu_p = rho - out.nu_t;
-    out.nu_n = rho + out.nu_t;
+    const scalar_t eps = scalar_t(1e-16);
+    out.nu_t = std::max(nu_t_init, eps);
     out.t = mu_bar / out.nu_t;
-    out.p = mu_bar / out.nu_p;
-    out.n = mu_bar / out.nu_n;
+    const auto pair = initialize_elastic_pair(g + out.t, rho, mu_bar);
+    out.p = pair.p;
+    out.n = pair.n;
+    out.nu_p = pair.z_p;
+    out.nu_n = pair.z_n;
     return out;
 }
 

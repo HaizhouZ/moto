@@ -99,7 +99,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         fmt::print("\n=== enter restoration ===\n");
         fmt::print("  entry iter={}  outer objective={:.3e}  outer search_obj={:.3e}  prim={:.3e}  dual={:.3e}  comp={:.3e}\n",
                    kkt_before.num_iter, kkt_before.objective, kkt_before.penalized_obj,
-                   kkt_before.inf_prim_res, kkt_before.inf_dual_res, kkt_before.inf_comp_res);
+                   kkt_before.prim_res_l1, kkt_before.inf_dual_res, kkt_before.inf_comp_res);
     }
     settings.in_restoration = true;
     set_phase_graph_override(resto_graph);
@@ -115,6 +115,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         d->for_each_constr([this](const generic_func &c, func_approx_data &fd) { c.setup_workspace_data(fd, &settings); });
         d->update_approximation(node_data::update_mode::eval_val, true);
         solver::ineq_soft::initialize(d);
+        d->update_approximation(node_data::update_mode::eval_val, true);
         d->update_approximation(node_data::update_mode::eval_derivatives, true);
     });
     if (resto_eq_debug_enabled()) {
@@ -177,7 +178,8 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
 
             const bool outer_accept = outer_filter_accepts(ls, kkt_outer_trial, kkt_before);
             const bool prim_improved =
-                kkt_outer_trial.inf_prim_res < settings.restoration.restoration_improvement_frac * kkt_before.inf_prim_res;
+                kkt_outer_trial.prim_res_l1 <
+                settings.restoration.restoration_improvement_frac * kkt_before.prim_res_l1;
             if (outer_accept && prim_improved) {
                 resto_accept = true;
                 break;
@@ -226,7 +228,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     result.ls_steps = kkt_rest.ls_steps;
     if (resto_accept) {
         result.result = iter_result_t::success;
-    } else if (resto_stalled && result.inf_dual_res < settings.dual_tol && result.inf_prim_res > settings.prim_tol) {
+    } else if (resto_stalled && result.inf_dual_res < settings.dual_tol && result.prim_res_l1 > settings.prim_tol) {
         result.result = iter_result_t::infeasible_stationary;
     } else {
         result.result = iter_result_t::restoration_failed;

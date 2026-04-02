@@ -24,22 +24,27 @@ scalar_t max_abs_or_zero(const row_vector &v) {
 
 void accumulate_constraint_objective_terms(ns_sqp::kkt_info &kkt,
                                            node_data &node,
-                                           bool track_diag_scaling = false) {
+                                           bool track_diag_scaling = false,
+                                           bool include_local_residuals = true) {
     node.for_each<soft_constr_fields>([&](const soft_constr &c, soft_constr::data_map_t &sd) {
         kkt.objective += c.objective_penalty(sd);
         kkt.search_barrier_value += c.search_penalty(sd);
         kkt.obj_fullstep_dec += c.objective_penalty_dir_deriv(sd);
         kkt.search_barrier_dir_deriv += c.search_penalty_dir_deriv(sd);
-        kkt.inf_dual_res = std::max(kkt.inf_dual_res, c.local_stat_residual_inf(sd));
-        kkt.inf_comp_res = std::max(kkt.inf_comp_res, c.local_comp_residual_inf(sd));
+        if (include_local_residuals) {
+            kkt.inf_dual_res = std::max(kkt.inf_dual_res, c.local_stat_residual_inf(sd));
+            kkt.inf_comp_res = std::max(kkt.inf_comp_res, c.local_comp_residual_inf(sd));
+        }
     });
     node.for_each<ineq_constr_fields>([&](const ineq_constr &c, ineq_constr::data_map_t &id) {
         kkt.objective += c.objective_penalty(id);
         kkt.search_barrier_value += c.search_penalty(id);
         kkt.obj_fullstep_dec += c.objective_penalty_dir_deriv(id);
         kkt.search_barrier_dir_deriv += c.search_penalty_dir_deriv(id);
-        kkt.inf_dual_res = std::max(kkt.inf_dual_res, c.local_stat_residual_inf(id));
-        kkt.inf_comp_res = std::max(kkt.inf_comp_res, c.local_comp_residual_inf(id));
+        if (include_local_residuals) {
+            kkt.inf_dual_res = std::max(kkt.inf_dual_res, c.local_stat_residual_inf(id));
+            kkt.inf_comp_res = std::max(kkt.inf_comp_res, c.local_comp_residual_inf(id));
+        }
         if (track_diag_scaling) {
             auto *ipm = dynamic_cast<solver::ipm_constr::approx_data *>(&id);
             if (ipm != nullptr && ipm->diag_scaling.size() > 0) {
@@ -852,7 +857,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
                 if (update_dual_res && n->dense().lag_jac_[__u].size() > 0) {
                     accumulate_u_stationarity(n->dense().lag_jac_[__u], kkt, dual_res_l1, n_dual_res);
                 }
-                accumulate_constraint_objective_terms(kkt, *n);
+                accumulate_constraint_objective_terms(kkt, *n, false, false);
                 accumulate_dual_norms(kkt, n->dense().dual_, true);
                 accumulate_primal_step_and_obj_dec(kkt, *n, false);
                 accumulate_dual_step_info(kkt, n->trial_dual_step);

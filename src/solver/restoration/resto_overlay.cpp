@@ -710,8 +710,10 @@ void resto_ineq_elastic_ipm_constr::propagate_res_stats(func_approx_data &) cons
 void resto_ineq_elastic_ipm_constr::initialize(data_map_t &data) const {
     auto &d = data.as<approx_data>();
     d.elastic.resize(d.func_.dim(), 0);
+    const scalar_t eps = scalar_t(1e-16);
     for (Eigen::Index i = 0; i < d.base_residual.size(); ++i) {
-        const auto init = initialize_elastic_ineq_scalar(d.base_residual(i), d.rho, d.ipm_cfg->mu);
+        const scalar_t nu_t0 = std::max(std::min(d.rho, d.multiplier_(i)), eps);
+        const auto init = initialize_elastic_ineq_scalar(d.base_residual(i), d.rho, d.ipm_cfg->mu, nu_t0);
         d.elastic.t(i) = init.t;
         d.elastic.p(i) = init.p;
         d.elastic.n(i) = init.n;
@@ -727,32 +729,6 @@ void resto_ineq_elastic_ipm_constr::initialize(data_map_t &data) const {
 void resto_ineq_elastic_ipm_constr::finalize_newton_step(data_map_t &data) const {
     auto &d = data.as<approx_data>();
     finalize_pair_newton_step(d);
-    if (resto_local_debug_enabled() && d.elastic.dim() > 0) {
-        vector delta(d.func_.dim());
-        delta.setZero();
-        size_t arg_idx = 0;
-        for (const sym &arg : d.func_.in_args()) {
-            if (arg.field() < field::num_prim) {
-                delta.noalias() += d.jac_[arg_idx] * d.prim_step_[arg_idx];
-            }
-            ++arg_idx;
-        }
-        const auto &e = d.elastic;
-        const vector res_d = delta + e.d_t - e.d_p + e.d_n + e.r_d;
-        const vector res_p = e.d_p - e.d_nu_t - d.lambda_reg * e.d_nu_p + e.r_p;
-        const vector res_n = e.d_n + e.d_nu_t - d.lambda_reg * e.d_nu_n + e.r_n;
-        const vector res_st = e.nu_t.cwiseProduct(e.d_t) + e.t.cwiseProduct(e.d_nu_t) + e.r_s_t;
-        const vector res_sp = e.nu_p.cwiseProduct(e.d_p) + e.p.cwiseProduct(e.d_nu_p) + e.r_s_p;
-        const vector res_sn = e.nu_n.cwiseProduct(e.d_n) + e.n.cwiseProduct(e.d_nu_n) + e.r_s_n;
-        fmt::print("    [resto-newton:{}] linres d={:.3e} p={:.3e} n={:.3e} st={:.3e} sp={:.3e} sn={:.3e}\n",
-                   name(),
-                   max_abs_or_zero(res_d),
-                   max_abs_or_zero(res_p),
-                   max_abs_or_zero(res_n),
-                   max_abs_or_zero(res_st),
-                   max_abs_or_zero(res_sp),
-                   max_abs_or_zero(res_sn));
-    }
 }
 
 void resto_ineq_elastic_ipm_constr::finalize_predictor_step(data_map_t &data, workspace_data *cfg) const {

@@ -233,7 +233,7 @@ void ns_sqp::step_back_alpha(filter_linesearch_per_iter_data &ls) {
 
 ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt) {
     const auto phase_prim_metric = [&](const kkt_info &kkt) {
-        return in_restoration_phase() ? kkt.inf_prim_res : kkt.prim_res_l1;
+        return kkt.prim_res_l1;
     };
     const auto phase_dual_metric = [&](const kkt_info &kkt) {
         return in_restoration_phase() ? std::max(kkt.inf_dual_res, kkt.inf_comp_res)
@@ -275,13 +275,6 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
             }
         }
 
-        const scalar_t current_resto_res =
-            std::max(current_kkt.inf_dual_res, current_kkt.inf_comp_res);
-        const scalar_t trial_resto_res =
-            std::max(trial_kkt.inf_dual_res, trial_kkt.inf_comp_res);
-        if (!(current_resto_res > 0.0) || !std::isfinite(current_resto_res) || !std::isfinite(trial_resto_res)) {
-            return false;
-        }
         const scalar_t alpha_primal_ratio =
             ls.initial_alpha_primal > 0.0 ? settings.ls.alpha_primal / ls.initial_alpha_primal : scalar_t(1.0);
         const scalar_t alpha_dual_ratio =
@@ -292,26 +285,25 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
             trial_point.prim_res < (scalar_t(1.0) - settings.ls.primal_gamma) * current_point.prim_res;
         const bool objective_improved =
             trial_point.objective < current_point.objective - settings.ls.dual_gamma * current_point.prim_res;
-        const bool resto_res_improved =
-            trial_resto_res <= scalar_t(0.9) * current_resto_res;
         const bool accepted_by_resto_filter = !phase_in_filter(trial_point, current_point);
         const bool sufficient_progress = primal_improved || objective_improved;
-        if (nontrivial_step && resto_res_improved && accepted_by_resto_filter && sufficient_progress) {
+        if (nontrivial_step && accepted_by_resto_filter && sufficient_progress) {
             if (settings.verbose) {
                 fmt::print("  restoration trial accepted "
-                           "(prim: {:.3e} -> {:.3e}, objective: {:.3e} -> {:.3e}, resto_res: {:.3e} -> {:.3e})\n",
+                           "(prim: {:.3e} -> {:.3e}, dual: {:.3e} -> {:.3e}, objective: {:.3e} -> {:.3e})\n",
                            current_point.prim_res, trial_point.prim_res,
-                           current_point.objective, trial_point.objective,
-                           current_resto_res, trial_resto_res);
+                           current_point.dual_res, trial_point.dual_res,
+                           current_point.objective, trial_point.objective);
             }
             return true;
         }
         if (settings.verbose) {
             fmt::print("  restoration trial rejected "
-                       "(prim: {:.3e} -> {:.3e}, objective: {:.3e} -> {:.3e}, resto_res: {:.3e} -> {:.3e}, "
+                       "(prim: {:.3e} -> {:.3e}, dual: {:.3e} -> {:.3e}, objective: {:.3e} -> {:.3e}, "
                        "primal_improved={}, objective_improved={}, accepted_by_filter={}, sufficient_progress={}, alpha_p={:.3e}, alpha_d={:.3e})\n",
                        current_point.prim_res, trial_point.prim_res,
-                       current_point.objective, trial_point.objective, current_resto_res, trial_resto_res,
+                       current_point.dual_res, trial_point.dual_res,
+                       current_point.objective, trial_point.objective,
                        primal_improved ? "true" : "false",
                        objective_improved ? "true" : "false",
                        accepted_by_resto_filter ? "true" : "false",
