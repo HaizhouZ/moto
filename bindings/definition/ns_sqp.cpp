@@ -45,6 +45,20 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("prim_res_tol", &ns_sqp::iterative_refinement_setting::prim_res_tol, "Primal residual tolerance for iterative refinement")
         .def_rw("dual_res_tol", &ns_sqp::iterative_refinement_setting::dual_res_tol, "Dual residual tolerance for iterative refinement");
 
+    nb::class_<ns_sqp::restoration_settings> restoration_setting(sqp, "restoration_settings");
+    restoration_setting
+        .def_rw("enabled", &ns_sqp::restoration_settings::enabled, "Whether restoration is enabled")
+        .def_rw("max_iter", &ns_sqp::restoration_settings::max_iter, "Maximum number of restoration iterations")
+        .def_rw("rho_u", &ns_sqp::restoration_settings::rho_u, "Restoration proximal weight on u")
+        .def_rw("rho_y", &ns_sqp::restoration_settings::rho_y, "Restoration proximal weight on y")
+        .def_rw("rho_eq", &ns_sqp::restoration_settings::rho_eq, "Elastic penalty weight for restoration equalities")
+        .def_rw("rho_ineq", &ns_sqp::restoration_settings::rho_ineq, "Elastic penalty weight for restoration inequalities")
+        .def_rw("lambda_reg", &ns_sqp::restoration_settings::lambda_reg, "Regularization on restoration local multiplier rows")
+        .def_rw("restoration_improvement_frac", &ns_sqp::restoration_settings::restoration_improvement_frac, "Required fraction of primal infeasibility improvement to accept restoration exit")
+        .def_rw("alpha_min_factor", &ns_sqp::restoration_settings::alpha_min_factor, "Tiny-step trigger factor used before entering restoration")
+        .def_rw("bound_mult_reset_threshold", &ns_sqp::restoration_settings::bound_mult_reset_threshold, "Reset copied-back bound multipliers when they exceed this threshold")
+        .def_rw("constr_mult_reset_threshold", &ns_sqp::restoration_settings::constr_mult_reset_threshold, "Reset copied-back equality multipliers when they exceed this threshold");
+
     auto ls_config_base = nb::class_<solver::linesearch_config>(m, "linesearch_config");
     ls_config_base.def_rw("update_alpha_dual", &solver::linesearch_config::update_alpha_dual, "Whether to update the dual step size during line search")
         .def_rw("eq_dual_alpha_source", &solver::linesearch_config::eq_dual_alpha_source, "Source for dual step size for equality constraints")
@@ -82,6 +96,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("ipm_conditional_corrector", &ns_sqp::settings_t::ipm_conditional_corrector, "Whether to use conditional corrector in the IPM solver")
         .def_prop_ro("ipm", [](ns_sqp::settings_t &self) -> auto & { return self.ipm; }, "IPM settings")
         .def_rw("rf", &ns_sqp::settings_t::rf, "Iterative refinement settings")
+        .def_rw("restoration", &ns_sqp::settings_t::restoration, "Restoration settings")
         .def_prop_ro("ls", [](ns_sqp::settings_t &self) -> auto & { return self.ls; }, "Line search settings")
         .def_rw("scaling", &ns_sqp::settings_t::scaling, "Jacobian scaling settings")
         .def_rw("no_except", &ns_sqp::settings_t::no_except, "Whether to suppress exceptions in parallel jobs")

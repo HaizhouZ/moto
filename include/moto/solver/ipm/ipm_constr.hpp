@@ -3,6 +3,7 @@
 
 #include <moto/ocp/ineq_constr.hpp>
 #include <moto/solver/ipm/ipm_config.hpp>
+#include <moto/solver/ipm/positivity_step.hpp>
 
 namespace moto {
 namespace solver {

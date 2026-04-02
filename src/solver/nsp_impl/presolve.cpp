@@ -81,6 +81,8 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
     auto &d = *cur;
     auto &nsp = d.nsp_;
     auto &_approx = d.dense_->approx_;
+    const bool restoration_active =
+        dynamic_cast<ns_riccati_data::restoration_aux_data *>(d.aux_.get()) != nullptr;
 
     timed_block_start("update_projected_dynamics");
     cur->update_projected_dynamics();
@@ -122,7 +124,7 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
         timed_block_end("activate_lag_jac_corr");
     };
 
-    if (!d.ncstr) {
+    if (restoration_active || !d.ncstr) {
         unconstrain_setup();
         activate_gradient_corrections();
         ns_factorization_correction(cur);

@@ -87,37 +87,19 @@ void ipm_constr::apply_corrector_step(data_map_t &data) const {
     propagate_jacobian(d);
 }
 void ipm_constr::update_ls_bounds(ipm::data_map_t &data, workspace_data *cfg) const {
-    constexpr scalar_t tau = 0.995; // scaling factor
-    scalar_t alpha_max = 1.0;       // default max step size
     auto &d = data.as<ipm_data>();
     auto &ls_cfg = cfg->as<solver::linesearch_config>();
-    // compute alpha_max
-    for (size_t idx : range(dim_)) {
-        if (d.d_slack_(idx) < 0 and d.active_(idx) > 0) {
-            alpha_max = (-tau) * d.slack_(idx) / d.d_slack_(idx);
-            ls_cfg.primal.clip(alpha_max);
-            ls_cfg.primal.alpha_max = alpha_max;
-        }
-        if (d.d_multiplier_(idx) < 0 and d.active_(idx) > 0) {
-            alpha_max = (-tau) * d.multiplier_(idx) / d.d_multiplier_(idx);
-            ls_cfg.dual.clip(alpha_max);
-            ls_cfg.dual.alpha_max = alpha_max;
-        }
-    }
-    // ls_cfg.primal.alpha_max = std::max(ls_cfg.primal.alpha_max, d.reg_);
-    // ls_cfg.dual.alpha_max = std::m ax(ls_cfg.dual.alpha_max, d.reg_);
+    positivity::update_pair_bounds(ls_cfg, d.slack_, d.d_slack_, d.multiplier_, d.d_multiplier_);
     assert(ls_cfg.primal.alpha_max >= 0);
     assert(ls_cfg.dual.alpha_max > 1e-20);
 }
 void ipm_constr::backup_trial_state(ipm::data_map_t &data) const {
     auto &d = data.as<ipm_data>();
-    d.multiplier_backup_ = d.multiplier_;
-    d.slack_backup_ = d.slack_;
+    positivity::backup_pair(d.slack_, d.slack_backup_, d.multiplier_, d.multiplier_backup_);
 }
 void ipm_constr::restore_trial_state(ipm::data_map_t &data) const {
     auto &d = data.as<ipm_data>();
-    d.multiplier_ = d.multiplier_backup_;
-    d.slack_ = d.slack_backup_;
+    positivity::restore_pair(d.slack_, d.slack_backup_, d.multiplier_, d.multiplier_backup_);
 }
 void ipm_constr::finalize_predictor_step(ipm::data_map_t &data, workspace_data *cfg) const {
     auto &d = data.as<ipm_data>();
@@ -141,9 +123,8 @@ void ipm_constr::apply_affine_step(ipm::data_map_t &data, workspace_data *cfg) c
     auto &d = data.as<ipm_data>();
     auto &ls_cfg = cfg->as<solver::linesearch_config>();
     assert(!d.ipm_cfg->ipm_computing_affine_step() && "ipm affine step computation not ended");
-    d.slack_.array() += ls_cfg.alpha_primal * d.d_slack_.array();
-    // d.multiplier_.array() += std::min(ls_cfg.alpha_primal, ls_cfg.alpha_dual) * d.d_multiplier_.array();
-    d.multiplier_.noalias() += ls_cfg.dual_alpha_for_ineq() * d.d_multiplier_;
+    positivity::apply_pair_step(d.slack_, d.d_slack_, ls_cfg.alpha_primal,
+                                d.multiplier_, d.d_multiplier_, ls_cfg.dual_alpha_for_ineq());
     if (d.ipm_cfg->ipm_accept_corrector()) {
         d.slack_ = d.slack_.array().max(1e-20);
         d.multiplier_ = d.multiplier_.array().max(1e-20);

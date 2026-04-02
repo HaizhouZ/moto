@@ -1,5 +1,6 @@
 #define MOTO_NS_RICCATI_IMPL
 #include <moto/solver/ns_riccati/generic_solver.hpp>
+#include <moto/solver/restoration/resto_runtime.hpp>
 
 #include <moto/utils/field_conversion.hpp>
 
@@ -16,11 +17,13 @@ void generic_solver::fwd_linear_rollout(ns_riccati_data *cur, ns_riccati_data *n
 void generic_solver::finalize_dual_newton_step(ns_riccati_data *cur) {
     auto &d = *cur;
     auto &nsp = d.nsp_;
+    const bool restoration_active =
+        dynamic_cast<ns_riccati_data::restoration_aux_data *>(d.aux_.get()) != nullptr;
     d.d_lbd_f.noalias() = -d.Q_y.transpose() - d.V_yy * d.trial_prim_step[__y];
     d.Q_yx.times<false>(d.trial_prim_step[__x], d.d_lbd_f);
     d.Q_yx_mod.times<false>(d.trial_prim_step[__x], d.d_lbd_f);
     // update hard constraint multipliers
-    if (d.ncstr > 0 && d.rank_status_ != rank_status::unconstrained) {
+    if (!restoration_active && d.ncstr > 0 && d.rank_status_ != rank_status::unconstrained) {
         // LU.solve([rhs])
         d.d_lbd_s_c_pre_solve.noalias() = -d.Q_u.transpose();
         d.Q_ux.times<false>(d.trial_prim_step[__x], d.d_lbd_s_c_pre_solve);
@@ -63,6 +66,9 @@ void generic_solver::finalize_dual_newton_step(ns_riccati_data *cur) {
         }
     }
     cur->apply_jac_y_inverse_transpose(d.d_lbd_f, d.trial_dual_step[__dyn]);
+    if (restoration_active) {
+        restoration::finalize_newton_step(*cur);
+    }
 }
 void generic_solver::finalize_primal_step(ns_riccati_data *cur) {
     auto &d = *cur;

@@ -135,6 +135,22 @@ void ns_sqp::reset_profile() {
     profile_report_ = {};
 }
 
+void ns_sqp::assemble_restoration_problem(data *cur, node_data::update_mode mode) {
+    const bool old_disable = settings.ipm.disable_corrections;
+    settings.ipm.disable_corrections = true;
+    cur->update_approximation(mode, false);
+    settings.ipm.disable_corrections = old_disable;
+    solver::restoration::prepare_current_constraint_stack(*cur);
+    solver::restoration::initialize_stage(*cur);
+    solver::restoration::assemble_resto_base_problem(
+        *cur,
+        mode != node_data::update_mode::eval_val,
+        settings.restoration.rho_u,
+        settings.restoration.rho_y,
+        &cur->primal_prox_hess_diagonal_[__u],
+        &cur->primal_prox_hess_diagonal_[__y]);
+}
+
 ns_sqp::kkt_info ns_sqp::initialize() {
     auto total_profile = profile_scope(profile_phase::initialize_total);
     auto &graph = solver_graph();
@@ -194,7 +210,9 @@ void ns_sqp::post_factorization_correction_step() {
 }
 void ns_sqp::finalize_correction(data *d) {
     riccati_solver_->finalize_primal_step_correction(d);
-    solver::ineq_soft::finalize_newton_step(d);
+    if (use_normal_soft_phase()) {
+        solver::ineq_soft::finalize_newton_step(d);
+    }
 }
 
 void ns_sqp::reset_ls_workers() {
@@ -206,12 +224,20 @@ void ns_sqp::refresh_ls_bounds() {
     reset_ls_workers();
     auto &graph = solver_graph();
     graph.for_each_parallel([this](size_t tid, data *d) {
-        solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
+        if (use_normal_soft_phase()) {
+            solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
+        }
+        if (in_restoration_phase()) {
+            solver::restoration::update_ls_bounds(*d, &setting_per_thread[tid]);
+        }
     });
     finalize_ls_bound_and_set_to_max();
 }
 
 void ns_sqp::ineq_constr_correction(iteration_context &ctx) {
+    if (in_restoration_phase()) {
+        return;
+    }
     if (settings.ipm.ipm_enable_affine_step()) {
         auto &graph = solver_graph();
         graph.for_each_parallel([this](size_t tid, data *d) {
@@ -252,6 +278,9 @@ void ns_sqp::ineq_constr_correction(iteration_context &ctx) {
     }
 }
 void ns_sqp::ineq_constr_prediction() {
+    if (in_restoration_phase()) {
+        return;
+    }
     if (settings.ipm.ipm_enable_affine_step()) { // compute the affine step, no need to finalize dual step
         settings.ipm.ipm_start_predictor_computation();
     }
@@ -302,8 +331,18 @@ void ns_sqp::solve_direction(iteration_context &ctx, bool do_scaling, bool gauss
     detail_timed_block_start("finalize_primal_step");
     graph.for_each_parallel([this](size_t tid, data *d) {
         riccati_solver_->finalize_primal_step(d);
-        solver::ineq_soft::finalize_newton_step(d);
-        solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
+        if (use_normal_soft_phase()) {
+            solver::ineq_soft::finalize_newton_step(d);
+        }
+        if (in_restoration_phase()) {
+            solver::restoration::finalize_newton_step(*d);
+        }
+        if (use_normal_soft_phase()) {
+            solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
+        }
+        if (in_restoration_phase()) {
+            solver::restoration::update_ls_bounds(*d, &setting_per_thread[tid]);
+        }
     });
     detail_timed_block_end("finalize_primal_step");
     }
@@ -341,7 +380,12 @@ void ns_sqp::prepare_globalization(filter_linesearch_data &ls, iteration_context
     unscale_duals();
     graph.for_each_parallel([this](data *d) {
         d->backup_trial_state();
-        solver::ineq_soft::backup_trial_state(d);
+        if (use_normal_soft_phase()) {
+            solver::ineq_soft::backup_trial_state(d);
+        }
+        if (in_restoration_phase()) {
+            solver::restoration::backup_trial_state(*d);
+        }
     });
     if (ctx.mu_changed) {
         ls.points.clear(); // the QP objective changed, so old filter points are no longer comparable
@@ -357,11 +401,23 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
     detail_timed_block_start("apply_affine_step");
         graph.for_each_parallel([this](data *d) {
             d->restore_trial_state();
-            solver::ineq_soft::restore_trial_state(d);
-        riccati_solver_->apply_affine_step(d, &settings);
-        solver::ineq_soft::apply_affine_step(d, &settings);
-        d->update_approximation(node_data::update_mode::eval_val, true);
-    });
+            if (use_normal_soft_phase()) {
+                solver::ineq_soft::restore_trial_state(d);
+            }
+            if (in_restoration_phase()) {
+                solver::restoration::restore_trial_state(*d);
+            }
+            riccati_solver_->apply_affine_step(d, &settings);
+            if (use_normal_soft_phase()) {
+                solver::ineq_soft::apply_affine_step(d, &settings);
+            }
+            if (in_restoration_phase()) {
+                solver::restoration::apply_affine_step(*d, &settings);
+                assemble_restoration_problem(d, node_data::update_mode::eval_val);
+            } else {
+                d->update_approximation(node_data::update_mode::eval_val, true);
+            }
+        });
     detail_timed_block_end("apply_affine_step");
     }
 
@@ -370,7 +426,11 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
     detail_timed_block_start("update_res_stat");
     if (settings.ls.method == linesearch_setting::search_method::merit_backtracking) {
         graph.for_each_parallel([this](data *d) {
-            d->update_approximation(node_data::update_mode::eval_raw_derivatives, true);
+            if (in_restoration_phase()) {
+                assemble_restoration_problem(d, node_data::update_mode::eval_raw_derivatives);
+            } else {
+                d->update_approximation(node_data::update_mode::eval_raw_derivatives, true);
+            }
         });
         ctx.trial = compute_kkt_info();
     } else {
@@ -389,7 +449,11 @@ void ns_sqp::accept_trial_point(filter_linesearch_data &ls, iteration_context &c
         detail_timed_block_start("update_approx_accepted");
         if (settings.ls.method != linesearch_setting::search_method::merit_backtracking) {
             graph.for_each_parallel([this](data *d) {
-                d->update_approximation(node_data::update_mode::eval_raw_derivatives, true);
+                if (in_restoration_phase()) {
+                    assemble_restoration_problem(d, node_data::update_mode::eval_raw_derivatives);
+                } else {
+                    d->update_approximation(node_data::update_mode::eval_raw_derivatives, true);
+                }
             });
             ctx.trial = compute_kkt_info();
         }
@@ -503,6 +567,29 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
 
             if (verbose) {
                 print_stats(kkt_last);
+            }
+
+            const scalar_t alpha_min_trigger =
+                std::max(settings.ls.primal.alpha_min,
+                         settings.restoration.alpha_min_factor * std::max(ls.initial_alpha_primal, scalar_t(1e-12)));
+            const bool tiny_step_trigger =
+                action == line_search_action::failure &&
+                ls.failure_reason == filter_linesearch_per_iter_data::failure_reason_t::tiny_step &&
+                settings.restoration.enabled &&
+                kkt_last.inf_prim_res > settings.prim_tol &&
+                settings.ls.alpha_primal <= alpha_min_trigger;
+
+            if (tiny_step_trigger) {
+                kkt_last = restoration_update(kkt_last, ls);
+                ls.reset_per_iter_data();
+                if (verbose) {
+                    print_stats(kkt_last);
+                }
+                if (kkt_last.result == iter_result_t::success ||
+                    kkt_last.result == iter_result_t::restoration_failed ||
+                    kkt_last.result == iter_result_t::infeasible_stationary) {
+                    break;
+                }
             }
 
             if (kkt_last.inf_dual_res < settings.dual_tol &&
@@ -658,6 +745,129 @@ void ns_sqp::print_dual_res_breakdown() {
     }
 }
 ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
+    if (in_restoration_phase()) {
+        kkt_info kkt;
+        scalar_t dual_res_l1 = 0.;
+        size_t n_dual_res = 0;
+        auto &graph = solver_graph();
+        const auto active_grad = [](const node_data *n, field_t pf) {
+            row_vector out = n->dense().lag_jac_[pf];
+            out += n->dense().lag_jac_corr_[pf];
+            return out;
+        };
+        for (auto n : graph.flatten_nodes()) {
+            auto *aux = dynamic_cast<ns_riccati_data::restoration_aux_data *>(n->aux_.get());
+            if (aux == nullptr) {
+                continue;
+            }
+            kkt.cost += n->dense().cost_;
+            if (aux->elastic_eq.dim() > 0) {
+                kkt.cost += settings.restoration.rho_eq * (aux->elastic_eq.p.sum() + aux->elastic_eq.n.sum());
+                kkt.cost -= aux->mu_bar *
+                            (aux->elastic_eq.p.array().max(scalar_t(1e-16)).log().sum() +
+                             aux->elastic_eq.n.array().max(scalar_t(1e-16)).log().sum());
+                kkt.obj_fullstep_dec += settings.restoration.rho_eq * (aux->elastic_eq.d_p.sum() + aux->elastic_eq.d_n.sum());
+                kkt.obj_fullstep_dec -= aux->mu_bar *
+                                        ((aux->elastic_eq.d_p.array() / aux->elastic_eq.p.array().max(scalar_t(1e-16))).sum() +
+                                         (aux->elastic_eq.d_n.array() / aux->elastic_eq.n.array().max(scalar_t(1e-16))).sum());
+                kkt.inf_prim_res = std::max(kkt.inf_prim_res, aux->elastic_eq.r_c.cwiseAbs().maxCoeff());
+                kkt.prim_res_l1 += aux->elastic_eq.r_c.lpNorm<1>();
+                kkt.inf_dual_res = std::max(kkt.inf_dual_res, std::max(aux->elastic_eq.r_p.cwiseAbs().maxCoeff(),
+                                                                        aux->elastic_eq.r_n.cwiseAbs().maxCoeff()));
+                kkt.inf_comp_res = std::max(kkt.inf_comp_res, std::max(aux->elastic_eq.r_s_p.cwiseAbs().maxCoeff(),
+                                                                        aux->elastic_eq.r_s_n.cwiseAbs().maxCoeff()));
+            }
+            if (aux->elastic_ineq.dim() > 0) {
+                kkt.cost += settings.restoration.rho_ineq * (aux->elastic_ineq.p.sum() + aux->elastic_ineq.n.sum());
+                kkt.cost -= aux->mu_bar *
+                            (aux->elastic_ineq.t.array().max(scalar_t(1e-16)).log().sum() +
+                             aux->elastic_ineq.p.array().max(scalar_t(1e-16)).log().sum() +
+                             aux->elastic_ineq.n.array().max(scalar_t(1e-16)).log().sum());
+                kkt.obj_fullstep_dec += settings.restoration.rho_ineq * (aux->elastic_ineq.d_p.sum() + aux->elastic_ineq.d_n.sum());
+                kkt.obj_fullstep_dec -= aux->mu_bar *
+                                        ((aux->elastic_ineq.d_t.array() / aux->elastic_ineq.t.array().max(scalar_t(1e-16))).sum() +
+                                         (aux->elastic_ineq.d_p.array() / aux->elastic_ineq.p.array().max(scalar_t(1e-16))).sum() +
+                                         (aux->elastic_ineq.d_n.array() / aux->elastic_ineq.n.array().max(scalar_t(1e-16))).sum());
+                kkt.inf_prim_res = std::max(kkt.inf_prim_res, aux->elastic_ineq.r_d.cwiseAbs().maxCoeff());
+                kkt.prim_res_l1 += aux->elastic_ineq.r_d.lpNorm<1>();
+                kkt.inf_dual_res = std::max(kkt.inf_dual_res, std::max({aux->elastic_ineq.r_t.cwiseAbs().maxCoeff(),
+                                                                        aux->elastic_ineq.r_p.cwiseAbs().maxCoeff(),
+                                                                        aux->elastic_ineq.r_n.cwiseAbs().maxCoeff()}));
+                kkt.inf_comp_res = std::max(kkt.inf_comp_res, std::max({aux->elastic_ineq.r_s_t.cwiseAbs().maxCoeff(),
+                                                                        aux->elastic_ineq.r_s_p.cwiseAbs().maxCoeff(),
+                                                                        aux->elastic_ineq.r_s_n.cwiseAbs().maxCoeff()}));
+            }
+            kkt.inf_prim_res = std::max(kkt.inf_prim_res, n->dense().approx_[__dyn].v_.size() > 0 ? n->dense().approx_[__dyn].v_.cwiseAbs().maxCoeff() : scalar_t(0.));
+            kkt.prim_res_l1 += n->dense().approx_[__dyn].v_.lpNorm<1>();
+            if (update_dual_res && n->dense().lag_jac_[__u].size() > 0) {
+                const row_vector grad_u = active_grad(n, __u);
+                kkt.inf_dual_res = std::max(kkt.inf_dual_res, grad_u.cwiseAbs().maxCoeff());
+                dual_res_l1 += grad_u.cwiseAbs().sum();
+                n_dual_res += static_cast<size_t>(grad_u.size());
+            }
+            for (auto cf : constr_fields) {
+                const auto &lam = n->dense().dual_[cf];
+                if (lam.size() > 0) {
+                    const scalar_t lam_inf = lam.cwiseAbs().maxCoeff();
+                    kkt.max_dual_norm = std::max(kkt.max_dual_norm, lam_inf);
+                    if (cf == __dyn || cf == __eq_x || cf == __eq_xu) {
+                        kkt.max_eq_dual_norm = std::max(kkt.max_eq_dual_norm, lam_inf);
+                    } else if (cf == __ineq_x || cf == __ineq_xu) {
+                        kkt.max_ineq_dual_norm = std::max(kkt.max_ineq_dual_norm, lam_inf);
+                    }
+                }
+            }
+            for (auto f : primal_fields) {
+                if (n->trial_prim_step[f].size() > 0) {
+                    kkt.inf_prim_step = std::max(kkt.inf_prim_step, n->trial_prim_step[f].cwiseAbs().maxCoeff());
+                    kkt.obj_fullstep_dec += n->dense().cost_jac_[f].dot(n->trial_prim_step[f]);
+                }
+            }
+            for (auto f : constr_fields) {
+                if (n->trial_dual_step[f].size() > 0) {
+                    const scalar_t step = n->trial_dual_step[f].cwiseAbs().maxCoeff();
+                    kkt.inf_dual_step = std::max(kkt.inf_dual_step, step);
+                    if (in_field(f, ineq_constr_fields)) {
+                        kkt.inf_ineq_dual_step = std::max(kkt.inf_ineq_dual_step, step);
+                    } else {
+                        kkt.inf_eq_dual_step = std::max(kkt.inf_eq_dual_step, step);
+                        if (f == __dyn) kkt.inf_dyn_dual_step = std::max(kkt.inf_dyn_dual_step, step);
+                        if (f == __eq_x) kkt.inf_eq_x_dual_step = std::max(kkt.inf_eq_x_dual_step, step);
+                        if (f == __eq_xu) kkt.inf_eq_xu_dual_step = std::max(kkt.inf_eq_xu_dual_step, step);
+                    }
+                }
+            }
+        }
+        if (update_dual_res) {
+            graph.apply_forward(
+                [&](node_data *cur, node_data *next) {
+                    if (next != nullptr) [[likely]] {
+                        static row_vector tmp;
+                        tmp.conservativeResize(next->dense().lag_jac_[__x].cols());
+                        tmp.noalias() = active_grad(next, __x) *
+                                            utils::permutation_from_y_to_x(&cur->problem(), &next->problem()) +
+                                        active_grad(cur, __y);
+                        if (tmp.size() > 0) {
+                            kkt.inf_dual_res = std::max(kkt.inf_dual_res, tmp.cwiseAbs().maxCoeff());
+                            dual_res_l1 += tmp.cwiseAbs().sum();
+                            n_dual_res += static_cast<size_t>(tmp.size());
+                        }
+                    } else if (cur->dense().lag_jac_[__y].size() > 0) {
+                        const row_vector grad_y = active_grad(cur, __y);
+                        kkt.inf_dual_res = std::max(kkt.inf_dual_res, grad_y.cwiseAbs().maxCoeff());
+                        dual_res_l1 += grad_y.cwiseAbs().sum();
+                        n_dual_res += static_cast<size_t>(grad_y.size());
+                    }
+                },
+                true);
+            if (n_dual_res > 0) {
+                kkt.avg_dual_res = dual_res_l1 / static_cast<scalar_t>(n_dual_res);
+            }
+        }
+        kkt.objective = kkt.cost;
+        return kkt;
+    }
+
     kkt_info kkt;
     field_t max_field;
     vector max_step;

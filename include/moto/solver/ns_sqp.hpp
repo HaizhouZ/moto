@@ -8,6 +8,7 @@
 #include <moto/solver/linesearch_config.hpp>
 #include <moto/solver/ns_riccati/generic_solver.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
+#include <moto/solver/restoration/resto_runtime.hpp>
 #include <array>
 #include <chrono>
 #include <functional>
@@ -144,6 +145,20 @@ struct ns_sqp {
         scalar_t mu_monotone_factor = 0.2;              ///< factor for monotonic decrease of mu, smaller -> faster decrease
     };
 
+    struct restoration_settings {
+        bool enabled = true;
+        size_t max_iter = 50;
+        scalar_t rho_u = 1e-4;
+        scalar_t rho_y = 1e-4;
+        scalar_t rho_eq = 1000.0;
+        scalar_t rho_ineq = 1000.0;
+        scalar_t lambda_reg = 1e-8;
+        scalar_t restoration_improvement_frac = 0.9;
+        scalar_t alpha_min_factor = 5e-2;
+        scalar_t bound_mult_reset_threshold = 1e4;
+        scalar_t constr_mult_reset_threshold = 0.0;
+    };
+
     struct settings_t : public workspace_data_collection<linesearch_setting, ipm_config> {
         using base = workspace_data_collection<linesearch_setting, ipm_config>;
         using worker = typename base::worker;
@@ -158,6 +173,7 @@ struct ns_sqp {
 
         iterative_refinement_setting rf;
         scaling_settings scaling;
+        restoration_settings restoration;
 
         bool no_except = false;
 
@@ -168,6 +184,7 @@ struct ns_sqp {
         friend class ns_sqp;
         bool verbose = true;
         size_t n_worker = MAX_THREADS; ///< number of worker threads
+        bool in_restoration = false;
         bool has_ineq_soft = false;    ///< whether the problem has inequality constraints (used to adjust printouts and possibly other settings)
         bool initialized = false;     ///< whether the settings have been initialized based on the problem (used to trigger one-time initialization in the first iteration, e.g. setting initial mu based on initial residuals)
     } settings;
@@ -202,7 +219,13 @@ struct ns_sqp {
         unknown = 0,
         success,               ///< converged to a KKT point within tolerances
         exceed_max_iter,       ///< reached maximum number of iterations without convergence
+        restoration_failed,    ///< restoration was triggered but failed to make sufficient progress
         infeasible_stationary, ///< reached an infeasible stationary point (e.g. due to LICQ failure) and cannot make progress
+    };
+
+    enum class iteration_phase : uint8_t {
+        normal,
+        restoration,
     };
 
     struct kkt_info {
@@ -260,6 +283,8 @@ struct ns_sqp {
     impl::data_mgr mem_;
 
   private:
+    struct filter_linesearch_data;
+
     solver_graph_type &solver_graph() {
         if (!active_model_graph_) {
             throw std::runtime_error("ns_sqp has no active model graph; call create_graph() first");
@@ -345,6 +370,8 @@ struct ns_sqp {
     void print_stats(const kkt_info &info);
     /// compute the kkt information of the current solution
     kkt_info compute_kkt_info(bool update_dual_res = true);
+    kkt_info restoration_update(const kkt_info &kkt_before, filter_linesearch_data &ls);
+    void assemble_restoration_problem(data *d, node_data::update_mode mode);
     /// perform iterative refinement to improve the solution accuracy, will modify the current solution in place
     void iterative_refinement();
     /// update the line search bounds with the (probably updated) max value
@@ -413,6 +440,14 @@ struct ns_sqp {
             scalar_t alpha_primal = 0.;
             scalar_t alpha_dual = 0.;
         } best_merit_trial;
+
+        void augment_filter_for_restoration_start(const kkt_info &reference_kkt, settings_t &settings) {
+            points.push_back(point{
+                .prim_res = (1.0 - settings.ls.primal_gamma) * reference_kkt.prim_res_l1,
+                .dual_res = reference_kkt.inf_dual_res,
+                .objective = reference_kkt.objective - settings.ls.dual_gamma * reference_kkt.prim_res_l1,
+            });
+        }
     };
 
     enum class line_search_action {
@@ -425,6 +460,7 @@ struct ns_sqp {
     struct iteration_context {
         kkt_info current;
         kkt_info trial;
+        iteration_phase phase = iteration_phase::normal;
         line_search_action action = line_search_action::accept;
         bool mu_changed = false;
     };
@@ -433,6 +469,8 @@ struct ns_sqp {
     line_search_action filter_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
     line_search_action merit_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
     bool outer_filter_accepts(const filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &reference_kkt);
+    bool in_restoration_phase() const { return settings.in_restoration; }
+    bool use_normal_soft_phase() const { return !settings.in_restoration; }
 
     void second_order_correction();
     void ineq_constr_correction(iteration_context &ctx);
