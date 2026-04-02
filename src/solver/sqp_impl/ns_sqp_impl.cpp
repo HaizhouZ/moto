@@ -766,6 +766,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
             if (aux == nullptr) {
                 continue;
             }
+            const auto reduced_res = solver::restoration::compute_reduced_residual(*n);
             kkt.cost += n->dense().cost_;
             if (aux->elastic_eq.dim() > 0) {
                 kkt.cost += settings.restoration.rho_eq * (aux->elastic_eq.p.sum() + aux->elastic_eq.n.sum());
@@ -776,12 +777,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
                 kkt.obj_fullstep_dec -= aux->mu_bar *
                                         ((aux->elastic_eq.d_p.array() / aux->elastic_eq.p.array().max(scalar_t(1e-16))).sum() +
                                          (aux->elastic_eq.d_n.array() / aux->elastic_eq.n.array().max(scalar_t(1e-16))).sum());
-                kkt.inf_prim_res = std::max(kkt.inf_prim_res, aux->elastic_eq.r_c.cwiseAbs().maxCoeff());
                 kkt.prim_res_l1 += aux->elastic_eq.r_c.lpNorm<1>();
-                kkt.inf_dual_res = std::max(kkt.inf_dual_res, std::max(aux->elastic_eq.r_p.cwiseAbs().maxCoeff(),
-                                                                        aux->elastic_eq.r_n.cwiseAbs().maxCoeff()));
-                kkt.inf_comp_res = std::max(kkt.inf_comp_res, std::max(aux->elastic_eq.r_s_p.cwiseAbs().maxCoeff(),
-                                                                        aux->elastic_eq.r_s_n.cwiseAbs().maxCoeff()));
             }
             if (aux->elastic_ineq.dim() > 0) {
                 kkt.cost += settings.restoration.rho_ineq * (aux->elastic_ineq.p.sum() + aux->elastic_ineq.n.sum());
@@ -794,19 +790,15 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
                                         ((aux->elastic_ineq.d_t.array() / aux->elastic_ineq.t.array().max(scalar_t(1e-16))).sum() +
                                          (aux->elastic_ineq.d_p.array() / aux->elastic_ineq.p.array().max(scalar_t(1e-16))).sum() +
                                          (aux->elastic_ineq.d_n.array() / aux->elastic_ineq.n.array().max(scalar_t(1e-16))).sum());
-                kkt.inf_prim_res = std::max(kkt.inf_prim_res, aux->elastic_ineq.r_d.cwiseAbs().maxCoeff());
                 kkt.prim_res_l1 += aux->elastic_ineq.r_d.lpNorm<1>();
-                kkt.inf_dual_res = std::max(kkt.inf_dual_res, std::max({aux->elastic_ineq.r_t.cwiseAbs().maxCoeff(),
-                                                                        aux->elastic_ineq.r_p.cwiseAbs().maxCoeff(),
-                                                                        aux->elastic_ineq.r_n.cwiseAbs().maxCoeff()}));
-                kkt.inf_comp_res = std::max(kkt.inf_comp_res, std::max({aux->elastic_ineq.r_s_t.cwiseAbs().maxCoeff(),
-                                                                        aux->elastic_ineq.r_s_p.cwiseAbs().maxCoeff(),
-                                                                        aux->elastic_ineq.r_s_n.cwiseAbs().maxCoeff()}));
             }
-            kkt.inf_prim_res = std::max(kkt.inf_prim_res, n->dense().approx_[__dyn].v_.size() > 0 ? n->dense().approx_[__dyn].v_.cwiseAbs().maxCoeff() : scalar_t(0.));
             kkt.prim_res_l1 += n->dense().approx_[__dyn].v_.lpNorm<1>();
+            kkt.inf_prim_res = std::max(kkt.inf_prim_res, reduced_res.inf_primal);
+            kkt.inf_dual_res = std::max(kkt.inf_dual_res, std::max(reduced_res.eq_local.inf_stat,
+                                                                    reduced_res.ineq_local.inf_stat));
+            kkt.inf_comp_res = std::max(kkt.inf_comp_res, reduced_res.inf_comp);
             if (update_dual_res && n->dense().lag_jac_[__u].size() > 0) {
-                const row_vector grad_u = active_grad(n, __u);
+                const row_vector grad_u = reduced_res.w_stationarity[__u];
                 kkt.inf_dual_res = std::max(kkt.inf_dual_res, grad_u.cwiseAbs().maxCoeff());
                 dual_res_l1 += grad_u.cwiseAbs().sum();
                 n_dual_res += static_cast<size_t>(grad_u.size());
