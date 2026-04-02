@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+#include <moto/ocp/impl/node_data.hpp>
 #include <moto/solver/ipm/positivity_step.hpp>
 #include <moto/solver/restoration/resto_local_kkt.hpp>
 #include <moto/solver/restoration/resto_overlay.hpp>
@@ -136,6 +137,72 @@ TEST_CASE("restoration overlay problem keeps dyn and replaces non-dynamics with 
     const auto *ineq_overlay = dynamic_cast<const resto_ineq_elastic_ipm_constr *>(resto->exprs(__ineq_xu).front().get());
     REQUIRE(ineq_overlay != nullptr);
     REQUIRE(ineq_overlay->source()->name() == iq->name());
+}
+
+TEST_CASE("restoration overlay dual sync keeps hard constraints aligned") {
+    auto prob = ocp::create();
+
+    auto [x, y] = sym::states("x", 2);
+    auto u = sym::inputs("u", 1);
+
+    prob->add(*x);
+    prob->add(*u);
+    prob->add(*y);
+
+    auto eq = constr(new generic_constr("eq", approx_order::first, 1));
+    eq->field_hint().is_eq = true;
+    dynamic_cast<generic_func &>(*eq).add_argument(x);
+    eq->value = [](func_approx_data &d) { d.v_(0) = d[0](0); };
+    eq->jacobian = [](func_approx_data &d) { d.jac_[0](0, 0) = 1.; };
+    prob->add(*eq);
+
+    auto eq_xu = constr(new generic_constr("eq_xu", approx_order::first, 1));
+    eq_xu->field_hint().is_eq = true;
+    dynamic_cast<generic_func &>(*eq_xu).add_argument(u);
+    eq_xu->value = [](func_approx_data &d) { d.v_(0) = d[0](0); };
+    eq_xu->jacobian = [](func_approx_data &d) { d.jac_[0](0, 0) = 1.; };
+    prob->add(*eq_xu);
+
+    auto dyn = constr(new generic_constr("dyn", approx_order::first, 2, __dyn));
+    dynamic_cast<generic_func &>(*dyn).add_argument(x);
+    dynamic_cast<generic_func &>(*dyn).add_argument(y);
+    dyn->value = [](func_approx_data &d) { d.v_ = d[1] - d[0]; };
+    dyn->jacobian = [](func_approx_data &d) {
+        d.jac_[0].setZero();
+        d.jac_[1].setZero();
+        d.jac_[0].diagonal().array() = -1.;
+        d.jac_[1].diagonal().array() = 1.;
+    };
+    prob->add(*dyn);
+
+    prob->wait_until_ready();
+
+    const auto resto = build_restoration_overlay_problem(
+        prob,
+        restoration_overlay_settings{
+            .rho_u = 1e-4,
+            .rho_y = 1e-4,
+            .rho_eq = 10.0,
+            .rho_ineq = 20.0,
+            .lambda_reg = 1e-8,
+        });
+
+    node_data outer(prob);
+    node_data overlay(resto);
+
+    outer.dense().dual_[__dyn] = vector::LinSpaced(outer.dense().dual_[__dyn].size(), 1., scalar_t(outer.dense().dual_[__dyn].size()));
+    outer.dense().dual_[__eq_x] = vector::Constant(outer.dense().dual_[__eq_x].size(), 3.0);
+    outer.dense().dual_[__eq_xu] = vector::Constant(outer.dense().dual_[__eq_xu].size(), -2.0);
+
+    overlay.dense().dual_[__dyn].setZero();
+    overlay.dense().dual_[__eq_x].setZero();
+    overlay.dense().dual_[__eq_xu].setZero();
+
+    sync_restoration_overlay_duals(outer, overlay);
+
+    REQUIRE(overlay.dense().dual_[__dyn].isApprox(outer.dense().dual_[__dyn]));
+    REQUIRE(overlay.dense().dual_[__eq_x].isApprox(outer.dense().dual_[__eq_x]));
+    REQUIRE(overlay.dense().dual_[__eq_xu].isApprox(outer.dense().dual_[__eq_xu]));
 }
 
 TEST_CASE("restoration inequality local KKT recovery satisfies regularized linearization") {

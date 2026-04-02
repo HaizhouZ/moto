@@ -486,6 +486,12 @@ void sync_restoration_overlay_primal(node_data &outer, node_data &resto) {
 }
 
 void sync_restoration_overlay_duals(node_data &outer, node_data &resto) {
+    for (auto field : hard_constr_fields) {
+        if (resto.dense().dual_[field].size() == 0 || outer.dense().dual_[field].size() == 0) {
+            continue;
+        }
+        resto.dense().dual_[field] = outer.dense().dual_[field];
+    }
     resto.for_each(__eq_x_soft, [&](const resto_eq_elastic_constr &overlay, resto_eq_elastic_constr::approx_data &d) {
         copy_dual_slice(d.multiplier_, outer, overlay);
     });
@@ -498,7 +504,6 @@ void sync_restoration_overlay_duals(node_data &outer, node_data &resto) {
     resto.for_each(__ineq_xu, [&](const resto_ineq_elastic_ipm_constr &overlay, resto_ineq_elastic_ipm_constr::approx_data &d) {
         copy_dual_slice(d.multiplier_, outer, overlay);
     });
-    resto.dense().dual_[__dyn] = outer.dense().dual_[__dyn];
 }
 
 } // namespace moto::solver::restoration
