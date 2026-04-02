@@ -58,7 +58,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     for (size_t i_rest = 0; i_rest < max_resto_iters; ++i_rest) {
         line_search_action action = sqp_iter(rls, kkt_rest,
                                              /*do_scaling=*/false,
-                                             /*do_refinement=*/false,
+                                             /*do_refinement=*/true,
                                              /*gauss_newton=*/false);
         kkt_rest.num_iter = kkt_before.num_iter + i_rest + 1;
         kkt_rest.ls_steps = rls.step_cnt;
