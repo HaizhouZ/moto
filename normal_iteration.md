@@ -4,7 +4,7 @@ This document summarizes what the current `normal` SQP iteration in `moto` actua
 
 It is intentionally narrower than [AGENTS.md](/home/harper/Documents/moto/AGENTS.md):
 - this file focuses on the active normal iteration contract
-- especially what system is solved, what residual iterative refinement reduces, and what `print_stats` reports
+- especially what system is solved, what residual iterative refinement reduces, and what `compute_kkt_info()` / `print_stats` report
 
 ## 1. Three Different Problems Must Be Distinguished
 
@@ -181,7 +181,7 @@ Per stage it forms:
 from:
 
 - `base_lag_grad_backup`
-- `+` the stage-local reduced self-block terms already exposed in solver coordinates
+- `+` the stage-local primal Hessian action in original `x/u/y` coordinates
   - `Q_uu * delta u`
   - `Q_yy * delta y`
   - `Q_xx * delta x`
@@ -198,19 +198,27 @@ So the normal refinement stopping metric is effectively:
 - `u` stationarity residual at the current stage
 - `y` stationarity residual after adding the downstream `x` contribution
 
-That is the practical solver-side reduced stationarity residual of the solved normal system.
+That is the practical solver-side stationarity residual of the original normal-phase
+Lagrangian, expressed in the solver's `x/u/y` stage coordinates.
 
 It is important not to overstate this:
 
 - this is not assembled as a textbook full-space KKT residual
-- it is the residual of the solver's reduced first-order system in the coordinates used by correction solves
+- it is not the Riccati internal `z`-space residual either
+- it is the original-Lagrangian stationarity residual after the Newton step has been
+  recovered back into stage coordinates, with the `next.x -> cur.y` coupling folded in explicitly
 
-This means the IR target is closest to the Riccati subproblem layer, not the raw original NLP layer.
+So the right interpretation is:
+
+- solve path:
+  Riccati/nullspace-reduced subproblem
+- IR target:
+  original-phase Lagrangian stationarity residual in recovered `x/u/y` coordinates
 
 This is the key alignment point for restoration:
 
-- normal IR reduces the residual of the same reduced first-order correction model used by the solver
-- it does not reduce some separate diagnostic residual
+- normal IR does not refine a separate Riccati-internal residual
+- it refines the recovered original-phase stationarity residual that corresponds to the current Newton step
 
 ## 5. How Correction Solves Work In Normal Mode
 
@@ -232,10 +240,15 @@ and
 
 This is the normal phase's correction contract:
 
-- the correction RHS is expressed in the same solver coordinates as the reduced first-order correction system
+- the correction RHS is expressed in recovered stage coordinates (`__u`, `__y`, with cross-stage `__x -> __y` folding handled by rollout)
 - in practice the normal RHS is loaded only on `__u` and `__y`; `__x` is carried through the rollout coupling rather than loaded directly
 - the correction solve reuses the same Riccati/nullspace data from the main solve rather than rebuilding a second factorization
 - the correction is not a separate algorithm
+
+This means normal IR sits between two layers:
+
+- the residual being reduced is an original-Lagrangian stationarity residual
+- the linear operator used to reduce it is still the already-factorized Riccati/nullspace solve
 
 ## 6. What Globalization Evaluates In Normal Mode
 
@@ -279,7 +292,7 @@ This is much closer to the original barrierized phase objective than to the inte
 So in normal mode:
 
 - solve system: Riccati reduced subproblem
-- refinement residual: reduced stationarity residual of the solver correction model
+- refinement residual: recovered original-phase Lagrangian stationarity residual
 - line search objective: public barrierized phase objective / feasibility summary
 
 These pieces are consistent enough to be treated as one phase contract, with one caveat:
@@ -305,9 +318,21 @@ reports:
 - `inf_comp_res`:
   IPM complementarity residual
 
-This is not the same object as:
+This is the public original-problem summary for the current normal phase.
+
+More precisely, it is evaluated on the current iterate of the barrierized normal phase problem:
+
+- original running cost / barrier objective
+- original hard/soft/inequality residual summaries
+- original phase complementarity summary
+- original phase stationarity summary
+
+Implementation-wise, it may reuse solver data structures and folded cross-stage terms, but its semantic target is still the original normal phase problem, not the internal Riccati subproblem.
+
+This is therefore not the same object as:
 
 - the raw original NLP residual vector
+- the stagewise Riccati reduced linear system
 - or the internal IR correction residual vector
 
 It is the public phase summary used for convergence checks and logging.
@@ -355,29 +380,37 @@ If restoration is to align mathematically with normal mode, it must satisfy the 
 3. solve that reduced system with Riccati
 4. compute correction RHS from that same reduced system's residual
 5. run IR against that same residual
-6. print and accept using clearly-labeled public summaries of that phase
+6. separately define `compute_kkt_info()` / `print_stats()` as public summaries of the phase original problem
+7. run globalization using clearly-labeled public objective / feasibility quantities for that phase
 
 The most important normal invariant is:
 
-- **the solved Riccati subproblem and the IR correction residual refer to the same internal phase object**
+- **the solve path uses the Riccati/nullspace-reduced system, but the IR residual is the recovered original-phase Lagrangian stationarity residual in stage coordinates**
 
 A second, equally important invariant is:
 
-- **the public `compute_kkt_info()` / `print_stats()` summaries are derived from the same phase, but they are not literally the same internal vector object as the IR residual**
+- **the public `compute_kkt_info()` / `print_stats()` summaries are derived from the same phase original problem, but they are not literally the same internal vector object as the IR residual**
 
-For normal, that object is the reduced barrier-QP system.
+For normal:
+
+- internal solve object: the reduced barrier-QP system after local IPM/PMM reductions
+- internal IR residual object: the recovered barrier-phase original-Lagrangian stationarity residual
+- public `compute_kkt_info()` object: the barrierized original normal phase problem at the current iterate
 
 For restoration, the target should be:
 
-- the reduced KKT system of the restoration Lagrangian after local elastic condensation
+- internal solve object: the reduced KKT system of the restoration Lagrangian after local elastic condensation
+- internal IR residual object: the recovered restoration-Lagrangian stationarity residual
+- public `compute_kkt_info()` object: the restoration phase problem summary at the current iterate
 
 ## 10. Immediate Implication For Restoration Work
 
-Before restoration IR is re-enabled safely, it should match normal in this sense:
+For restoration IR to be mathematically safe, it should match normal in this sense:
 
-- its correction RHS must come from the reduced residual of the restoration system
-- its `compute_kkt_info()` must summarize that same reduced residual
-- its line search `resto_res` should use that same quantity
-- its `print_stats` output should describe that same phase object
+- its correction RHS must come from the recovered restoration-Lagrangian stationarity residual
+- its IR stop check must use that same recovered residual
+- its `compute_kkt_info()` must summarize the restoration phase problem, not the reduced Riccati system
+- its `print_stats` output must clearly label those public restoration-phase quantities
+- if line search also uses an internal residual, that quantity must stay explicitly separate from the public restoration KKT summary
 
-Until those four align, restoration may still behave numerically, but it is not yet mathematically aligned with normal mode.
+Until those pieces align, restoration may still behave numerically, but it is not yet mathematically aligned with normal mode.
