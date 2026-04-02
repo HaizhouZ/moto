@@ -4,6 +4,7 @@
 
 #include <moto/solver/ipm/positivity_step.hpp>
 #include <moto/solver/restoration/resto_local_kkt.hpp>
+#include <moto/solver/restoration/resto_overlay.hpp>
 #include <moto/solver/restoration/resto_runtime.hpp>
 
 using namespace moto;
@@ -53,6 +54,88 @@ TEST_CASE("restoration equality local KKT recovery satisfies regularized lineari
     REQUIRE(approx_zero(res_n));
     REQUIRE(approx_zero(res_sp));
     REQUIRE(approx_zero(res_sn));
+}
+
+TEST_CASE("restoration overlay problem keeps dyn and replaces non-dynamics with standard overlays") {
+    auto prob = ocp::create();
+
+    auto [x, y] = sym::states("x", 2);
+    auto u = sym::inputs("u", 1);
+
+    prob->add(*x);
+    prob->add(*u);
+    prob->add(*y);
+
+    auto cost_stage = cost(new generic_cost("stage_cost", approx_order::second));
+    dynamic_cast<generic_func &>(*cost_stage).add_argument(u);
+    cost_stage->value = [](func_approx_data &d) {
+        d.v_(0) += scalar_t(0.5) * d[0].squaredNorm();
+    };
+    cost_stage->jacobian = [](func_approx_data &d) {
+        d.lag_jac_[0].noalias() += d[0].transpose();
+    };
+    cost_stage->hessian = [](func_approx_data &d) {
+        d.lag_hess_[0][0].diagonal().array() += 1.;
+    };
+    prob->add(*cost_stage);
+
+    auto eq = constr(new generic_constr("eq", approx_order::second, 1));
+    eq->field_hint().is_eq = true;
+    dynamic_cast<generic_func &>(*eq).add_argument(x);
+    eq->value = [](func_approx_data &d) { d.v_(0) = d[0](0); };
+    eq->jacobian = [](func_approx_data &d) { d.jac_[0](0, 0) = 1.; };
+    prob->add(*eq);
+
+    auto iq = constr(new generic_constr("iq", approx_order::second, 1));
+    iq->field_hint().is_eq = false;
+    dynamic_cast<generic_func &>(*iq).add_argument(u);
+    iq->value = [](func_approx_data &d) { d.v_(0) = d[0](0) - scalar_t(1.0); };
+    iq->jacobian = [](func_approx_data &d) { d.jac_[0](0, 0) = 1.; };
+    prob->add(*iq);
+
+    auto dyn = constr(new generic_constr("dyn", approx_order::first, 2, __dyn));
+    dynamic_cast<generic_func &>(*dyn).add_argument(x);
+    dynamic_cast<generic_func &>(*dyn).add_argument(u);
+    dynamic_cast<generic_func &>(*dyn).add_argument(y);
+    dyn->value = [](func_approx_data &d) {
+        d.v_ = d[2] - d[0];
+    };
+    dyn->jacobian = [](func_approx_data &d) {
+        d.jac_[0].setZero();
+        d.jac_[2].setZero();
+        d.jac_[0].diagonal().array() = -1.;
+        d.jac_[2].diagonal().array() = 1.;
+    };
+    prob->add(*dyn);
+
+    prob->wait_until_ready();
+
+    const auto resto = build_restoration_overlay_problem(
+        prob,
+        restoration_overlay_settings{
+            .rho_u = 1e-4,
+            .rho_y = 1e-4,
+            .rho_eq = 10.0,
+            .rho_ineq = 20.0,
+            .lambda_reg = 1e-8,
+        });
+
+    REQUIRE(resto->num(__dyn) == 1);
+    REQUIRE(resto->num(__cost) == 1);
+    REQUIRE(resto->num(__eq_x) == 0);
+    REQUIRE(resto->num(__eq_x_soft) == 1);
+    REQUIRE(resto->num(__ineq_xu) == 1);
+
+    const auto *prox = dynamic_cast<const resto_prox_cost *>(resto->exprs(__cost).front().get());
+    REQUIRE(prox != nullptr);
+
+    const auto *eq_overlay = dynamic_cast<const resto_eq_elastic_constr *>(resto->exprs(__eq_x_soft).front().get());
+    REQUIRE(eq_overlay != nullptr);
+    REQUIRE(eq_overlay->source()->name() == eq->name());
+
+    const auto *ineq_overlay = dynamic_cast<const resto_ineq_elastic_ipm_constr *>(resto->exprs(__ineq_xu).front().get());
+    REQUIRE(ineq_overlay != nullptr);
+    REQUIRE(ineq_overlay->source()->name() == iq->name());
 }
 
 TEST_CASE("restoration inequality local KKT recovery satisfies regularized linearization") {
