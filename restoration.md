@@ -197,33 +197,24 @@ Important semantic split:
 - instead, `\bar\mu` belongs to the IPM/Newton search model used to compute
   interior steps for those positivity inequalities
 - therefore restoration public objective/KKT summaries should stay on the
-  original restoration NLP, while line search and IPM-style step updates may still use the barrier-regularized
+  original restoration NLP, while line search and IPM-style step updates may still use the primal-dual IPM
   search model
 
-## Barrier-Regularized Search Lagrangian
+## Primal-Dual IPM KKT For Restoration Positivity Blocks
 
 To compute an interior Newton step for the positivity inequalities above, the
-solver introduces the barrier-regularized search Lagrangian
+solver uses a primal-dual IPM system on the local elastic variables. Using
+Hippo-style notation, define
 
 $$
-\mathcal{L}_{R,k}
-=
-\operatorname{obj}_{R,k}(w_k)
-+ \varrho \mathbf{1}^T (p_{c,k}+n_{c,k}+p_{d,k}+n_{d,k})
-- \bar\mu \sum_i \ln t_{k,i}
-- \bar\mu \sum_i \ln p_{c,k,i}
-- \bar\mu \sum_i \ln n_{c,k,i}
-- \bar\mu \sum_i \ln p_{d,k,i}
-- \bar\mu \sum_i \ln n_{d,k,i}
-+ \lambda_{f,k}^T F_k(w_k)
-+ \lambda_{c,k}^T \bigl(c_k(w_k)-p_{c,k}+n_{c,k}\bigr)
-+ \lambda_{d,k}^T \bigl(g_k(w_k)+t_k-p_{d,k}+n_{d,k}\bigr).
+A := F_w,
+\qquad
+C := c_w,
+\qquad
+G := g_w.
 $$
 
-This search Lagrangian is an internal IPM model for the restoration step. It is
-not the same object as the original restoration NLP above.
-
-Its base gradient with respect to the global stage variables is
+The base stationarity on the global stage variables is
 
 $$
 g_{R,k}^{\mathrm{base}}
@@ -238,11 +229,68 @@ This is the quantity that belongs to the base stage gradient state seen by the
 linear solve. In code it is what `activate_lag_jac_corr()` snapshots into
 `base_lag_grad_backup` before any reduced correction is activated.
 
-The barrier terms should not be conflated with the restoration
-original objective that is reported publicly. They are search-only
-regularization for the positivity inequalities.
+The local primal feasibility equations are
 
-The condensed elastic terms
+$$
+r_f := F(w),
+$$
+
+$$
+r_c := c(w)-p+n,
+$$
+
+$$
+r_d := g(w)+t-p_d+n_d.
+$$
+
+The local stationarity equations are
+
+$$
+r_t := \lambda_d - \nu_t,
+$$
+
+$$
+r_p := \varrho \mathbf{1} - \lambda_c - \nu_p,
+$$
+
+$$
+r_n := \varrho \mathbf{1} + \lambda_c - \nu_n,
+$$
+
+$$
+r_{p_d} := \varrho \mathbf{1} - \lambda_d - \nu_{p_d},
+$$
+
+$$
+r_{n_d} := \varrho \mathbf{1} + \lambda_d - \nu_{n_d}.
+$$
+
+The IPM complementarity equations for the positivity inequalities are
+
+$$
+r_{s,p} := \nu_p \odot p - \bar\mu \mathbf{1},
+$$
+
+$$
+r_{s,n} := \nu_n \odot n - \bar\mu \mathbf{1},
+$$
+
+$$
+r_{s,t} := \nu_t \odot t - \bar\mu \mathbf{1},
+$$
+
+$$
+r_{s,p_d} := \nu_{p_d} \odot p_d - \bar\mu \mathbf{1},
+$$
+
+$$
+r_{s,n_d} := \nu_{n_d} \odot n_d - \bar\mu \mathbf{1}.
+$$
+
+These complementarity equations are part of the search model only. They are not
+part of the public restoration original objective.
+
+After condensing the local elastic/IPM blocks, the reduced first-order terms are
 
 $$
 \Delta g_{R,k}^{\mathrm{cond,eq}}
@@ -257,80 +305,6 @@ $$
 are **not** part of the original restoration Lagrangian. They belong only to
 the reduced system created after eliminating the restoration-local elastic
 blocks, and so they must stay in `lag_jac_corr_` until activation.
-
-## Search-Model KKT Residuals
-
-Using Hippo-style notation, define
-
-$$
-A := F_w,
-\qquad
-C := c_w,
-\qquad
-G := g_w.
-$$
-
-The barrier-regularized search-model residuals are
-
-$$
-r_w := \nabla_w \operatorname{obj}_R(w) + A^T \lambda_f + C^T \lambda_c + G^T \lambda_d ,
-$$
-
-$$
-r_f := F(w) ,
-$$
-
-$$
-r_c := c(w)-p+n ,
-$$
-
-$$
-r_d := g(w)+t-p_d+n_d ,
-$$
-
-$$
-r_t := \lambda_d - \nu_t ,
-$$
-
-$$
-r_p := \varrho \mathbf{1} - \lambda_c - \nu_p ,
-$$
-
-$$
-r_n := \varrho \mathbf{1} + \lambda_c - \nu_n ,
-$$
-
-$$
-r_{p_d} := \varrho \mathbf{1} - \lambda_d - \nu_p ,
-$$
-
-$$
-r_{n_d} := \varrho \mathbf{1} + \lambda_d - \nu_n ,
-$$
-
-$$
-r_{s,p} := \nu_p \odot p - \bar\mu \mathbf{1} ,
-$$
-
-$$
-r_{s,n} := \nu_n \odot n - \bar\mu \mathbf{1} ,
-$$
-
-$$
-r_{s,t} := \nu_t \odot t - \bar\mu \mathbf{1} ,
-$$
-
-$$
-r_{s,p_d} := \nu_p \odot p_d - \bar\mu \mathbf{1} ,
-$$
-
-$$
-r_{s,n_d} := \nu_n \odot n_d - \bar\mu \mathbf{1} .
-$$
-
-These are search-model residuals for the equality-elastic and restoration-owned
-inequality blocks. The complementarity terms are barrier residuals from the IPM
-search model; they are not part of the original restoration objective.
 
 Introduce
 
