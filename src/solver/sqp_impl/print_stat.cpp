@@ -42,6 +42,11 @@ phase_mu_info current_phase_mu(ns_sqp::solver_graph_type &graph,
         // Restoration owns one mu_bar per stage. The stats table has one scalar column,
         // so we report the conservative aggregate max(mu_bar) and print the range below.
         info.display = info.max;
+    } else {
+        info.display = outer_mu;
+        info.min = outer_mu;
+        info.max = outer_mu;
+        info.valid = true;
     }
     return info;
 }
@@ -83,7 +88,7 @@ void ns_sqp::print_stats(const kkt_info &info) {
     if (!restoration_active && !settings.has_ineq_soft) {
         mu_info.valid = false;
     }
-    scalar_t stats_value[] = {0., info.objective, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res, info.inf_prim_step, info.inf_eq_dual_step, info.inf_ineq_dual_step,
+    scalar_t stats_value[] = {0., info.penalized_obj, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res, info.inf_prim_step, info.inf_eq_dual_step, info.inf_ineq_dual_step,
                               settings.ls.alpha_primal, settings.ls.alpha_dual, 0., mu_info.display};
     std::string_view ipm_flags;
     if (!restoration_active && settings.has_ineq_soft && settings.ipm.ipm_enable_corrector()) {

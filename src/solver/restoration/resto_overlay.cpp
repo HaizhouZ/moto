@@ -1,10 +1,15 @@
 #include <moto/solver/restoration/resto_overlay.hpp>
 
+#include <algorithm>
 #include <moto/ocp/impl/node_data.hpp>
 #include <moto/solver/ipm/positivity_step.hpp>
 
 namespace moto::solver::restoration {
 namespace {
+
+scalar_t max_abs_or_zero(const vector &v) {
+    return v.size() > 0 ? v.cwiseAbs().maxCoeff() : scalar_t(0.);
+}
 
 template <typename Src>
 void forward_source_value(const Src &source, func_approx_data &data) {
@@ -192,6 +197,17 @@ void resto_eq_elastic_constr::jacobian_impl(func_approx_data &data) const {
     }
     compute_local_model(d.base_residual, d.multiplier_, d.elastic, d.rho, d.ipm_cfg->mu, d.lambda_reg);
     propagate_jacobian(d);
+}
+
+void resto_eq_elastic_constr::hessian_impl(func_approx_data &data) const {
+    if (source_->order() >= approx_order::second) {
+        forward_source_hessian(source_, data);
+    }
+    auto &d = data.as<approx_data>();
+    if (d.ipm_cfg == nullptr || d.ipm_cfg->disable_corrections || d.elastic.dim() == 0) {
+        return;
+    }
+    compute_local_model(d.base_residual, d.multiplier_, d.elastic, d.rho, d.ipm_cfg->mu, d.lambda_reg);
     propagate_hessian(d);
 }
 
@@ -277,6 +293,42 @@ void resto_eq_elastic_constr::restore_trial_state(data_map_t &data) const {
     data.as<approx_data>().elastic.restore_trial_state();
 }
 
+scalar_t resto_eq_elastic_constr::objective_penalty(const func_approx_data &data) const {
+    const auto &d = static_cast<const approx_data &>(data);
+    return d.rho * d.elastic.penalty_sum();
+}
+
+scalar_t resto_eq_elastic_constr::objective_penalty_dir_deriv(const func_approx_data &data) const {
+    const auto &d = static_cast<const approx_data &>(data);
+    return d.rho * d.elastic.penalty_dir_deriv();
+}
+
+scalar_t resto_eq_elastic_constr::search_penalty(const func_approx_data &data) const {
+    const auto &d = static_cast<const approx_data &>(data);
+    if (d.ipm_cfg == nullptr) {
+        return 0.;
+    }
+    return d.ipm_cfg->mu * d.elastic.barrier_log_sum();
+}
+
+scalar_t resto_eq_elastic_constr::search_penalty_dir_deriv(const func_approx_data &data) const {
+    const auto &d = static_cast<const approx_data &>(data);
+    if (d.ipm_cfg == nullptr) {
+        return 0.;
+    }
+    return d.ipm_cfg->mu * d.elastic.barrier_dir_deriv();
+}
+
+scalar_t resto_eq_elastic_constr::local_stat_residual_inf(const func_approx_data &data) const {
+    const auto &d = static_cast<const approx_data &>(data);
+    return std::max(max_abs_or_zero(d.elastic.r_p), max_abs_or_zero(d.elastic.r_n));
+}
+
+scalar_t resto_eq_elastic_constr::local_comp_residual_inf(const func_approx_data &data) const {
+    const auto &d = static_cast<const approx_data &>(data);
+    return std::max(max_abs_or_zero(d.elastic.r_s_p), max_abs_or_zero(d.elastic.r_s_n));
+}
+
 resto_ineq_elastic_ipm_constr::resto_ineq_elastic_ipm_constr(const std::string &name,
                                                              const constr &source,
                                                              size_t source_pos,
@@ -329,6 +381,17 @@ void resto_ineq_elastic_ipm_constr::jacobian_impl(func_approx_data &data) const 
     }
     compute_local_model(d.base_residual, d.multiplier_, d.elastic, d.rho, d.ipm_cfg->mu, d.lambda_reg);
     propagate_jacobian(d);
+}
+
+void resto_ineq_elastic_ipm_constr::hessian_impl(func_approx_data &data) const {
+    if (source_->order() >= approx_order::second) {
+        forward_source_hessian(source_, data);
+    }
+    auto &d = data.as<approx_data>();
+    if (d.ipm_cfg == nullptr || d.ipm_cfg->disable_corrections || d.elastic.dim() == 0) {
+        return;
+    }
+    compute_local_model(d.base_residual, d.multiplier_, d.elastic, d.rho, d.ipm_cfg->mu, d.lambda_reg);
     propagate_hessian(d);
 }
 
@@ -362,7 +425,10 @@ void resto_ineq_elastic_ipm_constr::propagate_res_stats(func_approx_data &) cons
 
 void resto_ineq_elastic_ipm_constr::initialize(data_map_t &data) const {
     auto &d = data.as<approx_data>();
-    d.elastic.resize(d.func_.active_dim(__x, d.problem()), d.func_.active_dim(__u, d.problem()));
+    // The elastic IPM block is indexed by the wrapped inequality residual, not by
+    // the active primal tangent dimensions. Keep its local state aligned with the
+    // constraint dimension so local KKT assembly matches base_residual/multiplier_.
+    d.elastic.resize(d.func_.dim(), 0);
     for (Eigen::Index i = 0; i < d.base_residual.size(); ++i) {
         const auto init = initialize_elastic_ineq_scalar(d.base_residual(i), d.rho, d.ipm_cfg->mu);
         d.elastic.t(i) = init.t;
@@ -417,6 +483,46 @@ void resto_ineq_elastic_ipm_constr::backup_trial_state(data_map_t &data) const {
 
 void resto_ineq_elastic_ipm_constr::restore_trial_state(data_map_t &data) const {
     data.as<approx_data>().elastic.restore_trial_state();
+}
+
+scalar_t resto_ineq_elastic_ipm_constr::objective_penalty(const func_approx_data &data) const {
+    const auto &d = static_cast<const approx_data &>(data);
+    return d.rho * d.elastic.penalty_sum();
+}
+
+scalar_t resto_ineq_elastic_ipm_constr::objective_penalty_dir_deriv(const func_approx_data &data) const {
+    const auto &d = static_cast<const approx_data &>(data);
+    return d.rho * d.elastic.penalty_dir_deriv();
+}
+
+scalar_t resto_ineq_elastic_ipm_constr::search_penalty(const func_approx_data &data) const {
+    const auto &d = static_cast<const approx_data &>(data);
+    if (d.ipm_cfg == nullptr) {
+        return 0.;
+    }
+    return d.ipm_cfg->mu * d.elastic.barrier_log_sum();
+}
+
+scalar_t resto_ineq_elastic_ipm_constr::search_penalty_dir_deriv(const func_approx_data &data) const {
+    const auto &d = static_cast<const approx_data &>(data);
+    if (d.ipm_cfg == nullptr) {
+        return 0.;
+    }
+    return d.ipm_cfg->mu * d.elastic.barrier_dir_deriv();
+}
+
+scalar_t resto_ineq_elastic_ipm_constr::local_stat_residual_inf(const func_approx_data &data) const {
+    const auto &d = static_cast<const approx_data &>(data);
+    return std::max({max_abs_or_zero(d.elastic.r_t),
+                     max_abs_or_zero(d.elastic.r_p),
+                     max_abs_or_zero(d.elastic.r_n)});
+}
+
+scalar_t resto_ineq_elastic_ipm_constr::local_comp_residual_inf(const func_approx_data &data) const {
+    const auto &d = static_cast<const approx_data &>(data);
+    return std::max({max_abs_or_zero(d.elastic.r_s_t),
+                     max_abs_or_zero(d.elastic.r_s_p),
+                     max_abs_or_zero(d.elastic.r_s_n)});
 }
 
 ocp_ptr_t build_restoration_overlay_problem(const ocp_ptr_t &source_prob,

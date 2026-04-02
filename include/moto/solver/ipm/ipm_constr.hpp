@@ -67,6 +67,8 @@ class ipm_constr : public ineq_constr {
     void backup_trial_state(data_map_t &data) const override;
     /// @brief restore the backed-up IPM trial state before the next line-search attempt
     void restore_trial_state(data_map_t &data) const override;
+    scalar_t search_penalty(const func_approx_data &data) const override;
+    scalar_t search_penalty_dir_deriv(const func_approx_data &data) const override;
     /**
      * @brief make the sparse approximation data for the IPM
      * @param primal sym data including states inputs etc

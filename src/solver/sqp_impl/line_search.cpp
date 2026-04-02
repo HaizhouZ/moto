@@ -9,21 +9,19 @@
 namespace moto {
 
 scalar_t ns_sqp::current_phase_objective(const kkt_info &kkt) const {
-    return in_restoration_phase() ? kkt.objective - kkt.search_barrier_value
-                                  : kkt.cost - settings.ipm.mu * kkt.log_slack_sum;
+    return kkt.penalized_obj;
 }
 
 scalar_t ns_sqp::current_phase_fullstep_dec(const kkt_info &kkt) const {
-    return in_restoration_phase() ? kkt.obj_fullstep_dec - kkt.search_barrier_dir_deriv
-                                  : kkt.obj_fullstep_dec - settings.ipm.mu * kkt.barrier_dir_deriv;
+    return kkt.penalized_obj_fullstep_dec;
 }
 
 scalar_t ns_sqp::outer_objective(const kkt_info &kkt) const {
-    return kkt.cost - settings.ipm.mu * kkt.log_slack_sum;
+    return kkt.penalized_obj;
 }
 
 scalar_t ns_sqp::outer_fullstep_dec(const kkt_info &kkt) const {
-    return kkt.obj_fullstep_dec - settings.ipm.mu * kkt.barrier_dir_deriv;
+    return kkt.penalized_obj_fullstep_dec;
 }
 
 scalar_t ns_sqp::current_phase_alpha_min(const filter_linesearch_per_iter_data &ls) const {
@@ -55,7 +53,7 @@ void ns_sqp::filter_linesearch_data::update_filter(const kkt_info &current_kkt, 
     point current_point{
         .prim_res = current_kkt.prim_res_l1,
         .dual_res = current_kkt.inf_dual_res,
-        .objective = current_kkt.objective,
+        .objective = current_kkt.penalized_obj,
     };
     points.erase(std::remove_if(
                      points.begin(), points.end(),
@@ -74,15 +72,13 @@ bool ns_sqp::filter_linesearch_data::point::in_filter(const point &filter_entry,
 }
 bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const kkt_info &current_kkt, settings_t &settings) {
     scalar_t prim_res_k = current_kkt.prim_res_l1;
-    scalar_t obj_trial = trial_kkt.objective;
-    // recompute with current mu in case mu changed after current_kkt was computed
-    scalar_t mu = settings.ipm.mu;
-    scalar_t obj_k = current_kkt.cost - mu * current_kkt.log_slack_sum;
-    scalar_t fullstep_dec_k = current_kkt.obj_fullstep_dec - mu * current_kkt.barrier_dir_deriv;
+    scalar_t obj_trial = trial_kkt.penalized_obj;
+    scalar_t obj_k = current_kkt.penalized_obj;
+    scalar_t fullstep_dec_k = current_kkt.penalized_obj_fullstep_dec;
     point trial_point{
         .prim_res = trial_kkt.prim_res_l1,
         .dual_res = trial_kkt.inf_dual_res,
-        .objective = trial_kkt.objective,
+        .objective = trial_kkt.penalized_obj,
     };
 
     // switching condition based on IPOPT's filter line search paper: https://www.coin-or.org/Ipopt/documentation/node40.html#SECTION00421000000000000000
@@ -163,7 +159,7 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
         point current_point{
             .prim_res = current_kkt.prim_res_l1,
             .dual_res = current_kkt.inf_dual_res,
-            .objective = current_kkt.objective,
+            .objective = current_kkt.penalized_obj,
         };
         if (!trial_point.in_filter(current_point, settings)) {
             last_step_was_armijo = false;
@@ -299,7 +295,8 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
         const bool resto_res_improved =
             trial_resto_res <= scalar_t(0.9) * current_resto_res;
         const bool accepted_by_resto_filter = !phase_in_filter(trial_point, current_point);
-        if (nontrivial_step && resto_res_improved && accepted_by_resto_filter) {
+        const bool sufficient_progress = primal_improved || objective_improved;
+        if (nontrivial_step && resto_res_improved && accepted_by_resto_filter && sufficient_progress) {
             if (settings.verbose) {
                 fmt::print("  restoration trial accepted "
                            "(prim: {:.3e} -> {:.3e}, objective: {:.3e} -> {:.3e}, resto_res: {:.3e} -> {:.3e})\n",
@@ -312,12 +309,13 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
         if (settings.verbose) {
             fmt::print("  restoration trial rejected "
                        "(prim: {:.3e} -> {:.3e}, objective: {:.3e} -> {:.3e}, resto_res: {:.3e} -> {:.3e}, "
-                       "primal_improved={}, objective_improved={}, accepted_by_filter={}, alpha_p={:.3e}, alpha_d={:.3e})\n",
+                       "primal_improved={}, objective_improved={}, accepted_by_filter={}, sufficient_progress={}, alpha_p={:.3e}, alpha_d={:.3e})\n",
                        current_point.prim_res, trial_point.prim_res,
                        current_point.objective, trial_point.objective, current_resto_res, trial_resto_res,
                        primal_improved ? "true" : "false",
                        objective_improved ? "true" : "false",
                        accepted_by_resto_filter ? "true" : "false",
+                       sufficient_progress ? "true" : "false",
                        settings.ls.alpha_primal, settings.ls.alpha_dual);
         }
         return false;

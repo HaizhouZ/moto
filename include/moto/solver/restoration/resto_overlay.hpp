@@ -74,6 +74,7 @@ class resto_eq_elastic_constr final : public soft_constr {
 
     void value_impl(func_approx_data &data) const override;
     void jacobian_impl(func_approx_data &data) const override;
+    void hessian_impl(func_approx_data &data) const override;
     void propagate_jacobian(func_approx_data &data) const override;
     void propagate_hessian(func_approx_data &data) const override;
     void propagate_res_stats(func_approx_data &data) const override;
@@ -85,6 +86,12 @@ class resto_eq_elastic_constr final : public soft_constr {
     void update_ls_bounds(data_map_t &data, workspace_data *cfg) const override;
     void backup_trial_state(data_map_t &data) const override;
     void restore_trial_state(data_map_t &data) const override;
+    scalar_t objective_penalty(const func_approx_data &data) const override;
+    scalar_t objective_penalty_dir_deriv(const func_approx_data &data) const override;
+    scalar_t search_penalty(const func_approx_data &data) const override;
+    scalar_t search_penalty_dir_deriv(const func_approx_data &data) const override;
+    scalar_t local_stat_residual_inf(const func_approx_data &data) const override;
+    scalar_t local_comp_residual_inf(const func_approx_data &data) const override;
 
     const constr &source() const { return source_; }
     field_t source_field() const { return source_->field(); }
@@ -125,6 +132,7 @@ class resto_ineq_elastic_ipm_constr final : public ineq_constr {
 
     void value_impl(func_approx_data &data) const override;
     void jacobian_impl(func_approx_data &data) const override;
+    void hessian_impl(func_approx_data &data) const override;
     void propagate_jacobian(func_approx_data &data) const override;
     void propagate_hessian(func_approx_data &data) const override;
     void propagate_res_stats(func_approx_data &data) const override;
@@ -137,6 +145,12 @@ class resto_ineq_elastic_ipm_constr final : public ineq_constr {
     void update_ls_bounds(data_map_t &data, workspace_data *cfg) const override;
     void backup_trial_state(data_map_t &data) const override;
     void restore_trial_state(data_map_t &data) const override;
+    scalar_t objective_penalty(const func_approx_data &data) const override;
+    scalar_t objective_penalty_dir_deriv(const func_approx_data &data) const override;
+    scalar_t search_penalty(const func_approx_data &data) const override;
+    scalar_t search_penalty_dir_deriv(const func_approx_data &data) const override;
+    scalar_t local_stat_residual_inf(const func_approx_data &data) const override;
+    scalar_t local_comp_residual_inf(const func_approx_data &data) const override;
 
     const constr &source() const { return source_; }
     field_t source_field() const { return source_->field(); }

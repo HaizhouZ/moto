@@ -101,6 +101,20 @@ void ipm_constr::restore_trial_state(ipm::data_map_t &data) const {
     auto &d = data.as<ipm_data>();
     positivity::restore_pair(d.slack_, d.slack_backup_, d.multiplier_, d.multiplier_backup_);
 }
+scalar_t ipm_constr::search_penalty(const func_approx_data &data) const {
+    const auto &d = static_cast<const ipm_data &>(data);
+    if (d.ipm_cfg == nullptr || d.slack_.size() == 0) {
+        return 0.;
+    }
+    return d.ipm_cfg->mu * d.slack_.array().log().sum();
+}
+scalar_t ipm_constr::search_penalty_dir_deriv(const func_approx_data &data) const {
+    const auto &d = static_cast<const ipm_data &>(data);
+    if (d.ipm_cfg == nullptr || d.d_slack_.size() == 0 || d.slack_backup_.size() == 0) {
+        return 0.;
+    }
+    return d.ipm_cfg->mu * (d.d_slack_.array() / d.slack_backup_.array()).sum();
+}
 void ipm_constr::finalize_predictor_step(ipm::data_map_t &data, workspace_data *cfg) const {
     auto &d = data.as<ipm_data>();
     auto &ipm_worker = cfg->as<ipm_config::worker_type>();

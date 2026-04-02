@@ -71,6 +71,19 @@ class soft_constr : public generic_constr {
     /// @param data data map
     virtual void restore_trial_state(data_map_t &data) const {}
 
+    /// @brief contribution to the phase original objective (for example exact penalties)
+    virtual scalar_t objective_penalty(const func_approx_data &data) const { return 0.; }
+    /// @brief directional derivative of @ref objective_penalty along the current trial step
+    virtual scalar_t objective_penalty_dir_deriv(const func_approx_data &data) const { return 0.; }
+    /// @brief contribution to the phase search barrier / penalization objective
+    virtual scalar_t search_penalty(const func_approx_data &data) const { return 0.; }
+    /// @brief directional derivative of @ref search_penalty along the current trial step
+    virtual scalar_t search_penalty_dir_deriv(const func_approx_data &data) const { return 0.; }
+    /// @brief optional local stationarity summary owned by the constraint
+    virtual scalar_t local_stat_residual_inf(const func_approx_data &data) const { return 0.; }
+    /// @brief optional local complementarity summary owned by the constraint
+    virtual scalar_t local_comp_residual_inf(const func_approx_data &data) const { return 0.; }
+
     virtual void propagate_jacobian(func_approx_data &data) const = 0;
     virtual void propagate_hessian(func_approx_data &data) const = 0;
     virtual void propagate_res_stats(func_approx_data &data) const = 0;

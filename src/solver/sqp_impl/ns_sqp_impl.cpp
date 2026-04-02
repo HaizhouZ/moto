@@ -13,6 +13,45 @@
 namespace moto {
 namespace {
 
+scalar_t max_abs_or_zero(const vector &v) {
+    return v.size() > 0 ? v.cwiseAbs().maxCoeff() : scalar_t(0.);
+}
+
+scalar_t max_abs_or_zero(const row_vector &v) {
+    return v.size() > 0 ? v.cwiseAbs().maxCoeff() : scalar_t(0.);
+}
+
+void accumulate_constraint_objective_terms(ns_sqp::kkt_info &kkt,
+                                           node_data &node,
+                                           bool track_diag_scaling = false) {
+    node.for_each<soft_constr_fields>([&](const soft_constr &c, soft_constr::data_map_t &sd) {
+        kkt.objective += c.objective_penalty(sd);
+        kkt.search_barrier_value += c.search_penalty(sd);
+        kkt.obj_fullstep_dec += c.objective_penalty_dir_deriv(sd);
+        kkt.search_barrier_dir_deriv += c.search_penalty_dir_deriv(sd);
+        kkt.inf_dual_res = std::max(kkt.inf_dual_res, c.local_stat_residual_inf(sd));
+        kkt.inf_comp_res = std::max(kkt.inf_comp_res, c.local_comp_residual_inf(sd));
+    });
+    node.for_each<ineq_constr_fields>([&](const ineq_constr &c, ineq_constr::data_map_t &id) {
+        kkt.objective += c.objective_penalty(id);
+        kkt.search_barrier_value += c.search_penalty(id);
+        kkt.obj_fullstep_dec += c.objective_penalty_dir_deriv(id);
+        kkt.search_barrier_dir_deriv += c.search_penalty_dir_deriv(id);
+        kkt.inf_dual_res = std::max(kkt.inf_dual_res, c.local_stat_residual_inf(id));
+        kkt.inf_comp_res = std::max(kkt.inf_comp_res, c.local_comp_residual_inf(id));
+        if (track_diag_scaling) {
+            auto *ipm = dynamic_cast<solver::ipm_constr::approx_data *>(&id);
+            if (ipm != nullptr && ipm->diag_scaling.size() > 0) {
+                kkt.max_diag_scaling = std::max(kkt.max_diag_scaling, ipm->diag_scaling.cwiseAbs().maxCoeff());
+                kkt.log_slack_sum += ipm->slack_.array().log().sum();
+                if (ipm->d_slack_.size() > 0) {
+                    kkt.barrier_dir_deriv += (ipm->d_slack_.array() / ipm->slack_backup_.array()).sum();
+                }
+            }
+        }
+    });
+}
+
 template <class UFn, class XYFn>
 void accumulate_w_stationarity(ns_sqp::solver_graph_type &graph,
                                UFn &&on_u_residual,
@@ -761,6 +800,81 @@ void ns_sqp::print_dual_res_breakdown() {
 }
 ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
     if (in_restoration_phase()) {
+        if (using_restoration_overlay_graph()) {
+            kkt_info kkt;
+            scalar_t dual_res_l1 = 0.;
+            size_t n_dual_res = 0;
+            auto &graph = solver_graph();
+
+            for (auto n : graph.flatten_nodes()) {
+                kkt.cost += n->cost();
+                kkt.objective += n->cost();
+                kkt.inf_prim_res = std::max(kkt.inf_prim_res, n->inf_prim_res_);
+                kkt.prim_res_l1 += n->prim_res_l1_;
+
+                if (update_dual_res && n->dense().lag_jac_[__u].size() > 0) {
+                    kkt.inf_dual_res = std::max(kkt.inf_dual_res, max_abs_or_zero(n->dense().lag_jac_[__u]));
+                    dual_res_l1 += n->dense().lag_jac_[__u].cwiseAbs().sum();
+                    n_dual_res += static_cast<size_t>(n->dense().lag_jac_[__u].size());
+                }
+                accumulate_constraint_objective_terms(kkt, *n);
+
+                for (auto cf : constr_fields) {
+                    const auto &lam = n->dense().dual_[cf];
+                    if (lam.size() > 0) {
+                        const scalar_t lam_inf = lam.cwiseAbs().maxCoeff();
+                        kkt.max_dual_norm = std::max(kkt.max_dual_norm, lam_inf);
+                        if (cf == __dyn || cf == __eq_x || cf == __eq_xu || cf == __eq_x_soft || cf == __eq_xu_soft) {
+                            kkt.max_eq_dual_norm = std::max(kkt.max_eq_dual_norm, lam_inf);
+                        } else if (cf == __ineq_x || cf == __ineq_xu) {
+                            kkt.max_ineq_dual_norm = std::max(kkt.max_ineq_dual_norm, lam_inf);
+                        }
+                    }
+                }
+                for (auto f : primal_fields) {
+                    if (n->trial_prim_step[f].size() > 0) {
+                        kkt.inf_prim_step = std::max(kkt.inf_prim_step, n->trial_prim_step[f].cwiseAbs().maxCoeff());
+                        kkt.obj_fullstep_dec += n->dense().cost_jac_[f].dot(n->trial_prim_step[f]);
+                    }
+                }
+                for (auto f : constr_fields) {
+                    if (n->trial_dual_step[f].size() > 0) {
+                        const scalar_t step = n->trial_dual_step[f].cwiseAbs().maxCoeff();
+                        kkt.inf_dual_step = std::max(kkt.inf_dual_step, step);
+                        if (in_field(f, ineq_constr_fields)) {
+                            kkt.inf_ineq_dual_step = std::max(kkt.inf_ineq_dual_step, step);
+                        } else {
+                            kkt.inf_eq_dual_step = std::max(kkt.inf_eq_dual_step, step);
+                            if (f == __dyn) kkt.inf_dyn_dual_step = std::max(kkt.inf_dyn_dual_step, step);
+                            if (f == __eq_x) kkt.inf_eq_x_dual_step = std::max(kkt.inf_eq_x_dual_step, step);
+                            if (f == __eq_xu) kkt.inf_eq_xu_dual_step = std::max(kkt.inf_eq_xu_dual_step, step);
+                        }
+                    }
+                }
+            }
+
+            if (update_dual_res) {
+                accumulate_w_stationarity(
+                    graph,
+                    [&](const row_vector &r) {
+                        kkt.inf_dual_res = std::max(kkt.inf_dual_res, max_abs_or_zero(r));
+                        dual_res_l1 += r.cwiseAbs().sum();
+                        n_dual_res += static_cast<size_t>(r.size());
+                    },
+                    [&](const row_vector &r) {
+                        kkt.inf_dual_res = std::max(kkt.inf_dual_res, max_abs_or_zero(r));
+                        dual_res_l1 += r.cwiseAbs().sum();
+                        n_dual_res += static_cast<size_t>(r.size());
+                    });
+                if (n_dual_res > 0) {
+                    kkt.avg_dual_res = dual_res_l1 / static_cast<scalar_t>(n_dual_res);
+                }
+            }
+            kkt.penalized_obj = kkt.objective - kkt.search_barrier_value;
+            kkt.penalized_obj_fullstep_dec = kkt.obj_fullstep_dec - kkt.search_barrier_dir_deriv;
+            return kkt;
+        }
+
         kkt_info kkt;
         scalar_t dual_res_l1 = 0.;
         size_t n_dual_res = 0;
@@ -899,6 +1013,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
                 }
             }
         }
+        accumulate_constraint_objective_terms(kkt, *n, true);
         for (auto f : primal_fields) {
             if (n->trial_prim_step[f].size() > 0) {
                 kkt.inf_prim_step = std::max(kkt.inf_prim_step, n->trial_prim_step[f].cwiseAbs().maxCoeff());
@@ -918,17 +1033,6 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
                 kkt.obj_fullstep_dec += n->dense().cost_jac_[f].dot(n->trial_prim_step[f]);
             }
         }
-        // accumulate mu-free barrier quantities: log_slack_sum and barrier_dir_deriv
-        n->for_each<ineq_soft_constr_fields>([&](const soft_constr &, soft_constr::data_map_t &sd) {
-            auto *id = dynamic_cast<solver::ipm_constr::approx_data *>(&sd);
-            if (id == nullptr || id->ipm_cfg == nullptr)
-                return;
-            kkt.log_slack_sum += id->slack_.array().log().sum();
-            if (id->d_slack_.size() > 0)
-                kkt.barrier_dir_deriv += (id->d_slack_.array() / id->slack_backup_.array()).sum();
-            if (id->diag_scaling.size() > 0)
-                kkt.max_diag_scaling = std::max(kkt.max_diag_scaling, id->diag_scaling.cwiseAbs().maxCoeff());
-        });
         for (auto f : constr_fields) {
             if (n->trial_dual_step[f].size() > 0) {
                 scalar_t step = n->trial_dual_step[f].cwiseAbs().maxCoeff();
@@ -979,7 +1083,11 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
         if (n_dual_res > 0)
             kkt.avg_dual_res = dual_res_l1 / static_cast<scalar_t>(n_dual_res);
     }
-    kkt.objective = kkt.cost - settings.ipm.mu * kkt.log_slack_sum;
+    kkt.objective = kkt.cost;
+    kkt.search_barrier_value = settings.ipm.mu * kkt.log_slack_sum;
+    kkt.search_barrier_dir_deriv = settings.ipm.mu * kkt.barrier_dir_deriv;
+    kkt.penalized_obj = kkt.objective - kkt.search_barrier_value;
+    kkt.penalized_obj_fullstep_dec = kkt.obj_fullstep_dec - kkt.search_barrier_dir_deriv;
     return kkt;
 }
 
