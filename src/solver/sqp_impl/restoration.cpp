@@ -1,7 +1,6 @@
 #include <moto/solver/ns_sqp.hpp>
 #include <moto/solver/ineq_soft.hpp>
 #include <moto/solver/restoration/resto_overlay.hpp>
-#include <moto/solver/restoration/resto_runtime.hpp>
 
 namespace moto {
 namespace {
@@ -102,12 +101,12 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
                 d->restore_trial_state();
             });
 
-            resto_graph.for_each_parallel([this](data *d) {
+            resto_graph.for_each_parallel([this](size_t tid, data *d) {
                 d->for_each<ineq_constr_fields>([&](const ineq_constr &c, ineq_constr::data_map_t &id) {
-                    c.finalize_predictor_step(id, &settings);
+                    c.finalize_predictor_step(id, &setting_per_thread[tid]);
                 });
                 d->for_each<soft_constr_fields>([&](const soft_constr &c, soft_constr::data_map_t &sd) {
-                    c.finalize_predictor_step(sd, &settings);
+                    c.finalize_predictor_step(sd, &setting_per_thread[tid]);
                 });
                 d->update_approximation(node_data::update_mode::eval_derivatives, true);
             });

@@ -9,7 +9,7 @@
 #include <moto/solver/ns_riccati/generic_solver.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
 #include <moto/solver/restoration/resto_overlay.hpp>
-#include <moto/solver/restoration/resto_runtime.hpp>
+#include <moto/solver/restoration/resto_overlay.hpp>
 #include <array>
 #include <chrono>
 #include <functional>
@@ -381,7 +381,6 @@ struct ns_sqp {
     kkt_info compute_kkt_info(bool update_dual_res = true);
     kkt_info restoration_update(const kkt_info &kkt_before, filter_linesearch_data &ls);
     void update_phase_problem(data *d, node_data::update_mode mode);
-    void assemble_restoration_problem(data *d, node_data::update_mode mode);
     /// perform iterative refinement to improve the solution accuracy, will modify the current solution in place
     void iterative_refinement();
     /// update the line search bounds with the (probably updated) max value

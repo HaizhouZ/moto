@@ -11,32 +11,6 @@ namespace solver {
 namespace ns_riccati {
 extern void print_debug(ns_riccati_data *cur);
 
-namespace {
-void add_diag_to_dense(matrix &dst, const vector &diag) {
-    if (diag.size() == 0) {
-        return;
-    }
-    if (dst.rows() != diag.size() || dst.cols() != diag.size()) {
-        throw std::runtime_error("restoration prox hessian diagonal size mismatch");
-    }
-    dst.diagonal().array() += diag.array();
-}
-
-void add_diag_times(const vector &diag, const vector &rhs, vector &out) {
-    if (diag.size() == 0) {
-        return;
-    }
-    out.array() += diag.array() * rhs.array();
-}
-
-void add_diag_times(const vector &diag, const matrix &rhs, matrix_ref out) {
-    if (diag.size() == 0) {
-        return;
-    }
-    out.noalias() += diag.asDiagonal() * rhs;
-}
-} // namespace
-
 void generic_solver::ns_factorization_correction(ns_riccati_data *cur) {
     auto &d = *cur;
     auto &nsp = d.nsp_;
@@ -79,7 +53,6 @@ void generic_solver::ns_factorization_correction(ns_riccati_data *cur) {
     timed_block_start("precompute_u0p");
     d.Q_uu.times<false>(nsp.u_y_k, nsp.u_0_p_k);
     d.Q_uu_mod.times<false>(nsp.u_y_k, nsp.u_0_p_k);
-    add_diag_times(d.restoration_prox_hess_diag_[__u], nsp.u_y_k, nsp.u_0_p_k);
     timed_block_end("precompute_u0p");
 
     timed_block_start("precompute_z0");
@@ -108,9 +81,6 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
     auto &d = *cur;
     auto &nsp = d.nsp_;
     auto &_approx = d.dense_->approx_;
-    const bool restoration_active =
-        dynamic_cast<ns_riccati_data::restoration_aux_data *>(d.aux_.get()) != nullptr;
-
     timed_block_start("update_projected_dynamics");
     cur->update_projected_dynamics();
     timed_block_end("update_projected_dynamics");
@@ -127,9 +97,6 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
     d.V_yy.setZero();
     d.Q_yy.dump_into(d.V_yy);
     d.Q_yy_mod.dump_into(d.V_yy);
-    if (restoration_active) {
-        add_diag_to_dense(d.V_yy, d.restoration_prox_hess_diag_[__y]);
-    }
 
     d.rank_status_ = rank_status::unconstrained;
 
@@ -143,9 +110,6 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
         nsp.Q_zz.setZero();
         d.Q_uu.dump_into(nsp.Q_zz);
         d.Q_uu_mod.dump_into(nsp.Q_zz);
-        if (restoration_active) {
-            add_diag_to_dense(nsp.Q_zz, d.restoration_prox_hess_diag_[__u]);
-        }
         nsp.z_0_K = nsp.u_0_p_K;
         d.F_x.T_times<false>(d.Q_yx, d.V_xx);
         d.F_x.T_times<false>(d.Q_yx_mod, d.V_xx);
@@ -157,7 +121,7 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
         timed_block_end("activate_lag_jac_corr");
     };
 
-    if (restoration_active || !d.ncstr) {
+    if (!d.ncstr) {
         unconstrain_setup();
         activate_gradient_corrections();
         ns_factorization_correction(cur);
@@ -233,9 +197,6 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
         buf.data_.setZero();
         d.Q_uu.times(nsp.Z_u, buf.data_);
         d.Q_uu_mod.times(nsp.Z_u, buf.data_);
-        if (restoration_active) {
-            add_diag_times(d.restoration_prox_hess_diag_[__u], nsp.Z_u, buf.data_);
-        }
         nsp.Q_zz.noalias() = nsp.Z_u.transpose() * buf.data_;
         timed_block_end("compute_Qzz");
 
@@ -253,9 +214,6 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
         timed_block_start("precompute_u0p");
         d.Q_uu.times<false>(nsp.u_y_K, nsp.u_0_p_K);
         d.Q_uu_mod.times<false>(nsp.u_y_K, nsp.u_0_p_K);
-        if (restoration_active) {
-            add_diag_times(d.restoration_prox_hess_diag_[__u], nsp.u_y_K, nsp.u_0_p_K);
-        }
         timed_block_end("precompute_u0p");
 
         timed_block_start("precompute_z0");

@@ -6,7 +6,6 @@
 #include <moto/solver/ipm/positivity_step.hpp>
 #include <moto/solver/restoration/resto_local_kkt.hpp>
 #include <moto/solver/restoration/resto_overlay.hpp>
-#include <moto/solver/restoration/resto_runtime.hpp>
 
 using namespace moto;
 using namespace moto::solver;
@@ -313,27 +312,6 @@ TEST_CASE("restoration equality dual reset helper only clears equality fields") 
     REQUIRE(dual[__ineq_xu].isConstant(-13.0));
 }
 
-TEST_CASE("restoration local residual helper reports local stationarity and complementarity maxima") {
-    ns_riccati::ns_riccati_data::restoration_aux_data aux;
-    aux.elastic_eq.resize(1, 1);
-    aux.elastic_eq.r_p << 0.2, -0.6;
-    aux.elastic_eq.r_n << -0.3, 0.1;
-    aux.elastic_eq.r_s_p << 0.4, -0.5;
-    aux.elastic_eq.r_s_n << 0.05, -0.2;
-
-    aux.elastic_ineq.resize(1, 1);
-    aux.elastic_ineq.r_t << -0.7, 0.25;
-    aux.elastic_ineq.r_p << 0.15, -0.35;
-    aux.elastic_ineq.r_n << -0.1, 0.05;
-    aux.elastic_ineq.r_s_t << 0.9, -0.2;
-    aux.elastic_ineq.r_s_p << -0.45, 0.3;
-    aux.elastic_ineq.r_s_n << 0.12, -0.18;
-
-    const auto info = refinement_local_residuals(aux);
-    REQUIRE(approx_scalar(info.stationarity, 0.6));
-    REQUIRE(approx_scalar(info.complementarity, 0.5));
-}
-
 TEST_CASE("restoration elastic blocks own their penalty and barrier bookkeeping") {
     resto_elastic_constr eq;
     eq.resize(1, 1);
@@ -367,171 +345,6 @@ TEST_CASE("restoration elastic blocks own their penalty and barrier bookkeeping"
                           std::log(11.0) + std::log(13.0) + std::log(17.0) + std::log(19.0) + std::log(23.0) + std::log(29.0)));
     REQUIRE(approx_scalar(iq.barrier_dir_deriv(),
                           1.0 / 31.0 - 2.0 / 37.0 + 3.0 / 41.0 + 4.0 / 43.0 - 5.0 / 47.0 + 6.0 / 53.0));
-}
-
-TEST_CASE("restoration objective summary is assembled from elastic blocks") {
-    ns_riccati::ns_riccati_data::restoration_aux_data aux;
-    aux.rho_eq = 4.0;
-    aux.rho_ineq = 6.0;
-    aux.mu_bar = 0.5;
-
-    aux.elastic_eq.resize(1, 0);
-    aux.elastic_eq.p << 2.0;
-    aux.elastic_eq.n << 3.0;
-    aux.elastic_eq.p_backup << 5.0;
-    aux.elastic_eq.n_backup << 7.0;
-    aux.elastic_eq.d_p << 0.2;
-    aux.elastic_eq.d_n << -0.3;
-    aux.elastic_eq.r_c << 1.25;
-    aux.elastic_eq.r_p << 0.4;
-    aux.elastic_eq.r_n << -0.6;
-    aux.elastic_eq.r_s_p << 0.8;
-    aux.elastic_eq.r_s_n << -0.2;
-
-    aux.elastic_ineq.resize(1, 0);
-    aux.elastic_ineq.t << 11.0;
-    aux.elastic_ineq.p << 13.0;
-    aux.elastic_ineq.n << 17.0;
-    aux.elastic_ineq.t_backup << 19.0;
-    aux.elastic_ineq.p_backup << 23.0;
-    aux.elastic_ineq.n_backup << 29.0;
-    aux.elastic_ineq.d_t << 0.5;
-    aux.elastic_ineq.d_p << -0.7;
-    aux.elastic_ineq.d_n << 0.9;
-    aux.elastic_ineq.r_d << 2.5;
-    aux.elastic_ineq.r_t << -1.1;
-    aux.elastic_ineq.r_p << 0.3;
-    aux.elastic_ineq.r_n << -0.2;
-    aux.elastic_ineq.r_s_t << 0.6;
-    aux.elastic_ineq.r_s_p << -0.4;
-    aux.elastic_ineq.r_s_n << 0.9;
-
-    const auto summary = current_objective_summary(aux);
-    REQUIRE(approx_scalar(summary.exact_penalty, 4.0 * (2.0 + 3.0) + 6.0 * (13.0 + 17.0)));
-    REQUIRE(approx_scalar(summary.barrier_value,
-                          0.5 * (std::log(2.0) + std::log(3.0) + std::log(11.0) + std::log(13.0) + std::log(17.0))));
-    REQUIRE(approx_scalar(summary.penalty_dir_deriv, 4.0 * (0.2 - 0.3) + 6.0 * (-0.7 + 0.9)));
-    REQUIRE(approx_scalar(summary.barrier_dir_deriv,
-                          0.5 * ((0.2 / 5.0) + (-0.3 / 7.0) + (0.5 / 19.0) + (-0.7 / 23.0) + (0.9 / 29.0))));
-    REQUIRE(approx_scalar(summary.prim_res_l1, 1.25 + 2.5));
-    REQUIRE(approx_scalar(summary.inf_local_stat, 0.6));
-    REQUIRE(approx_scalar(summary.inf_local_comp, 0.8));
-}
-
-TEST_CASE("restoration reduced residual combines active w stationarity with local residual blocks") {
-    array_type<row_vector, primal_fields> lag_jac;
-    array_type<row_vector, primal_fields> lag_jac_corr;
-    for (auto pf : primal_fields) {
-        lag_jac[pf].resize(2);
-        lag_jac_corr[pf].resize(2);
-        lag_jac[pf].setZero();
-        lag_jac_corr[pf].setZero();
-    }
-    lag_jac[__x] << 1.0, -2.0;
-    lag_jac[__u] << 0.5, -0.2;
-    lag_jac[__y] << -0.7, 0.3;
-    lag_jac_corr[__x] << -0.1, 0.4;
-    lag_jac_corr[__u] << 0.2, 0.1;
-    lag_jac_corr[__y] << -0.3, 0.2;
-
-    vector dyn_res(2);
-    dyn_res << 0.4, -1.2;
-
-    ns_riccati::ns_riccati_data::restoration_aux_data aux;
-    aux.elastic_eq.resize(1, 0);
-    aux.elastic_eq.r_c << -0.6;
-    aux.elastic_eq.r_p << 0.25;
-    aux.elastic_eq.r_n << -0.15;
-    aux.elastic_eq.r_s_p << 0.5;
-    aux.elastic_eq.r_s_n << -0.35;
-
-    aux.elastic_ineq.resize(0, 1);
-    aux.elastic_ineq.r_d << 0.8;
-    aux.elastic_ineq.r_t << -0.9;
-    aux.elastic_ineq.r_p << 0.45;
-    aux.elastic_ineq.r_n << -0.2;
-    aux.elastic_ineq.r_s_t << 0.7;
-    aux.elastic_ineq.r_s_p << -0.25;
-    aux.elastic_ineq.r_s_n << 0.1;
-
-    const auto residual = compute_reduced_residual(lag_jac, lag_jac_corr, dyn_res, aux);
-    REQUIRE(residual.w_stationarity[__x].isApprox((row_vector(2) << 1.0, -2.0).finished()));
-    REQUIRE(residual.w_stationarity[__u].isApprox((row_vector(2) << 0.5, -0.2).finished()));
-    REQUIRE(residual.w_stationarity[__y].isApprox((row_vector(2) << -0.7, 0.3).finished()));
-    REQUIRE(approx_scalar(residual.eq_local.inf_prim, 0.6));
-    REQUIRE(approx_scalar(residual.eq_local.inf_stat, 0.25));
-    REQUIRE(approx_scalar(residual.eq_local.inf_comp, 0.5));
-    REQUIRE(approx_scalar(residual.ineq_local.inf_prim, 0.8));
-    REQUIRE(approx_scalar(residual.ineq_local.inf_stat, 0.9));
-    REQUIRE(approx_scalar(residual.ineq_local.inf_comp, 0.7));
-    REQUIRE(approx_scalar(residual.inf_primal, 1.2));
-    REQUIRE(approx_scalar(residual.inf_dual, 2.0));
-    REQUIRE(approx_scalar(residual.inf_comp, 0.5));
-}
-
-TEST_CASE("restoration barrier stats average local complementarity products") {
-    ns_riccati::ns_riccati_data::restoration_aux_data aux;
-    aux.elastic_eq.resize(1, 0);
-    aux.elastic_eq.p << 2.0;
-    aux.elastic_eq.nu_p << 3.0;
-    aux.elastic_eq.n << 5.0;
-    aux.elastic_eq.nu_n << 7.0;
-
-    aux.elastic_ineq.resize(0, 1);
-    aux.elastic_ineq.t << 11.0;
-    aux.elastic_ineq.nu_t << 13.0;
-    aux.elastic_ineq.p << 17.0;
-    aux.elastic_ineq.nu_p << 19.0;
-    aux.elastic_ineq.n << 23.0;
-    aux.elastic_ineq.nu_n << 29.0;
-
-    const auto stats = current_barrier_stats(aux);
-    REQUIRE(stats.n_comp == 5);
-    REQUIRE(approx_scalar(stats.avg_comp, (6.0 + 35.0 + 143.0 + 323.0 + 667.0) / 5.0));
-    REQUIRE(approx_scalar(stats.inf_comp, 667.0));
-}
-
-TEST_CASE("restoration mu update follows IPM-style complementarity ratio in adaptive mode") {
-    ns_riccati::ns_riccati_data::restoration_aux_data aux;
-    aux.mu_bar = 10.0;
-    aux.elastic_eq.resize(1, 0);
-    aux.elastic_eq.p_backup << 2.0;
-    aux.elastic_eq.nu_p_backup << 1.0;
-    aux.elastic_eq.n_backup << 3.0;
-    aux.elastic_eq.nu_n_backup << 2.0;
-    aux.elastic_eq.p << 1.0;
-    aux.elastic_eq.nu_p << 0.5;
-    aux.elastic_eq.n << 2.0;
-    aux.elastic_eq.nu_n << 1.0;
-
-    solver::ipm_config cfg;
-    cfg.mu_method = solver::ipm_config::mehrotra_predictor_corrector;
-
-    REQUIRE(update_mu_bar(aux, cfg, 10.0, 0.2, 1.0, 1.0));
-    const scalar_t prev_aff = 2.0 * 1.0 + 3.0 * 2.0;
-    const scalar_t post_aff = 1.0 * 0.5 + 2.0 * 1.0;
-    const scalar_t eta = post_aff / prev_aff;
-    const scalar_t sig = std::pow(eta, 3);
-    REQUIRE(approx_scalar(aux.mu_bar, sig * prev_aff / 2.0));
-}
-
-TEST_CASE("restoration mu update follows monotone decrease threshold") {
-    ns_riccati::ns_riccati_data::restoration_aux_data aux;
-    aux.mu_bar = 2.0;
-    aux.elastic_eq.resize(1, 0);
-    aux.elastic_eq.p << 1.0;
-    aux.elastic_eq.nu_p << 2.0;
-    aux.elastic_eq.n << 1.0;
-    aux.elastic_eq.nu_n << 2.0;
-
-    solver::ipm_config cfg;
-    cfg.mu_method = solver::ipm_config::monotonic_decrease;
-    const scalar_t mu_monotone_fraction_threshold = 10.0;
-    const scalar_t mu_monotone_factor = 0.2;
-
-    REQUIRE(update_mu_bar(aux, cfg, mu_monotone_fraction_threshold, mu_monotone_factor, 1.0, 1.0));
-    REQUIRE(aux.mu_bar < 2.0);
-    REQUIRE(aux.mu_bar >= 1e-11);
 }
 
 TEST_CASE("restoration predictor bookkeeping follows normal IPM complementarity accounting") {
@@ -581,43 +394,4 @@ TEST_CASE("restoration predictor bookkeeping follows normal IPM complementarity 
         (29.0 + alpha_d * -4.0) * (17.0 + cfg.alpha_primal * -1.0);
     REQUIRE(approx_scalar(worker.prev_aff_comp, prev_aff));
     REQUIRE(approx_scalar(worker.post_aff_comp, post_aff));
-}
-
-TEST_CASE("restoration mu update prefers predictor worker data when available") {
-    ns_riccati::ns_riccati_data::restoration_aux_data aux;
-    aux.mu_bar = 5.0;
-    aux.predictor_worker.n_ipm_cstr = 2;
-    aux.predictor_worker.prev_aff_comp = 20.0;
-    aux.predictor_worker.post_aff_comp = 5.0;
-
-    solver::ipm_config cfg;
-    cfg.mu_method = solver::ipm_config::mehrotra_predictor_corrector;
-
-    REQUIRE(update_mu_bar(aux, cfg, 10.0, 0.2, 1.0, 1.0));
-    const scalar_t eta = 5.0 / 20.0;
-    const scalar_t sig = std::pow(eta, 3);
-    REQUIRE(approx_scalar(aux.mu_bar, sig * 20.0 / 2.0));
-    REQUIRE(aux.predictor_worker.n_ipm_cstr == 0);
-}
-
-TEST_CASE("restoration correction rhs only loads reduced u and y stationarity") {
-    array_type<row_vector, primal_fields> rhs;
-    for (auto pf : primal_fields) {
-        rhs[pf].resize(2);
-        rhs[pf].setConstant(5.0);
-    }
-
-    reduced_residual_info residual;
-    residual.w_stationarity[__x].resize(2);
-    residual.w_stationarity[__u].resize(2);
-    residual.w_stationarity[__y].resize(2);
-    residual.w_stationarity[__x] << 1.0, 2.0;
-    residual.w_stationarity[__u] << -0.4, 0.6;
-    residual.w_stationarity[__y] << 0.3, -0.9;
-
-    load_correction_rhs(rhs, residual);
-
-    REQUIRE(rhs[__x].isZero());
-    REQUIRE(rhs[__u].isApprox(residual.w_stationarity[__u]));
-    REQUIRE(rhs[__y].isApprox(residual.w_stationarity[__y]));
 }

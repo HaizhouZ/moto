@@ -48,9 +48,16 @@ void ns_sqp::iterative_refinement() {
                 thread_res[tid].inf_kkt_stat_err_y = std::max(thread_res[tid].inf_kkt_stat_err_y, d->kkt_stat_err_[__y].cwiseAbs().maxCoeff());
             }
             if (in_restoration_phase()) {
-                const auto local_res = solver::restoration::refinement_local_residuals(*d);
-                thread_res[tid].inf_resto_local_stat = std::max(thread_res[tid].inf_resto_local_stat, local_res.stationarity);
-                thread_res[tid].inf_resto_local_comp = std::max(thread_res[tid].inf_resto_local_comp, local_res.complementarity);
+                auto accumulate_local = [&](const soft_constr &f, const soft_constr::approx_data &sd) {
+                    thread_res[tid].inf_resto_local_stat =
+                        std::max(thread_res[tid].inf_resto_local_stat, f.local_stat_residual_inf(sd));
+                    thread_res[tid].inf_resto_local_comp =
+                        std::max(thread_res[tid].inf_resto_local_comp, f.local_comp_residual_inf(sd));
+                };
+                d->template for_each(__ineq_x, accumulate_local);
+                d->template for_each(__ineq_xu, accumulate_local);
+                d->template for_each(__eq_x_soft, accumulate_local);
+                d->template for_each(__eq_xu_soft, accumulate_local);
             }
         },
                                    true);

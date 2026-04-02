@@ -174,34 +174,9 @@ void ns_sqp::reset_profile() {
     profile_report_ = {};
 }
 
-void ns_sqp::assemble_restoration_problem(data *cur, node_data::update_mode mode) {
-    const bool old_disable = settings.ipm.disable_corrections;
-    settings.ipm.disable_corrections = true;
-    cur->update_approximation(mode, false);
-    settings.ipm.disable_corrections = old_disable;
-    if (mode != node_data::update_mode::eval_val) {
-        for (auto f : std::array{__u, __y}) {
-            cur->restoration_prox_hess_diag_[f].setZero();
-        }
-    }
-    solver::restoration::prepare_current_constraint_stack(*cur);
-    solver::restoration::initialize_stage(*cur);
-    solver::restoration::assemble_resto_base_problem(
-        *cur,
-        mode != node_data::update_mode::eval_val,
-        settings.restoration.rho_u,
-        settings.restoration.rho_y,
-        &cur->restoration_prox_hess_diag_[__u],
-        &cur->restoration_prox_hess_diag_[__y]);
-}
-
 void ns_sqp::update_phase_problem(data *d, node_data::update_mode mode) {
-    if (using_restoration_overlay_graph()) {
+    if (using_restoration_overlay_graph() || !in_restoration_phase()) {
         d->update_approximation(mode, true);
-        return;
-    }
-    if (in_restoration_phase()) {
-        assemble_restoration_problem(d, mode);
         return;
     }
     d->update_approximation(mode, true);
@@ -266,11 +241,8 @@ void ns_sqp::post_factorization_correction_step() {
 }
 void ns_sqp::finalize_correction(data *d) {
     riccati_solver_->finalize_primal_step_correction(d);
-    if (use_normal_soft_phase()) {
+    if (use_normal_soft_phase() || in_restoration_phase()) {
         solver::ineq_soft::finalize_newton_step(d);
-    }
-    if (in_restoration_phase()) {
-        solver::restoration::finalize_newton_step(*d);
     }
 }
 
@@ -283,11 +255,8 @@ void ns_sqp::refresh_ls_bounds() {
     reset_ls_workers();
     auto &graph = solver_graph();
     graph.for_each_parallel([this](size_t tid, data *d) {
-        if (use_normal_soft_phase()) {
+        if (use_normal_soft_phase() || in_restoration_phase()) {
             solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
-        }
-        if (in_restoration_phase()) {
-            solver::restoration::update_ls_bounds(*d, &setting_per_thread[tid]);
         }
     });
     finalize_ls_bound_and_set_to_max();
@@ -390,17 +359,9 @@ void ns_sqp::solve_direction(iteration_context &ctx, bool do_scaling, bool gauss
     detail_timed_block_start("finalize_primal_step");
     graph.for_each_parallel([this](size_t tid, data *d) {
         riccati_solver_->finalize_primal_step(d);
-        if (use_normal_soft_phase()) {
+        if (use_normal_soft_phase() || in_restoration_phase()) {
             solver::ineq_soft::finalize_newton_step(d);
-        }
-        if (in_restoration_phase()) {
-            solver::restoration::finalize_newton_step(*d);
-        }
-        if (use_normal_soft_phase()) {
             solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
-        }
-        if (in_restoration_phase()) {
-            solver::restoration::update_ls_bounds(*d, &setting_per_thread[tid]);
         }
     });
     detail_timed_block_end("finalize_primal_step");
@@ -439,11 +400,8 @@ void ns_sqp::prepare_globalization(filter_linesearch_data &ls, iteration_context
     unscale_duals();
     graph.for_each_parallel([this](data *d) {
         d->backup_trial_state();
-        if (use_normal_soft_phase()) {
+        if (use_normal_soft_phase() || in_restoration_phase()) {
             solver::ineq_soft::backup_trial_state(d);
-        }
-        if (in_restoration_phase()) {
-            solver::restoration::backup_trial_state(*d);
         }
     });
     if (ctx.mu_changed) {
@@ -460,22 +418,14 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
     detail_timed_block_start("apply_affine_step");
         graph.for_each_parallel([this](data *d) {
             d->restore_trial_state();
-            if (use_normal_soft_phase()) {
+            if (use_normal_soft_phase() || in_restoration_phase()) {
                 solver::ineq_soft::restore_trial_state(d);
             }
-            if (in_restoration_phase()) {
-                solver::restoration::restore_trial_state(*d);
-            }
             riccati_solver_->apply_affine_step(d, &settings);
-            if (use_normal_soft_phase()) {
+            if (use_normal_soft_phase() || in_restoration_phase()) {
                 solver::ineq_soft::apply_affine_step(d, &settings);
             }
-            if (in_restoration_phase()) {
-                solver::restoration::apply_affine_step(*d, &settings);
-                update_phase_problem(d, node_data::update_mode::eval_val);
-            } else {
-                update_phase_problem(d, node_data::update_mode::eval_val);
-            }
+            update_phase_problem(d, node_data::update_mode::eval_val);
         });
     detail_timed_block_end("apply_affine_step");
     }
@@ -875,109 +825,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
             return kkt;
         }
 
-        kkt_info kkt;
-        scalar_t dual_res_l1 = 0.;
-        size_t n_dual_res = 0;
-        const auto active_grad = [](const data &d, field_t pf) {
-            return row_vector(d.dense().lag_jac_[pf]);
-        };
-        auto &graph = solver_graph();
-        for (auto n : graph.flatten_nodes()) {
-            auto *aux = dynamic_cast<ns_riccati_data::restoration_aux_data *>(n->aux_.get());
-            if (aux == nullptr) {
-                continue;
-            }
-            const auto reduced_res = solver::restoration::compute_reduced_residual(*n);
-            const auto objective_summary = solver::restoration::current_objective_summary(*n);
-            kkt.cost += n->dense().cost_;
-            kkt.objective += n->dense().cost_ + objective_summary.exact_penalty;
-            kkt.search_barrier_value += objective_summary.barrier_value;
-            kkt.prim_res_l1 += n->dense().approx_[__dyn].v_.lpNorm<1>();
-            kkt.prim_res_l1 += objective_summary.prim_res_l1;
-            kkt.inf_prim_res = std::max(kkt.inf_prim_res, reduced_res.inf_primal);
-            kkt.inf_dual_res = std::max(kkt.inf_dual_res, objective_summary.inf_local_stat);
-            kkt.inf_comp_res = std::max(kkt.inf_comp_res, objective_summary.inf_local_comp);
-            if (update_dual_res && n->dense().lag_jac_[__u].size() > 0) {
-                const row_vector grad_u = active_grad(*n, __u);
-                kkt.inf_dual_res = std::max(kkt.inf_dual_res, grad_u.cwiseAbs().maxCoeff());
-                dual_res_l1 += grad_u.cwiseAbs().sum();
-                n_dual_res += static_cast<size_t>(grad_u.size());
-            }
-            for (auto cf : constr_fields) {
-                const auto &lam = n->dense().dual_[cf];
-                if (lam.size() > 0) {
-                    const scalar_t lam_inf = lam.cwiseAbs().maxCoeff();
-                    kkt.max_dual_norm = std::max(kkt.max_dual_norm, lam_inf);
-                    if (cf == __dyn || cf == __eq_x || cf == __eq_xu) {
-                        kkt.max_eq_dual_norm = std::max(kkt.max_eq_dual_norm, lam_inf);
-                    } else if (cf == __ineq_x || cf == __ineq_xu) {
-                        kkt.max_ineq_dual_norm = std::max(kkt.max_ineq_dual_norm, lam_inf);
-                    }
-                }
-            }
-            for (auto f : primal_fields) {
-                if (n->trial_prim_step[f].size() > 0) {
-                    kkt.inf_prim_step = std::max(kkt.inf_prim_step, n->trial_prim_step[f].cwiseAbs().maxCoeff());
-                    kkt.obj_fullstep_dec += n->dense().cost_jac_[f].dot(n->trial_prim_step[f]);
-                }
-            }
-            kkt.obj_fullstep_dec += objective_summary.penalty_dir_deriv;
-            kkt.search_barrier_dir_deriv += objective_summary.barrier_dir_deriv;
-            for (auto f : constr_fields) {
-                if (n->trial_dual_step[f].size() > 0) {
-                    const scalar_t step = n->trial_dual_step[f].cwiseAbs().maxCoeff();
-                    kkt.inf_dual_step = std::max(kkt.inf_dual_step, step);
-                    if (in_field(f, ineq_constr_fields)) {
-                        kkt.inf_ineq_dual_step = std::max(kkt.inf_ineq_dual_step, step);
-                    } else {
-                        kkt.inf_eq_dual_step = std::max(kkt.inf_eq_dual_step, step);
-                        if (f == __dyn) kkt.inf_dyn_dual_step = std::max(kkt.inf_dyn_dual_step, step);
-                        if (f == __eq_x) kkt.inf_eq_x_dual_step = std::max(kkt.inf_eq_x_dual_step, step);
-                        if (f == __eq_xu) kkt.inf_eq_xu_dual_step = std::max(kkt.inf_eq_xu_dual_step, step);
-                    }
-                }
-            }
-        }
-        if (update_dual_res) {
-            graph.apply_forward(
-                [&](node_data *cur, node_data *next) {
-                    const auto *cur_data = dynamic_cast<const data *>(cur);
-                    if (cur_data == nullptr) {
-                        return;
-                    }
-                    if (next != nullptr) [[likely]] {
-                        const auto *next_data = dynamic_cast<const data *>(next);
-                        if (next_data == nullptr) {
-                            return;
-                        }
-                        static row_vector tmp;
-                        const row_vector next_x = active_grad(*next_data, __x);
-                        const row_vector cur_y = active_grad(*cur_data, __y);
-                        tmp.conservativeResize(next_x.cols());
-                        tmp.noalias() = next_x *
-                                             utils::permutation_from_y_to_x(&cur->problem(), &next->problem()) +
-                                         cur_y;
-                        if (tmp.size() > 0) {
-                            kkt.inf_dual_res = std::max(kkt.inf_dual_res, tmp.cwiseAbs().maxCoeff());
-                            dual_res_l1 += tmp.cwiseAbs().sum();
-                            n_dual_res += static_cast<size_t>(tmp.size());
-                        }
-                    } else {
-                        const row_vector grad_y = active_grad(*cur_data, __y);
-                        if (grad_y.size() == 0) {
-                            return;
-                        }
-                        kkt.inf_dual_res = std::max(kkt.inf_dual_res, grad_y.cwiseAbs().maxCoeff());
-                        dual_res_l1 += grad_y.cwiseAbs().sum();
-                        n_dual_res += static_cast<size_t>(grad_y.size());
-                    }
-                },
-                true);
-            if (n_dual_res > 0) {
-                kkt.avg_dual_res = dual_res_l1 / static_cast<scalar_t>(n_dual_res);
-            }
-        }
-        return kkt;
+        throw std::runtime_error("restoration phase without overlay graph is no longer supported");
     }
 
     kkt_info kkt;

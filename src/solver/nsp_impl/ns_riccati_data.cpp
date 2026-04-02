@@ -63,10 +63,6 @@ ns_riccati_data::ns_riccati_data(node_data *full_data)
     nsp_.s_c_stacked.resize(ncstr, nu);
     nsp_.s_c_stacked_0_k.resize(ncstr);
     nsp_.s_c_stacked_0_K.resize(ncstr, nx);
-    for (auto f : primal_fields) {
-        restoration_prox_hess_diag_[f].resize(dense_->lag_jac_[f].size());
-        restoration_prox_hess_diag_[f].setZero();
-    }
     d_y.K.setZero();
     // if (nsp_->sparse_factorizer_)
     // nsp_->sparse_factorizer_->init(nsp_);

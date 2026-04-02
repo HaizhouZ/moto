@@ -6,48 +6,16 @@ namespace moto {
 namespace {
 struct phase_mu_info {
     scalar_t display = 0.;
-    scalar_t min = 0.;
-    scalar_t max = 0.;
     bool valid = false;
 };
 
 phase_mu_info current_phase_mu(ns_sqp::solver_graph_type &graph,
                                bool in_restoration,
                                scalar_t outer_mu) {
+    (void)graph;
     phase_mu_info info;
-    if (!in_restoration) {
-        info.display = outer_mu;
-        info.min = info.display;
-        info.max = info.display;
-        info.valid = true;
-        return info;
-    }
-
-    for (auto *n : graph.flatten_nodes()) {
-        const auto *aux =
-            dynamic_cast<const ns_sqp::ns_riccati_data::restoration_aux_data *>(n->aux_.get());
-        if (aux == nullptr) {
-            continue;
-        }
-        if (!info.valid) {
-            info.min = aux->mu_bar;
-            info.max = aux->mu_bar;
-            info.valid = true;
-        } else {
-            info.min = std::min(info.min, aux->mu_bar);
-            info.max = std::max(info.max, aux->mu_bar);
-        }
-    }
-    if (info.valid) {
-        // Restoration owns one mu_bar per stage. The stats table has one scalar column,
-        // so we report the conservative aggregate max(mu_bar) and print the range below.
-        info.display = info.max;
-    } else {
-        info.display = outer_mu;
-        info.min = outer_mu;
-        info.max = outer_mu;
-        info.valid = true;
-    }
+    info.display = outer_mu;
+    info.valid = !in_restoration || outer_mu > 0.;
     return info;
 }
 } // namespace
@@ -120,12 +88,7 @@ void ns_sqp::print_stats(const kkt_info &info) {
         }
         idx_stat++;
     }
-
     fmt::print("\n");
-    if (restoration_active && mu_info.valid && std::abs(mu_info.max - mu_info.min) > scalar_t(1e-15)) {
-        fmt::print("    restoration mu_bar range=[{:.3e}, {:.3e}] (table shows max)\n",
-                   mu_info.min, mu_info.max);
-    }
     fmt::print("    ||lam_eq||={:.3e}  ||lam_ineq||={:.3e}  diag_scl={:.3e}  ||lam||={:.3e}\n",
                info.max_eq_dual_norm, info.max_ineq_dual_norm, info.max_diag_scaling, info.max_dual_norm);
     fmt::print("    d_eq: dyn={:.3e}  eq_x={:.3e}  eq_xu={:.3e}\n",

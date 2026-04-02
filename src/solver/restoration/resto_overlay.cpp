@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <moto/ocp/impl/node_data.hpp>
 #include <moto/solver/ipm/positivity_step.hpp>
+#include <moto/solver/ns_riccati/ns_riccati_data.hpp>
 
 namespace moto::solver::restoration {
 namespace {
@@ -30,13 +31,6 @@ std::string overlay_name(const generic_func &source, std::string_view suffix) {
     return fmt::format("{}__{}", source.name(), suffix);
 }
 
-void add_dense_block(sparse_mat &dst, const matrix &src) {
-    if (src.size() == 0) {
-        return;
-    }
-    dst.insert(0, 0, src.rows(), src.cols(), sparsity::dense).noalias() += src;
-}
-
 void fill_sigma(const vector &ref, vector &sigma_sq, scalar_t eps) {
     sigma_sq.resizeLike(ref);
     if (ref.size() == 0) {
@@ -57,20 +51,6 @@ void copy_dual_slice(vector_ref dst, const node_data &outer, const Overlay &over
         throw std::runtime_error("restoration overlay source position out of range");
     }
     dst = outer.problem().extract(outer.dense().dual_[source_field], exprs[overlay.source_pos()]);
-}
-
-template <typename Overlay>
-bool same_primal_signature(const Overlay &overlay, const generic_func &source) {
-    if (overlay.in_args().size() != source.in_args().size()) {
-        return false;
-    }
-    for (size_t i = 0; i < overlay.in_args().size(); ++i) {
-        if (overlay.in_args()[i]->field() != source.in_args()[i]->field() ||
-            overlay.in_args()[i]->dim() != source.in_args()[i]->dim()) {
-            return false;
-        }
-    }
-    return true;
 }
 
 } // namespace
@@ -625,6 +605,54 @@ void sync_restoration_overlay_duals(node_data &outer, node_data &resto) {
     resto.for_each(__ineq_xu, [&](const resto_ineq_elastic_ipm_constr &overlay, resto_ineq_elastic_ipm_constr::approx_data &d) {
         copy_dual_slice(d.multiplier_, outer, overlay);
     });
+}
+
+void restore_outer_duals(array_type<vector, constr_fields> &dual,
+                         const array_type<vector, constr_fields> &backup) {
+    for (auto field : constr_fields) {
+        dual[field] = backup[field];
+    }
+}
+
+void commit_bound_state(vector_ref slack,
+                        vector_ref multiplier,
+                        const vector_const_ref &resto_slack,
+                        const vector_const_ref &resto_multiplier,
+                        scalar_t reset_threshold,
+                        scalar_t reset_value) {
+    slack = resto_slack;
+    multiplier = resto_multiplier;
+    maybe_reset_multiplier(multiplier, reset_threshold, reset_value);
+}
+
+bool should_reset_multiplier(const vector_const_ref &multiplier, scalar_t threshold) {
+    return threshold <= 0.0 || (multiplier.size() > 0 && multiplier.cwiseAbs().maxCoeff() > threshold);
+}
+
+void maybe_reset_multiplier(vector_ref multiplier, scalar_t threshold, scalar_t reset_value) {
+    if (should_reset_multiplier(multiplier, threshold)) {
+        multiplier.setConstant(reset_value);
+    }
+}
+
+void reset_equality_duals(array_type<vector, constr_fields> &dual, scalar_t threshold) {
+    bool reset_any = false;
+    for (auto field : std::array{__eq_x, __eq_xu, __eq_x_soft, __eq_xu_soft}) {
+        if (should_reset_multiplier(dual[field], threshold)) {
+            reset_any = true;
+            break;
+        }
+    }
+    if (!reset_any) {
+        return;
+    }
+    for (auto field : std::array{__eq_x, __eq_xu, __eq_x_soft, __eq_xu_soft}) {
+        dual[field].setZero();
+    }
+}
+
+void reset_equality_duals(ns_riccati::ns_riccati_data &d, scalar_t threshold) {
+    reset_equality_duals(d.dense_->dual_, threshold);
 }
 
 } // namespace moto::solver::restoration

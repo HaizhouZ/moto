@@ -2,7 +2,6 @@
 #define __NS_RICCATI_DATA__
 
 #include <moto/solver/data_base.hpp>
-#include <moto/solver/restoration/resto_elastic_constr.hpp>
 #include <Eigen/Cholesky>
 #include <Eigen/LU>
 #include <moto/utils/blasfeo_factorizer/blasfeo_llt.hpp>
@@ -63,36 +62,10 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
     } nsp_;
 
     node_data *full_data_;
-    array_type<vector, primal_fields> restoration_prox_hess_diag_;
-
     struct aux_data {
         virtual ~aux_data() = default;
     };
     std::unique_ptr<aux_data> aux_; // auxiliary data pointer, can be used to store custom data
-
-    struct restoration_aux_data : aux_data {
-        scalar_t rho_eq = 1000.0;
-        scalar_t rho_ineq = 1000.0;
-        scalar_t rho_u = 1e-4;
-        scalar_t rho_y = 1e-4;
-        scalar_t lambda_reg = 1e-8;
-        scalar_t mu_bar = 1.0;
-        bool initialized = false;
-        bool verbose = false;
-        bool outer_dual_backup_valid = false;
-        solver::ipm_config::worker predictor_worker;
-
-        resto_elastic_constr elastic_eq;
-        resto_ineq_constr elastic_ineq;
-        array_type<vector, constr_fields> outer_dual_backup;
-        vector outer_cost_backup;
-        vector g_current;
-        vector g_step;
-        vector u_ref;
-        vector y_ref;
-        vector sigma_u_sq;
-        vector sigma_y_sq;
-    };
 
     rank_status rank_status_;
     // sensitivity for sqp step

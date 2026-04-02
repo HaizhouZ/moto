@@ -9,6 +9,9 @@
 
 namespace moto {
 struct node_data;
+namespace solver::ns_riccati {
+struct ns_riccati_data;
+}
 }
 
 namespace moto::solver::restoration {
@@ -172,5 +175,18 @@ void sync_restoration_overlay_primal(node_data &outer, node_data &resto);
 void sync_restoration_overlay_duals(node_data &outer, node_data &resto);
 void seed_restoration_overlay_refs(node_data &resto,
                                    scalar_t prox_eps = scalar_t(1.0));
+void restore_outer_duals(array_type<vector, constr_fields> &dual,
+                         const array_type<vector, constr_fields> &backup);
+void commit_bound_state(vector_ref slack,
+                        vector_ref multiplier,
+                        const vector_const_ref &resto_slack,
+                        const vector_const_ref &resto_multiplier,
+                        scalar_t reset_threshold,
+                        scalar_t reset_value);
+
+bool should_reset_multiplier(const vector_const_ref &multiplier, scalar_t threshold);
+void maybe_reset_multiplier(vector_ref multiplier, scalar_t threshold, scalar_t reset_value);
+void reset_equality_duals(array_type<vector, constr_fields> &dual, scalar_t threshold);
+void reset_equality_duals(ns_riccati::ns_riccati_data &d, scalar_t threshold);
 
 } // namespace moto::solver::restoration
