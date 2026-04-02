@@ -7,6 +7,15 @@
 namespace moto {
 namespace solver {
 namespace ns_riccati {
+namespace {
+void add_diag_times(const vector &diag, const vector &rhs, row_vector &out) {
+    if (diag.size() == 0) {
+        return;
+    }
+    out.array() += (diag.array() * rhs.array()).transpose();
+}
+} // namespace
+
 void generic_solver::fwd_linear_rollout(ns_riccati_data *cur, ns_riccati_data *next) {
     auto &d = *cur;
     d.trial_prim_step[__y].noalias() = d.d_y.k + d.d_y.K * d.trial_prim_step[__x];
@@ -106,8 +115,10 @@ void generic_solver::compute_kkt_residual(ns_riccati_data *cur) {
     auto dense = d.dense_;
     d.kkt_stat_err_[__u].noalias() = d.base_lag_grad_backup[__u].transpose();
     d.Q_uu.times(d.trial_prim_step[__u], d.kkt_stat_err_[__u]);
+    add_diag_times(d.restoration_prox_hess_diag_[__u], d.trial_prim_step[__u], d.kkt_stat_err_[__u]);
     d.kkt_stat_err_[__y].noalias() = d.base_lag_grad_backup[__y].transpose();
     d.Q_yy.times(d.trial_prim_step[__y], d.kkt_stat_err_[__y]);
+    add_diag_times(d.restoration_prox_hess_diag_[__y], d.trial_prim_step[__y], d.kkt_stat_err_[__y]);
     d.kkt_stat_err_[__x].noalias() = d.base_lag_grad_backup[__x].transpose();
     d.Q_xx.times(d.trial_prim_step[__x], d.kkt_stat_err_[__x]);
     for (auto f : primal_fields) {

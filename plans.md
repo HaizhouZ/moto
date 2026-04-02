@@ -76,6 +76,7 @@
 - `compute_kkt_residual()` 不能把 normal cost 或 normal barrier objective 的导数带进 restoration residual。
 - iterative refinement 控制流继续复用，但 residual checker 和 correction RHS 必须按 phase 切换。
 - restoration 下的 IR stop check 必须显式纳入 local elastic block 的 stationarity / complementarity，避免只看 `w`-stationarity 就误判“已收敛”。
+- 在 reduced RHS 还没按 restoration 局部块完整推导前，不能把 normal-phase IR correction 直接施加到 restoration 上；宁可先禁用 restoration IR，也不能用错误 RHS 把 Riccati 递推炸掉。
 - restoration line search 的 inner acceptor 使用 restoration objective 与 restoration primal violation；outer filter 只在 restoration 成功返回判断时介入。
 
 ### 5. 复用 ipm_constr 的正性/步长逻辑
@@ -95,6 +96,7 @@
 
 ### 6. 入口与退出
 - 入口条件保持：outer globalization 发生 `tiny_step` failure 且 outer primal infeasibility 仍大于容差。
+- outer `tiny_step` 的判定阈值必须和 restoration trigger 共用同一套动态 `alpha_min` 逻辑；不能一边在 `update()` 里想触发 restoration，另一边 line search 永远不给出 `tiny_step`。
 - 入口动作固定为：
   - 快照 outer dual state
   - 初始化 `mu_bar`

@@ -63,6 +63,7 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
     } nsp_;
 
     node_data *full_data_;
+    array_type<vector, primal_fields> restoration_prox_hess_diag_;
 
     struct aux_data {
         virtual ~aux_data() = default;

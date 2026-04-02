@@ -140,6 +140,11 @@ void ns_sqp::assemble_restoration_problem(data *cur, node_data::update_mode mode
     settings.ipm.disable_corrections = true;
     cur->update_approximation(mode, false);
     settings.ipm.disable_corrections = old_disable;
+    if (mode != node_data::update_mode::eval_val) {
+        for (auto f : std::array{__u, __y}) {
+            cur->restoration_prox_hess_diag_[f].setZero();
+        }
+    }
     solver::restoration::prepare_current_constraint_stack(*cur);
     solver::restoration::initialize_stage(*cur);
     solver::restoration::assemble_resto_base_problem(
@@ -147,8 +152,8 @@ void ns_sqp::assemble_restoration_problem(data *cur, node_data::update_mode mode
         mode != node_data::update_mode::eval_val,
         settings.restoration.rho_u,
         settings.restoration.rho_y,
-        &cur->primal_prox_hess_diagonal_[__u],
-        &cur->primal_prox_hess_diagonal_[__y]);
+        &cur->restoration_prox_hess_diag_[__u],
+        &cur->restoration_prox_hess_diag_[__y]);
 }
 
 ns_sqp::kkt_info ns_sqp::initialize() {
@@ -572,15 +577,12 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                 print_stats(kkt_last);
             }
 
-            const scalar_t alpha_min_trigger =
-                std::max(settings.ls.primal.alpha_min,
-                         settings.restoration.alpha_min_factor * std::max(ls.initial_alpha_primal, scalar_t(1e-12)));
             const bool tiny_step_trigger =
                 action == line_search_action::failure &&
                 ls.failure_reason == filter_linesearch_per_iter_data::failure_reason_t::tiny_step &&
                 settings.restoration.enabled &&
                 kkt_last.inf_prim_res > settings.prim_tol &&
-                settings.ls.alpha_primal <= alpha_min_trigger;
+                settings.ls.alpha_primal <= current_phase_alpha_min(ls);
 
             if (tiny_step_trigger) {
                 kkt_last = restoration_update(kkt_last, ls);

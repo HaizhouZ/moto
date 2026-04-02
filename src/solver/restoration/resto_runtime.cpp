@@ -107,7 +107,7 @@ void add_diag_quadratic(row_vector &dst,
     dst.noalias() += (scale * diag.array() * delta.array()).matrix().transpose();
 }
 
-void add_diag_hessian(aligned_vector_map_t &diag_block,
+void add_diag_hessian(vector &diag_block,
                       const vector &diag,
                       scalar_t scale) {
     if (diag.size() == 0) {
@@ -116,33 +116,7 @@ void add_diag_hessian(aligned_vector_map_t &diag_block,
     if (diag_block.size() != diag.size()) {
         throw std::runtime_error("add_diag_hessian diagonal size mismatch");
     }
-    diag_block.get().array() += scale * diag.array();
-}
-
-void add_diag_hessian(sparse_mat &block,
-                      const vector &diag,
-                      scalar_t scale) {
-    if (diag.size() == 0) {
-        return;
-    }
-    const auto dim = static_cast<size_t>(diag.size());
-    if (block.rows() == 0 && block.cols() == 0) {
-        block.resize(dim, dim);
-    }
-    if (block.rows() != dim || block.cols() != dim) {
-        throw std::runtime_error("add_diag_hessian dimension mismatch");
-    }
-    if (block.diag_panels_.empty()) {
-        block.insert(0, 0, dim, dim, sparsity::diag);
-    }
-    if (block.diag_panels_.size() != 1 ||
-        block.diag_panels_.front().row_st_ != 0 ||
-        block.diag_panels_.front().col_st_ != 0 ||
-        static_cast<Eigen::Index>(block.diag_panels_.front().rows_) != diag.size()) {
-        throw std::runtime_error("add_diag_hessian expects a single maintained diagonal block");
-    }
-    auto diag_block = aligned_vector_map_t(block.diag_panels_.front().data_);
-    add_diag_hessian(diag_block, diag, scale);
+    diag_block.array() += scale * diag.array();
 }
 
 void add_sparse_block(sparse_mat &block, const matrix &delta) {
@@ -369,8 +343,8 @@ void assemble_resto_base_problem(ns_riccati::ns_riccati_data &d,
                                  bool update_derivatives,
                                  scalar_t rho_u,
                                  scalar_t rho_y,
-                                 aligned_vector_map_t *u_diag,
-                                 aligned_vector_map_t *y_diag) {
+                                 vector *u_diag,
+                                 vector *y_diag) {
     auto *aux = get_aux(d);
     if (aux == nullptr) {
         return;
@@ -391,7 +365,7 @@ void assemble_resto_base_problem(ns_riccati::ns_riccati_data &d,
     const std::array<scalar_t, 2> prox_rho{rho_u, rho_y};
     const std::array<const vector *, 2> prox_ref{&aux->u_ref, &aux->y_ref};
     const std::array<const vector *, 2> prox_sigma{&aux->sigma_u_sq, &aux->sigma_y_sq};
-    const std::array<aligned_vector_map_t *, 2> prox_diag{u_diag, y_diag};
+    const std::array<vector *, 2> prox_diag{u_diag, y_diag};
 
     for (size_t i = 0; i < prox_fields.size(); ++i) {
         const auto pf = prox_fields[i];
@@ -408,10 +382,8 @@ void assemble_resto_base_problem(ns_riccati::ns_riccati_data &d,
         add_diag_quadratic(d.dense_->cost_jac_[pf], sigma_sq, delta, rho);
         add_diag_quadratic(d.dense_->lag_jac_[pf], sigma_sq, delta, rho);
         if (update_derivatives) {
-            if (prox_diag[i] != nullptr && prox_diag[i]->data() != nullptr) {
+            if (prox_diag[i] != nullptr) {
                 add_diag_hessian(*prox_diag[i], sigma_sq, rho);
-            } else {
-                add_diag_hessian(d.dense_->lag_hess_[pf][pf], sigma_sq, rho);
             }
         }
     }

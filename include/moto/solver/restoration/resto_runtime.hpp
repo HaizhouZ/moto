@@ -46,8 +46,8 @@ void assemble_resto_base_problem(ns_riccati::ns_riccati_data &d,
                                  bool update_derivatives,
                                  scalar_t rho_u,
                                  scalar_t rho_y,
-                                 aligned_vector_map_t *u_diag = nullptr,
-                                 aligned_vector_map_t *y_diag = nullptr);
+                                 vector *u_diag = nullptr,
+                                 vector *y_diag = nullptr);
 void finalize_newton_step(ns_riccati::ns_riccati_data &d);
 void update_ls_bounds(ns_riccati::ns_riccati_data &d, workspace_data *cfg);
 void backup_trial_state(ns_riccati::ns_riccati_data &d);

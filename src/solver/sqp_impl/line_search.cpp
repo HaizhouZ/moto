@@ -24,6 +24,16 @@ scalar_t ns_sqp::outer_fullstep_dec(const kkt_info &kkt) const {
     return kkt.obj_fullstep_dec - settings.ipm.mu * kkt.barrier_dir_deriv;
 }
 
+scalar_t ns_sqp::current_phase_alpha_min(const filter_linesearch_per_iter_data &ls) const {
+    scalar_t alpha_min = settings.ls.primal.alpha_min;
+    if (!in_restoration_phase() && settings.restoration.enabled) {
+        alpha_min = std::max(alpha_min,
+                             settings.restoration.alpha_min_factor *
+                                 std::max(ls.initial_alpha_primal, scalar_t(1e-12)));
+    }
+    return alpha_min;
+}
+
 void ns_sqp::finalize_ls_bound_and_set_to_max() {
     // merge line search bounds from each thread
     for (solver::linesearch_config &s : setting_per_thread) {
@@ -226,7 +236,7 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
         ls.skip_soc = true;
     }
     scalar_t fullstep_dec_k = current_phase_fullstep_dec(current_kkt);
-    ls.alpha_min = settings.ls.primal.alpha_min;
+    ls.alpha_min = current_phase_alpha_min(ls);
 
     const auto record_best_trial = [&] {
         const auto make_point = [&](const kkt_info &kkt) -> filter_linesearch_data::point {

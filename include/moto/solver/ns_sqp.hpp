@@ -194,19 +194,11 @@ struct ns_sqp {
 
     struct data : public node_data, ns_riccati_data {
         data(const ocp_ptr_t &prob)
-            : node_data(prob), ns_riccati_data((node_data *)this) {
-            for (auto f : primal_fields) {
-                auto &diag_panels = this->dense().lag_hess_[f][f].diag_panels_;
-                if (!diag_panels.empty()) {
-                    primal_prox_hess_diagonal_[f].reset(diag_panels.back().data_);
-                }
-            }
-        }
+            : node_data(prob), ns_riccati_data((node_data *)this) {}
         data(data &&rhs) = default;
         static void update_approx(data *d) {
             d->update_approximation();
         }
-        array_type<aligned_vector_map_t, primal_fields> primal_prox_hess_diagonal_;
         /// row scale applied to each constraint field (empty ⟹ scaling not yet applied)
         array_type<vector, constr_fields> scale_c_;
         /// scale applied to each primal field's cost gradient
@@ -466,6 +458,7 @@ struct ns_sqp {
     };
 
     void step_back_alpha(filter_linesearch_per_iter_data &ls);
+    scalar_t current_phase_alpha_min(const filter_linesearch_per_iter_data &ls) const;
     line_search_action filter_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
     line_search_action merit_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
     bool outer_filter_accepts(const filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &reference_kkt);
