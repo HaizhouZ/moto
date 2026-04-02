@@ -74,10 +74,10 @@ void generic_solver::finalize_dual_newton_step(ns_riccati_data *cur) {
             d.trial_dual_step[__eq_xu] = d.d_lbd_s_c.tail(d.nc);
         }
     }
-    cur->apply_jac_y_inverse_transpose(d.d_lbd_f, d.trial_dual_step[__dyn]);
     if (restoration_active) {
         restoration::finalize_newton_step(*cur);
     }
+    cur->apply_jac_y_inverse_transpose(d.d_lbd_f, d.trial_dual_step[__dyn]);
 }
 void generic_solver::finalize_primal_step(ns_riccati_data *cur) {
     auto &d = *cur;

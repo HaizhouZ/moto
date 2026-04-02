@@ -32,6 +32,16 @@ struct barrier_stats {
     size_t n_comp = 0;
 };
 
+struct objective_summary {
+    scalar_t exact_penalty = 0.;
+    scalar_t barrier_value = 0.;
+    scalar_t penalty_dir_deriv = 0.;
+    scalar_t barrier_dir_deriv = 0.;
+    scalar_t prim_res_l1 = 0.;
+    scalar_t inf_local_stat = 0.;
+    scalar_t inf_local_comp = 0.;
+};
+
 vector gather_lambda_eq(const ns_riccati::ns_riccati_data &d);
 vector gather_lambda_ineq(const ns_riccati::ns_riccati_data &d);
 void scatter_lambda_eq(ns_riccati::ns_riccati_data &d, const vector_const_ref &lambda);
@@ -64,6 +74,8 @@ reduced_residual_info compute_reduced_residual(
 reduced_residual_info compute_reduced_residual(const ns_riccati::ns_riccati_data &d);
 barrier_stats current_barrier_stats(const ns_riccati::ns_riccati_data::restoration_aux_data &aux);
 barrier_stats current_barrier_stats(const ns_riccati::ns_riccati_data &d);
+objective_summary current_objective_summary(const ns_riccati::ns_riccati_data::restoration_aux_data &aux);
+objective_summary current_objective_summary(const ns_riccati::ns_riccati_data &d);
 bool update_mu_bar(ns_riccati::ns_riccati_data::restoration_aux_data &aux,
                    const solver::ipm_config &cfg,
                    scalar_t mu_monotone_fraction_threshold,
@@ -79,7 +91,6 @@ bool update_mu_bar(ns_riccati::ns_riccati_data &d,
 void load_correction_rhs(array_type<row_vector, primal_fields> &lag_jac_corr,
                          const reduced_residual_info &residual);
 void load_correction_rhs(ns_riccati::ns_riccati_data &d, const reduced_residual_info &residual);
-void load_correction_rhs_from_kkt_residual(ns_riccati::ns_riccati_data &d);
 
 void prepare_current_constraint_stack(ns_riccati::ns_riccati_data &d);
 void initialize_stage(ns_riccati::ns_riccati_data &d);

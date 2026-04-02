@@ -42,6 +42,29 @@ void resto_elastic_constr::update_ls_bounds(linesearch_config &cfg, scalar_t fra
     positivity::update_pair_bounds(cfg, n, d_n, nu_n, d_nu_n, fraction_to_boundary);
 }
 
+scalar_t resto_elastic_constr::penalty_sum() const {
+    return p.sum() + n.sum();
+}
+
+scalar_t resto_elastic_constr::penalty_dir_deriv() const {
+    return d_p.sum() + d_n.sum();
+}
+
+scalar_t resto_elastic_constr::barrier_log_sum(scalar_t floor) const {
+    if (p.size() == 0) {
+        return 0.;
+    }
+    return p.array().max(floor).log().sum() + n.array().max(floor).log().sum();
+}
+
+scalar_t resto_elastic_constr::barrier_dir_deriv(scalar_t floor) const {
+    if (p_backup.size() == 0) {
+        return 0.;
+    }
+    return (d_p.array() / p_backup.array().max(floor)).sum() +
+           (d_n.array() / n_backup.array().max(floor)).sum();
+}
+
 void resto_ineq_constr::resize(size_t nx_dim, size_t nu_dim) {
     nx = nx_dim;
     nu = nu_dim;
@@ -78,6 +101,32 @@ void resto_ineq_constr::update_ls_bounds(linesearch_config &cfg, scalar_t fracti
     positivity::update_pair_bounds(cfg, t, d_t, nu_t, d_nu_t, fraction_to_boundary);
     positivity::update_pair_bounds(cfg, p, d_p, nu_p, d_nu_p, fraction_to_boundary);
     positivity::update_pair_bounds(cfg, n, d_n, nu_n, d_nu_n, fraction_to_boundary);
+}
+
+scalar_t resto_ineq_constr::penalty_sum() const {
+    return p.sum() + n.sum();
+}
+
+scalar_t resto_ineq_constr::penalty_dir_deriv() const {
+    return d_p.sum() + d_n.sum();
+}
+
+scalar_t resto_ineq_constr::barrier_log_sum(scalar_t floor) const {
+    if (t.size() == 0) {
+        return 0.;
+    }
+    return t.array().max(floor).log().sum() +
+           p.array().max(floor).log().sum() +
+           n.array().max(floor).log().sum();
+}
+
+scalar_t resto_ineq_constr::barrier_dir_deriv(scalar_t floor) const {
+    if (t_backup.size() == 0) {
+        return 0.;
+    }
+    return (d_t.array() / t_backup.array().max(floor)).sum() +
+           (d_p.array() / p_backup.array().max(floor)).sum() +
+           (d_n.array() / n_backup.array().max(floor)).sum();
 }
 
 } // namespace moto::solver

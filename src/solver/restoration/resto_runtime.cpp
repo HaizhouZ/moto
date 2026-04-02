@@ -4,6 +4,7 @@
 #include <moto/solver/restoration/resto_local_kkt.hpp>
 #include <moto/solver/restoration/resto_runtime.hpp>
 #include <moto/spmm/sparse_mat.hpp>
+#include <algorithm>
 
 namespace moto::solver::restoration {
 
@@ -135,11 +136,17 @@ void add_sparse_block(sparse_mat &block, const matrix &delta) {
 }
 
 row_vector active_gradient(const array_type<row_vector, primal_fields> &lag_jac,
-                           const array_type<row_vector, primal_fields> &lag_jac_corr,
+                           const array_type<row_vector, primal_fields> &,
                            field_t pf) {
     row_vector out = lag_jac[pf];
-    out += lag_jac_corr[pf];
     return out;
+}
+
+void add_diag_times(const vector &diag, const vector &rhs, row_vector &out) {
+    if (diag.size() == 0) {
+        return;
+    }
+    out.array() += (diag.array() * rhs.array()).transpose();
 }
 } // namespace
 
@@ -311,6 +318,68 @@ barrier_stats current_barrier_stats(const ns_riccati::ns_riccati_data &d) {
     return current_barrier_stats(*aux);
 }
 
+solver::ipm_config::worker current_barrier_worker(const ns_riccati::ns_riccati_data::restoration_aux_data &aux) {
+    solver::ipm_config::worker worker;
+    const auto accumulate = [&](const vector &value_backup,
+                                const vector &dual_backup,
+                                const vector &value,
+                                const vector &dual) {
+        if (value.size() == 0) {
+            return;
+        }
+        worker.n_ipm_cstr += static_cast<size_t>(value.size());
+        worker.prev_aff_comp += value_backup.dot(dual_backup);
+        worker.post_aff_comp += value.dot(dual);
+    };
+    accumulate(aux.elastic_eq.p_backup, aux.elastic_eq.nu_p_backup, aux.elastic_eq.p, aux.elastic_eq.nu_p);
+    accumulate(aux.elastic_eq.n_backup, aux.elastic_eq.nu_n_backup, aux.elastic_eq.n, aux.elastic_eq.nu_n);
+    accumulate(aux.elastic_ineq.t_backup, aux.elastic_ineq.nu_t_backup, aux.elastic_ineq.t, aux.elastic_ineq.nu_t);
+    accumulate(aux.elastic_ineq.p_backup, aux.elastic_ineq.nu_p_backup, aux.elastic_ineq.p, aux.elastic_ineq.nu_p);
+    accumulate(aux.elastic_ineq.n_backup, aux.elastic_ineq.nu_n_backup, aux.elastic_ineq.n, aux.elastic_ineq.nu_n);
+    return worker;
+}
+
+objective_summary current_objective_summary(const ns_riccati::ns_riccati_data::restoration_aux_data &aux) {
+    objective_summary summary;
+    if (aux.elastic_eq.dim() > 0) {
+        summary.exact_penalty += aux.rho_eq * aux.elastic_eq.penalty_sum();
+        summary.barrier_value += aux.mu_bar * aux.elastic_eq.barrier_log_sum();
+        summary.penalty_dir_deriv += aux.rho_eq * aux.elastic_eq.penalty_dir_deriv();
+        summary.barrier_dir_deriv += aux.mu_bar * aux.elastic_eq.barrier_dir_deriv();
+        summary.prim_res_l1 += aux.elastic_eq.r_c.lpNorm<1>();
+        summary.inf_local_stat = std::max(summary.inf_local_stat,
+                                          std::max(aux.elastic_eq.r_p.size() > 0 ? aux.elastic_eq.r_p.cwiseAbs().maxCoeff() : scalar_t(0.),
+                                                   aux.elastic_eq.r_n.size() > 0 ? aux.elastic_eq.r_n.cwiseAbs().maxCoeff() : scalar_t(0.)));
+        summary.inf_local_comp = std::max(summary.inf_local_comp,
+                                          std::max(aux.elastic_eq.r_s_p.size() > 0 ? aux.elastic_eq.r_s_p.cwiseAbs().maxCoeff() : scalar_t(0.),
+                                                   aux.elastic_eq.r_s_n.size() > 0 ? aux.elastic_eq.r_s_n.cwiseAbs().maxCoeff() : scalar_t(0.)));
+    }
+    if (aux.elastic_ineq.dim() > 0) {
+        summary.exact_penalty += aux.rho_ineq * aux.elastic_ineq.penalty_sum();
+        summary.barrier_value += aux.mu_bar * aux.elastic_ineq.barrier_log_sum();
+        summary.penalty_dir_deriv += aux.rho_ineq * aux.elastic_ineq.penalty_dir_deriv();
+        summary.barrier_dir_deriv += aux.mu_bar * aux.elastic_ineq.barrier_dir_deriv();
+        summary.prim_res_l1 += aux.elastic_ineq.r_d.lpNorm<1>();
+        summary.inf_local_stat = std::max(summary.inf_local_stat,
+                                          std::max({aux.elastic_ineq.r_t.size() > 0 ? aux.elastic_ineq.r_t.cwiseAbs().maxCoeff() : scalar_t(0.),
+                                                    aux.elastic_ineq.r_p.size() > 0 ? aux.elastic_ineq.r_p.cwiseAbs().maxCoeff() : scalar_t(0.),
+                                                    aux.elastic_ineq.r_n.size() > 0 ? aux.elastic_ineq.r_n.cwiseAbs().maxCoeff() : scalar_t(0.)}));
+        summary.inf_local_comp = std::max(summary.inf_local_comp,
+                                          std::max({aux.elastic_ineq.r_s_t.size() > 0 ? aux.elastic_ineq.r_s_t.cwiseAbs().maxCoeff() : scalar_t(0.),
+                                                    aux.elastic_ineq.r_s_p.size() > 0 ? aux.elastic_ineq.r_s_p.cwiseAbs().maxCoeff() : scalar_t(0.),
+                                                    aux.elastic_ineq.r_s_n.size() > 0 ? aux.elastic_ineq.r_s_n.cwiseAbs().maxCoeff() : scalar_t(0.)}));
+    }
+    return summary;
+}
+
+objective_summary current_objective_summary(const ns_riccati::ns_riccati_data &d) {
+    const auto *aux = get_aux(d);
+    if (aux == nullptr) {
+        return {};
+    }
+    return current_objective_summary(*aux);
+}
+
 bool update_mu_bar(ns_riccati::ns_riccati_data::restoration_aux_data &aux,
                    const solver::ipm_config &cfg,
                    scalar_t mu_monotone_fraction_threshold,
@@ -320,12 +389,18 @@ bool update_mu_bar(ns_riccati::ns_riccati_data::restoration_aux_data &aux,
     const scalar_t mu_floor = scalar_t(1e-11);
     const scalar_t mu_old = aux.mu_bar;
     const auto stats = current_barrier_stats(aux);
+    const auto worker = current_barrier_worker(aux);
     if (!(mu_old > 0.)) {
         aux.mu_bar = mu_floor;
         return true;
     }
 
-    if (cfg.mu_method == solver::ipm_config::monotonic_decrease) {
+    if (cfg.is_adaptive_mu() && worker.n_ipm_cstr > 0 && worker.prev_aff_comp > 0.) {
+        scalar_t eta = worker.post_aff_comp / worker.prev_aff_comp;
+        scalar_t sig = std::clamp(eta, scalar_t(0.), scalar_t(1.));
+        sig = std::pow(sig, scalar_t(3.));
+        aux.mu_bar = std::max(sig * worker.prev_aff_comp / static_cast<scalar_t>(worker.n_ipm_cstr), mu_floor);
+    } else if (cfg.mu_method == solver::ipm_config::monotonic_decrease) {
         while (inf_primal < aux.mu_bar * mu_monotone_fraction_threshold &&
                inf_dual < aux.mu_bar * mu_monotone_fraction_threshold &&
                stats.inf_comp < aux.mu_bar * mu_monotone_fraction_threshold) {
@@ -409,15 +484,6 @@ void load_correction_rhs(array_type<row_vector, primal_fields> &lag_jac_corr,
 
 void load_correction_rhs(ns_riccati::ns_riccati_data &d, const reduced_residual_info &residual) {
     load_correction_rhs(d.dense_->lag_jac_corr_, residual);
-}
-
-void load_correction_rhs_from_kkt_residual(ns_riccati::ns_riccati_data &d) {
-    for (auto pf : primal_fields) {
-        d.dense_->lag_jac_corr_[pf].setZero();
-    }
-    for (auto pf : std::array{__u, __y}) {
-        d.dense_->lag_jac_corr_[pf] = d.kkt_stat_err_[pf];
-    }
 }
 
 void prepare_current_constraint_stack(ns_riccati::ns_riccati_data &d) {

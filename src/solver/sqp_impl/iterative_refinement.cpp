@@ -73,13 +73,8 @@ void ns_sqp::iterative_refinement() {
                            iter_refine, inf_kkt_stat_err_u, inf_kkt_stat_err_y);
             }
         }
-        const scalar_t resto_local_tol = std::max(settings.rf.prim_res_tol, settings.rf.dual_res_tol);
-        const bool resto_locals_small =
-            !in_restoration_phase() ||
-            (inf_resto_local_stat < settings.rf.dual_res_tol && inf_resto_local_comp < resto_local_tol);
         if (inf_kkt_stat_err_u < settings.rf.prim_res_tol &&
-            inf_kkt_stat_err_y < settings.rf.dual_res_tol &&
-            resto_locals_small) {
+            inf_kkt_stat_err_y < settings.rf.dual_res_tol) {
             break;
         }
         {
@@ -88,13 +83,6 @@ void ns_sqp::iterative_refinement() {
             run_correction_step(
                 [](ns_sqp::data *data) {
                     data->first_order_correction_start([data]() {
-                        if (dynamic_cast<ns_riccati_data::restoration_aux_data *>(data->aux_.get()) != nullptr) {
-                            // Restoration's reduced y-stationarity lives on the coupled
-                            // cur.y + next.x chain. Use the already-assembled KKT residual
-                            // (after next.x has been folded into cur.y) as the correction RHS.
-                            solver::restoration::load_correction_rhs_from_kkt_residual(*data);
-                            return;
-                        }
                         data->dense().lag_jac_corr_[__u] = data->kkt_stat_err_[__u];
                         data->dense().lag_jac_corr_[__y] = data->kkt_stat_err_[__y];
                     });

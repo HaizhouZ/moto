@@ -756,9 +756,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
         scalar_t dual_res_l1 = 0.;
         size_t n_dual_res = 0;
         const auto active_grad = [](const data &d, field_t pf) {
-            row_vector out = d.dense().lag_jac_[pf];
-            out += d.dense().lag_jac_corr_[pf];
-            return out;
+            return row_vector(d.dense().lag_jac_[pf]);
         };
         auto &graph = solver_graph();
         for (auto n : graph.flatten_nodes()) {
@@ -767,36 +765,14 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
                 continue;
             }
             const auto reduced_res = solver::restoration::compute_reduced_residual(*n);
+            const auto objective_summary = solver::restoration::current_objective_summary(*n);
             kkt.cost += n->dense().cost_;
-            if (aux->elastic_eq.dim() > 0) {
-                kkt.cost += settings.restoration.rho_eq * (aux->elastic_eq.p.sum() + aux->elastic_eq.n.sum());
-                kkt.cost -= aux->mu_bar *
-                            (aux->elastic_eq.p.array().max(scalar_t(1e-16)).log().sum() +
-                             aux->elastic_eq.n.array().max(scalar_t(1e-16)).log().sum());
-                kkt.obj_fullstep_dec += settings.restoration.rho_eq * (aux->elastic_eq.d_p.sum() + aux->elastic_eq.d_n.sum());
-                kkt.obj_fullstep_dec -= aux->mu_bar *
-                                        ((aux->elastic_eq.d_p.array() / aux->elastic_eq.p.array().max(scalar_t(1e-16))).sum() +
-                                         (aux->elastic_eq.d_n.array() / aux->elastic_eq.n.array().max(scalar_t(1e-16))).sum());
-                kkt.prim_res_l1 += aux->elastic_eq.r_c.lpNorm<1>();
-            }
-            if (aux->elastic_ineq.dim() > 0) {
-                kkt.cost += settings.restoration.rho_ineq * (aux->elastic_ineq.p.sum() + aux->elastic_ineq.n.sum());
-                kkt.cost -= aux->mu_bar *
-                            (aux->elastic_ineq.t.array().max(scalar_t(1e-16)).log().sum() +
-                             aux->elastic_ineq.p.array().max(scalar_t(1e-16)).log().sum() +
-                             aux->elastic_ineq.n.array().max(scalar_t(1e-16)).log().sum());
-                kkt.obj_fullstep_dec += settings.restoration.rho_ineq * (aux->elastic_ineq.d_p.sum() + aux->elastic_ineq.d_n.sum());
-                kkt.obj_fullstep_dec -= aux->mu_bar *
-                                        ((aux->elastic_ineq.d_t.array() / aux->elastic_ineq.t.array().max(scalar_t(1e-16))).sum() +
-                                         (aux->elastic_ineq.d_p.array() / aux->elastic_ineq.p.array().max(scalar_t(1e-16))).sum() +
-                                         (aux->elastic_ineq.d_n.array() / aux->elastic_ineq.n.array().max(scalar_t(1e-16))).sum());
-                kkt.prim_res_l1 += aux->elastic_ineq.r_d.lpNorm<1>();
-            }
+            kkt.cost += objective_summary.exact_penalty;
             kkt.prim_res_l1 += n->dense().approx_[__dyn].v_.lpNorm<1>();
+            kkt.prim_res_l1 += objective_summary.prim_res_l1;
             kkt.inf_prim_res = std::max(kkt.inf_prim_res, reduced_res.inf_primal);
-            kkt.inf_dual_res = std::max(kkt.inf_dual_res,
-                                        std::max(reduced_res.eq_local.inf_stat, reduced_res.ineq_local.inf_stat));
-            kkt.inf_comp_res = std::max(kkt.inf_comp_res, reduced_res.inf_comp);
+            kkt.inf_dual_res = std::max(kkt.inf_dual_res, objective_summary.inf_local_stat);
+            kkt.inf_comp_res = std::max(kkt.inf_comp_res, objective_summary.inf_local_comp);
             if (update_dual_res && n->dense().lag_jac_[__u].size() > 0) {
                 const row_vector grad_u = active_grad(*n, __u);
                 kkt.inf_dual_res = std::max(kkt.inf_dual_res, grad_u.cwiseAbs().maxCoeff());
@@ -821,6 +797,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
                     kkt.obj_fullstep_dec += n->dense().cost_jac_[f].dot(n->trial_prim_step[f]);
                 }
             }
+            kkt.obj_fullstep_dec += objective_summary.penalty_dir_deriv - objective_summary.barrier_dir_deriv;
             for (auto f : constr_fields) {
                 if (n->trial_dual_step[f].size() > 0) {
                     const scalar_t step = n->trial_dual_step[f].cwiseAbs().maxCoeff();
@@ -876,6 +853,14 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
             }
         }
         kkt.objective = kkt.cost;
+        for (auto n : graph.flatten_nodes()) {
+            auto *aux = dynamic_cast<ns_riccati_data::restoration_aux_data *>(n->aux_.get());
+            if (aux == nullptr) {
+                continue;
+            }
+            const auto objective_summary = solver::restoration::current_objective_summary(*n);
+            kkt.objective -= objective_summary.barrier_value;
+        }
         return kkt;
     }
 
