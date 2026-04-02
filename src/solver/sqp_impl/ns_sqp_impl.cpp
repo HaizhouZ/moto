@@ -1,4 +1,5 @@
 #include <moto/solver/ineq_soft.hpp>
+#include <moto/ocp/ineq_constr.hpp>
 #include <moto/solver/ipm/ipm_constr.hpp>
 #include <moto/solver/ns_riccati/generic_solver.hpp>
 #include <moto/solver/ns_sqp.hpp>
@@ -358,9 +359,6 @@ void ns_sqp::refresh_ls_bounds() {
 }
 
 void ns_sqp::ineq_constr_correction(iteration_context &ctx) {
-    if (in_restoration_phase()) {
-        return;
-    }
     if (settings.ipm.ipm_enable_affine_step()) {
         auto &graph = solver_graph();
         graph.for_each_parallel([this](size_t tid, data *d) {
@@ -401,9 +399,6 @@ void ns_sqp::ineq_constr_correction(iteration_context &ctx) {
     }
 }
 void ns_sqp::ineq_constr_prediction() {
-    if (in_restoration_phase()) {
-        return;
-    }
     if (settings.ipm.ipm_enable_affine_step()) { // compute the affine step, no need to finalize dual step
         settings.ipm.ipm_start_predictor_computation();
     }

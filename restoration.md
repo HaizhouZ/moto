@@ -97,7 +97,7 @@ The restoration original problem is
 
 $$
 \begin{aligned}
-\min_{w,t,p_c,n_c,p_d,n_d}\quad &
+\min_{w,p_c,n_c,p_d,n_d}\quad &
 \operatorname{obj}_R(w)
  + \varrho_c \mathbf{1}^T (p_c+n_c)
  + \varrho_d \mathbf{1}^T (p_d+n_d) \\
@@ -106,9 +106,8 @@ F(w)=0, \\
 &
 c(w)-p_c+n_c=0, \\
 &
-g(w)+t-p_d+n_d=0, \\
+g(w)-p_d+n_d \le 0, \\
 &
-t \succeq 0,\quad
 p_c \succeq 0,\quad n_c \succeq 0,\quad
 p_d \succeq 0,\quad n_d \succeq 0 .
 \end{aligned}
@@ -118,19 +117,356 @@ Here:
 
 - `F(w)=0` remains hard
 - `c(w)` is elastic through `(p_c,n_c)`
-- `g(w)` is elastic through `(t,p_d,n_d)`
+- `g(w)` is elastic through `(p_d,n_d)`
 - `\varrho_c = settings.restoration.rho_eq`
 - `\varrho_d = settings.restoration.rho_ineq`
 - `\operatorname{obj}_R(w)` is currently the proximal anchoring cost on `u/y`
 
-## 4. Search Model vs Original Objective
+## 4. Restoration Lagrangian And Primal-Dual IPM Form
+
+For the restoration NLP, introduce multipliers
+
+$$
+\lambda_F,\qquad \lambda_c
+$$
+
+for
+
+$$
+F(w)=0,\qquad c(w)-p_c+n_c=0.
+$$
+
+The restoration Lagrangian is
+
+$$
+\begin{aligned}
+\mathcal{L}_R
+=\;&
+\operatorname{obj}_R(w)
++ \varrho_c \mathbf{1}^T (p_c+n_c)
++ \varrho_d \mathbf{1}^T (p_d+n_d) \\
+&+ \lambda_F^T F(w)
++ \lambda_c^T \bigl(c(w)-p_c+n_c\bigr).
+\end{aligned}
+$$
+
+This is the barrier-free original restoration problem. No log-barrier term
+belongs to `\mathcal{L}_R`.
+
+For the implemented primal-dual search model, one must additionally include the
+positivity-dual products. In other words, the local search blocks are derived
+from Lagrangians of the form
+
+$$
+\mathcal{L}_{R,\mathrm{search}}
+=
+\mathcal{L}_R
+-
+(\nu_p^c)^T p_c
+-
+(\nu_n^c)^T n_c
+-
+(\nu_t)^T t
+-
+(\nu_p^d)^T p_d
+-
+(\nu_n^d)^T n_d ,
+$$
+
+with the understanding that only the variables relevant to a given local block
+are present. The complementarity perturbation by `\mu` then appears in the KKT
+system, not as an extra term inside the original objective.
+
+For the inequality-elastic part, the implementation does not introduce a
+separate global `\lambda_d` term on top of the slackened relation. Instead, the
+search model is written directly in terms of the local slack/elastic variables
+and their positivity duals.
+
+### 4.1 Equality Elastic Block
+
+For equality elastic constraints, the search model keeps
+
+$$
+c(w)-p_c+n_c=0,\qquad
+p_c>0,\qquad n_c>0.
+$$
+
+With positivity duals `\nu_p^c,\nu_n^c`, the primal-dual IPM KKT block is
+
+$$
+\mathcal{L}_{R,\mathrm{eq\text{-}search}}
+=
+\operatorname{obj}_R(w)
++ \varrho_c \mathbf{1}^T (p_c+n_c)
++ \lambda_F^T F(w)
++ \lambda_c^T \bigl(c(w)-p_c+n_c\bigr)
+- (\nu_p^c)^T p_c
+- (\nu_n^c)^T n_c .
+$$
+
+$$
+\begin{aligned}
+r_c   &= c(w)-p_c+n_c, \\
+r_p^c &= \varrho_c - \lambda_c - \nu_p^c, \\
+r_n^c &= \varrho_c + \lambda_c - \nu_n^c, \\
+r_{s,p}^c &= \nu_p^c \circ p_c - \mu \mathbf{1}, \\
+r_{s,n}^c &= \nu_n^c \circ n_c - \mu \mathbf{1}.
+\end{aligned}
+$$
+
+This is the local system condensed by `resto_eq_elastic_constr`.
+
+#### Equality Linearized Local KKT
+
+Given a stage perturbation `\delta c`, the local Newton system is
+
+$$
+\begin{aligned}
+\delta c - \delta p_c + \delta n_c &= -r_c, \\
+-\delta \lambda_c - \delta \nu_p^c &= -r_p^c, \\
+\delta \lambda_c - \delta \nu_n^c &= -r_n^c, \\
+\nu_p^c \circ \delta p_c + p_c \circ \delta \nu_p^c &= -r_{s,p}^c, \\
+\nu_n^c \circ \delta n_c + n_c \circ \delta \nu_n^c &= -r_{s,n}^c .
+\end{aligned}
+$$
+
+With the current implementation's regularization parameter `\lambda_{\mathrm{reg}}`,
+the code uses the condensed quantities
+
+$$
+\begin{aligned}
+\mathrm{combo}_p^c &=
+\frac{p_c \circ r_p^c + \lambda_{\mathrm{reg}} r_{s,p}^c}
+     {p_c + \lambda_{\mathrm{reg}} \nu_p^c}, \\
+\mathrm{combo}_n^c &=
+\frac{n_c \circ r_n^c + \lambda_{\mathrm{reg}} r_{s,n}^c}
+     {n_c + \lambda_{\mathrm{reg}} \nu_n^c}.
+\end{aligned}
+$$
+
+Then
+
+$$
+\begin{aligned}
+M_c^{-1} &=
+\left(
+\frac{p_c}{p_c + \lambda_{\mathrm{reg}} \nu_p^c}
++
+\frac{n_c}{n_c + \lambda_{\mathrm{reg}} \nu_n^c}
+\right)^{-1}, \\
+b_c &= r_c + \mathrm{combo}_p^c - \mathrm{combo}_n^c,
+\end{aligned}
+$$
+
+and the condensed dual step is
+
+$$
+\delta \lambda_c = M_c^{-1}(\delta c + b_c).
+$$
+
+The local recover formulas are
+
+$$
+\begin{aligned}
+\delta \nu_p^c &= \frac{\nu_p^c \circ (r_p^c-\delta\lambda_c)-r_{s,p}^c}
+                      {p_c+\lambda_{\mathrm{reg}}\nu_p^c}, \\
+\delta \nu_n^c &= \frac{\nu_n^c \circ (r_n^c+\delta\lambda_c)-r_{s,n}^c}
+                      {n_c+\lambda_{\mathrm{reg}}\nu_n^c}, \\
+\delta p_c &= \delta\lambda_c + \lambda_{\mathrm{reg}}\delta\nu_p^c - r_p^c, \\
+\delta n_c &= -\delta\lambda_c + \lambda_{\mathrm{reg}}\delta\nu_n^c - r_n^c .
+\end{aligned}
+$$
+
+This is exactly the object condensed into `lag_jac_corr_` and
+`hessian_modification_`.
+
+### 4.2 Inequality Elastic Block With Slack `t`
+
+For inequality elastic constraints, the restoration wrapper first rewrites the
+original inequality through a positive slack:
+
+$$
+g(w)+t-p_d+n_d=0,
+\qquad
+t>0,\quad p_d>0,\quad n_d>0.
+$$
+
+There is **no separate** `\lambda_d` in the local restoration block. The
+active local variables are
+
+$$
+t,\;p_d,\;n_d,\qquad \nu_t,\;\nu_p^d,\;\nu_n^d .
+$$
+
+The exact penalty acts only on `p_d,n_d`, while the positivity duals
+`\nu_t,\nu_p^d,\nu_n^d` belong to the search model. The reduced local KKT block
+is derived from
+
+$$
+\mathcal{L}_{R,\mathrm{ineq\text{-}search}}
+=
+\operatorname{obj}_R(w)
++ \varrho_d \mathbf{1}^T (p_d+n_d)
+- (\nu_t)^T t
+- (\nu_p^d)^T p_d
+- (\nu_n^d)^T n_d
+$$
+
+together with the slack relation `g(w)+t-p_d+n_d=0`, and is therefore
+
+$$
+\begin{aligned}
+r_d   &= g(w)+t-p_d+n_d, \\
+r_p^d &= \varrho_d-\nu_t-\nu_p^d, \\
+r_n^d &= \varrho_d+\nu_t-\nu_n^d, \\
+r_{s,t} &= \nu_t \circ t - \mu \mathbf{1}, \\
+r_{s,p}^d &= \nu_p^d \circ p_d - \mu \mathbf{1}, \\
+r_{s,n}^d &= \nu_n^d \circ n_d - \mu \mathbf{1}.
+\end{aligned}
+$$
+
+This is the local slack-plus-elastic search block that the restoration
+implementation should condense.
+
+#### Inequality Linearized Local KKT
+
+Given a stage perturbation `\delta g`, the local Newton system is
+
+$$
+\begin{aligned}
+\delta g + \delta t - \delta p_d + \delta n_d &= -r_d, \\
+\delta p_d - \delta \nu_t - \lambda_{\mathrm{reg}} \delta \nu_p^d &= -r_p^d, \\
+\delta n_d + \delta \nu_t - \lambda_{\mathrm{reg}} \delta \nu_n^d &= -r_n^d, \\
+\nu_t \circ \delta t + t \circ \delta \nu_t &= -r_{s,t}, \\
+\nu_p^d \circ \delta p_d + p_d \circ \delta \nu_p^d &= -r_{s,p}^d, \\
+\nu_n^d \circ \delta n_d + n_d \circ \delta \nu_n^d &= -r_{s,n}^d .
+\end{aligned}
+$$
+
+Here `\lambda_{\mathrm{reg}}` plays the same role as in the equality-elastic
+block: it regularizes the dual recovery equations for the positive variables.
+
+Introduce the regularized diagonal denominators
+
+$$
+\begin{aligned}
+D_t^d &:= \nu_t, \\
+D_p^d &:= p_d + \lambda_{\mathrm{reg}} \nu_p^d, \\
+D_n^d &:= n_d + \lambda_{\mathrm{reg}} \nu_n^d .
+\end{aligned}
+$$
+
+Define the condensed quantities
+
+$$
+\begin{aligned}
+\mathrm{combo}_t &= \frac{r_{s,t}}{D_t^d}, \\
+\mathrm{combo}_p^d &=
+\frac{p_d \circ r_p^d + \lambda_{\mathrm{reg}} r_{s,p}^d}
+     {D_p^d}, \\
+\mathrm{combo}_n^d &=
+\frac{n_d \circ r_n^d + \lambda_{\mathrm{reg}} r_{s,n}^d}
+     {D_n^d}.
+\end{aligned}
+$$
+
+Substituting
+
+$$
+\begin{aligned}
+\delta t   &= -\mathrm{combo}_t   - \frac{t}{D_t^d}\delta\nu_t, \\
+\delta p_d &= -\mathrm{combo}_p^d + \frac{p_d}{D_p^d}\delta\nu_t, \\
+\delta n_d &= -\mathrm{combo}_n^d - \frac{n_d}{D_n^d}\delta\nu_t
+\end{aligned}
+$$
+
+into the primal equation gives
+
+$$
+\left(
+\frac{t}{D_t^d}
++
+\frac{p_d}{D_p^d}
++
+\frac{n_d}{D_n^d}
+\right)\delta\nu_t
+=
+\delta g + b_d,
+$$
+
+with
+
+$$
+b_d = r_d - \mathrm{combo}_t + \mathrm{combo}_p^d - \mathrm{combo}_n^d .
+$$
+
+Therefore the condensed step is
+
+$$
+\begin{aligned}
+M_d^{-1} &=
+\left(
+\frac{t}{D_t^d}
++
+\frac{p_d}{D_p^d}
++
+\frac{n_d}{D_n^d}
+\right)^{-1}, \\
+\delta \nu_t &= M_d^{-1}(\delta g + b_d), \\
+\delta \nu_p^d &=
+\frac{\nu_p^d \circ (r_p^d-\delta\nu_t)-r_{s,p}^d}
+     {D_p^d}, \\
+\delta \nu_n^d &=
+\frac{\nu_n^d \circ (r_n^d+\delta\nu_t)-r_{s,n}^d}
+     {D_n^d}.
+\end{aligned}
+$$
+
+The local recover formulas are then
+
+$$
+\begin{aligned}
+\delta t   &= -\frac{r_{s,t} + t \circ \delta\nu_t}{D_t^d}, \\
+\delta p_d &= \delta\nu_t + \lambda_{\mathrm{reg}}\delta\nu_p^d - r_p^d, \\
+\delta n_d &= -\delta\nu_t + \lambda_{\mathrm{reg}}\delta\nu_n^d - r_n^d.
+\end{aligned}
+$$
+
+This is the regularized reduced local solve that the restoration inequality
+wrapper is intended to implement. In code terms:
+
+- `M_d^{-1}` corresponds to `minv_diag`
+- `b_d` corresponds to the condensed right-hand side used to build `minv_bd`
+- the recovered `\delta\nu_t,\delta\nu_p^d,\delta\nu_n^d,\delta t,\delta p_d,\delta n_d`
+  correspond to the local Newton step recovered in `recover_local_step(...)`
+
+### 4.3 Interpretation Of `\nu_t`
+
+The important point is:
+
+- there is no separate `\lambda_d` in the implemented local block
+- `\nu_t` is the positivity dual associated with the slack `t`
+- the search model perturbs the inequality through `t>0`
+- `p_d,n_d` remain the exact-penalty elastic variables
+
+Equivalently, the search block can be viewed as a perturbed treatment of
+
+$$
+g(w)-p_d+n_d < 0
+$$
+
+with `t` as its explicit positive slack and `\nu_t` as the corresponding
+positivity dual. This is the mathematical reference for
+`resto_ineq_elastic_ipm_constr`.
+
+## 5. Search Model vs Original Objective
 
 The current implementation now makes a strict distinction between:
 
 - `objective`
 - `penalized_obj`
 
-### 4.1 `objective`
+### 5.1 `objective`
 
 `objective` is the **original phase objective**.
 
@@ -146,7 +482,7 @@ $$
 
 This is what is shown in the `obj` column of `print_stats(...)`.
 
-### 4.2 `penalized_obj`
+### 5.2 `penalized_obj`
 
 `penalized_obj` is the **search objective** used by restoration line search.
 
@@ -175,11 +511,11 @@ This is why the restoration logs can show, for example:
 
 at the same iterate.
 
-## 5. Overlay Wrapper Structure
+## 6. Overlay Wrapper Structure
 
 Restoration is implemented as standard `cost/constr` overlays.
 
-### 5.1 Proximal Cost
+### 6.1 Proximal Cost
 
 `resto_prox_cost` is a real `__cost` function.
 
@@ -191,7 +527,7 @@ It contributes through the standard cost channels:
 
 No hand-injected restoration Hessian storage remains.
 
-### 5.2 Elastic Equality Wrapper
+### 6.2 Elastic Equality Wrapper
 
 `resto_eq_elastic_constr` wraps a source equality and represents
 
@@ -208,15 +544,15 @@ Its condensed contributions go through the normal non-cost channels:
 - first-order correction into `lag_jac_corr_`
 - second-order correction into `hessian_modification_`
 
-### 5.3 Elastic Inequality Wrapper
+### 6.3 Elastic Inequality Wrapper
 
 `resto_ineq_elastic_ipm_constr` wraps a source inequality and represents
 
 $$
-g(w)+t-p_d+n_d=0
+g(w)+t-p_d+n_d = 0
 $$
 
-with positivity variables for
+with positivity variables
 
 $$
 t>0,\qquad p_d>0,\qquad n_d>0
@@ -224,8 +560,9 @@ $$
 
 in the search model.
 
-This is a restoration-specific double-slack IPM wrapper.
-It is not the normal `ipm_constr`, but it follows the same lifecycle style:
+This is a restoration-specific elastic-IPM wrapper built from the slack form of
+the original inequality. It is not the normal `ipm_constr`, but it follows the
+same lifecycle style:
 
 - initialize
 - finalize Newton step
@@ -234,7 +571,7 @@ It is not the normal `ipm_constr`, but it follows the same lifecycle style:
 - backup / restore
 - affine step
 
-## 6. Iterative Refinement
+## 7. Iterative Refinement
 
 Restoration reuses the same iterative-refinement shell as normal.
 
@@ -248,7 +585,7 @@ The important current fact is:
 So there is now no separate runtime residual object outside the active
 `cost/constr` framework.
 
-## 7. Line Search And `alpha_min`
+## 8. Line Search And `alpha_min`
 
 Restoration line search uses the same backtracking shell as normal, but with a
 restoration phase metric:

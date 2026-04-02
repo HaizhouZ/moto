@@ -1,6 +1,8 @@
 #include <moto/solver/ns_sqp.hpp>
+#include <moto/ocp/ineq_constr.hpp>
 #include <moto/solver/ineq_soft.hpp>
 #include <moto/solver/restoration/resto_overlay.hpp>
+#include <cstdlib>
 
 namespace moto {
 namespace {
@@ -34,6 +36,56 @@ void sync_hard_duals(node_data &src, node_data &dst) {
     }
 }
 
+bool resto_eq_debug_enabled() {
+    const char *flag = std::getenv("MOTO_RESTO_EQ_DEBUG");
+    return flag != nullptr && std::string_view(flag) != "0";
+}
+
+void dump_resto_eq_node(ns_sqp::data &d, std::string_view label) {
+    fmt::print("=== resto-eq-debug:{} node={} ===\n", label, d.problem().uid());
+    fmt::print("  dims: eq_x={} eq_xu={} eq_x_soft={} eq_xu_soft={} ineq_x={} ineq_xu={}\n",
+               d.problem().dim(__eq_x), d.problem().dim(__eq_xu),
+               d.problem().dim(__eq_x_soft), d.problem().dim(__eq_xu_soft),
+               d.problem().dim(__ineq_x), d.problem().dim(__ineq_xu));
+    fmt::print("  lag_jac_corr[x]={:.3e} lag_jac_corr[u]={:.3e} lag_jac_corr[y]={:.3e}\n",
+               d.dense().lag_jac_corr_[__x].size() ? d.dense().lag_jac_corr_[__x].cwiseAbs().maxCoeff() : 0.,
+               d.dense().lag_jac_corr_[__u].size() ? d.dense().lag_jac_corr_[__u].cwiseAbs().maxCoeff() : 0.,
+               d.dense().lag_jac_corr_[__y].size() ? d.dense().lag_jac_corr_[__y].cwiseAbs().maxCoeff() : 0.);
+    fmt::print("  Q_yx_mod={:.3e} finite={}  Q_yy_mod={:.3e} finite={}\n",
+               d.Q_yx_mod.dense().size() ? d.Q_yx_mod.dense().cwiseAbs().maxCoeff() : 0.,
+               d.Q_yx_mod.dense().allFinite(),
+               d.Q_yy_mod.dense().size() ? d.Q_yy_mod.dense().cwiseAbs().maxCoeff() : 0.,
+               d.Q_yy_mod.dense().allFinite());
+    d.for_each(__eq_x_soft, [&](const solver::restoration::resto_eq_elastic_constr &overlay,
+                                solver::restoration::resto_eq_elastic_constr::approx_data &ad) {
+        fmt::print("  eq_soft {} src_field={} src_pos={}\n",
+                   overlay.name(), static_cast<int>(overlay.source_field()), overlay.source_pos());
+        fmt::print("    base={:.3e} v={:.3e} lambda={:.3e}\n",
+                   ad.base_residual.size() ? ad.base_residual.cwiseAbs().maxCoeff() : 0.,
+                   ad.v_.size() ? ad.v_.cwiseAbs().maxCoeff() : 0.,
+                   ad.multiplier_.size() ? ad.multiplier_.cwiseAbs().maxCoeff() : 0.);
+        fmt::print("    minv_bc={:.3e} minv_diag={:.3e} local_stat={:.3e} local_comp={:.3e}\n",
+                   ad.elastic.minv_bc.size() ? ad.elastic.minv_bc.cwiseAbs().maxCoeff() : 0.,
+                   ad.elastic.minv_diag.size() ? ad.elastic.minv_diag.cwiseAbs().maxCoeff() : 0.,
+                   solver::restoration::current_local_residuals(ad.elastic).inf_stat,
+                   solver::restoration::current_local_residuals(ad.elastic).inf_comp);
+    });
+    d.for_each(__eq_xu_soft, [&](const solver::restoration::resto_eq_elastic_constr &overlay,
+                                 solver::restoration::resto_eq_elastic_constr::approx_data &ad) {
+        fmt::print("  eq_xu_soft {} src_field={} src_pos={}\n",
+                   overlay.name(), static_cast<int>(overlay.source_field()), overlay.source_pos());
+        fmt::print("    base={:.3e} v={:.3e} lambda={:.3e}\n",
+                   ad.base_residual.size() ? ad.base_residual.cwiseAbs().maxCoeff() : 0.,
+                   ad.v_.size() ? ad.v_.cwiseAbs().maxCoeff() : 0.,
+                   ad.multiplier_.size() ? ad.multiplier_.cwiseAbs().maxCoeff() : 0.);
+        fmt::print("    minv_bc={:.3e} minv_diag={:.3e} local_stat={:.3e} local_comp={:.3e}\n",
+                   ad.elastic.minv_bc.size() ? ad.elastic.minv_bc.cwiseAbs().maxCoeff() : 0.,
+                   ad.elastic.minv_diag.size() ? ad.elastic.minv_diag.cwiseAbs().maxCoeff() : 0.,
+                   solver::restoration::current_local_residuals(ad.elastic).inf_stat,
+                   solver::restoration::current_local_residuals(ad.elastic).inf_comp);
+    });
+}
+
 } // namespace
 
 ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_linesearch_data &ls) {
@@ -65,6 +117,12 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         solver::ineq_soft::initialize(d);
         d->update_approximation(node_data::update_mode::eval_derivatives, true);
     });
+    if (resto_eq_debug_enabled()) {
+        auto nodes = resto_graph.flatten_nodes();
+        if (!nodes.empty()) {
+            dump_resto_eq_node(*nodes.back(), "after-derivatives");
+        }
+    }
 
     ls.augment_filter_for_restoration_start(kkt_before, settings);
     filter_linesearch_data rls;
@@ -110,13 +168,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
                 d->restore_trial_state();
             });
 
-            resto_graph.for_each_parallel([this](size_t tid, data *d) {
-                d->for_each<ineq_constr_fields>([&](const ineq_constr &c, ineq_constr::data_map_t &id) {
-                    c.finalize_predictor_step(id, &setting_per_thread[tid]);
-                });
-                d->for_each<soft_constr_fields>([&](const soft_constr &c, soft_constr::data_map_t &sd) {
-                    c.finalize_predictor_step(sd, &setting_per_thread[tid]);
-                });
+            resto_graph.for_each_parallel([this](data *d) {
                 d->update_approximation(node_data::update_mode::eval_derivatives, true);
             });
             kkt_rest = compute_kkt_info();

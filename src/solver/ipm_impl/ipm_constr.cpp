@@ -36,7 +36,6 @@ void ipm_constr::initialize(ipm::data_map_t &data) const {
     d.multiplier_.setConstant(1.0);
     d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array();
     d.multiplier_backup_ = d.multiplier_;
-
     if (d.multiplier_.hasNaN() || d.slack_.hasNaN()) {
         fmt::print("multiplier: {}\n", d.multiplier_);
         fmt::print("slack: {}\n", d.slack_);

@@ -30,8 +30,6 @@ void ns_sqp::iterative_refinement() {
         struct MOTO_ALIGN_NO_SHARING inf_res_state_worker {
             scalar_t inf_kkt_stat_err_u = 0.;
             scalar_t inf_kkt_stat_err_y = 0.;
-            scalar_t inf_resto_local_stat = 0.;
-            scalar_t inf_resto_local_comp = 0.;
         } thread_res[settings.n_worker];
         size_t step = 0;
         graph.apply_forward<true>([&](size_t tid, data *d, data *next) {
@@ -47,38 +45,17 @@ void ns_sqp::iterative_refinement() {
             if (d->kkt_stat_err_[__y].size() > 0) {
                 thread_res[tid].inf_kkt_stat_err_y = std::max(thread_res[tid].inf_kkt_stat_err_y, d->kkt_stat_err_[__y].cwiseAbs().maxCoeff());
             }
-            if (in_restoration_phase()) {
-                auto accumulate_local = [&](const soft_constr &f, const soft_constr::approx_data &sd) {
-                    thread_res[tid].inf_resto_local_stat =
-                        std::max(thread_res[tid].inf_resto_local_stat, f.local_stat_residual_inf(sd));
-                    thread_res[tid].inf_resto_local_comp =
-                        std::max(thread_res[tid].inf_resto_local_comp, f.local_comp_residual_inf(sd));
-                };
-                d->template for_each(__ineq_x, accumulate_local);
-                d->template for_each(__ineq_xu, accumulate_local);
-                d->template for_each(__eq_x_soft, accumulate_local);
-                d->template for_each(__eq_xu_soft, accumulate_local);
-            }
         },
                                    true);
         scalar_t inf_kkt_stat_err_u = 0.;
         scalar_t inf_kkt_stat_err_y = 0.;
-        scalar_t inf_resto_local_stat = 0.;
-        scalar_t inf_resto_local_comp = 0.;
         for (auto &w : thread_res) {
             inf_kkt_stat_err_u = std::max(inf_kkt_stat_err_u, w.inf_kkt_stat_err_u);
             inf_kkt_stat_err_y = std::max(inf_kkt_stat_err_y, w.inf_kkt_stat_err_y);
-            inf_resto_local_stat = std::max(inf_resto_local_stat, w.inf_resto_local_stat);
-            inf_resto_local_comp = std::max(inf_resto_local_comp, w.inf_resto_local_comp);
         }
         if (settings.verbose) {
-            if (in_restoration_phase()) {
-                fmt::print("  iterative refinement {}, kkt_stat_err_u: {:.3e}, kkt_stat_err_y: {:.3e}, resto_local_stat: {:.3e}, resto_local_comp: {:.3e}\n",
-                           iter_refine, inf_kkt_stat_err_u, inf_kkt_stat_err_y, inf_resto_local_stat, inf_resto_local_comp);
-            } else {
-                fmt::print("  iterative refinement {}, kkt_stat_err_u: {:.3e}, kkt_stat_err_y: {:.3e}\n",
-                           iter_refine, inf_kkt_stat_err_u, inf_kkt_stat_err_y);
-            }
+            fmt::print("  iterative refinement {}, kkt_stat_err_u: {:.3e}, kkt_stat_err_y: {:.3e}\n",
+                       iter_refine, inf_kkt_stat_err_u, inf_kkt_stat_err_y);
         }
         if (inf_kkt_stat_err_u < settings.rf.prim_res_tol &&
             inf_kkt_stat_err_y < settings.rf.dual_res_tol) {

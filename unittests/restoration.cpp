@@ -22,7 +22,7 @@ bool approx_scalar(scalar_t a, scalar_t b, scalar_t tol = 1e-12) {
 } // namespace
 
 TEST_CASE("restoration equality local KKT recovery satisfies regularized linearization") {
-    resto_elastic_constr eq;
+    detail::eq_local_state eq;
     eq.resize(1, 2);
     eq.p << 0.7, 0.9, 1.2;
     eq.n << 0.8, 1.1, 0.6;
@@ -41,6 +41,85 @@ TEST_CASE("restoration equality local KKT recovery satisfies regularized lineari
 
     vector delta_c(3);
     delta_c << -0.11, 0.07, 0.19;
+    recover_local_step(delta_c, eq, lambda_reg);
+
+    const vector res_c = delta_c - eq.d_p + eq.d_n + eq.r_c;
+    const vector res_p = eq.d_p - eq.d_lambda - lambda_reg * eq.d_nu_p + eq.r_p;
+    const vector res_n = eq.d_n + eq.d_lambda - lambda_reg * eq.d_nu_n + eq.r_n;
+    const vector res_sp = eq.nu_p.cwiseProduct(eq.d_p) + eq.p.cwiseProduct(eq.d_nu_p) + eq.r_s_p;
+    const vector res_sn = eq.nu_n.cwiseProduct(eq.d_n) + eq.n.cwiseProduct(eq.d_nu_n) + eq.r_s_n;
+    const auto summary = linearized_newton_residuals(delta_c, eq, lambda_reg);
+
+    REQUIRE(approx_zero(res_c));
+    REQUIRE(approx_zero(res_p));
+    REQUIRE(approx_zero(res_n));
+    REQUIRE(approx_zero(res_sp));
+    REQUIRE(approx_zero(res_sn));
+    REQUIRE(summary.inf_prim < 1e-12);
+    REQUIRE(summary.inf_stat < 1e-12);
+    REQUIRE(summary.inf_comp < 1e-12);
+}
+
+TEST_CASE("restoration equality local KKT recovery satisfies affine predictor linearization") {
+    detail::eq_local_state eq;
+    eq.resize(1, 1);
+    eq.p << 0.7, 0.9;
+    eq.n << 0.8, 1.1;
+    eq.nu_p << 1.3, 0.7;
+    eq.nu_n << 0.6, 1.2;
+
+    vector c(2);
+    c << 0.2, -0.4;
+    vector lambda(2);
+    lambda << 0.1, -0.2;
+    const scalar_t rho = 2.0;
+    const scalar_t mu_bar = 0.3;
+    const scalar_t lambda_reg = 1e-3;
+
+    vector mu_p = vector::Zero(2);
+    vector mu_n = vector::Zero(2);
+    compute_local_model(c, lambda, eq, rho, mu_bar, &mu_p, &mu_n, lambda_reg);
+
+    vector delta_c(2);
+    delta_c << -0.11, 0.07;
+    recover_local_step(delta_c, eq, lambda_reg);
+
+    const vector res_c = delta_c - eq.d_p + eq.d_n + eq.r_c;
+    const vector res_p = eq.d_p - eq.d_lambda - lambda_reg * eq.d_nu_p + eq.r_p;
+    const vector res_n = eq.d_n + eq.d_lambda - lambda_reg * eq.d_nu_n + eq.r_n;
+    const vector res_sp = eq.nu_p.cwiseProduct(eq.d_p) + eq.p.cwiseProduct(eq.d_nu_p) + eq.r_s_p;
+    const vector res_sn = eq.nu_n.cwiseProduct(eq.d_n) + eq.n.cwiseProduct(eq.d_nu_n) + eq.r_s_n;
+
+    REQUIRE(approx_zero(res_c));
+    REQUIRE(approx_zero(res_p));
+    REQUIRE(approx_zero(res_n));
+    REQUIRE(approx_zero(res_sp));
+    REQUIRE(approx_zero(res_sn));
+}
+
+TEST_CASE("restoration equality local KKT recovery satisfies corrector linearization") {
+    detail::eq_local_state eq;
+    eq.resize(1, 1);
+    eq.p << 0.7, 0.9;
+    eq.n << 0.8, 1.1;
+    eq.nu_p << 1.3, 0.7;
+    eq.nu_n << 0.6, 1.2;
+
+    vector c(2);
+    c << 0.2, -0.4;
+    vector lambda(2);
+    lambda << 0.1, -0.2;
+    const scalar_t rho = 2.0;
+    const scalar_t mu_bar = 0.3;
+    const scalar_t lambda_reg = 1e-3;
+
+    vector mu_p(2), mu_n(2);
+    mu_p << 0.25, 0.28;
+    mu_n << 0.27, 0.29;
+    compute_local_model(c, lambda, eq, rho, mu_bar, &mu_p, &mu_n, lambda_reg);
+
+    vector delta_c(2);
+    delta_c << -0.11, 0.07;
     recover_local_step(delta_c, eq, lambda_reg);
 
     const vector res_c = delta_c - eq.d_p + eq.d_n + eq.r_c;
@@ -139,38 +218,44 @@ TEST_CASE("restoration overlay problem keeps dyn and replaces non-dynamics with 
 }
 
 TEST_CASE("restoration inequality local KKT recovery satisfies regularized linearization") {
-    resto_ineq_constr iq;
+    detail::ineq_local_state iq;
     iq.resize(2, 1);
+    iq.t << 1.1, 0.8, 1.4;
     iq.p << 0.8, 1.0, 1.3;
     iq.n << 0.9, 0.7, 1.2;
+    iq.nu_t << 0.4, 0.6, 0.5;
     iq.nu_p << 0.9, 0.8, 0.7;
     iq.nu_n << 0.6, 0.9, 0.5;
 
     vector g(3);
     g << -0.2, 0.5, -0.1;
-    vector lambda(3);
-    lambda << 0.15, -0.05, 0.2;
     const scalar_t rho = 3.0;
     const scalar_t mu_bar = 0.25;
     const scalar_t lambda_reg = 1e-3;
 
-    compute_local_model(g, lambda, iq, rho, mu_bar, lambda_reg);
+    compute_local_model(g, iq, rho, mu_bar, lambda_reg);
 
     vector delta_g(3);
     delta_g << 0.08, -0.12, 0.04;
     recover_local_step(delta_g, iq, lambda_reg);
 
-    const vector res_d = delta_g - iq.d_p + iq.d_n + iq.r_d;
-    const vector res_p = iq.d_p - iq.d_lambda - lambda_reg * iq.d_nu_p + iq.r_p;
-    const vector res_n = iq.d_n + iq.d_lambda - lambda_reg * iq.d_nu_n + iq.r_n;
+    const vector res_d = delta_g + iq.d_t - iq.d_p + iq.d_n + iq.r_d;
+    const vector res_p = iq.d_p - iq.d_nu_t - lambda_reg * iq.d_nu_p + iq.r_p;
+    const vector res_n = iq.d_n + iq.d_nu_t - lambda_reg * iq.d_nu_n + iq.r_n;
+    const vector res_st = iq.nu_t.cwiseProduct(iq.d_t) + iq.t.cwiseProduct(iq.d_nu_t) + iq.r_s_t;
     const vector res_sp = iq.nu_p.cwiseProduct(iq.d_p) + iq.p.cwiseProduct(iq.d_nu_p) + iq.r_s_p;
     const vector res_sn = iq.nu_n.cwiseProduct(iq.d_n) + iq.n.cwiseProduct(iq.d_nu_n) + iq.r_s_n;
+    const auto summary = linearized_newton_residuals(delta_g, iq, lambda_reg);
 
     REQUIRE(approx_zero(res_d));
     REQUIRE(approx_zero(res_p));
     REQUIRE(approx_zero(res_n));
+    REQUIRE(approx_zero(res_st));
     REQUIRE(approx_zero(res_sp));
     REQUIRE(approx_zero(res_sn));
+    REQUIRE(summary.inf_prim < 1e-12);
+    REQUIRE(summary.inf_stat < 1e-12);
+    REQUIRE(summary.inf_comp < 1e-12);
 }
 
 TEST_CASE("restoration inequality initializer satisfies local KKT at the central point") {
@@ -180,25 +265,25 @@ TEST_CASE("restoration inequality initializer satisfies local KKT at the central
 
     const auto init = initialize_elastic_ineq_scalar(g, rho, mu_bar);
 
-    resto_ineq_constr iq;
+    detail::ineq_local_state iq;
     iq.resize(1, 0);
+    iq.t << init.t;
     iq.p << init.p;
     iq.n << init.n;
+    iq.nu_t << init.nu_t;
     iq.nu_p << init.nu_p;
     iq.nu_n << init.nu_n;
 
     vector g_vec(1);
     g_vec << g;
-    vector lambda(1);
-    lambda << init.lambda;
+    compute_local_model(g_vec, iq, rho, mu_bar, 0.0);
 
-    compute_local_model(g_vec, lambda, iq, rho, mu_bar, 0.0);
-
+    REQUIRE(approx_zero(iq.r_d, 1e-10));
     REQUIRE(approx_zero(iq.r_p, 1e-10));
     REQUIRE(approx_zero(iq.r_n, 1e-10));
+    REQUIRE(approx_zero(iq.r_s_t, 1e-10));
     REQUIRE(approx_zero(iq.r_s_p, 1e-10));
     REQUIRE(approx_zero(iq.r_s_n, 1e-10));
-    REQUIRE(approx_scalar(iq.r_d(0), g, 1e-12));
 }
 
 TEST_CASE("positivity helper reuses consistent alpha and backup semantics") {
@@ -303,7 +388,7 @@ TEST_CASE("restoration equality dual reset helper only clears equality fields") 
 }
 
 TEST_CASE("restoration elastic blocks own their penalty and barrier bookkeeping") {
-    resto_elastic_constr eq;
+    detail::eq_local_state eq;
     eq.resize(1, 1);
     eq.p << 2.0, 3.0;
     eq.n << 5.0, 7.0;
@@ -317,21 +402,24 @@ TEST_CASE("restoration elastic blocks own their penalty and barrier bookkeeping"
     REQUIRE(approx_scalar(eq.barrier_log_sum(), std::log(2.0) + std::log(3.0) + std::log(5.0) + std::log(7.0)));
     REQUIRE(approx_scalar(eq.barrier_dir_deriv(), 0.5 / 4.0 - 1.0 / 8.0 + 1.0 / 2.0 + 2.0 / 10.0));
 
-    resto_ineq_constr iq;
+    detail::ineq_local_state iq;
     iq.resize(1, 1);
+    iq.t << 11.0, 13.0;
     iq.p << 17.0, 19.0;
     iq.n << 23.0, 29.0;
+    iq.t_backup << 31.0, 37.0;
     iq.p_backup << 41.0, 43.0;
     iq.n_backup << 47.0, 53.0;
+    iq.d_t << -2.0, 1.0;
     iq.d_p << 3.0, 4.0;
     iq.d_n << -5.0, 6.0;
 
     REQUIRE(approx_scalar(iq.penalty_sum(), 88.0));
     REQUIRE(approx_scalar(iq.penalty_dir_deriv(), 8.0));
     REQUIRE(approx_scalar(iq.barrier_log_sum(),
-                          std::log(17.0) + std::log(19.0) + std::log(23.0) + std::log(29.0)));
+                          std::log(11.0) + std::log(13.0) + std::log(17.0) + std::log(19.0) + std::log(23.0) + std::log(29.0)));
     REQUIRE(approx_scalar(iq.barrier_dir_deriv(),
-                          3.0 / 41.0 + 4.0 / 43.0 - 5.0 / 47.0 + 6.0 / 53.0));
+                          -2.0 / 31.0 + 1.0 / 37.0 + 3.0 / 41.0 + 4.0 / 43.0 - 5.0 / 47.0 + 6.0 / 53.0));
 }
 
 TEST_CASE("restoration predictor bookkeeping follows normal IPM complementarity accounting") {
@@ -339,7 +427,7 @@ TEST_CASE("restoration predictor bookkeeping follows normal IPM complementarity 
     cfg.alpha_primal = 0.4;
     cfg.alpha_dual = 0.7;
 
-    resto_elastic_constr eq;
+    detail::eq_local_state eq;
     eq.resize(1, 0);
     eq.p << 2.0;
     eq.n << 3.0;
@@ -350,14 +438,18 @@ TEST_CASE("restoration predictor bookkeeping follows normal IPM complementarity 
     eq.d_nu_p << -1.5;
     eq.d_nu_n << 0.5;
 
-    resto_ineq_constr iq;
+    detail::ineq_local_state iq;
     iq.resize(1, 0);
+    iq.t << 11.0;
     iq.p << 13.0;
     iq.n << 17.0;
+    iq.nu_t << 19.0;
     iq.nu_p << 23.0;
     iq.nu_n << 29.0;
+    iq.d_t << 0.5;
     iq.d_p << 1.5;
     iq.d_n << -1.0;
+    iq.d_nu_t << -3.0;
     iq.d_nu_p << 2.0;
     iq.d_nu_n << -4.0;
 
@@ -365,13 +457,14 @@ TEST_CASE("restoration predictor bookkeeping follows normal IPM complementarity 
     eq.finalize_predictor_step(cfg, worker);
     iq.finalize_predictor_step(cfg, worker);
 
-    REQUIRE(worker.n_ipm_cstr == 4);
+    REQUIRE(worker.n_ipm_cstr == 5);
     const scalar_t alpha_d = cfg.dual_alpha_for_ineq();
     const scalar_t prev_aff =
-        2.0 * 5.0 + 3.0 * 7.0 + 13.0 * 23.0 + 17.0 * 29.0;
+        2.0 * 5.0 + 3.0 * 7.0 + 11.0 * 19.0 + 13.0 * 23.0 + 17.0 * 29.0;
     const scalar_t post_aff =
         (5.0 + alpha_d * -1.5) * (2.0 + cfg.alpha_primal * -0.5) +
         (7.0 + alpha_d * 0.5) * (3.0 + cfg.alpha_primal * 0.25) +
+        (19.0 + alpha_d * -3.0) * (11.0 + cfg.alpha_primal * 0.5) +
         (23.0 + alpha_d * 2.0) * (13.0 + cfg.alpha_primal * 1.5) +
         (29.0 + alpha_d * -4.0) * (17.0 + cfg.alpha_primal * -1.0);
     REQUIRE(approx_scalar(worker.prev_aff_comp, prev_aff));

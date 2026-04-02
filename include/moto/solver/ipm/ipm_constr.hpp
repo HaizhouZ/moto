@@ -80,6 +80,7 @@ class ipm_constr : public ineq_constr {
         return func_approx_data_ptr_t(make_approx<ipm_constr>(primal, raw, shared));
     }
     DEF_DEFAULT_CLONE(ipm_constr)
+
 };
 } // namespace solver
 using ipm = solver::ipm_constr;

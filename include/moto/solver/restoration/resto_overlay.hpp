@@ -4,7 +4,6 @@
 #include <moto/ocp/ineq_constr.hpp>
 #include <moto/ocp/problem.hpp>
 #include <moto/solver/ipm/ipm_config.hpp>
-#include <moto/solver/restoration/resto_elastic_constr.hpp>
 #include <moto/solver/restoration/resto_local_kkt.hpp>
 
 namespace moto {
@@ -56,7 +55,8 @@ class resto_eq_elastic_constr final : public soft_constr {
     struct approx_data : public soft_constr::approx_data {
         solver::ipm_config *ipm_cfg = nullptr;
         vector base_residual;
-        resto_elastic_constr elastic;
+        vector multiplier_backup;
+        detail::eq_local_state elastic;
         scalar_t rho = 1000.0;
         scalar_t lambda_reg = 1e-8;
 
@@ -85,6 +85,7 @@ class resto_eq_elastic_constr final : public soft_constr {
     void initialize(data_map_t &data) const override;
     void finalize_newton_step(data_map_t &data) const override;
     void finalize_predictor_step(data_map_t &data, workspace_data *cfg) const override;
+    void apply_corrector_step(data_map_t &data) const override;
     void apply_affine_step(data_map_t &data, workspace_data *cfg) const override;
     void update_ls_bounds(data_map_t &data, workspace_data *cfg) const override;
     void backup_trial_state(data_map_t &data) const override;
@@ -95,7 +96,6 @@ class resto_eq_elastic_constr final : public soft_constr {
     scalar_t search_penalty_dir_deriv(const func_approx_data &data) const override;
     scalar_t local_stat_residual_inf(const func_approx_data &data) const override;
     scalar_t local_comp_residual_inf(const func_approx_data &data) const override;
-
     const constr &source() const { return source_; }
     field_t source_field() const { return source_->field(); }
     size_t source_pos() const { return source_pos_; }
@@ -114,7 +114,8 @@ class resto_ineq_elastic_ipm_constr final : public ineq_constr {
     struct approx_data : public ineq_constr::approx_data {
         solver::ipm_config *ipm_cfg = nullptr;
         vector base_residual;
-        resto_ineq_constr elastic;
+        vector multiplier_backup;
+        detail::ineq_local_state elastic;
         scalar_t rho = 1000.0;
         scalar_t lambda_reg = 1e-8;
 
@@ -154,7 +155,6 @@ class resto_ineq_elastic_ipm_constr final : public ineq_constr {
     scalar_t search_penalty_dir_deriv(const func_approx_data &data) const override;
     scalar_t local_stat_residual_inf(const func_approx_data &data) const override;
     scalar_t local_comp_residual_inf(const func_approx_data &data) const override;
-
     const constr &source() const { return source_; }
     field_t source_field() const { return source_->field(); }
     size_t source_pos() const { return source_pos_; }
