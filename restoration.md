@@ -205,7 +205,7 @@ Important semantic split:
   while line search and IPM-style step updates may still use the barrier-regularized
   search model
 
-## Barrier-Regularized Search Lagrangian
+## Restoration Original NLP
 
 For one stage, write the base restoration objective on
 $w_k := (x_k,u_k,y_k)$ as
@@ -214,8 +214,39 @@ $$
 \operatorname{obj}_{R,k}(w_k).
 $$
 
-Before condensing the local elastic block, the implemented interior-point
-search model uses the stagewise barrier-regularized restoration Lagrangian
+Then the barrier-free restoration original NLP at one stage is
+
+$$
+\min_{w_k,p_{c,k},n_{c,k},t_k,p_{d,k},n_{d,k}}
+\operatorname{obj}_{R,k}(w_k)
++ \varrho \mathbf{1}^T (p_{c,k}+n_{c,k}+p_{d,k}+n_{d,k})
+$$
+
+subject to
+
+$$
+F_k(w_k)=0,
+$$
+
+$$
+c_k(w_k)-p_{c,k}+n_{c,k}=0,
+$$
+
+$$
+g_k(w_k)+t_k-p_{d,k}+n_{d,k}=0,
+$$
+
+$$
+p_{c,k}>0,\quad n_{c,k}>0,\quad t_k>0,\quad p_{d,k}>0,\quad n_{d,k}>0.
+$$
+
+This is the restoration problem whose objective and residual summary should be
+reported publicly.
+
+## Barrier-Regularized Search Lagrangian
+
+To compute an interior Newton step for the positivity inequalities above, the
+solver introduces the barrier-regularized search Lagrangian
 
 $$
 \mathcal{L}_{R,k}
@@ -232,6 +263,9 @@ $$
 + \lambda_{d,k}^T \bigl(g_k(w_k)+t_k-p_{d,k}+n_{d,k}\bigr).
 $$
 
+This search Lagrangian is an internal IPM model for the restoration step. It is
+not the same object as the barrier-free restoration original NLP above.
+
 Its base gradient with respect to the global stage variables is
 
 $$
@@ -247,9 +281,9 @@ This is the quantity that belongs to the base stage gradient state seen by the
 linear solve. In code it is what `activate_lag_jac_corr()` snapshots into
 `base_lag_grad_backup` before any reduced correction is activated.
 
-But this barrier-regularized search Lagrangian should not be conflated with the
-barrier-free restoration original objective that is reported publicly. The
-barrier terms are search-only regularization for the positivity inequalities.
+The barrier terms should not be conflated with the barrier-free restoration
+original objective that is reported publicly. They are search-only
+regularization for the positivity inequalities.
 
 The condensed elastic terms
 
@@ -267,20 +301,22 @@ are **not** part of the original restoration Lagrangian. They belong only to
 the reduced system created after eliminating the restoration-local elastic
 blocks, and so they must stay in `lag_jac_corr_` until activation.
 
-## KKT Residuals
+## Search-Model KKT Residuals
 
 Using Hippo-style notation, define
 
 $$
 A := F_w,
 \qquad
-C := c_w.
+C := c_w,
+\qquad
+G := g_w.
 $$
 
-The local restoration residuals are
+The barrier-regularized search-model residuals are
 
 $$
-r_w := \nabla_w \operatorname{obj}_R(w) + A^T \lambda_f + C^T \lambda_c ,
+r_w := \nabla_w \operatorname{obj}_R(w) + A^T \lambda_f + C^T \lambda_c + G^T \lambda_d ,
 $$
 
 $$
@@ -292,6 +328,14 @@ r_c := c(w)-p+n ,
 $$
 
 $$
+r_d := g(w)+t-p_d+n_d ,
+$$
+
+$$
+r_t := \lambda_d - \nu_t ,
+$$
+
+$$
 r_p := \varrho \mathbf{1} - \lambda_c - \nu_p ,
 $$
 
@@ -300,17 +344,37 @@ r_n := \varrho \mathbf{1} + \lambda_c - \nu_n ,
 $$
 
 $$
+r_{p_d} := \varrho \mathbf{1} - \lambda_d - \nu_p ,
+$$
+
+$$
+r_{n_d} := \varrho \mathbf{1} + \lambda_d - \nu_n ,
+$$
+
+$$
 r_{s,p} := \nu_p \odot p - \bar\mu \mathbf{1} ,
 $$
 
 $$
-r_{s,n} := \nu_n \odot n - \bar\mu \mathbf{1} .
+r_{s,n} := \nu_n \odot n - \bar\mu \mathbf{1} ,
 $$
 
-These are the restoration-only local residuals for the equality elastic block.
-The current implementation also carries an analogous restoration-owned
-inequality block with residuals
-$r_d, r_t, r_{p_d}, r_{n_d}, r_{s,t}, r_{s,p_d}, r_{s,n_d}$.
+$$
+r_{s,t} := \nu_t \odot t - \bar\mu \mathbf{1} ,
+$$
+
+$$
+r_{s,p_d} := \nu_p \odot p_d - \bar\mu \mathbf{1} ,
+$$
+
+$$
+r_{s,n_d} := \nu_n \odot n_d - \bar\mu \mathbf{1} .
+$$
+
+These are search-model residuals for the equality-elastic and restoration-owned
+inequality blocks. The complementarity terms are barrier residuals from the IPM
+search model; they are not part of the barrier-free restoration original
+objective.
 
 Introduce
 
