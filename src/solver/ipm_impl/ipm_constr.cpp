@@ -169,6 +169,9 @@ void ipm_constr::value_impl(func_approx_data &data) const {
 void ipm_constr::jacobian_impl(func_approx_data &data) const {
     base::jacobian_impl(data);
     auto &d = data.as<ipm_data>();
+    if (d.ipm_cfg != nullptr && d.ipm_cfg->disable_corrections) {
+        return;
+    }
 
     // setup T^{-1} N
     d.reg_T_inv_.array() = d.slack_.array() + d.reg_.array() * d.multiplier_.array();

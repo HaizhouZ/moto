@@ -135,25 +135,6 @@ struct ns_sqp {
         scalar_t flat_obj_step_tol = 1e-12; ///< step norm must exceed this to be "non-trivial"
     };
 
-    struct restoration_settings {
-        bool enabled = true;  ///< whether restoration mode is allowed
-        size_t max_iter = 50; ///< max restoration iterations per trigger (also capped by total max_iter)
-        scalar_t rho_u = 1e-4; ///< proximal weight on u (anchors to point where restoration was triggered)
-        scalar_t rho_y = 1e-4; ///< proximal weight on y (anchors to point where restoration was triggered)
-        /// Elastic exact-penalty weight varrho on p+n in the restoration NLP.
-        scalar_t rho_eq = 1000.0;
-        /// Hippo/IPM-style local elastic regularization. For lambda_reg > 0 the
-        /// condensed block uses
-        /// M_rho = P (P + lambda_reg N_p)^{-1} + T_n (T_n + lambda_reg N_n)^{-1}.
-        /// When lambda_reg == 0, the helper falls back to the unregularized
-        /// explicit elastic local-KKT formulas.
-        scalar_t lambda_reg = 1e-8;
-        /// exit restoration when inf_prim_res drops below this fraction of the entry infeasibility
-        scalar_t restoration_improvement_frac = 0.9;
-        /// IPOPT-style tiny-step trigger parameters for switching to restoration.
-        scalar_t alpha_min_factor = 5e-2;
-    };
-
     struct ipm_config : public solver::ipm_config {
         scalar_t mu0 = 1.0;        ///< initial barrier parameter
         bool warm_start = false;   ///< whether to warm start the IPM solver
@@ -177,7 +158,6 @@ struct ns_sqp {
 
         iterative_refinement_setting rf;
         scaling_settings scaling;
-        restoration_settings restoration;
 
         bool no_except = false;
 
@@ -188,7 +168,6 @@ struct ns_sqp {
         friend class ns_sqp;
         bool verbose = true;
         size_t n_worker = MAX_THREADS; ///< number of worker threads
-        bool in_restoration = false;   ///< whether currently in restoration mode (used to adjust printouts and possibly other settings)
         bool has_ineq_soft = false;    ///< whether the problem has inequality constraints (used to adjust printouts and possibly other settings)
         bool initialized = false;     ///< whether the settings have been initialized based on the problem (used to trigger one-time initialization in the first iteration, e.g. setting initial mu based on initial residuals)
     } settings;
@@ -197,15 +176,6 @@ struct ns_sqp {
     using ns_riccati_data = solver::ns_riccati::ns_riccati_data;
 
     struct data : public node_data, ns_riccati_data {
-        struct restoration_prox_data {
-            vector u_ref, y_ref;
-            vector sigma_u_sq, sigma_y_sq;
-        };
-        struct restoration_snapshot {
-            bool valid = false;
-            scalar_t mu_bar = 0.;
-            vector p, n, nu_p, nu_n, lambda;
-        };
         data(const ocp_ptr_t &prob)
             : node_data(prob), ns_riccati_data((node_data *)this) {
             for (auto f : primal_fields) {
@@ -226,15 +196,12 @@ struct ns_sqp {
         array<scalar_t, field::num_prim> scale_p_{};
         /// whether scaling has been applied (and therefore duals must be unscaled)
         bool scaling_applied_ = false;
-        restoration_prox_data restoration_prox_;
-        restoration_snapshot last_restoration_;
     };
 
     enum iter_result_t : size_t {
         unknown = 0,
         success,               ///< converged to a KKT point within tolerances
         exceed_max_iter,       ///< reached maximum number of iterations without convergence
-        restoration_failed,    ///< restoration was triggered but failed to make sufficient progress
         infeasible_stationary, ///< reached an infeasible stationary point (e.g. due to LICQ failure) and cannot make progress
     };
 
@@ -266,18 +233,6 @@ struct ns_sqp {
         scalar_t avg_dual_res = 0.;        // average dual residual: L1 norm of stationarity gradient / number of elements (unscaled)
     } kkt_last;
 
-    struct restoration_eval_info {
-        scalar_t theta = 0.;   ///< restoration primal infeasibility
-        scalar_t phi = 0.;     ///< restoration barrier objective
-        scalar_t dual = 0.;    ///< restoration dual infeasibility
-        scalar_t comp = 0.;    ///< restoration complementarity residual
-        scalar_t pd_err = 0.;  ///< restoration primal-dual error summary
-        scalar_t dual_w = 0.;       ///< reduced w-stationarity seen by the condensed Riccati system
-        scalar_t dual_local_p = 0.; ///< local elastic p-stationarity residual
-        scalar_t dual_local_n = 0.; ///< local elastic n-stationarity residual
-        scalar_t comp_p = 0.;       ///< local elastic p-complementarity residual
-        scalar_t comp_n = 0.;       ///< local elastic n-complementarity residual
-    };
     kkt_info update(size_t n_iter, bool verbose = true);
     const profile_report &profile() const { return profile_report_; }
     void reset_profile();
@@ -378,7 +333,6 @@ struct ns_sqp {
     scoped_profile profile_scope(profile_phase phase) { return scoped_profile(this, phase); }
     static const char *profile_phase_name(profile_phase phase);
     profile_report profile_report_;
-
     /// print inf norms of constraint residuals and Jacobians across all nodes, to diagnose scaling
     void print_scaling_info();
     /// print per-field contribution to dual stationarity residual (first node only)
@@ -391,10 +345,6 @@ struct ns_sqp {
     void print_stats(const kkt_info &info);
     /// compute the kkt information of the current solution
     kkt_info compute_kkt_info(bool update_dual_res = true);
-    /// compute restoration-specific KKT-style metrics for the current stage values
-    kkt_info compute_restoration_kkt_info();
-    /// compute restoration-specific residuals/objective for the current stage values
-    restoration_eval_info compute_restoration_info();
     /// perform iterative refinement to improve the solution accuracy, will modify the current solution in place
     void iterative_refinement();
     /// update the line search bounds with the (probably updated) max value
@@ -453,28 +403,7 @@ struct ns_sqp {
         bool last_step_was_armijo = false;
         size_t filter_reject_cnt = 0; ///< number of consecutive filter rejections, used for adaptive strategies in line search
 
-        struct restoration_point {
-            scalar_t theta = std::numeric_limits<scalar_t>::infinity();
-            scalar_t phi = std::numeric_limits<scalar_t>::infinity();
-            bool in_filter(const restoration_point &filter_entry, const settings_t &settings) const {
-                return theta >= (1.0 - settings.ls.primal_gamma) * filter_entry.theta &&
-                       phi >= filter_entry.phi - settings.ls.dual_gamma * filter_entry.theta;
-            }
-        };
-        struct restoration_state {
-            kkt_info entry;
-            kkt_info current;
-            kkt_info trial;
-            restoration_point best_trial;
-            std::vector<restoration_point> points;
-            bool initialized = false;
-            void reset() {
-                *this = restoration_state{};
-            }
-        } resto;
-
         void update_filter(const kkt_info &kkt, settings_t &settings);
-        void augment_filter_for_restoration_start(const kkt_info &reference_kkt, settings_t &settings);
         bool try_step(const kkt_info &trial_kkt, const kkt_info &current_kkt, settings_t &settings);
 
         /***** merit backtracking part (used when settings.ls.method == merit_backtracking) *****/
@@ -502,7 +431,6 @@ struct ns_sqp {
 
     void step_back_alpha(filter_linesearch_per_iter_data &ls);
     line_search_action filter_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
-    line_search_action restoration_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
     line_search_action merit_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
     bool outer_filter_accepts(const filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &reference_kkt);
 
@@ -511,7 +439,6 @@ struct ns_sqp {
     void ineq_constr_prediction();
     /// initialize the solver before the first iteration or after a reset, returns the initial kkt info
     kkt_info initialize();
-    kkt_info restoration_update(const kkt_info &kkt_before, filter_linesearch_data &ls);
     void post_factorization_correction_step();
     void finalize_correction(data *d);
     void reset_ls_workers();
@@ -540,6 +467,8 @@ struct ns_sqp {
     void prepare_globalization(filter_linesearch_data &ls, iteration_context &ctx);
     bool evaluate_trial_point(filter_linesearch_data &ls, iteration_context &ctx);
     void accept_trial_point(filter_linesearch_data &ls, iteration_context &ctx);
+    line_search_action select_globalization_action(filter_linesearch_data &ls, iteration_context &ctx);
+    line_search_action handle_globalization_failure(filter_linesearch_data &ls, iteration_context &ctx);
     line_search_action run_globalization(filter_linesearch_data &ls, iteration_context &ctx);
     /**
      * @brief Run one QP solve + line-search iteration.

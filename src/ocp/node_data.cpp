@@ -116,16 +116,6 @@ void node_data::update_approximation(update_mode config, bool include_original_c
     for (const generic_custom_func &f : prob_->exprs(__post_comp)) {
         f.custom_call((*shared_)[f]); ///< @todo pass update mode
     }
-    // snapshot pure cost gradient before adding constraint dual contributions
-    if (config != update_mode::eval_val)
-        for (auto field : primal_fields){
-            dense_->cost_jac_[field] = dense_->lag_jac_[field];
-        }
-    if (config != update_mode::eval_val && !include_original_cost)
-        for (auto field : primal_fields) {
-            dense_->lag_jac_[field].setZero();
-        }
-
     if (raw_derivatives) {
         dense_->lag_ = 0.;
         for (auto field : primal_fields) {
@@ -137,6 +127,12 @@ void node_data::update_approximation(update_mode config, bool include_original_c
             }
         }
         return;
+    }
+
+    if (config != update_mode::eval_val && include_original_cost) {
+        for (auto field : primal_fields) {
+            dense_->lag_jac_[field] = dense_->cost_jac_[field];
+        }
     }
 
     for (auto f : lag_data::stored_constr_fields) {

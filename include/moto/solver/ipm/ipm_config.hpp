@@ -23,6 +23,7 @@ class ipm_config {
     scalar_t mu_trial = 1e-2; ///< trial barrier parameter for the affine step
     adaptive_mu_t mu_method = mehrotra_predictor_corrector; ///< adaptive mu method
     bool ipm_conditional_corrector = false; ///< whether to use conditional corrector
+    bool disable_corrections = false; ///< skip Jacobian/Hessian correction propagation while preserving raw g/J evaluation
 
     struct MOTO_ALIGN_NO_SHARING worker {
         scalar_t kkt_inf = std::numeric_limits<scalar_t>::infinity(); ///< KKT infinity norm, used for logging and debugging

@@ -7,29 +7,6 @@
 
 namespace moto {
 
-static scalar_t compute_restoration_alpha_min(const ns_sqp::settings_t &settings,
-                                              scalar_t theta_k,
-                                              scalar_t theta_min,
-                                              scalar_t fullstep_dec_k) {
-    const auto &rs = settings.restoration;
-    const scalar_t minus_dir_deriv = -fullstep_dec_k;
-    scalar_t alpha_min = rs.alpha_min_factor * settings.ls.primal_gamma;
-
-    if (minus_dir_deriv > 0.) {
-        scalar_t ratio_term = settings.ls.dual_gamma * theta_k / minus_dir_deriv;
-        if (theta_k <= theta_min) {
-            scalar_t power_term =
-                std::pow(std::max(theta_k, scalar_t(0.)), settings.ls.s_theta) /
-                std::pow(minus_dir_deriv, settings.ls.s_phi);
-            alpha_min = rs.alpha_min_factor * std::min({settings.ls.primal_gamma, ratio_term, power_term});
-        } else {
-            alpha_min = rs.alpha_min_factor * std::min(settings.ls.primal_gamma, ratio_term);
-        }
-    }
-
-    return std::max(alpha_min, settings.ls.primal.alpha_min);
-}
-
 void ns_sqp::finalize_ls_bound_and_set_to_max() {
     // merge line search bounds from each thread
     for (solver::linesearch_config &s : setting_per_thread) {
@@ -61,24 +38,6 @@ void ns_sqp::filter_linesearch_data::update_filter(const kkt_info &current_kkt, 
         fmt::print("  added point to filter: primal res: {:.3e}, dual res: {:.3e}, objective: {:.3e}\n",
                    current_point.prim_res, current_point.dual_res, current_point.objective);
     points.push_back(current_point);
-}
-void ns_sqp::filter_linesearch_data::augment_filter_for_restoration_start(const kkt_info &reference_kkt, settings_t &settings) {
-    point relaxed_point{
-        .prim_res = (scalar_t(1.) - settings.ls.primal_gamma) * reference_kkt.prim_res_l1,
-        .dual_res = reference_kkt.inf_dual_res,
-        .objective = reference_kkt.objective - settings.ls.dual_gamma * reference_kkt.prim_res_l1,
-    };
-    points.erase(std::remove_if(
-                     points.begin(), points.end(),
-                     [&](const point &p) {
-                         return p.in_filter(relaxed_point, settings);
-                     }),
-                 points.end());
-    if (settings.verbose) {
-        fmt::print("[resto]: augment outer filter with relaxed point: primal res {:.3e}, objective {:.3e}\n",
-                   relaxed_point.prim_res, relaxed_point.objective);
-    }
-    points.push_back(relaxed_point);
 }
 bool ns_sqp::filter_linesearch_data::point::in_filter(const point &filter_entry, const settings_t &settings) const {
     return prim_res >= (1.0 - settings.ls.primal_gamma) * filter_entry.prim_res and
@@ -192,121 +151,6 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt, const k
     }
 }
 
-ns_sqp::line_search_action ns_sqp::restoration_linesearch(filter_linesearch_data &ls,
-                                                          const kkt_info &trial_kkt,
-                                                          const kkt_info &current_kkt) {
-    auto &rs = ls.resto;
-    const filter_linesearch_data::restoration_point trial_point{
-        .theta = rs.trial.inf_prim_res,
-        .phi = rs.trial.objective,
-    };
-    const filter_linesearch_data::restoration_point current_point{
-        .theta = rs.current.inf_prim_res,
-        .phi = rs.current.objective,
-    };
-
-    ls.switching_condition = false;
-    ls.armijo_cond_met = false;
-    ls.alpha_min = settings.ls.primal.alpha_min;
-
-    if (trial_point.theta < ls.best_trial.prim_res || trial_point.phi < ls.best_trial.objective) {
-        ls.best_trial.prim_res = trial_point.theta;
-        ls.best_trial.dual_res = rs.trial.inf_dual_res;
-        ls.best_trial.objective = trial_point.phi;
-        ls.best_trial.alpha_primal = settings.ls.alpha_primal;
-        ls.best_trial.alpha_dual = settings.ls.alpha_dual;
-    }
-
-    if (settings.verbose) {
-        fmt::print("[resto ls] step no. {}, theta_R: {:.3e}, phi_R: {:.3e}, dual_R: {:.3e}, comp_R: {:.3e}, alpha_primal: {:.3e}, alpha_dual: {:.3e}\n",
-                   ls.step_cnt, rs.trial.inf_prim_res, rs.trial.objective, rs.trial.inf_dual_res,
-                   rs.trial.inf_comp_res,
-                   settings.ls.alpha_primal, settings.ls.alpha_dual);
-    }
-
-    bool accept = true;
-    for (const auto &p : rs.points) {
-        if (trial_point.in_filter(p, settings)) {
-            accept = false;
-            if (settings.verbose) {
-                fmt::print("  [resto] trial point rejected by restoration filter (theta_R: {:.3e}, phi_R: {:.3e}), dominated by point (theta_R: {:.3e}, phi_R: {:.3e})\n",
-                           trial_point.theta, trial_point.phi, p.theta, p.phi);
-            }
-            break;
-        }
-    }
-    if (accept) {
-        accept = !trial_point.in_filter(current_point, settings);
-        if (settings.verbose) {
-            fmt::print("  [resto] restoration acceptor vs current point: {} (trial theta_R: {:.3e}, phi_R: {:.3e}; current theta_R: {:.3e}, phi_R: {:.3e})\n",
-                       accept ? "accept" : "reject",
-                       trial_point.theta, trial_point.phi,
-                       current_point.theta, current_point.phi);
-        }
-    }
-    if (accept) {
-        constexpr scalar_t dual_growth_limit = 100.0;
-        constexpr scalar_t comp_growth_limit = 100.0;
-        const scalar_t dual_ref = std::max(rs.current.inf_dual_res, settings.dual_tol);
-        const scalar_t comp_ref = std::max(rs.current.inf_comp_res, settings.comp_tol);
-        const bool dual_ok = rs.trial.inf_dual_res <= dual_growth_limit * dual_ref;
-        const bool comp_ok = rs.trial.inf_comp_res <= comp_growth_limit * comp_ref;
-        if (!(dual_ok && comp_ok)) {
-            if (settings.verbose) {
-                fmt::print("  [resto] reject accepted-by-filter trial due to restoration dual/comp growth: "
-                           "trial dual_R {:.3e} vs limit {:.3e}, trial comp_R {:.3e} vs limit {:.3e}\n",
-                           rs.trial.inf_dual_res, dual_growth_limit * dual_ref,
-                           rs.trial.inf_comp_res, comp_growth_limit * comp_ref);
-            }
-            accept = false;
-        }
-    }
-
-    if (accept || ls.stop) {
-        ls.recompute_approx = false;
-        if (accept && !ls.stop) {
-            rs.points.erase(std::remove_if(
-                                rs.points.begin(), rs.points.end(),
-                                [&](const filter_linesearch_data::restoration_point &p) {
-                                    return p.in_filter(current_point, settings);
-                                }),
-                            rs.points.end());
-            rs.points.push_back(current_point);
-        }
-        return accept ? line_search_action::accept : line_search_action::failure;
-    }
-
-    ls.recompute_approx = true;
-    if (settings.ls.max_steps > ls.step_cnt) {
-        ls.step_cnt++;
-        step_back_alpha(ls);
-        if (settings.verbose) {
-            fmt::print("  resto backtrack, alpha_p: {:.3e}, alpha_d: {:.3e}\n",
-                       settings.ls.alpha_primal, settings.ls.alpha_dual);
-        }
-        return line_search_action::backtrack;
-    }
-
-    ls.stop = true;
-    ls.failure_reason = filter_linesearch_per_iter_data::failure_reason_t::other;
-    if (settings.ls.failure_strategy == linesearch_setting::failure_backup_strategy::min_step) {
-        ls.enforce_min = true;
-        auto scale = std::min(0.01 / ls.initial_alpha_primal, 1.0);
-        settings.ls.alpha_primal = ls.initial_alpha_primal * scale;
-    } else {
-        settings.ls.alpha_primal = ls.best_trial.alpha_primal;
-        if (settings.ls.update_alpha_dual) {
-            settings.ls.alpha_dual = ls.best_trial.alpha_dual;
-        }
-    }
-    if (settings.verbose) {
-        fmt::print("  resto line search failed, best trial theta_R: {:.3e}, phi_R: {:.3e}, alpha_p: {:.3e}, alpha_d: {:.3e}\n",
-                   ls.best_trial.prim_res, ls.best_trial.objective,
-                   ls.best_trial.alpha_primal, ls.best_trial.alpha_dual);
-    }
-    return line_search_action::failure;
-}
-
 bool ns_sqp::outer_filter_accepts(const filter_linesearch_data &ls,
                                   const kkt_info &trial_kkt,
                                   const kkt_info &reference_kkt) {
@@ -367,7 +211,7 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     }
     scalar_t mu = settings.ipm.mu;
     scalar_t fullstep_dec_k = current_kkt.obj_fullstep_dec - mu * current_kkt.barrier_dir_deriv;
-    ls.alpha_min = compute_restoration_alpha_min(settings, current_kkt.prim_res_l1, ls.constr_vio_min, fullstep_dec_k);
+    ls.alpha_min = settings.ls.primal.alpha_min;
 
     const auto record_best_trial = [&] {
         const auto make_point = [&](const kkt_info &kkt) -> filter_linesearch_data::point {
@@ -400,7 +244,7 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     if (settings.verbose) {
         fmt::print("[ls] step no. {}, primal res: {:.3e}, barrier obj: {:.3e}, alpha_primal: {:.3e}, alpha_dual: {:.3e}\n",
                    ls.step_cnt, trial_kkt.prim_res_l1, trial_kkt.objective, settings.ls.alpha_primal, settings.ls.alpha_dual);
-        fmt::print("  alpha_min(resto trigger): {:.3e}\n", ls.alpha_min);
+        fmt::print("  alpha_min: {:.3e}\n", ls.alpha_min);
     }
     print_filter();
     bool accept = ls.try_step(trial_kkt, current_kkt, settings);
@@ -408,8 +252,7 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     if (accept || ls.stop) {
         ls.recompute_approx = false;
         if (accept && !ls.stop) {
-            if (!settings.in_restoration &&
-                (!ls.switching_condition || !ls.armijo_cond_met)) {
+            if (!ls.switching_condition || !ls.armijo_cond_met) {
                 // only update the filter if we are not in switching mode with Armijo condition met,
                 // otherwise the filter is not relevant and may even reject future points that make sufficient primal progress
                 // but not sufficient objective decrease
@@ -426,14 +269,13 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
         ls.soc_iter_cnt < settings.ls.max_soc_iter && !ls.switching_condition) {
     }
 
-    if (!settings.in_restoration &&
-        settings.ls.alpha_primal <= ls.alpha_min &&
+    if (settings.ls.alpha_primal <= ls.alpha_min &&
         current_kkt.prim_res_l1 > settings.prim_tol) {
         ls.stop = true;
         ls.failure_reason = filter_linesearch_per_iter_data::failure_reason_t::tiny_step;
         ls.recompute_approx = false;
         if (settings.verbose) {
-            fmt::print("  line search reached restoration trigger step: alpha_p {:.3e} <= alpha_min {:.3e} with prim_res {:.3e}\n",
+            fmt::print("  line search reached min step: alpha_p {:.3e} <= alpha_min {:.3e} with prim_res {:.3e}\n",
                        settings.ls.alpha_primal, ls.alpha_min, current_kkt.prim_res_l1);
         }
         return line_search_action::failure;
@@ -469,13 +311,9 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
         }
     }
 
-    // Signal failure to the outer SQP loop so it can decide whether to trigger
-    // restoration mode or terminate.
     fmt::println(" line search failed, dec_full_pred = {:.3e}, best trial primal res: {:.3e}, dual res: {:.3e}, objective: {:.3e}\n",
-                 current_kkt.obj_fullstep_dec, ls.best_trial.prim_res, ls.best_trial.dual_res, ls.best_trial.objective);
-    if (!settings.in_restoration) {
-        ls.update_filter(current_kkt, settings);
-    }
+                 fullstep_dec_k, ls.best_trial.prim_res, ls.best_trial.dual_res, ls.best_trial.objective);
+    ls.update_filter(current_kkt, settings);
     return line_search_action::failure;
 }
 

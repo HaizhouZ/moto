@@ -32,7 +32,6 @@ This guide was derived from the code itself, especially:
 - a nullspace / Riccati-based stagewise QP solve
 - optional IPM treatment for inequalities
 - optional PMM treatment for soft equalities
-- an IPOPT-inspired restoration phase with an explicit stage-local elastic KKT condensed onto `w=(x,u,y)`
 - nanobind Python bindings
 
 The main solver entry point is:
@@ -59,14 +58,10 @@ The main SQP iteration loop lives in:
 - [`src/solver/nsp_impl/rollout.cpp`](/home/harper/Documents/moto/src/solver/nsp_impl/rollout.cpp): forward rollout and dual-step recovery
 - [`src/solver/sqp_impl/line_search.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/line_search.cpp): filter and merit backtracking
 - [`src/solver/sqp_impl/scaling.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/scaling.cpp): Jacobian scaling
-- [`src/solver/sqp_impl/restoration.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/restoration.cpp): restoration mode
 - [`src/solver/sqp_impl/iterative_refinement.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/iterative_refinement.cpp): residual correction
 - [`include/moto/solver/ipm/ipm_constr.hpp`](/home/harper/Documents/moto/include/moto/solver/ipm/ipm_constr.hpp): IPM inequality implementation
 - [`include/moto/solver/soft_constr/pmm_constr.hpp`](/home/harper/Documents/moto/include/moto/solver/soft_constr/pmm_constr.hpp): PMM soft equality implementation
-- [`include/moto/solver/restoration/resto_local_kkt.hpp`](/home/harper/Documents/moto/include/moto/solver/restoration/resto_local_kkt.hpp): shared explicit elastic restoration math helper
-- [`include/moto/solver/restoration/resto_elastic_constr.hpp`](/home/harper/Documents/moto/include/moto/solver/restoration/resto_elastic_constr.hpp): solver-private stage-local elastic runtime state
-- [`include/moto/solver/restoration/resto_runtime.hpp`](/home/harper/Documents/moto/include/moto/solver/restoration/resto_runtime.hpp): restoration lifecycle integration hooks
-- [`restoration_explicit_checkpoint.md`](/home/harper/Documents/moto/restoration_explicit_checkpoint.md): math checkpoint for the explicit local-KKT restoration derivation
+- [`restoration.md`](/home/harper/Documents/moto/restoration.md): archived restoration design note; the implementation has been removed from the active solver
 - [`bindings/`](/home/harper/Documents/moto/bindings): Python bindings
 - [`example/`](/home/harper/Documents/moto/example): manual examples
 - [`unittests/`](/home/harper/Documents/moto/unittests): Catch2 tests
@@ -92,7 +87,7 @@ Important build facts:
 - `WITH_NATIVE_OPT=ON` enables `-march=native`
 - Python bindings are built from [`bindings/CMakeLists.txt`](/home/harper/Documents/moto/bindings/CMakeLists.txt)
 - unit tests are defined in [`unittests/CMakeLists.txt`](/home/harper/Documents/moto/unittests/CMakeLists.txt)
-- current CMake test registration includes `sym_test`, `graph_model_compose_test`, `restoration_test`, and the Python restoration probes
+- current CMake test registration includes `sym_test` and `graph_model_compose_test`
 
 Manual runs from the repo docs:
 
@@ -148,7 +143,7 @@ Primary primal fields:
 
 Solver-managed non-primal storage:
 
-- `__s`: internal shared slack storage reserved for solver-owned IPM/restoration state
+- `__s`: internal shared slack storage reserved for solver-owned IPM state and other solver-private storage
 - `__p`: non-decision parameters
 
 Core function / constraint fields:
@@ -445,9 +440,8 @@ Responsibilities:
 
 Restoration note:
 
-- the active restoration implementation no longer adds a dedicated constraint subclass here
-- instead it uses a solver-private stage runtime plus a shared local-KKT helper under
-  [`include/moto/solver/restoration/`](/home/harper/Documents/moto/include/moto/solver/restoration)
+- the restoration implementation has been removed from the active solver
+- [`restoration.md`](/home/harper/Documents/moto/restoration.md) is now historical design documentation only
 
 Registry-based conversion:
 
@@ -530,7 +524,7 @@ Important gradient distinction:
 
 - `cost_jac_` is pure cost only
 - `lag_jac_` is the persistent base stage gradient `cost_jac_ + J^T lambda`
-- `lag_jac_corr_` is solver-owned scratch for pending corrections from IPM, PMM, restoration, or refinement
+- `lag_jac_corr_` is solver-owned scratch for pending corrections from IPM, PMM, or refinement
 - line search uses `cost_jac_` for `obj_fullstep_dec`
 - dual residual / stationarity checks use `lag_jac_`
 
@@ -552,12 +546,6 @@ Its flow is:
 8. If value evaluation is active:
    compute `inf_prim_res_`, `prim_res_l1_`, `inf_comp_res_`
    add `cost_` into `lag_`
-
-Important restoration-specific detail:
-
-- `update_approximation(..., include_original_cost=false)` still evaluates the original cost and snapshots `cost_jac_`
-- afterward it zeros the base stage gradient for `primal_fields` before adding constraint-dual terms
-- this means restoration still has the original objective value and directional derivative bookkeeping for filter globalization, but the original cost gradient does not drive the restoration search direction
 
 Mental model:
 
@@ -620,8 +608,8 @@ Multiplier-related state:
 
 Auxiliary mode hook:
 
-- `aux_` can hold mode-specific state
-- restoration currently uses `restoration_aux_data` with `rho_eq`, `mu_bar`, an initialization flag, and a stage-local explicit elastic runtime (`p,n,nu_p,nu_n` plus local work buffers)
+- `aux_` can still hold solver-private mode-specific state when needed
+- there is currently no active restoration runtime attached through this hook
 
 ### `nullspace_data`
 
@@ -670,7 +658,6 @@ Important sub-groups:
 - `settings.ipm`: barrier and predictor-corrector settings
 - `settings.rf`: iterative refinement settings
 - `settings.scaling`: Jacobian scaling settings
-- `settings.restoration`: restoration settings
 
 Important invariants:
 
@@ -763,7 +750,7 @@ The most useful currently exposed phases for bottleneck work are:
 - `update_projected_dynamics()`
 - `activate_lag_jac_corr()`
 
-This makes sure the stage QP sees all pending gradient corrections from IPM, PMM, restoration, or refinement.
+This makes sure the stage QP sees all pending gradient corrections from IPM, PMM, or refinement.
 
 ### 2. Copy base blocks
 
@@ -844,12 +831,6 @@ In normal constrained mode:
 
 - solve `lu_eq_.transpose().solve(...)` for hard-equality multipliers
 
-In restoration explicit-elastic mode:
-
-- `__dyn` duals are still recovered through the hard-constraint path
-- `__eq_x` and `__eq_xu` do not use the old PMM-style `dlam = (h + J_u du + J_x dx) / rho_eq` reconstruction
-- instead, presolve condenses the local elastic KKT onto `w=(x,u,y)` and rollout recovers `d_lambda`, `d_p`, `d_n`, `d_nu_p`, and `d_nu_n` from the same local helper
-
 ## KKT Information And Residual Accounting
 
 [`compute_kkt_info(...)`](/home/harper/Documents/moto/src/solver/sqp_impl/ns_sqp_impl.cpp) aggregates across all nodes:
@@ -905,8 +886,6 @@ Key details:
 - `fullstep_dec < 0` must be checked before `pow(...)` to avoid NaNs
 - backtracking can be linear or geometric
 - failure fallback is either minimum step or best trial
-- restoration reuses the same filter acceptance logic, but does not add new points to the outer filter history
-- restoration is triggered only on line-search `failure` with failure reason `tiny_step`, not on arbitrary backtracking failure
 
 The SOC scaffolding exists but is intentionally not implemented:
 
@@ -1014,7 +993,7 @@ Current solver direction:
 
 - `__s` exists as solver-managed shared slack storage
 - it is not exposed as a user modeling field and does not participate in code generation like `__x/__u/__y`
-- it is not part of the global Riccati primal state; explicit restoration uses stage-local runtime state and local-KKT condensation instead
+- it is not part of the global Riccati primal state
 
 ## Predictor-Corrector And Iterative Refinement
 
@@ -1043,70 +1022,11 @@ If inequalities are present:
 
 This is a true correction solve on the linearized KKT system, not a full relinearization of the nonlinear problem.
 
-## Restoration Mode
+## Restoration Note
 
-[`src/solver/sqp_impl/restoration.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/restoration.cpp) now implements an IPOPT-inspired restoration phase with an explicit local elastic KKT for `__eq_x` and `__eq_xu`, condensed onto the global stage variables `w=(x,u,y)`.
-
-Entry condition:
-
-- normal globalization must return `line_search_action::failure`
-- the failure reason must be `tiny_step`
-- current primal infeasibility must still exceed `prim_tol`
-
-The tiny-step threshold is an IPOPT-style adaptive minimum step:
-
-- `theta(x_k) = prim_res_l1`
-- `theta_min = settings.ls.constr_vio_min`
-- `gamma_theta = settings.ls.primal_gamma`
-- `gamma_phi = settings.ls.dual_gamma`
-- `alpha_min_factor = settings.restoration.alpha_min_factor`
-
-Restoration initialization:
-
-- `mu_bar = max(mu_regular, inf_prim_res)`
-- current iterate is reused as the restoration reference point
-- equality multipliers are reset for `__dyn`, `__eq_x`, and `__eq_xu`
-- `u_ref` and `y_ref` are snapshotted for proximal anchoring
-- `sigma_u`, `sigma_y` use componentwise scaling `1 / max(|ref|, 1)`
-- merit backtracking is intentionally incompatible with restoration
-
-Active restoration model:
-
-- dynamics `__dyn` remain hard constraints
-- hard equalities `__eq_x` and `__eq_xu` are moved into an explicit elastic exact-penalty model
-- the elastic variables `p,n,nu_p,nu_n,lambda_c` are stage-local restoration state, not user-visible primal variables
-- presolve condenses the local elastic KKT onto `w=(x,u,y)` using the Hippo-style terms
-  - `M = P N_p^{-1} + T_n N_n^{-1}`
-  - `b_c = r_c + N_p^{-1}(r_{s,p}+P r_p) - N_n^{-1}(r_{s,n}+T_n r_n)`
-  - gradient term `C^T M^{-1} b_c`
-  - curvature term `C^T M^{-1} C`
-- `u` and `y` receive first-order proximal anchoring through `lag_jac_corr_`
-- there is currently no matching proximal Hessian for `u/y`
-
-Original cost semantics during restoration:
-
-- original cost value is still evaluated
-- original `cost_jac_` is still computed so filter/objective directional-derivative logic remains consistent
-- original cost gradient is removed from the base search-direction Jacobian before the restoration solve is assembled
-
-Globalization semantics during restoration:
-
-- restoration still uses the normal filter objective pair `(prim_res_l1, barrier objective)`
-- restoration does not append new points to the outer filter history
-- restoration line-search failure alone is not treated as immediate restoration failure
-
-Current success / failure behavior:
-
-- success requires an accepted restoration step with sufficient primal-infeasibility improvement relative to the entry point
-- `infeasible_stationary` is reserved for small dual residual without recovered feasibility
-- otherwise the phase eventually returns `restoration_failed` or the outer loop exhausts `max_iter`
-
-Current practical status on `example/arm/run.py`:
-
-- restoration is automatically triggered and is thread-consistent between `--n-job 1` and `--n-job 4`
-- the current explicit local-KKT elastic model reliably reduces the problem to a terminal `__eq_x` bottleneck
-- the best tested stable tuning so far is roughly `rho_u = rho_y = 0.1`, `rho_eq = 0.1`
-- even there, the arm example still exits with `iter_result_restoration_failed` rather than full success
+- the restoration solver path has been removed from the codebase
+- [`restoration.md`](/home/harper/Documents/moto/restoration.md) remains as design history only
+- current SQP behavior on line-search `failure` is the normal non-restoration path in [`src/solver/sqp_impl/ns_sqp_impl.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/ns_sqp_impl.cpp)
 
 ## Diagnostics
 
@@ -1153,7 +1073,7 @@ Current profiling-related Python entry points on `ns_sqp_impl`:
 - remember many sparse/dense objects are views into shared storage, not owned copies
 - do not copy `settings_t`
 - do not assume soft constraints are only inequalities; PMM soft equalities use the same dispatch layer
-- do not remove commented or dormant solver hooks like restoration or SOC infrastructure without checking intended roadmap
+- do not remove commented or dormant solver hooks like SOC infrastructure without checking intended roadmap
 - when changing C++ code that affects Python examples, always wait for the full build to finish before running Python tests
 - do not trust a Python test run started while `moto` / `moto_pywrap` is still linking; stale modules can easily give misleading results
 

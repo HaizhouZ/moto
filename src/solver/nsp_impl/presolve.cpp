@@ -1,7 +1,5 @@
 #define MOTO_NS_RICCATI_IMPL
 #include <moto/solver/ns_riccati/generic_solver.hpp>
-#include <moto/solver/restoration/resto_init.hpp>
-#include <moto/solver/restoration/resto_runtime.hpp>
 
 // #define ENABLE_TIMED_BLOCK
 #include <moto/utils/timed_block.hpp>
@@ -168,90 +166,6 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
     }
     if (constr_c) {
         d.c_x.dump_into(nsp.s_c_stacked_0_K.bottomRows(d.nc));
-    }
-
-    // ── Explicit elastic restoration condensed onto w = (x,u,y) ─────────────
-    // Dynamics remains a hard constraint. The original __eq_x / __eq_xu
-    // residuals are stacked into c(w), while the local restoration variables
-    // (p,n,nu_p,nu_n,lambda_c) are kept in restoration_aux_data and eliminated
-    // exactly at the stage level:
-    //
-    //   min_w,p,n  phi_R(w) + rho * 1^T (p+n) - mu_bar * sum(log p + log n)
-    //   s.t.       c(w) - p + n = 0
-    //
-    // This yields the Hippo-style condensed corrections. Note that the base
-    // stage gradient Q_(·) already contains C^T lambda_c via lag_jac_, so the
-    // condensed explicit-elastic contribution added here is only
-    //   ΔQ̃_R_(·)     = [M_rho^{-1} b_c]^T c_(·)
-    //   ΔQ̃_R_(·,·)   = c_(·)^T M_rho^{-1} c_(·)
-    //
-    // with (for lambda_reg > 0)
-    //   M_rho = P (P + lambda_reg N_p)^{-1} + T_n (T_n + lambda_reg N_n)^{-1}
-    //   b_c   = r_c
-    //         + (P + lambda_reg N_p)^{-1}(P r_p + lambda_reg r_{s,p})
-    //         - (T_n + lambda_reg N_n)^{-1}(T_n r_n + lambda_reg r_{s,n})
-    // and lambda_reg == 0 falling back to the unregularized explicit elastic
-    // local-KKT formulas.
-    //
-    // The explicit local block is initialized once when restoration starts and
-    // updated in rollout/line-search hooks.
-    if (gauss_newton) {
-        const size_t ncstr = d.ncstr;
-        auto *aux = dynamic_cast<ns_riccati_data::restoration_aux_data *>(d.aux_.get());
-
-        // Build s_c_stacked_0_k (equality constraint residuals) for the GN gradient.
-        cur->update_projected_dynamics_residual();
-        nsp.s_c_stacked_0_k.conservativeResize(ncstr);
-        if (constr_s) {
-            nsp.s_0_p_k.conservativeResize(constr_s);
-            nsp.s_0_p_k.noalias() = _approx[__eq_x].v_;
-            d.s_y.times<false>(d.F_0, nsp.s_0_p_k);
-            nsp.s_c_stacked_0_k.head(constr_s) = nsp.s_0_p_k;
-        }
-        if (constr_c) {
-            nsp.s_c_stacked_0_k.tail(d.nc) = _approx[__eq_xu].v_;
-        }
-
-        // ── Explicit local-KKT condensation for __eq_x / __eq_xu ────────────
-        if (ncstr > 0 && aux != nullptr) {
-            restoration::initialize_stage(d);
-            const vector lambda = restoration::gather_lambda(d);
-            restoration::compute_local_model(nsp.s_c_stacked_0_k,
-                                             lambda,
-                                             aux->elastic,
-                                             aux->rho_eq,
-                                             aux->mu_bar,
-                                             aux->lambda_reg);
-            const vector eta = aux->elastic.minv_bc;
-            const row_vector eta_u = eta.transpose() * nsp.s_c_stacked;
-            const row_vector eta_x = eta.transpose() * nsp.s_c_stacked_0_K;
-
-            // This explicit-elastic first-order term is a stage-gradient correction:
-            //   Δg_R = C^T M_rho^{-1} b_c.
-            // Keep it in lag_jac_corr_ and let activate_lag_jac_corr() fold it
-            // into the active stage gradient together with the other pending
-            // first-order corrections.
-            d.dense_->lag_jac_corr_[__u].noalias() += eta_u;
-            d.dense_->lag_jac_corr_[__x].noalias() += eta_x;
-
-            unconstrain_setup();
-
-            nsp.Q_zz.noalias() += nsp.s_c_stacked.transpose() * aux->elastic.minv_diag.asDiagonal() * nsp.s_c_stacked;
-            nsp.u_0_p_K.noalias() += nsp.s_c_stacked.transpose() * aux->elastic.minv_diag.asDiagonal() * nsp.s_c_stacked_0_K;
-            nsp.z_0_K = nsp.u_0_p_K;
-            d.V_xx.noalias() += nsp.s_c_stacked_0_K.transpose() * aux->elastic.minv_diag.asDiagonal() * nsp.s_c_stacked_0_K;
-        } else {
-            unconstrain_setup();
-        }
-
-        // rank_status_ = unconstrained (set by unconstrain_setup), so
-        // ns_factorization_correction takes the early return path.
-        // ns/nc/ncstr are left intact so restoration bookkeeping can still
-        // report original equality violation, while the explicit elastic block
-        // itself is condensed onto x/u/y.
-        activate_gradient_corrections();
-        ns_factorization_correction(cur);
-        return;
     }
 
     auto &rank = nsp.rank;

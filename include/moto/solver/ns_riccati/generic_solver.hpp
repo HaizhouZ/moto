@@ -15,12 +15,11 @@ struct generic_solver {
      * @brief factorization for the nullspace kernel using the hard constraints.
      * @details will directly add related parts to the Q-derivatives.
      *          When @p gauss_newton is true, instead of projecting the equality constraints
-     *          into the cost via nullspace, treats them as objectives (Gauss-Newton mode):
-     *          adds GN gradient/Hessian terms from dynamics + equality residuals + proximal
-     *          anchors (read from cur->aux_ as restoration_aux_data), and runs the Riccati
-     *          in unconstrained mode while preserving lu_eq_ for the dual step.
+     *          into the cost via nullspace, treats them as objectives (Gauss-Newton mode)
+     *          and runs the Riccati in unconstrained mode while preserving lu_eq_
+     *          for the dual step.
      * @param cur          current node data
-     * @param gauss_newton if true, run in restoration/Gauss-Newton mode
+     * @param gauss_newton if true, run in Gauss-Newton mode
      */
     virtual void ns_factorization(ns_riccati_data *cur, bool gauss_newton = false);
     /**

@@ -34,9 +34,8 @@ struct MOTO_ALIGN_NO_SHARING data_base {
     // Snapshot of the base stage Lagrangian gradient before any pending
     // reduced-system correction in lag_jac_corr_ is activated.
     //
-    // In restoration mode this is the original stagewise restoration
-    // Lagrangian gradient on w=(x,u,y); condensed elastic terms remain in
-    // lag_jac_corr_ and are not part of this backup.
+    // This backup captures the stage gradient before lag_jac_corr_ is folded
+    // into the active solve state.
     array_type<row_vector, primal_fields> base_lag_grad_backup;
     array_type<row_vector, primal_fields> kkt_stat_err_;
     matrix V_xx, V_yy;

@@ -13,9 +13,6 @@ $(p,n,\nu_p,\nu_n,\lambda_c)$ are maintained only in a stage-local
 restoration runtime and are eliminated analytically when assembling the global
 Riccati system.
 
-For the full checkpoint derivation, see
-[`restoration_explicit_checkpoint.md`](/home/harper/Documents/moto/restoration_explicit_checkpoint.md).
-
 ## Entry Condition
 
 The outer SQP loop enters restoration when the normal globalization returns a
@@ -64,6 +61,20 @@ $$
 \bar\mu_0 = \max\!\bigl(\mu_j,\ \|c(w_k)\|_\infty\bigr).
 $$
 
+During restoration, `mu_bar` is updated with the **same method and the same
+settings** as the normal IPM loop, but with restoration-specific drivers:
+
+- if `settings.ipm.mu_method == monotonic_decrease`, the monotone test uses
+  the restoration metrics `(primal_res_R, dual_R, comp_R)` instead of the normal
+  NLP metrics
+- if `settings.ipm.mu_method == mehrotra_predictor_corrector`, the adaptive
+  update uses only the restoration local complementarity statistics from
+  `(p,n,nu_p,nu_n)`
+
+In both cases the state is separate: restoration evolves its own `mu_bar`,
+while the outer `settings.ipm.mu` is restored when the restoration phase
+returns.
+
 The restoration reference point is simply the current iterate:
 
 $$
@@ -86,6 +97,25 @@ componentwise proximal scaling still uses
 $$
 \sigma(\xi) = \frac{1}{\max(|\xi|,1)}.
 $$
+
+For the restoration-owned inequality block, the current implementation
+initializes the positivity pair on its own interior point instead of copying
+the outer normal-IPM slack state:
+
+$$
+t_0 = \max(-g(w_k), 1),
+\qquad
+\nu_{t,0} = \bar\mu_0 / t_0.
+$$
+
+Then the elastic inequality pair is initialized from the current violation
+
+$$
+v_{d,0} := g(w_k) + t_0
+$$
+
+using the same scalar elastic initializer as the equality block, producing
+strictly positive $(p_{d,0}, n_{d,0}, \nu_{p_d,0}, \nu_{n_d,0}, \lambda_{d,0})$.
 
 The restoration loop itself is capped by both the global SQP iteration budget
 and the restoration-local limit:
@@ -113,39 +143,50 @@ $$
 c(w)=0
 $$
 
-be the stacked equalities formed from `__eq_x` and `__eq_xu`.
+be the stacked equalities formed from `__eq_x` and `__eq_xu`, and let
+
+$$
+g(w) \le 0
+$$
+
+be the stacked inequalities formed from `__ineq_x` and `__ineq_xu`.
 
 The restoration subproblem is
 
 $$
 \begin{aligned}
-\min_{w,p,n}\quad &
-\phi_R(w)
- + \varrho \mathbf{1}^T (p+n)
- - \bar\mu \sum_i \ln p_i
- - \bar\mu \sum_i \ln n_i \\
+\min_{w,t,p_c,n_c,p_d,n_d}\quad &
+\operatorname{obj}_R(w)
+ + \varrho \mathbf{1}^T (p_c+n_c+p_d+n_d)
+ - \bar\mu \sum_i \ln t_i
+ - \bar\mu \sum_i \ln p_{c,i}
+ - \bar\mu \sum_i \ln n_{c,i}
+ - \bar\mu \sum_i \ln p_{d,i}
+ - \bar\mu \sum_i \ln n_{d,i} \\
 \text{s.t.}\quad &
 F(w)=0, \\
 &
-c(w)-p+n=0, \\
+c(w)-p_c+n_c=0, \\
 &
-p \succeq 0,\quad n \succeq 0 .
+g(w)+t-p_d+n_d=0, \\
+&
+t \succeq 0,\quad
+p_c \succeq 0,\quad n_c \succeq 0,\quad
+p_d \succeq 0,\quad n_d \succeq 0 .
 \end{aligned}
 $$
 
 Here:
 
 - `F(w)=0` stays hard throughout restoration.
-- `c(w)` is restored elastically.
-- The current restoration subproblem excludes the normal `__ineq_x` and
-  `__ineq_xu` constraints. They are not part of the restoration base
-  Lagrangian, and they do not contribute to restoration-local barrier or
-  complementarity terms.
+- `c(w)` is restored elastically through the `p_c/n_c` block.
+- `g(w)` is restored through a restoration-owned inequality block
+  `g(w)+t-p_d+n_d=0`.
 - `\varrho` is the elastic exact-penalty weight, currently stored in
   `settings.restoration.rho_eq`.
 - `\rho_\lambda` is the Hippo-style local elastic regularization, currently stored
   in `settings.restoration.lambda_reg`.
-- `\phi_R(w)` contains the restoration-only terms on `w`, currently the
+- `\operatorname{obj}_R(w)` contains the restoration-only terms on `w`, currently the
   proximal anchoring on `u/y`.
 - These proximal terms are assembled only into the restoration base
   Lagrangian state (`lag_ / lag_jac_ / lag_hess_`); they do not modify the
@@ -157,7 +198,7 @@ For one stage, write the base restoration objective on
 $w_k := (x_k,u_k,y_k)$ as
 
 $$
-\phi_{R,k}(w_k).
+\operatorname{obj}_{R,k}(w_k).
 $$
 
 Before condensing the local elastic block, the implemented stagewise
@@ -166,12 +207,16 @@ restoration Lagrangian is
 $$
 \mathcal{L}_{R,k}
 =
-\phi_{R,k}(w_k)
-+ \varrho \mathbf{1}^T (p_k+n_k)
-- \bar\mu \sum_i \ln p_{k,i}
-- \bar\mu \sum_i \ln n_{k,i}
+\operatorname{obj}_{R,k}(w_k)
++ \varrho \mathbf{1}^T (p_{c,k}+n_{c,k}+p_{d,k}+n_{d,k})
+- \bar\mu \sum_i \ln t_{k,i}
+- \bar\mu \sum_i \ln p_{c,k,i}
+- \bar\mu \sum_i \ln n_{c,k,i}
+- \bar\mu \sum_i \ln p_{d,k,i}
+- \bar\mu \sum_i \ln n_{d,k,i}
 + \lambda_{f,k}^T F_k(w_k)
-+ \lambda_{c,k}^T \bigl(c_k(w_k)-p_k+n_k\bigr).
++ \lambda_{c,k}^T \bigl(c_k(w_k)-p_{c,k}+n_{c,k}\bigr)
++ \lambda_{d,k}^T \bigl(g_k(w_k)+t_k-p_{d,k}+n_{d,k}\bigr).
 $$
 
 Its base gradient with respect to the global stage variables is
@@ -179,26 +224,31 @@ Its base gradient with respect to the global stage variables is
 $$
 g_{R,k}^{\mathrm{base}}
 :=
-\nabla_{w_k}\phi_{R,k}(w_k)
+\nabla_{w_k}\operatorname{obj}_{R,k}(w_k)
 + A_k^T \lambda_{f,k}
-+ C_k^T \lambda_{c,k}.
++ C_k^T \lambda_{c,k}
++ G_k^T \lambda_{d,k}.
 $$
 
 This is the quantity that belongs to the base stage gradient state. In code it
 is what `activate_lag_jac_corr()` snapshots into `base_lag_grad_backup` before
 any reduced correction is activated.
 
-The condensed elastic term
+The condensed elastic terms
 
 $$
-\Delta g_{R,k}^{\mathrm{cond}}
+\Delta g_{R,k}^{\mathrm{cond,eq}}
 :=
-C_k^T M_{\rho,k}^{-1} b_{c,k}
+C_k^T M_{\rho,k}^{-1} b_{c,k},
+\qquad
+\Delta g_{R,k}^{\mathrm{cond,ineq}}
+:=
+G_k^T M_{d,k}^{-1} b_{d,k}
 $$
 
-is **not** part of the original restoration Lagrangian. It belongs only to the
-reduced system created after eliminating $(p,n,\nu_p,\nu_n,\lambda_c)$, and so
-it must stay in `lag_jac_corr_` until activation.
+are **not** part of the original restoration Lagrangian. They belong only to
+the reduced system created after eliminating the restoration-local elastic
+blocks, and so they must stay in `lag_jac_corr_` until activation.
 
 ## KKT Residuals
 
@@ -213,7 +263,7 @@ $$
 The local restoration residuals are
 
 $$
-r_w := \nabla_w \phi_R(w) + A^T \lambda_f + C^T \lambda_c ,
+r_w := \nabla_w \operatorname{obj}_R(w) + A^T \lambda_f + C^T \lambda_c ,
 $$
 
 $$
@@ -240,8 +290,10 @@ $$
 r_{s,n} := \nu_n \odot n - \bar\mu \mathbf{1} .
 $$
 
-These are restoration-only local residuals. The normal inequality-IPM
-residuals are excluded from the restoration KKT system.
+These are the restoration-only local residuals for the equality elastic block.
+The current implementation also carries an analogous restoration-owned
+inequality block with residuals
+$r_d, r_t, r_{p_d}, r_{n_d}, r_{s,t}, r_{s,p_d}, r_{s,n_d}$.
 
 Introduce
 
@@ -583,7 +635,7 @@ The current implementation now uses **two acceptor layers**:
 - the **outer** acceptor is still the original filter globalization for the
   original NLP
 - the **inner restoration** acceptor uses restoration-only quantities
-  $(\theta_R,\phi_R)$
+  `(primal_res_R, obj_R)`
 
 At restoration entry, the outer filter is augmented once with the IPOPT-style
 relaxed point derived from the entry iterate:
@@ -604,14 +656,14 @@ be viewed as a lighter explicit elastic variant:
 - it uses a restoration-specific inner acceptor and restoration-specific
   metrics,
 - but it does **not** build a separate nested restoration solver stack,
-- and it does **not** yet perform Ipopt-style multiplier recomputation on
-  successful return.
+- and it still keeps the explicit elastic subproblem condensed onto the stage
+  variables `w=(x,u,y)`.
 
 Inside restoration iterations, line-search acceptance is driven by the
 restoration acceptor, not by the outer filter. The restoration acceptor uses:
 
 $$
-\theta_R
+\operatorname{primal\_res}_R
 =
 \max\Bigl(
 \|F(w)\|_\infty,\,
@@ -622,9 +674,9 @@ $$
 and
 
 $$
-\phi_R
+\operatorname{obj}_R
 =
-\phi_{\mathrm{prox}}(w)
+\operatorname{obj}_{\mathrm{prox}}(w)
 \;+\;
 \varrho\,\mathbf 1^T(p+n)
 \;-\;
@@ -640,8 +692,11 @@ $$
 =
 \max\Bigl(
 \|r_w^{\mathrm{red}}\|_\infty,
-\|r_p\|_\infty,
-\|r_n\|_\infty
+\|r_{p_c}\|_\infty,
+\|r_{n_c}\|_\infty,
+\|r_t\|_\infty,
+\|r_{p_d}\|_\infty,
+\|r_{n_d}\|_\infty
 \Bigr),
 $$
 
@@ -649,21 +704,24 @@ $$
 \mathrm{comp}_R
 =
 \max\Bigl(
-\|r_{s,p}\|_\infty,
-\|r_{s,n}\|_\infty
+\|r_{s,p_c}\|_\infty,
+\|r_{s,n_c}\|_\infty,
+\|r_{s,t}\|_\infty,
+\|r_{s,p_d}\|_\infty,
+\|r_{s,n_d}\|_\infty
 \Bigr).
 $$
-
-Normal `__ineq_x / __ineq_xu` violations, barrier terms, and complementarity
-residuals are intentionally excluded from these restoration metrics.
 
 These restoration quantities are evaluated from the **current trial stage
 values**:
 
 - `F(w)` comes from the trial `eval_val` update
 - `c(w)` comes from the current trial values of `__eq_x` / `__eq_xu`
+- `g(w)` comes from the current trial values of `__ineq_x` / `__ineq_xu`
 - `\lambda_c` is read from the current scattered equality dual state
-- `p,n,\nu_p,\nu_n` are read from the restoration runtime after its affine step
+- `p_c,n_c,\nu_{p_c},\nu_{n_c}` are read from the equality elastic runtime
+- `t,p_d,n_d,\nu_t,\nu_{p_d},\nu_{n_d},\lambda_d` are read from the
+  restoration-owned inequality runtime after its affine step
 
 Here $r_w^{\mathrm{red}}$ denotes the reduced restoration stationarity on
 $w=(x,u,y)$ as seen by the condensed Riccati system:
@@ -681,8 +739,8 @@ $w=(x,u,y)$ as seen by the condensed Riccati system:
 
 Once restoration is active, `dual_R` intentionally stops reusing the original
 NLP dual residual as a whole. Instead it uses the reduced restoration
-stationarity on $w$ together with the explicit elastic local stationarity
-residuals $r_p,r_n$.
+stationarity on $w$ together with the explicit local stationarity residuals of
+both the equality and inequality restoration blocks.
 
 So the restoration acceptor does **not** rely on cached local residuals from
 the previous factorization.
@@ -712,6 +770,32 @@ The outer filter is consulted again only when restoration wants to **exit**:
 an accepted restoration step is mapped back to the original NLP and must also
 be acceptable to the outer filter logic.
 
+## Successful Return Mapping
+
+When restoration exits successfully, the primal iterate is kept, but the
+multiplier state is mapped back to the **original** NLP explicitly:
+
+- the restoration-owned inequality state `(t,\nu_t)` is copied back to the
+  outer normal inequality storage
+- if the copied-back normal inequality multipliers exceed
+  `settings.restoration.bound_mult_reset_threshold`, they are all reset to `1`
+- equality multipliers for `__dyn / __eq_x / __eq_xu` are then handled by a
+  separate cleanup step:
+  - if `constr_mult_reset_threshold <= 0`, they are reset to zero
+  - otherwise a least-squares estimate is formed from the original-NLP
+    stationarity equation
+    $$
+    \min_\lambda \| g_{\mathrm{cost}} + J_{\mathrm{eq}}^T \lambda \|_2
+    $$
+    and accepted only if its maximum magnitude stays below
+    `constr_mult_reset_threshold`
+  - if the equality system is square, the implementation follows the Ipopt
+    boundary behavior and resets these multipliers to zero instead of using the
+    least-squares estimate
+
+After this return mapping, the solver recomputes the **outer** KKT quantities
+from the original NLP semantics.
+
 ## Success / Failure
 
 The restoration phase is considered successful only when an accepted
@@ -735,8 +819,20 @@ $$
 \|r_{\mathrm{prim}}(x_{\mathrm{entry}})\|_\infty.
 $$
 
-It is classified as `infeasible_stationary` only when dual stationarity is
-small but feasibility is not recovered.
+It is classified as `infeasible_stationary` only when:
+
+- the restoration-local complementarity residual is already small,
+- the **outer/original** primal infeasibility is still above tolerance,
+- the **outer/original** dual residual is already below tolerance,
+- and restoration has stalled or its line search has repeatedly failed.
+
+This choice matches the current explicit elastic design: the restoration
+subproblem itself can reach
+$$
+\operatorname{primal\_res}_R \approx 0
+$$
+because the elastic variables satisfy `c(w)-p+n=0`, while the original NLP can
+still remain visibly infeasible.
 
 Otherwise, if the restoration phase does not recover feasibility before the
 global iteration budget is exhausted, the solver returns

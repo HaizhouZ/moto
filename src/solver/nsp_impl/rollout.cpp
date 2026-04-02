@@ -1,6 +1,5 @@
 #define MOTO_NS_RICCATI_IMPL
 #include <moto/solver/ns_riccati/generic_solver.hpp>
-#include <moto/solver/restoration/resto_runtime.hpp>
 
 #include <moto/utils/field_conversion.hpp>
 
@@ -61,20 +60,6 @@ void generic_solver::finalize_dual_newton_step(ns_riccati_data *cur) {
         }
         if (d.nc > 0) {
             d.trial_dual_step[__eq_xu] = d.d_lbd_s_c.tail(d.nc);
-        }
-    } else if (d.ncstr > 0 && d.aux_ != nullptr) {
-        const auto *aux = dynamic_cast<const ns_riccati_data::restoration_aux_data *>(d.aux_.get());
-        if (aux != nullptr) {
-            // Explicit elastic restoration recovers the local dual/slack block
-            // outside of this routine. Leave eq-step storage ready to be
-            // overwritten by restoration::finalize_newton_step().
-            d.d_lbd_s_c.setZero();
-            if (d.ns > 0) {
-                d.trial_dual_step[__eq_x].setZero();
-            }
-            if (d.nc > 0) {
-                d.trial_dual_step[__eq_xu].setZero();
-            }
         }
     }
     cur->apply_jac_y_inverse_transpose(d.d_lbd_f, d.trial_dual_step[__dyn]);

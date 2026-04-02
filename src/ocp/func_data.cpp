@@ -37,11 +37,16 @@ func_approx_data::func_approx_data(sym_data &primal,
     size_t f_st = raw.prob_->get_expr_start(f);
     // for non-cost
     if (f.order() >= approx_order::first) {
-        // bind Lagrangian jacobian
+        // Bind first-order storage. For pure costs, write directly into
+        // cost_jac_; node_data::update_approximation() decides whether that
+        // pure cost gradient should participate in the active lagrangian.
         lag_jac_.reserve(in_args_.size());
         for (size_t i : range(in_args_.size())) {
             if (in_args[i]->field() < field::num_prim && raw.prob_->is_active(in_args[i])) {
-                lag_jac_.push_back(raw.prob_->extract_tangent(raw.lag_jac_[in_args[i]->field()], in_args[i]));
+                auto &jac_store = (f.field() == __cost)
+                                      ? raw.cost_jac_[in_args[i]->field()]
+                                      : raw.lag_jac_[in_args[i]->field()];
+                lag_jac_.push_back(raw.prob_->extract_tangent(jac_store, in_args[i]));
             } else { // useless
                 static row_vector empty;
                 lag_jac_.push_back(empty);
