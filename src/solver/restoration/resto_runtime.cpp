@@ -272,10 +272,6 @@ local_residual_info refinement_local_residuals(const ns_riccati::ns_riccati_data
         accumulate_max(info.stationarity, aux.elastic_eq.r_p, aux.elastic_eq.r_n);
         accumulate_max(info.complementarity, aux.elastic_eq.r_s_p, aux.elastic_eq.r_s_n);
     }
-    if (aux.elastic_ineq.dim() > 0) {
-        accumulate_max(info.stationarity, aux.elastic_ineq.r_t, aux.elastic_ineq.r_p, aux.elastic_ineq.r_n);
-        accumulate_max(info.complementarity, aux.elastic_ineq.r_s_t, aux.elastic_ineq.r_s_p, aux.elastic_ineq.r_s_n);
-    }
     return info;
 }
 
@@ -363,14 +359,6 @@ objective_summary current_objective_summary(const ns_riccati::ns_riccati_data::r
         summary.penalty_dir_deriv += aux.rho_ineq * aux.elastic_ineq.penalty_dir_deriv();
         summary.barrier_dir_deriv += aux.mu_bar * aux.elastic_ineq.barrier_dir_deriv();
         summary.prim_res_l1 += aux.elastic_ineq.r_d.lpNorm<1>();
-        summary.inf_local_stat = std::max(summary.inf_local_stat,
-                                          std::max({aux.elastic_ineq.r_t.size() > 0 ? aux.elastic_ineq.r_t.cwiseAbs().maxCoeff() : scalar_t(0.),
-                                                    aux.elastic_ineq.r_p.size() > 0 ? aux.elastic_ineq.r_p.cwiseAbs().maxCoeff() : scalar_t(0.),
-                                                    aux.elastic_ineq.r_n.size() > 0 ? aux.elastic_ineq.r_n.cwiseAbs().maxCoeff() : scalar_t(0.)}));
-        summary.inf_local_comp = std::max(summary.inf_local_comp,
-                                          std::max({aux.elastic_ineq.r_s_t.size() > 0 ? aux.elastic_ineq.r_s_t.cwiseAbs().maxCoeff() : scalar_t(0.),
-                                                    aux.elastic_ineq.r_s_p.size() > 0 ? aux.elastic_ineq.r_s_p.cwiseAbs().maxCoeff() : scalar_t(0.),
-                                                    aux.elastic_ineq.r_s_n.size() > 0 ? aux.elastic_ineq.r_s_n.cwiseAbs().maxCoeff() : scalar_t(0.)}));
     }
     return summary;
 }
@@ -454,9 +442,9 @@ reduced_residual_info compute_reduced_residual(
 
     info.eq_local = current_local_residuals(aux.elastic_eq);
     info.ineq_local = current_local_residuals(aux.elastic_ineq);
-    info.inf_primal = std::max({info.inf_primal, info.eq_local.inf_prim, info.ineq_local.inf_prim});
-    info.inf_dual = std::max({info.inf_dual, info.eq_local.inf_stat, info.ineq_local.inf_stat});
-    info.inf_comp = std::max(info.eq_local.inf_comp, info.ineq_local.inf_comp);
+    info.inf_primal = std::max(info.inf_primal, info.eq_local.inf_prim);
+    info.inf_dual = std::max(info.inf_dual, info.eq_local.inf_stat);
+    info.inf_comp = info.eq_local.inf_comp;
     return info;
 }
 

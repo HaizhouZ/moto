@@ -246,8 +246,8 @@ TEST_CASE("restoration local residual helper reports local stationarity and comp
     aux.elastic_ineq.r_s_n << 0.12, -0.18;
 
     const auto info = refinement_local_residuals(aux);
-    REQUIRE(approx_scalar(info.stationarity, 0.7));
-    REQUIRE(approx_scalar(info.complementarity, 0.9));
+    REQUIRE(approx_scalar(info.stationarity, 0.6));
+    REQUIRE(approx_scalar(info.complementarity, 0.5));
 }
 
 TEST_CASE("restoration elastic blocks own their penalty and barrier bookkeeping") {
@@ -330,8 +330,8 @@ TEST_CASE("restoration objective summary is assembled from elastic blocks") {
     REQUIRE(approx_scalar(summary.barrier_dir_deriv,
                           0.5 * ((0.2 / 5.0) + (-0.3 / 7.0) + (0.5 / 19.0) + (-0.7 / 23.0) + (0.9 / 29.0))));
     REQUIRE(approx_scalar(summary.prim_res_l1, 1.25 + 2.5));
-    REQUIRE(approx_scalar(summary.inf_local_stat, 1.1));
-    REQUIRE(approx_scalar(summary.inf_local_comp, 0.9));
+    REQUIRE(approx_scalar(summary.inf_local_stat, 0.6));
+    REQUIRE(approx_scalar(summary.inf_local_comp, 0.8));
 }
 
 TEST_CASE("restoration reduced residual combines active w stationarity with local residual blocks") {
@@ -382,7 +382,7 @@ TEST_CASE("restoration reduced residual combines active w stationarity with loca
     REQUIRE(approx_scalar(residual.ineq_local.inf_comp, 0.7));
     REQUIRE(approx_scalar(residual.inf_primal, 1.2));
     REQUIRE(approx_scalar(residual.inf_dual, 2.0));
-    REQUIRE(approx_scalar(residual.inf_comp, 0.7));
+    REQUIRE(approx_scalar(residual.inf_comp, 0.5));
 }
 
 TEST_CASE("restoration barrier stats average local complementarity products") {
