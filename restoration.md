@@ -192,7 +192,20 @@ Here:
   Lagrangian state (`lag_ / lag_jac_ / lag_hess_`); they do not modify the
   outer-NLP `cost_ / cost_jac_` bookkeeping used by the normal filter/objective.
 
-## Stagewise Restoration Lagrangian
+Important semantic split:
+
+- the **restoration original problem** is the elastic NLP with exact-penalty
+  terms and positivity inequalities
+  `p_c > 0`, `n_c > 0`, `t > 0`, `p_d > 0`, `n_d > 0`
+- the logarithmic barrier with parameter `\bar\mu` is **not** part of that
+  original restoration NLP
+- instead, `\bar\mu` belongs to the IPM/Newton search model used to compute
+  interior steps for those positivity inequalities
+- therefore restoration public objective/KKT summaries should stay barrier-free,
+  while line search and IPM-style step updates may still use the barrier-regularized
+  search model
+
+## Barrier-Regularized Search Lagrangian
 
 For one stage, write the base restoration objective on
 $w_k := (x_k,u_k,y_k)$ as
@@ -201,8 +214,8 @@ $$
 \operatorname{obj}_{R,k}(w_k).
 $$
 
-Before condensing the local elastic block, the implemented stagewise
-restoration Lagrangian is
+Before condensing the local elastic block, the implemented interior-point
+search model uses the stagewise barrier-regularized restoration Lagrangian
 
 $$
 \mathcal{L}_{R,k}
@@ -230,9 +243,13 @@ g_{R,k}^{\mathrm{base}}
 + G_k^T \lambda_{d,k}.
 $$
 
-This is the quantity that belongs to the base stage gradient state. In code it
-is what `activate_lag_jac_corr()` snapshots into `base_lag_grad_backup` before
-any reduced correction is activated.
+This is the quantity that belongs to the base stage gradient state seen by the
+linear solve. In code it is what `activate_lag_jac_corr()` snapshots into
+`base_lag_grad_backup` before any reduced correction is activated.
+
+But this barrier-regularized search Lagrangian should not be conflated with the
+barrier-free restoration original objective that is reported publicly. The
+barrier terms are search-only regularization for the positivity inequalities.
 
 The condensed elastic terms
 
@@ -603,6 +620,8 @@ During restoration:
 - the original cost directional derivative is still available for globalization
 - the restoration-local elastic variables $p,n$ do **not** contribute to the
   outer barrier objective or `log_slack_sum`
+- the restoration-local barrier terms do **not** change the restoration
+  original objective; they only affect the restoration search model
 
 But the original user cost does **not** drive the restoration search direction.
 The restoration direction is driven by:
@@ -738,9 +757,9 @@ $w=(x,u,y)$ as seen by the condensed Riccati system:
   $$
 
 Once restoration is active, `dual_R` intentionally stops reusing the original
-NLP dual residual as a whole. Instead it uses the reduced restoration
-stationarity on $w$ together with the explicit local stationarity residuals of
-both the equality and inequality restoration blocks.
+NLP dual residual as a whole. Instead it uses the restoration-phase
+stationarity summary on $w$ together with the explicit local stationarity
+residuals of both the equality and inequality restoration blocks.
 
 So the restoration acceptor does **not** rely on cached local residuals from
 the previous factorization.
@@ -765,6 +784,15 @@ traversal, so they do not pollute:
 
 This is why the original cost still has to be evaluated during restoration,
 even though it no longer defines the search direction.
+
+At the same time, the **restoration** line search is allowed to use its own
+barrier-regularized search objective built from:
+
+- restoration original objective (`prox + exact penalty`)
+- restoration barrier value from the positivity-IPM model
+
+That search objective is internal to the restoration phase and is not the same
+as the restoration original objective reported in public stats.
 
 The outer filter is consulted again only when restoration wants to **exit**:
 an accepted restoration step is mapped back to the original NLP and must also

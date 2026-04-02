@@ -144,6 +144,8 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("ls_steps", &ns_sqp::kkt_info::ls_steps, "Line-search trial count used in this SQP iteration")
         .def_rw("objective", &ns_sqp::kkt_info::objective, "Objective value")
         .def_ro("cost", &ns_sqp::kkt_info::cost, "Pure running cost (sum of __cost terms, no barrier)")
+        .def_ro("search_barrier_value", &ns_sqp::kkt_info::search_barrier_value, "Search-only barrier contribution for the active phase")
+        .def_ro("search_barrier_dir_deriv", &ns_sqp::kkt_info::search_barrier_dir_deriv, "Directional derivative of the search-only barrier contribution")
         .def_rw("inf_prim_res", &ns_sqp::kkt_info::inf_prim_res, "Primal residual (constraint violation)")
         .def_rw("inf_dual_res", &ns_sqp::kkt_info::inf_dual_res, "Dual residual (stationary condition)")
         .def_rw("inf_comp_res", &ns_sqp::kkt_info::inf_comp_res, "Inequality complementarity residual")

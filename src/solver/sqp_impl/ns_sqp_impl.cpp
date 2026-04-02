@@ -218,6 +218,9 @@ void ns_sqp::finalize_correction(data *d) {
     if (use_normal_soft_phase()) {
         solver::ineq_soft::finalize_newton_step(d);
     }
+    if (in_restoration_phase()) {
+        solver::restoration::finalize_newton_step(*d);
+    }
 }
 
 void ns_sqp::reset_ls_workers() {
@@ -767,7 +770,8 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
             const auto reduced_res = solver::restoration::compute_reduced_residual(*n);
             const auto objective_summary = solver::restoration::current_objective_summary(*n);
             kkt.cost += n->dense().cost_;
-            kkt.cost += objective_summary.exact_penalty;
+            kkt.objective += n->dense().cost_ + objective_summary.exact_penalty;
+            kkt.search_barrier_value += objective_summary.barrier_value;
             kkt.prim_res_l1 += n->dense().approx_[__dyn].v_.lpNorm<1>();
             kkt.prim_res_l1 += objective_summary.prim_res_l1;
             kkt.inf_prim_res = std::max(kkt.inf_prim_res, reduced_res.inf_primal);
@@ -797,7 +801,8 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
                     kkt.obj_fullstep_dec += n->dense().cost_jac_[f].dot(n->trial_prim_step[f]);
                 }
             }
-            kkt.obj_fullstep_dec += objective_summary.penalty_dir_deriv - objective_summary.barrier_dir_deriv;
+            kkt.obj_fullstep_dec += objective_summary.penalty_dir_deriv;
+            kkt.search_barrier_dir_deriv += objective_summary.barrier_dir_deriv;
             for (auto f : constr_fields) {
                 if (n->trial_dual_step[f].size() > 0) {
                     const scalar_t step = n->trial_dual_step[f].cwiseAbs().maxCoeff();
@@ -851,15 +856,6 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
             if (n_dual_res > 0) {
                 kkt.avg_dual_res = dual_res_l1 / static_cast<scalar_t>(n_dual_res);
             }
-        }
-        kkt.objective = kkt.cost;
-        for (auto n : graph.flatten_nodes()) {
-            auto *aux = dynamic_cast<ns_riccati_data::restoration_aux_data *>(n->aux_.get());
-            if (aux == nullptr) {
-                continue;
-            }
-            const auto objective_summary = solver::restoration::current_objective_summary(*n);
-            kkt.objective -= objective_summary.barrier_value;
         }
         return kkt;
     }
