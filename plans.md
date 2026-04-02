@@ -7,6 +7,14 @@
 - `restoration` 的方向、残差、IR、acceptor 全都以 **resto Lagrangian** 为准；
 - elastic block 中所有正性变量的 `backup/restore/affine step/fraction-to-boundary/update_ls_bounds` 尽量复用 `ipm_constr` 的已有逻辑，而不是再写一套同构实现。
 
+对齐基线以 [normal_iteration.md](/home/harper/Documents/moto/normal_iteration.md) 为准，必须始终区分三层对象：
+
+- 原问题
+- local reduced soft/ineq 子问题
+- 最终 Riccati reduced 子问题
+
+restoration 的实现和验证也必须沿这三层来描述，不能把它们混成“一个 restoration 问题”。
+
 ## Key Changes
 ### 0. 相位隔离下的复用约束
 - “复用 normal 代码”不是目标本身；只有 **phase-safe 的复用** 才允许进入实现。
@@ -33,15 +41,25 @@
 ### 1. 求解目标固定为 restoration Lagrangian
 - restoration 子问题固定采用 [restoration.md](/home/harper/Documents/moto/restoration.md) 中的 stagewise restoration Lagrangian：
   - `obj_R(w)` 作为 restoration base objective
-  - `rho * (p_c+n_c+p_d+n_d)` 作为 elastic penalty
+  - `rho_eq * (p_c+n_c) + rho_ineq * (p_d+n_d)` 作为 exact L1 elastic penalty
   - `-mu_bar * log(...)` 作为 restoration barrier
   - `lambda_f, lambda_c, lambda_d` 进入 restoration Lagrangian 约束项
 - `solve_direction()` 在 restoration phase 中求的是该 Lagrangian 线性化/二次化后的 reduced KKT，不是单纯最小化 `theta_R`，也不是 outer NLP 的 barrier objective。
 - prox 项仍作为 `cost` 存在，但它属于 `obj_R(w)`，因此必须进入：
   - restoration `cost_`
   - restoration `cost_jac_`
-  - restoration base `lag_ / lag_jac_ / lag_hess_`
+  - restoration base `lag_ / lag_jac_`
+  - restoration prox Hessian storage
 - outer 原始用户 cost 在 restoration 中只保留为“退出时的 outer 可接受性判断输入”，不进入 restoration direction。
+
+这里的层次固定为：
+
+- restoration 原问题：
+  restoration Lagrangian with exact L1 elastic penalty, local elastic variables, and barrier
+- restoration local reduced 子问题：
+  eq elastic / ineq elastic block 的局部 condensation
+- restoration Riccati 子问题：
+  将这些 local reduced 贡献写入 stage QP 后，再进入 nullspace / Riccati reduction
 
 ### 2. 组装分层与 corr 生命周期
 - normal 与 restoration 共用 raw evaluation；区别只在 active QP assembly。
@@ -51,8 +69,14 @@
   - condensed elastic/IPM corrections：来自 eq elastic 与 restoration-owned ineq 的 Schur complement
 - 所有 condensed 一阶项统一写入 `lag_jac_corr_`。
 - 所有 condensed 二阶项统一写入 `hessian_modification_`。
-- prox 二阶项属于 base restoration cost Hessian，不能被算成 corr。
+- prox 二阶项属于 restoration base cost Hessian，不能被算成 corr；当前通过独立的 prox diagonal storage 接入 Riccati，而不混入 local reduced correction Hessian。
 - `ns_factorization` 只消费组装结果；不再在 factorization 阶段临时生成 restoration 数学，避免 base/corr 生命周期混淆。
+
+对齐 normal 的要求是：
+
+- local reduced 子问题的二阶项进入 solver-owned correction Hessian 通道
+- base objective 的二阶项保持独立语义
+- Riccati 子问题只消费组装后的 stage QP，不重新推导 local reduced 数学
 
 ### 3. 乘子与相位语义
 - `dense().dual_[cf]` 继续复用为“当前相位该约束的 multiplier 真值”：
@@ -69,7 +93,7 @@
 - phase-aware residual assembly 必须显式绑定当前 objective。
 - normal phase 残差保持现状。
 - restoration phase 残差定义固定为：
-  - `w`-stationarity：来自 **restoration Lagrangian** 的 reduced stationarity
+  - `w`-stationarity：来自 **restoration Riccati 子问题** 对应的 reduced stationarity
   - local stationarity：`p/n/t/...` 对应的 stationarity residual
   - complementarity：restoration barrier 正性块 residual
   - primal residual：`F(w)`, `c-p+n`, `g+t-p_d+n_d`
@@ -78,6 +102,12 @@
 - restoration 下的 IR stop check 必须显式纳入 local elastic block 的 stationarity / complementarity，避免只看 `w`-stationarity 就误判“已收敛”。
 - 在 reduced RHS 还没按 restoration 局部块完整推导前，不能把 normal-phase IR correction 直接施加到 restoration 上；宁可先禁用 restoration IR，也不能用错误 RHS 把 Riccati 递推炸掉。
 - restoration line search 的 inner acceptor 使用 restoration objective 与 restoration primal violation；outer filter 只在 restoration 成功返回判断时介入。
+
+这里的对齐原则固定为：
+
+- IR 真正减小的是 restoration Riccati 子问题的 reduced correction residual
+- `compute_kkt_info()` / `print_stats()` 是 restoration phase 的公开摘要，不要求与 IR 内部向量逐分量相同
+- 但两者必须来自同一 restoration phase，而不能一个看原问题、一个看 Riccati 子问题
 
 ### 5. 复用 ipm_constr 的正性/步长逻辑
 - 不为 elastic slack/dual 再写一套独立的正性边界逻辑。
