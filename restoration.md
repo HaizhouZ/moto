@@ -157,7 +157,8 @@ $$
 \begin{aligned}
 \min_{w,t,p_c,n_c,p_d,n_d}\quad &
 \operatorname{obj}_R(w)
- + \varrho \mathbf{1}^T (p_c+n_c+p_d+n_d) \\
+ + \varrho_c \mathbf{1}^T (p_c+n_c)
+ + \varrho_d \mathbf{1}^T (p_d+n_d) \\
 \text{s.t.}\quad &
 F(w)=0, \\
 &
@@ -177,8 +178,10 @@ Here:
 - `c(w)` is restored elastically through the `p_c/n_c` block.
 - `g(w)` is restored through a restoration-owned inequality block
   `g(w)+t-p_d+n_d=0`.
-- `\varrho` is the elastic exact-penalty weight, currently stored in
+- `\varrho_c` is the equality-elastic exact-penalty weight, currently stored in
   `settings.restoration.rho_eq`.
+- `\varrho_d` is the restoration-inequality exact-penalty weight, currently stored in
+  `settings.restoration.rho_ineq`.
 - `\rho_\lambda` is the Hippo-style local elastic regularization, currently stored
   in `settings.restoration.lambda_reg`.
 - `\operatorname{obj}_R(w)` contains the restoration-only terms on `w`, currently the
@@ -190,12 +193,13 @@ Here:
 Important semantic split:
 
 - the **restoration original problem** is the elastic NLP with exact-penalty
-  terms and positivity inequalities
-  `p_c > 0`, `n_c > 0`, `t > 0`, `p_d > 0`, `n_d > 0`
+  terms and nonnegativity inequalities
+  `p_c \succeq 0`, `n_c \succeq 0`, `t \succeq 0`, `p_d \succeq 0`, `n_d \succeq 0`
 - the logarithmic barrier with parameter `\bar\mu` is **not** part of that
   original restoration NLP
 - instead, `\bar\mu` belongs to the IPM/Newton search model used to compute
-  interior steps for those positivity inequalities
+  interior steps, where the iterates are kept strictly interior
+  `p_c > 0`, `n_c > 0`, `t > 0`, `p_d > 0`, `n_d > 0`
 - therefore restoration public objective/KKT summaries should stay on the
   original restoration NLP, while line search and IPM-style step updates may still use the primal-dual IPM
   search model
@@ -250,19 +254,19 @@ r_t := \lambda_d - \nu_t,
 $$
 
 $$
-r_p := \varrho \mathbf{1} - \lambda_c - \nu_p,
+r_p := \varrho_c \mathbf{1} - \lambda_c - \nu_p,
 $$
 
 $$
-r_n := \varrho \mathbf{1} + \lambda_c - \nu_n,
+r_n := \varrho_c \mathbf{1} + \lambda_c - \nu_n,
 $$
 
 $$
-r_{p_d} := \varrho \mathbf{1} - \lambda_d - \nu_{p_d},
+r_{p_d} := \varrho_d \mathbf{1} - \lambda_d - \nu_{p_d},
 $$
 
 $$
-r_{n_d} := \varrho \mathbf{1} + \lambda_d - \nu_{n_d}.
+r_{n_d} := \varrho_d \mathbf{1} + \lambda_d - \nu_{n_d}.
 $$
 
 The IPM complementarity equations for the positivity inequalities are
@@ -302,8 +306,8 @@ C_k^T M_{\rho,k}^{-1} b_{c,k},
 G_k^T M_{d,k}^{-1} b_{d,k}
 $$
 
-are **not** part of the original restoration Lagrangian. They belong only to
-the reduced system created after eliminating the restoration-local elastic
+These terms are **not** part of the original restoration NLP. They belong only
+to the reduced system created after eliminating the restoration-local elastic
 blocks, and so they must stay in `lag_jac_corr_` until activation.
 
 Introduce
@@ -320,8 +324,8 @@ $$
 
 ## Implemented Local Linearized System
 
-For `lambda_reg > 0`, the current implementation uses the regularized local
-linearization
+For `lambda_reg > 0`, the current implementation uses the following
+regularized local linearization for the **equality elastic block**
 
 $$
 C\,\delta w - \delta p + \delta n = -r_c ,
@@ -343,12 +347,17 @@ $$
 N_n\,\delta n + T_n\,\delta \nu_n = -r_{s,n}.
 $$
 
-This is the system actually condensed by the code. The bound blocks do not
+This is the equality-elastic system actually condensed by the code. The bound blocks do not
 couple directly to $w$; all coupling comes from
 
 $$
 c(w)-p+n=0.
 $$
+
+The restoration-owned inequality block uses the analogous three-variable local
+IPM system in `(t,p_d,n_d,\nu_t,\nu_{p_d},\nu_{n_d},\lambda_d)` with residuals
+`r_d, r_t, r_{p_d}, r_{n_d}, r_{s,t}, r_{s,p_d}, r_{s,n_d}` as implemented in
+[resto_local_kkt.hpp](/home/harper/Documents/moto/include/moto/solver/restoration/resto_local_kkt.hpp).
 
 ## Condensation Onto The Global Stage System
 
