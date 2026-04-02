@@ -217,3 +217,76 @@ TEST_CASE("restoration local residual helper reports local stationarity and comp
     REQUIRE(approx_scalar(info.stationarity, 0.7));
     REQUIRE(approx_scalar(info.complementarity, 0.9));
 }
+
+TEST_CASE("restoration reduced residual combines active w stationarity with local residual blocks") {
+    array_type<row_vector, primal_fields> lag_jac;
+    array_type<row_vector, primal_fields> lag_jac_corr;
+    for (auto pf : primal_fields) {
+        lag_jac[pf].resize(2);
+        lag_jac_corr[pf].resize(2);
+        lag_jac[pf].setZero();
+        lag_jac_corr[pf].setZero();
+    }
+    lag_jac[__x] << 1.0, -2.0;
+    lag_jac[__u] << 0.5, -0.2;
+    lag_jac[__y] << -0.7, 0.3;
+    lag_jac_corr[__x] << -0.1, 0.4;
+    lag_jac_corr[__u] << 0.2, 0.1;
+    lag_jac_corr[__y] << -0.3, 0.2;
+
+    vector dyn_res(2);
+    dyn_res << 0.4, -1.2;
+
+    ns_riccati::ns_riccati_data::restoration_aux_data aux;
+    aux.elastic_eq.resize(1, 0);
+    aux.elastic_eq.r_c << -0.6;
+    aux.elastic_eq.r_p << 0.25;
+    aux.elastic_eq.r_n << -0.15;
+    aux.elastic_eq.r_s_p << 0.5;
+    aux.elastic_eq.r_s_n << -0.35;
+
+    aux.elastic_ineq.resize(0, 1);
+    aux.elastic_ineq.r_d << 0.8;
+    aux.elastic_ineq.r_t << -0.9;
+    aux.elastic_ineq.r_p << 0.45;
+    aux.elastic_ineq.r_n << -0.2;
+    aux.elastic_ineq.r_s_t << 0.7;
+    aux.elastic_ineq.r_s_p << -0.25;
+    aux.elastic_ineq.r_s_n << 0.1;
+
+    const auto residual = compute_reduced_residual(lag_jac, lag_jac_corr, dyn_res, aux);
+    REQUIRE(residual.w_stationarity[__x].isApprox((row_vector(2) << 0.9, -1.6).finished()));
+    REQUIRE(residual.w_stationarity[__u].isApprox((row_vector(2) << 0.7, -0.1).finished()));
+    REQUIRE(residual.w_stationarity[__y].isApprox((row_vector(2) << -1.0, 0.5).finished()));
+    REQUIRE(approx_scalar(residual.eq_local.inf_prim, 0.6));
+    REQUIRE(approx_scalar(residual.eq_local.inf_stat, 0.25));
+    REQUIRE(approx_scalar(residual.eq_local.inf_comp, 0.5));
+    REQUIRE(approx_scalar(residual.ineq_local.inf_prim, 0.8));
+    REQUIRE(approx_scalar(residual.ineq_local.inf_stat, 0.9));
+    REQUIRE(approx_scalar(residual.ineq_local.inf_comp, 0.7));
+    REQUIRE(approx_scalar(residual.inf_primal, 1.2));
+    REQUIRE(approx_scalar(residual.inf_dual, 1.6));
+    REQUIRE(approx_scalar(residual.inf_comp, 0.7));
+}
+
+TEST_CASE("restoration correction rhs only loads reduced u and y stationarity") {
+    array_type<row_vector, primal_fields> rhs;
+    for (auto pf : primal_fields) {
+        rhs[pf].resize(2);
+        rhs[pf].setConstant(5.0);
+    }
+
+    reduced_residual_info residual;
+    residual.w_stationarity[__x].resize(2);
+    residual.w_stationarity[__u].resize(2);
+    residual.w_stationarity[__y].resize(2);
+    residual.w_stationarity[__x] << 1.0, 2.0;
+    residual.w_stationarity[__u] << -0.4, 0.6;
+    residual.w_stationarity[__y] << 0.3, -0.9;
+
+    load_correction_rhs(rhs, residual);
+
+    REQUIRE(rhs[__x].isZero());
+    REQUIRE(rhs[__u].isApprox(residual.w_stationarity[__u]));
+    REQUIRE(rhs[__y].isApprox(residual.w_stationarity[__y]));
+}

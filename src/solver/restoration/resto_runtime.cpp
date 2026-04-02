@@ -132,6 +132,14 @@ void add_sparse_block(sparse_mat &block, const matrix &delta) {
     dense.noalias() += delta;
     block = dense;
 }
+
+row_vector active_gradient(const array_type<row_vector, primal_fields> &lag_jac,
+                           const array_type<row_vector, primal_fields> &lag_jac_corr,
+                           field_t pf) {
+    row_vector out = lag_jac[pf];
+    out += lag_jac_corr[pf];
+    return out;
+}
 } // namespace
 
 vector gather_lambda_eq(const ns_riccati::ns_riccati_data &d) {
@@ -270,6 +278,62 @@ local_residual_info refinement_local_residuals(const ns_riccati::ns_riccati_data
         return info;
     }
     return refinement_local_residuals(*aux);
+}
+
+reduced_residual_info compute_reduced_residual(
+    const array_type<row_vector, primal_fields> &lag_jac,
+    const array_type<row_vector, primal_fields> &lag_jac_corr,
+    const vector_const_ref &dyn_residual,
+    const ns_riccati::ns_riccati_data::restoration_aux_data &aux) {
+    reduced_residual_info info;
+
+    for (auto pf : primal_fields) {
+        info.w_stationarity[pf] = active_gradient(lag_jac, lag_jac_corr, pf);
+        if (info.w_stationarity[pf].size() > 0) {
+            info.inf_dual = std::max(info.inf_dual, info.w_stationarity[pf].cwiseAbs().maxCoeff());
+        }
+    }
+
+    if (dyn_residual.size() > 0) {
+        info.inf_primal = std::max(info.inf_primal, dyn_residual.cwiseAbs().maxCoeff());
+    }
+
+    info.eq_local = current_local_residuals(aux.elastic_eq);
+    info.ineq_local = current_local_residuals(aux.elastic_ineq);
+    info.inf_primal = std::max({info.inf_primal, info.eq_local.inf_prim, info.ineq_local.inf_prim});
+    info.inf_dual = std::max({info.inf_dual, info.eq_local.inf_stat, info.ineq_local.inf_stat});
+    info.inf_comp = std::max(info.eq_local.inf_comp, info.ineq_local.inf_comp);
+    return info;
+}
+
+reduced_residual_info compute_reduced_residual(const ns_riccati::ns_riccati_data &d) {
+    const auto *aux = get_aux(d);
+    reduced_residual_info info;
+    for (auto pf : primal_fields) {
+        info.w_stationarity[pf].resize(d.dense_->lag_jac_[pf].size());
+        info.w_stationarity[pf].setZero();
+    }
+    if (aux == nullptr) {
+        return info;
+    }
+    return compute_reduced_residual(d.dense_->lag_jac_,
+                                    d.dense_->lag_jac_corr_,
+                                    d.dense_->approx_[__dyn].v_,
+                                    *aux);
+}
+
+void load_correction_rhs(array_type<row_vector, primal_fields> &lag_jac_corr,
+                         const reduced_residual_info &residual) {
+    for (auto pf : primal_fields) {
+        lag_jac_corr[pf].setZero();
+    }
+    for (auto pf : std::array{__u, __y}) {
+        lag_jac_corr[pf] = residual.w_stationarity[pf];
+    }
+}
+
+void load_correction_rhs(ns_riccati::ns_riccati_data &d, const reduced_residual_info &residual) {
+    load_correction_rhs(d.dense_->lag_jac_corr_, residual);
 }
 
 void prepare_current_constraint_stack(ns_riccati::ns_riccati_data &d) {

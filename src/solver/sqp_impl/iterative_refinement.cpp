@@ -88,6 +88,11 @@ void ns_sqp::iterative_refinement() {
             run_correction_step(
                 [](ns_sqp::data *data) {
                     data->first_order_correction_start([data]() {
+                        if (dynamic_cast<ns_riccati_data::restoration_aux_data *>(data->aux_.get()) != nullptr) {
+                            solver::restoration::load_correction_rhs(
+                                *data, solver::restoration::compute_reduced_residual(*data));
+                            return;
+                        }
                         data->dense().lag_jac_corr_[__u] = data->kkt_stat_err_[__u];
                         data->dense().lag_jac_corr_[__y] = data->kkt_stat_err_[__y];
                     });

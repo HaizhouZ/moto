@@ -2,6 +2,7 @@
 
 #include <moto/core/workspace_data.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
+#include <moto/solver/restoration/resto_local_kkt.hpp>
 
 namespace moto::solver::restoration {
 
@@ -13,6 +14,15 @@ struct prox_data {
 struct local_residual_info {
     scalar_t stationarity = 0.;
     scalar_t complementarity = 0.;
+};
+
+struct reduced_residual_info {
+    array_type<row_vector, primal_fields> w_stationarity;
+    local_residual_summary eq_local;
+    local_residual_summary ineq_local;
+    scalar_t inf_primal = 0.;
+    scalar_t inf_dual = 0.;
+    scalar_t inf_comp = 0.;
 };
 
 vector gather_lambda_eq(const ns_riccati::ns_riccati_data &d);
@@ -39,6 +49,15 @@ void cleanup_restoration_stage(ns_riccati::ns_riccati_data &d,
                                scalar_t constr_mult_reset_threshold);
 local_residual_info refinement_local_residuals(const ns_riccati::ns_riccati_data::restoration_aux_data &aux);
 local_residual_info refinement_local_residuals(const ns_riccati::ns_riccati_data &d);
+reduced_residual_info compute_reduced_residual(
+    const array_type<row_vector, primal_fields> &lag_jac,
+    const array_type<row_vector, primal_fields> &lag_jac_corr,
+    const vector_const_ref &dyn_residual,
+    const ns_riccati::ns_riccati_data::restoration_aux_data &aux);
+reduced_residual_info compute_reduced_residual(const ns_riccati::ns_riccati_data &d);
+void load_correction_rhs(array_type<row_vector, primal_fields> &lag_jac_corr,
+                         const reduced_residual_info &residual);
+void load_correction_rhs(ns_riccati::ns_riccati_data &d, const reduced_residual_info &residual);
 
 void prepare_current_constraint_stack(ns_riccati::ns_riccati_data &d);
 void initialize_stage(ns_riccati::ns_riccati_data &d);
