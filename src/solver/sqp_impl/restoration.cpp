@@ -93,6 +93,12 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         }
 
         if (action == line_search_action::failure) {
+            graph.for_each_parallel([this](data *d) {
+                d->restore_trial_state();
+                solver::restoration::restore_trial_state(*d);
+                assemble_restoration_problem(d, node_data::update_mode::eval_val);
+                assemble_restoration_problem(d, node_data::update_mode::eval_raw_derivatives);
+            });
             ++stalled_iters;
         } else {
             stalled_iters = 0;
