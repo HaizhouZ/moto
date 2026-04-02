@@ -272,6 +272,32 @@ void cleanup_restoration_stage(ns_riccati::ns_riccati_data &d,
     reset_equality_duals(d, constr_mult_reset_threshold);
 }
 
+local_residual_info refinement_local_residuals(const ns_riccati::ns_riccati_data::restoration_aux_data &aux) {
+    local_residual_info info;
+    const auto accumulate_max = [](scalar_t &dst, const auto &...values) {
+        ((dst = std::max(dst, values.size() > 0 ? values.cwiseAbs().maxCoeff() : scalar_t(0.))), ...);
+    };
+
+    if (aux.elastic_eq.dim() > 0) {
+        accumulate_max(info.stationarity, aux.elastic_eq.r_p, aux.elastic_eq.r_n);
+        accumulate_max(info.complementarity, aux.elastic_eq.r_s_p, aux.elastic_eq.r_s_n);
+    }
+    if (aux.elastic_ineq.dim() > 0) {
+        accumulate_max(info.stationarity, aux.elastic_ineq.r_t, aux.elastic_ineq.r_p, aux.elastic_ineq.r_n);
+        accumulate_max(info.complementarity, aux.elastic_ineq.r_s_t, aux.elastic_ineq.r_s_p, aux.elastic_ineq.r_s_n);
+    }
+    return info;
+}
+
+local_residual_info refinement_local_residuals(const ns_riccati::ns_riccati_data &d) {
+    local_residual_info info;
+    const auto *aux = get_aux(d);
+    if (aux == nullptr) {
+        return info;
+    }
+    return refinement_local_residuals(*aux);
+}
+
 void prepare_current_constraint_stack(ns_riccati::ns_riccati_data &d) {
     auto *aux = get_aux(d);
     if (aux == nullptr) {

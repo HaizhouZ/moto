@@ -74,6 +74,7 @@
   - primal residual：`F(w)`, `c-p+n`, `g+t-p_d+n_d`
 - `compute_kkt_residual()` 不能把 normal cost 或 normal barrier objective 的导数带进 restoration residual。
 - iterative refinement 控制流继续复用，但 residual checker 和 correction RHS 必须按 phase 切换。
+- restoration 下的 IR stop check 必须显式纳入 local elastic block 的 stationarity / complementarity，避免只看 `w`-stationarity 就误判“已收敛”。
 - restoration line search 的 inner acceptor 使用 restoration objective 与 restoration primal violation；outer filter 只在 restoration 成功返回判断时介入。
 
 ### 5. 复用 ipm_constr 的正性/步长逻辑

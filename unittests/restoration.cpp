@@ -196,3 +196,24 @@ TEST_CASE("restoration equality dual reset helper only clears equality fields") 
     REQUIRE(dual[__ineq_x].isConstant(11.0));
     REQUIRE(dual[__ineq_xu].isConstant(-13.0));
 }
+
+TEST_CASE("restoration local residual helper reports local stationarity and complementarity maxima") {
+    ns_riccati::ns_riccati_data::restoration_aux_data aux;
+    aux.elastic_eq.resize(1, 1);
+    aux.elastic_eq.r_p << 0.2, -0.6;
+    aux.elastic_eq.r_n << -0.3, 0.1;
+    aux.elastic_eq.r_s_p << 0.4, -0.5;
+    aux.elastic_eq.r_s_n << 0.05, -0.2;
+
+    aux.elastic_ineq.resize(1, 1);
+    aux.elastic_ineq.r_t << -0.7, 0.25;
+    aux.elastic_ineq.r_p << 0.15, -0.35;
+    aux.elastic_ineq.r_n << -0.1, 0.05;
+    aux.elastic_ineq.r_s_t << 0.9, -0.2;
+    aux.elastic_ineq.r_s_p << -0.45, 0.3;
+    aux.elastic_ineq.r_s_n << 0.12, -0.18;
+
+    const auto info = refinement_local_residuals(aux);
+    REQUIRE(approx_scalar(info.stationarity, 0.7));
+    REQUIRE(approx_scalar(info.complementarity, 0.9));
+}

@@ -10,6 +10,11 @@ struct prox_data {
     vector sigma_u_sq, sigma_y_sq;
 };
 
+struct local_residual_info {
+    scalar_t stationarity = 0.;
+    scalar_t complementarity = 0.;
+};
+
 vector gather_lambda_eq(const ns_riccati::ns_riccati_data &d);
 vector gather_lambda_ineq(const ns_riccati::ns_riccati_data &d);
 void scatter_lambda_eq(ns_riccati::ns_riccati_data &d, const vector_const_ref &lambda);
@@ -32,6 +37,8 @@ void cleanup_restoration_stage(ns_riccati::ns_riccati_data &d,
                                bool success,
                                scalar_t bound_mult_reset_threshold,
                                scalar_t constr_mult_reset_threshold);
+local_residual_info refinement_local_residuals(const ns_riccati::ns_riccati_data::restoration_aux_data &aux);
+local_residual_info refinement_local_residuals(const ns_riccati::ns_riccati_data &d);
 
 void prepare_current_constraint_stack(ns_riccati::ns_riccati_data &d);
 void initialize_stage(ns_riccati::ns_riccati_data &d);
