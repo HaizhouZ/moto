@@ -157,7 +157,7 @@ $$
 \begin{aligned}
 \min_{w,t,p_c,n_c,p_d,n_d}\quad &
 \operatorname{obj}_R(w)
- + \varrho \mathbf{1}^T (p_c+n_c+p_d+n_d)
+ + \varrho \mathbf{1}^T (p_c+n_c+p_d+n_d) \\
 \text{s.t.}\quad &
 F(w)=0, \\
 &
@@ -199,44 +199,6 @@ Important semantic split:
 - therefore restoration public objective/KKT summaries should stay on the
   original restoration NLP, while line search and IPM-style step updates may still use the barrier-regularized
   search model
-
-## Stagewise View Of The Original NLP
-
-For one stage, write the base restoration objective on
-$w_k := (x_k,u_k,y_k)$ as
-
-$$
-\operatorname{obj}_{R,k}(w_k).
-$$
-
-Then the corresponding stagewise original restoration NLP is
-
-$$
-\min_{w_k,p_{c,k},n_{c,k},t_k,p_{d,k},n_{d,k}}
-\operatorname{obj}_{R,k}(w_k)
-+ \varrho \mathbf{1}^T (p_{c,k}+n_{c,k}+p_{d,k}+n_{d,k})
-$$
-
-subject to
-
-$$
-F_k(w_k)=0,
-$$
-
-$$
-c_k(w_k)-p_{c,k}+n_{c,k}=0,
-$$
-
-$$
-g_k(w_k)+t_k-p_{d,k}+n_{d,k}=0,
-$$
-
-$$
-p_{c,k}>0,\quad n_{c,k}>0,\quad t_k>0,\quad p_{d,k}>0,\quad n_{d,k}>0.
-$$
-
-This is the restoration problem whose objective and residual summary should be
-reported publicly.
 
 ## Barrier-Regularized Search Lagrangian
 
