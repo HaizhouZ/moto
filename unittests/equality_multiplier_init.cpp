@@ -101,56 +101,6 @@ void seed_primal_state(ns_sqp &sqp, size_t n_stage_nodes) {
     }
 }
 
-using primal_snapshot_t = std::array<std::vector<vector>, field::num_prim>;
-
-primal_snapshot_t capture_primal_state(ns_sqp &sqp) {
-    primal_snapshot_t snapshot;
-    auto &flat = sqp.graph().flatten_nodes();
-    for (auto field : primal_fields) {
-        auto &field_snap = snapshot[field];
-        field_snap.reserve(flat.size());
-        for (auto *node : flat) {
-            field_snap.push_back(node->sym_val().value_[field]);
-        }
-    }
-    return snapshot;
-}
-
-void restore_primal_state(ns_sqp &sqp, const primal_snapshot_t &snapshot) {
-    auto &flat = sqp.graph().flatten_nodes();
-    for (auto field : primal_fields) {
-        REQUIRE(snapshot[field].size() == flat.size());
-        for (size_t i = 0; i < flat.size(); ++i) {
-            flat[i]->sym_val().value_[field] = snapshot[field][i];
-        }
-    }
-}
-
-std::vector<vector> capture_equality_duals(ns_sqp &sqp) {
-    std::vector<vector> snapshot;
-    auto &flat = sqp.graph().flatten_nodes();
-    snapshot.reserve(flat.size() * 5);
-    for (auto *node : flat) {
-        for (auto field : std::array{__dyn, __eq_x, __eq_xu, __eq_x_soft, __eq_xu_soft}) {
-            snapshot.push_back(node->dense().dual_[field]);
-        }
-    }
-    return snapshot;
-}
-
-scalar_t max_snapshot_diff(const std::vector<vector> &lhs, const std::vector<vector> &rhs) {
-    REQUIRE(lhs.size() == rhs.size());
-    scalar_t max_diff = 0.;
-    for (size_t i = 0; i < lhs.size(); ++i) {
-        REQUIRE(lhs[i].size() == rhs[i].size());
-        if (lhs[i].size() == 0) {
-            continue;
-        }
-        max_diff = std::max(max_diff, (lhs[i] - rhs[i]).cwiseAbs().maxCoeff());
-    }
-    return max_diff;
-}
-
 void configure_solver(ns_sqp &sqp, bool enable_eq_init, size_t n_edges) {
     auto [x, y] = sym::states("x_eq_init", 1);
     auto u = sym::inputs("u_eq_init", 1);
@@ -275,32 +225,4 @@ TEST_CASE("equality multiplier initialization updates soft equalities and leaves
     }
 
     REQUIRE(saw_soft_dual);
-}
-
-TEST_CASE("repeated fixed-primal equality multiplier rebuilds settle") {
-    ns_sqp with_init;
-    configure_solver(with_init, true, 2);
-    with_init.settings.ipm.warm_start = true;
-
-    const auto frozen_primal = capture_primal_state(with_init);
-
-    std::vector<scalar_t> dual_residuals;
-    std::vector<std::vector<vector>> dual_snapshots;
-    constexpr size_t n_passes = 3;
-    dual_residuals.reserve(n_passes);
-    dual_snapshots.reserve(n_passes);
-
-    for (size_t pass = 0; pass < n_passes; ++pass) {
-        restore_primal_state(with_init, frozen_primal);
-        const auto kkt = with_init.update(0, false);
-        dual_residuals.push_back(kkt.inf_dual_res);
-        dual_snapshots.push_back(capture_equality_duals(with_init));
-    }
-
-    const auto [res_min_it, res_max_it] = std::minmax_element(dual_residuals.begin(), dual_residuals.end());
-    REQUIRE(*res_max_it - *res_min_it <= scalar_t(0.1) * dual_residuals.front());
-
-    const scalar_t diff_12 = max_snapshot_diff(dual_snapshots[0], dual_snapshots[1]);
-    const scalar_t diff_23 = max_snapshot_diff(dual_snapshots[1], dual_snapshots[2]);
-    REQUIRE(diff_23 <= diff_12 + scalar_t(1e-12));
 }

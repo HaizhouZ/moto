@@ -151,6 +151,19 @@ void register_submodule_functional(nb::module_ &m) {
                 return std::make_shared<generic_constr>(name, order, dim, field);
             },
             nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined)
+        .def_static(
+            "create_box",
+            [](const std::string &name,
+               const var_inarg_list &args,
+               const cs::SX &out,
+               const generic_constr::box_bound_t &lb,
+               const generic_constr::box_bound_t &ub,
+               approx_order order,
+               field_t field) {
+                return std::shared_ptr<generic_constr>(generic_constr::create_box(name, args, out, lb, ub, order, field));
+            },
+            nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("lb"), nb::arg("ub"),
+            nb::arg("order") = approx_order::first, nb::arg("field") = field_t::__undefined)
         .DEF_CLONE_FUNC(generic_constr)
         .def(
             "cast_ineq",
