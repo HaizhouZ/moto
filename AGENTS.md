@@ -61,7 +61,7 @@ The main SQP iteration loop lives in:
 - [`src/solver/sqp_impl/iterative_refinement.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/iterative_refinement.cpp): residual correction
 - [`include/moto/solver/ipm/ipm_constr.hpp`](/home/harper/Documents/moto/include/moto/solver/ipm/ipm_constr.hpp): IPM inequality implementation
 - [`include/moto/solver/soft_constr/pmm_constr.hpp`](/home/harper/Documents/moto/include/moto/solver/soft_constr/pmm_constr.hpp): PMM soft equality implementation
-- [`restoration.md`](/home/harper/Documents/moto/restoration.md): archived restoration design note; the implementation has been removed from the active solver
+- [`restoration.md`](/home/harper/Documents/moto/restoration.md): restoration design note; useful for the elastic KKT / condensation math, but not a complete description of the current overlay-based implementation
 - [`bindings/`](/home/harper/Documents/moto/bindings): Python bindings
 - [`example/`](/home/harper/Documents/moto/example): manual examples
 - [`unittests/`](/home/harper/Documents/moto/unittests): Catch2 tests
@@ -467,8 +467,9 @@ Responsibilities:
 
 Restoration note:
 
-- the restoration implementation has been removed from the active solver
-- [`restoration.md`](/home/harper/Documents/moto/restoration.md) is now historical design documentation only
+- restoration is active through the overlay-based path in [`src/solver/sqp_impl/restoration.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/restoration.cpp)
+- restoration overlay problems are assembled in [`src/solver/restoration/resto_overlay.cpp`](/home/harper/Documents/moto/src/solver/restoration/resto_overlay.cpp)
+- [`restoration.md`](/home/harper/Documents/moto/restoration.md) remains useful for the local elastic KKT derivation, but current entry/exit, logging, and cleanup behavior live in code
 
 Registry-based conversion:
 
@@ -642,7 +643,7 @@ Multiplier-related state:
 Auxiliary mode hook:
 
 - `aux_` can still hold solver-private mode-specific state when needed
-- there is currently no active restoration runtime attached through this hook
+- the active restoration runtime is no longer carried through this hook; overlay restoration is cached on the active graph state instead
 
 ### `nullspace_data`
 

@@ -384,7 +384,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     };
 
     cleanup(resto_accept);
-    kkt_info result = compute_kkt_info();
+    kkt_info result = resto_accept ? compute_kkt_info() : kkt_rest;
     result.num_iter = kkt_rest.num_iter;
     result.ls_steps = kkt_rest.ls_steps;
     if (resto_accept) {
