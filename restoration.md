@@ -23,6 +23,12 @@ The phase difference is only in the active problem definition:
 - non-dynamics constraints are replaced by elastic restoration wrappers
 - globalization uses restoration phase metrics
 
+The restoration overlay graph is now cached inside the active SQP graph state.
+It is rebuilt only when:
+
+- the modeled graph is dirty
+- restoration overlay settings change
+
 ## 1. Entry Condition
 
 The outer SQP loop enters restoration when normal globalization returns a
@@ -53,12 +59,15 @@ such as `25r`, `26r`, and so on.
 Restoration does **not** mutate the already-constructed normal `node_data`
 objects in place.
 
-Instead, `ns_sqp::restoration_graph()` lazily creates a second solver graph
-from the active model graph:
+Instead, `ns_sqp::restoration_graph()` lazily creates or refreshes a second
+solver graph from the active model graph:
 
 1. each model edge is composed into a finalized interval `edge_ocp`
 2. a restoration overlay problem is built on top of that composed problem
 3. the overlay graph is realized into its own `node_data` / dense storage
+
+That realized overlay runtime is cached and reused across restoration entries
+until the graph or overlay settings invalidate it.
 
 So normal and restoration do **not** share:
 
@@ -577,8 +586,8 @@ Restoration reuses the same iterative-refinement shell as normal.
 
 The important current fact is:
 
-- iterative refinement no longer depends on a framework-external
-  `refinement_local_residuals(...)`
+- iterative refinement does not depend on a framework-external restoration
+  residual object
 - if restoration local residual summaries are printed, they are aggregated from
   the currently active restoration wrappers on the overlay graph
 
@@ -593,6 +602,11 @@ restoration phase metric:
 - primal metric: `inf_prim_res`
 - dual metric: `max(inf_dual_res, inf_comp_res)`
 - objective metric: `penalized_obj`
+
+Current implementation detail:
+
+- restoration is only supported with filter line search
+- `merit_backtracking` currently throws at restoration entry
 
 The current restoration `alpha_min` is **not** an independent absolute floor.
 It is computed as
@@ -616,7 +630,7 @@ The current `arm` logs show exactly that behavior: restoration does trigger its
 own `alpha_min` rule, but the resulting minimum is still small because the
 restoration step is already heavily clipped before backtracking starts.
 
-## 8. Entry / Exit Synchronization
+## 9. Entry / Exit Synchronization
 
 At restoration entry:
 
@@ -632,28 +646,35 @@ At restoration success:
 - hard duals are copied back
 - equality duals are reset according to the restoration threshold policy
 - outer graph derivatives are recomputed in normal mode
+- the accepted restoration point must also satisfy the outer filter acceptance
+  test and a primal-improvement threshold before restoration is declared
+  successful
 
 At restoration failure:
 
 - the outer graph remains the active source of truth
-- restoration graph data is discarded as phase-local state
+- outer derivatives are refreshed in normal mode before returning
+- the cached restoration graph remains available for future restoration entries;
+  only phase-local active state is cleared
 
-## 9. Current Numerical Behavior
+## 10. Current Numerical Behavior
 
 As of the current implementation:
 
 - `quadruped` normal behavior remains intact
-- `arm` enters restoration cleanly on the overlay graph
+- `arm` enters restoration on the overlay graph without mutating the normal
+  graph in place
 - restoration prints:
   - explicit entry / exit markers
   - full per-iteration stats with `r`-suffixed iteration numbers
   - a separate line showing `objective`, `search_obj`, and barrier contribution
 
-The current remaining failure mode in `arm` is not graph synchronization or
-objective bookkeeping. It is a tiny-step / direction-quality issue:
+The most common remaining failure mode is not graph synchronization or
+objective bookkeeping. It is still a globalization / direction-quality issue:
 
-- restoration can reduce primal infeasibility from the large entry value to
-  approximately `1.112e+00`
-- but only with extremely small accepted steps
-- backtracking eventually reaches `alpha_primal << alpha_min`
-- restoration exits with `iter_result_restoration_failed`
+- restoration may reduce primal infeasibility while accepting only very small
+  steps
+- backtracking can still terminate on the tiny-step condition
+- the resulting status is either `iter_result_restoration_failed` or
+  `iter_result_infeasible_stationary`, depending on the post-restoration KKT
+  state

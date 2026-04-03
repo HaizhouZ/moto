@@ -104,26 +104,43 @@ python -m py_compile example/quadruped/run.py
 find gen -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
 ./build/unittests/graph_model_compose_test
 MOTO_SQP_MAX_ITER=50 python example/quadruped/run.py
-KMP_AFFINITY='noverbose,granularity=fine,scatter' OMP_NUM_THREADS=10 MOTO_SQP_WARMUP=1 MOTO_SQP_BENCH_RUNS=1 MOTO_SQP_MAX_ITER=10 python example/quadruped/run.py
+KMP_AFFINITY='noverbose,granularity=fine,scatter' OMP_NUM_THREADS=10 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 MOTO_PROFILE_SQP=1 MOTO_SQP_BENCH_RUNS=1 MOTO_SQP_MAX_ITER=50 python example/quadruped/run.py
 ```
 
 Current practical note from local quadruped profiling:
 
 - when benchmarking `example/quadruped/run.py` with `OMP_NUM_THREADS=10`, keeping `Eigen::setNbThreads(1)` in `ns_sqp` construction was measurably better than leaving Eigen's internal thread count unconstrained
 - the most comparable local check was:
-  - `KMP_AFFINITY='noverbose,granularity=fine,scatter' OMP_NUM_THREADS=10 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 MOTO_PROFILE_SQP=1 MOTO_SQP_WARMUP=0 MOTO_SQP_BENCH_RUNS=1 MOTO_SQP_MAX_ITER=50 python example/quadruped/run.py`
+  - `KMP_AFFINITY='noverbose,granularity=fine,scatter' OMP_NUM_THREADS=10 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 MOTO_PROFILE_SQP=1 MOTO_SQP_BENCH_RUNS=1 MOTO_SQP_MAX_ITER=50 python example/quadruped/run.py`
 - on that workload, the version with `Eigen::setNbThreads(1)` reduced total profiled update time from roughly `474 ms` to roughly `415 ms` in one run, and from `526 ms` to `374 ms` after additional iterative-refinement experiments; exact values do vary run-to-run, but the direction was consistently favorable enough to keep the setting in `ns_sqp`
+- a more recent warm run of the current quadruped setup converged in `35` iterations with about `112 ms` total profiled update time and about `3.2 ms / iter`
+- in that run there was no backtracking:
+  - `trial_evals = 35`
+  - every iteration had exactly one accepted full-step trial
+- the dominant globalization cost in that profile was not filter bookkeeping itself:
+  - `run_globalization` was about `0.55 ms / iter`
+  - `update_approx_accepted` was about `0.50 ms / iter`
+  - `evaluate_trial_point` was only about `0.05 ms / iter`
+- practical implication:
+  - for current filter runs, the expensive part is often relinearizing the accepted point for the next SQP iteration, not the scalar acceptance logic in [`src/solver/sqp_impl/line_search.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/line_search.cpp)
 
 Useful benchmarking / profiling environment variables in `example/quadruped/run.py`:
 
 - `MOTO_SQP_MAX_ITER`: iterations requested per `sqp.update(...)`
-- `MOTO_SQP_WARMUP`: number of warm-up `update(...)` calls before timing
 - `MOTO_SQP_BENCH_RUNS`: number of timed hot-start runs
 - `MOTO_PROFILE_SQP`: print the last run's SQP profile summary
-- `MOTO_SQP_WARMUP_VERBOSE`: if set, print verbose solver logs during warm-up
 - `MOTO_SQP_BENCH_VERBOSE`: if set, print verbose logs for every timed run; otherwise only the last timed run is verbose
 - `MOTO_PARALLEL_BLOCK_ORDER={forward,reverse}`: override chunk assignment order in `parallel_for`
 - `MOTO_PARALLEL_TID_MODE={logical,omp}`: choose whether solver callbacks see logical chunk ids or OpenMP thread ids
+- `MOTO_DEBUG_SOLVER_PROBS`: print head/tail solver problems for the realized graph
+- `MOTO_DEBUG_GRAPH_LAYOUT`: print flattened solver graph dimensions and dynamics count
+
+Current benchmark-script caveats:
+
+- [`example/quadruped/run.py`](/home/harper/Documents/moto/example/quadruped/run.py) no longer has a dedicated warm-up loop
+- benchmark timing now measures only the configured `MOTO_SQP_BENCH_RUNS`
+- `get_profile_report()` still reports the most recent `update(...)` call only
+- the script still defaults to `display = True`, so headless or solver-only profiling often uses a temporary no-visualization copy rather than editing the file in place
 
 Current default parallel behavior:
 
@@ -252,6 +269,10 @@ Important compose rules that are now covered by unit tests:
 - terminal sink `x`-only terms are now merged into the final real edge problem
 - terminal sink terms depending on `u` are invalid for the final `x/u` terminal node semantics; they emit a warning and are ignored
 - codegen finalization of lowered/materialized clones must be serialized or uniquely named to avoid `.so` races
+- current implementation chooses serialization plus reuse:
+  - finalized clones intentionally share stable generated symbol names
+  - same-name codegen is serialized with a per-function mutex in [`src/utils/codegen.cpp`](/home/harper/Documents/moto/src/utils/codegen.cpp)
+  - compiled `.so` and `.json` outputs are written through `.tmp` files and renamed atomically
 - graph realization now lives with `graph_model` itself:
   - `graph_model::compose_interval(...)` handles interval composition and sink-term materialization
   - `graph_model::realize_into(...)` expands the modeled topology into a runtime `directed_graph`
@@ -260,6 +281,12 @@ Important compose rules that are now covered by unit tests:
 ## SQP Graph Ownership
 
 `ns_sqp` no longer owns a separate solver-graph member. The active [`graph_model_state`](/home/harper/Documents/moto/include/moto/model/graph_model.hpp) owns the realized runtime graph, and `ns_sqp` fetches it as needed through `sqp.graph`.
+
+Current restoration detail:
+
+- `ns_sqp` now uses a derived graph-state wrapper that can cache a realized restoration overlay graph
+- the cached restoration runtime is rebuilt only when the modeled graph is dirty or restoration settings change
+- this avoids rebuilding the restoration overlay on every restoration entry
 
 Current recommended Python flow:
 
@@ -547,6 +574,12 @@ Its flow is:
    compute `inf_prim_res_`, `prim_res_l1_`, `inf_comp_res_`
    add `cost_` into `lag_`
 
+Important mode distinction:
+
+- `eval_val` updates values and residual summaries only
+- `eval_derivatives` updates Jacobians and Hessians but does not refresh primal-residual summaries by itself
+- in current filter line search, trial points are often checked with `eval_val` only, and the accepted point is then relinearized with `eval_derivatives` so the next SQP iteration sees a fresh QP model
+
 Mental model:
 
 - every function writes into local sparse refs
@@ -673,15 +706,16 @@ Important invariants:
 [`ns_sqp::initialize()`](/home/harper/Documents/moto/src/solver/sqp_impl/ns_sqp_impl.cpp) performs:
 
 1. reset `mu` if not warm-starting
-2. for every node:
+2. refresh `settings.has_ineq_soft` and `settings.has_ipm_ineq` from the active graph
+3. for every node:
    call `setup_workspace_data(...)` on each constraint
    evaluate values with `update_approximation(eval_val)`
    initialize inequality / soft constraints via `solver::ineq_soft::initialize`
-3. for every node:
+4. for every node:
    evaluate derivatives with `update_approximation(eval_derivatives)`
-4. compute initial `kkt_info`
-5. reset scaling caches
-6. print stats header and iteration-0 stats if verbose
+5. compute initial `kkt_info`
+6. reset scaling caches
+7. print stats header and iteration-0 stats if verbose
 
 `solver::ineq_soft::initialize(...)` wires each soft constraint’s `prim_step_` views into `trial_prim_step[...]`, binds its `d_multiplier_` into `trial_dual_step[...]`, and calls the specific soft-constraint initializer.
 
@@ -697,9 +731,9 @@ Its runtime sequence is:
 4. Backward `riccati_recursion(...)`.
 5. `compute_primal_sensitivity(...)`.
 6. Forward `fwd_linear_rollout(...)`.
-7. If inequalities exist, start predictor mode.
+7. If true IPM inequalities exist, start predictor mode.
 8. Finalize primal step and compute line-search bounds.
-9. If inequalities exist, run corrector step and resolve.
+9. If true IPM inequalities exist, run corrector step and resolve.
 10. Optionally run iterative refinement.
 11. Finalize dual Newton step.
 12. Unscale dual step and restore Jacobians/residuals to original units.
@@ -711,6 +745,12 @@ Its runtime sequence is:
     evaluate KKT residuals
     accept or backtrack
 15. On acceptance, update derivatives if needed and store `kkt_current = kkt_trial`.
+
+Accepted-trial detail that matters for performance:
+
+- in filter mode, the accepted point commonly reaches `accept_trial_point(...)` with only value information
+- the solver then performs a full `eval_derivatives` pass on the accepted point before the next SQP iteration
+- in merit-backtracking mode, trial derivatives may already be available, so acceptance can skip that extra derivative refresh
 
 ## SQP Profiling
 
@@ -735,11 +775,22 @@ The most useful currently exposed phases for bottleneck work are:
 
 - `solve_direction`
 - `riccati_recursion`
+- `run_globalization`
+- `evaluate_trial_point`
+- `apply_affine_step`
+- `update_res_stat`
+- `accept_trial_point`
+- `update_approx_accepted`
 - `iterative_refinement`
 - `iterative_refinement_step`
 - `correction_post_factorization`
 - `correction_riccati_recursion`
 - `correction_fwd_rollout`
+
+Current profiling takeaway for quadruped:
+
+- if `trial_evaluations` is close to the number of SQP iterations and `ls_steps` stay at zero, line search is not spending time on repeated backtracking trials
+- in that regime, a large `run_globalization` cost usually means accepted-point bookkeeping and relinearization, not the filter predicates themselves
 
 ## Nullspace / Riccati Solve Data Flow
 
@@ -887,6 +938,14 @@ Key details:
 - backtracking can be linear or geometric
 - failure fallback is either minimum step or best trial
 
+Current practical interpretation:
+
+- the scalar filter / Armijo logic in [`src/solver/sqp_impl/line_search.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/line_search.cpp) is usually not the hot part
+- when globalization looks expensive in current quadruped profiles, the cost typically comes from:
+  - restoring trial state
+  - applying the affine step
+  - re-evaluating the accepted point's derivatives for the next SQP iteration
+
 The SOC scaffolding exists but is intentionally not implemented:
 
 - `second_order_correction()` is empty
@@ -999,7 +1058,7 @@ Current solver direction:
 
 ### IPM predictor-corrector
 
-If inequalities are present:
+If true IPM inequalities are present:
 
 - first solve produces an affine predictor step
 - worker-local stats are merged
@@ -1024,9 +1083,10 @@ This is a true correction solve on the linearized KKT system, not a full relinea
 
 ## Restoration Note
 
-- the restoration solver path has been removed from the codebase
-- [`restoration.md`](/home/harper/Documents/moto/restoration.md) remains as design history only
-- current SQP behavior on line-search `failure` is the normal non-restoration path in [`src/solver/sqp_impl/ns_sqp_impl.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/ns_sqp_impl.cpp)
+- the legacy restoration implementation was removed, but restoration is still active through the overlay-based path in [`src/solver/sqp_impl/restoration.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/restoration.cpp)
+- restoration overlay problems are built by [`src/solver/restoration/resto_overlay.cpp`](/home/harper/Documents/moto/src/solver/restoration/resto_overlay.cpp)
+- the active graph state caches the realized restoration runtime and invalidates it when the modeled graph or restoration settings change
+- [`restoration.md`](/home/harper/Documents/moto/restoration.md) is still useful as historical design context, but it is not a complete description of the current overlay implementation
 
 ## Diagnostics
 
@@ -1076,6 +1136,8 @@ Current profiling-related Python entry points on `ns_sqp_impl`:
 - do not remove commented or dormant solver hooks like SOC infrastructure without checking intended roadmap
 - when changing C++ code that affects Python examples, always wait for the full build to finish before running Python tests
 - do not trust a Python test run started while `moto` / `moto_pywrap` is still linking; stale modules can easily give misleading results
+- do not compare first-run wall time across commits without separating solver time from codegen / shared-library compilation time
+- remember that same-name codegen is intentionally serialized today; apparent loss of "multithreaded codegen" may be reuse and race avoidance rather than a regression in the solver itself
 
 ## Common Pitfalls
 
@@ -1084,6 +1146,8 @@ Current profiling-related Python entry points on `ns_sqp_impl`:
 - modifying `__dyn` scaling and breaking projected-dynamics solves
 - assuming `__eq_x` / `__ineq_x` differentiate against `__x`
 - touching line-search or IPM state without handling backup/restore
+- assuming `eval_val` and `eval_derivatives` have the same bookkeeping side effects
+- blaming [`src/solver/sqp_impl/line_search.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/line_search.cpp) predicates for globalization cost before checking `update_approx_accepted`
 - changing a settings struct without updating bindings
 - treating [`example/quadruped/run.py`](/home/harper/Documents/moto/example/quadruped/run.py) as canonical; it is often used for experiments
 - seeing `warning: substitution in generic_constr ... go2_q_nxt` in quadruped logs means the example is still using the legacy `ocp.create()` path, not the newer `node_ocp / edge_ocp` modeling path
