@@ -166,7 +166,7 @@ void accumulate_w_stationarity(ns_sqp::solver_graph_type &graph,
     graph.apply_forward(
         [&](node_data *cur, node_data *next) {
             if (next != nullptr) [[likely]] {
-                static row_vector tmp;
+                row_vector tmp;
                 tmp.conservativeResize(next->dense().lag_jac_[__x].cols());
                 tmp.noalias() = next->dense().lag_jac_[__x] *
                                     utils::permutation_from_y_to_x(&cur->problem(), &next->problem()) +

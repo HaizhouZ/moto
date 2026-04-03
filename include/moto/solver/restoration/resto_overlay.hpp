@@ -3,6 +3,7 @@
 #include <moto/ocp/cost.hpp>
 #include <moto/ocp/ineq_constr.hpp>
 #include <moto/ocp/problem.hpp>
+#include <moto/core/array.hpp>
 #include <moto/solver/ipm/ipm_config.hpp>
 #include <moto/solver/ipm/positivity_step.hpp>
 #include <moto/solver/linesearch_config.hpp>
@@ -20,30 +21,51 @@ namespace moto::solver::restoration {
 
 namespace detail {
 
+enum elastic_slot_t : size_t {
+    slot_t = 0,
+    slot_p = 1,
+    slot_n = 2,
+};
+
+template <typename T>
+using elastic_pair_array = array_type<T, std::array{slot_p, slot_n}>;
+
+template <typename T>
+using elastic_triplet_array = array_type<T, std::array{slot_t, slot_p, slot_n}>;
+
 struct eq_local_state {
     size_t ns = 0;
     size_t nc = 0;
 
-    vector p, p_backup, d_p, nu_p, nu_p_backup, d_nu_p;
-    vector n, n_backup, d_n, nu_n, nu_n_backup, d_nu_n;
-    vector c_current, r_c, r_p, r_n, r_s_p, r_s_n;
-    vector combo_p, combo_n, b_c, minv_diag, minv_bc, d_lambda;
-    vector corrector_p, corrector_n;
-
+    elastic_pair_array<vector> value;
+    elastic_pair_array<vector> value_backup;
+    elastic_pair_array<vector> d_value;
+    elastic_pair_array<vector> dual;
+    elastic_pair_array<vector> dual_backup;
+    elastic_pair_array<vector> d_dual;
+    elastic_pair_array<vector> r_stat;
+    elastic_pair_array<vector> r_comp;
+    elastic_pair_array<vector> combo;
+    elastic_pair_array<vector> corrector;
+    vector base_residual, r_c, b_c, minv_diag, minv_bc, d_lambda;
 };
 
 struct ineq_local_state {
     size_t nx = 0;
     size_t nu = 0;
 
-    vector t, t_backup, d_t, nu_t, nu_t_backup, d_nu_t;
-    vector p, p_backup, d_p, nu_p, nu_p_backup, d_nu_p;
-    vector n, n_backup, d_n, nu_n, nu_n_backup, d_nu_n;
-    vector g_current, r_d, r_p, r_n, r_s_t, r_s_p, r_s_n;
-    vector denom_t, denom_p, denom_n;
-    vector combo_t, combo_p, combo_n, b_d, minv_diag, minv_bd;
-    vector corrector_t, corrector_p, corrector_n;
-
+    elastic_triplet_array<vector> value;
+    elastic_triplet_array<vector> value_backup;
+    elastic_triplet_array<vector> d_value;
+    elastic_triplet_array<vector> dual;
+    elastic_triplet_array<vector> dual_backup;
+    elastic_triplet_array<vector> d_dual;
+    elastic_triplet_array<vector> r_comp;
+    elastic_triplet_array<vector> denom;
+    elastic_triplet_array<vector> combo;
+    elastic_triplet_array<vector> corrector;
+    elastic_pair_array<vector> r_stat;
+    vector base_residual, r_d, b_d, minv_diag, minv_bd;
 };
 
 } // namespace detail
