@@ -432,6 +432,23 @@ struct ns_sqp {
             /// @check if a point is in the filter
             bool in_filter(const point &filter_entry, const settings_t &settings) const;
         };
+        struct normal_filter_eval_result {
+            point trial_point;
+            point current_point;
+            point dominating_filter_point;
+            bool dominated_by_filter = false;
+            bool switching_condition = false;
+            bool armijo_cond_met = false;
+            bool accepted_by_armijo = false;
+            bool accepted_by_filter = false;
+            bool accepted_by_flat_objective = false;
+            bool flat_objective_eligible = false;
+            bool accepted = false;
+            scalar_t fullstep_dec = 0.;
+            scalar_t switching_lhs = 0.;
+            scalar_t switching_rhs = 0.;
+            scalar_t armijo_target = 0.;
+        };
         struct trial : public point, public solver::linesearch_config {
         } best_trial;
         std::vector<point> points;                                           ///< filter for accepting line search steps
@@ -440,6 +457,12 @@ struct ns_sqp {
         size_t filter_reject_cnt = 0; ///< number of consecutive filter rejections, used for adaptive strategies in line search
 
         void update_filter(const kkt_info &kkt, settings_t &settings);
+        static normal_filter_eval_result evaluate_normal_filter_step(const std::vector<point> &filter_points,
+                                                                     const kkt_info &trial_kkt,
+                                                                     const kkt_info &current_kkt,
+                                                                     scalar_t constr_vio_min,
+                                                                     const settings_t &settings,
+                                                                     bool allow_flat_objective = true);
         bool try_step(const kkt_info &trial_kkt, const kkt_info &current_kkt, settings_t &settings);
 
         /***** merit backtracking part (used when settings.ls.method == merit_backtracking) *****/
@@ -475,15 +498,11 @@ struct ns_sqp {
     };
 
     void step_back_alpha(filter_linesearch_per_iter_data &ls);
-    scalar_t current_phase_alpha_min(const filter_linesearch_per_iter_data &ls) const;
+    scalar_t current_linesearch_alpha_min(const filter_linesearch_per_iter_data &ls) const;
     line_search_action filter_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
     line_search_action merit_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
     bool outer_filter_accepts(const filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &reference_kkt);
     kkt_info compute_kkt_info_for_phase(iteration_phase phase, bool update_dual_res = true);
-    scalar_t current_phase_objective(const kkt_info &kkt) const;
-    scalar_t current_phase_fullstep_dec(const kkt_info &kkt) const;
-    scalar_t outer_objective(const kkt_info &kkt) const;
-    scalar_t outer_fullstep_dec(const kkt_info &kkt) const;
     bool in_restoration_phase() const { return settings.in_restoration; }
     bool use_normal_soft_phase() const { return !settings.in_restoration; }
 

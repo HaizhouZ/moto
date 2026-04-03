@@ -3,11 +3,377 @@
 #include <algorithm>
 #include <cstdlib>
 #include <string_view>
+#include <tuple>
 #include <moto/ocp/impl/node_data.hpp>
 #include <moto/solver/ipm/positivity_step.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
 
 namespace moto::solver::restoration {
+
+namespace {
+size_t local_state_dim(const detail::eq_local_state &state) {
+    return state.ns + state.nc;
+}
+
+size_t local_state_dim(const detail::ineq_local_state &state) {
+    return state.nx + state.nu;
+}
+} // namespace
+
+void resto_eq_elastic_constr::resize_local_state(detail::eq_local_state &state, size_t ns_dim, size_t nc_dim) {
+    auto resize_zero = [](vector &v, Eigen::Index n) {
+        v.resize(n);
+        v.setZero();
+    };
+
+    state.ns = ns_dim;
+    state.nc = nc_dim;
+    const auto dim_eig = static_cast<Eigen::Index>(state.ns + state.nc);
+    for (auto *v : {&state.p, &state.p_backup, &state.d_p, &state.nu_p, &state.nu_p_backup, &state.d_nu_p,
+                    &state.n, &state.n_backup, &state.d_n, &state.nu_n, &state.nu_n_backup, &state.d_nu_n,
+                    &state.c_current, &state.r_c, &state.r_p, &state.r_n, &state.r_s_p, &state.r_s_n,
+                    &state.combo_p, &state.combo_n, &state.b_c, &state.minv_diag, &state.minv_bc, &state.d_lambda,
+                    &state.corrector_p, &state.corrector_n}) {
+        resize_zero(*v, dim_eig);
+    }
+}
+
+void resto_ineq_elastic_ipm_constr::resize_local_state(detail::ineq_local_state &state, size_t nx_dim, size_t nu_dim) {
+    auto resize_zero = [](vector &v, Eigen::Index n) {
+        v.resize(n);
+        v.setZero();
+    };
+
+    state.nx = nx_dim;
+    state.nu = nu_dim;
+    const auto dim_eig = static_cast<Eigen::Index>(state.nx + state.nu);
+    for (auto *v : {&state.t, &state.t_backup, &state.d_t, &state.nu_t, &state.nu_t_backup, &state.d_nu_t,
+                    &state.p, &state.p_backup, &state.d_p, &state.nu_p, &state.nu_p_backup, &state.d_nu_p,
+                    &state.n, &state.n_backup, &state.d_n, &state.nu_n, &state.nu_n_backup, &state.d_nu_n,
+                    &state.g_current, &state.r_d, &state.r_p, &state.r_n, &state.r_s_t, &state.r_s_p, &state.r_s_n,
+                    &state.denom_t, &state.denom_p, &state.denom_n,
+                    &state.combo_t, &state.combo_p, &state.combo_n, &state.b_d, &state.minv_diag, &state.minv_bd,
+                    &state.corrector_t, &state.corrector_p, &state.corrector_n}) {
+        resize_zero(*v, dim_eig);
+    }
+}
+
+elastic_init_pair resto_eq_elastic_constr::initialize_elastic_pair(scalar_t c, scalar_t rho, scalar_t mu_bar) {
+    if (!(rho > 0.)) {
+        throw std::runtime_error("initialize_elastic_pair requires rho > 0");
+    }
+    if (!(mu_bar > 0.)) {
+        throw std::runtime_error("initialize_elastic_pair requires mu_bar > 0");
+    }
+
+    const scalar_t disc = (mu_bar - rho * c) * (mu_bar - rho * c) + scalar_t(2.) * rho * mu_bar * c;
+    const scalar_t sqrt_disc = std::sqrt(std::max(disc, scalar_t(0.)));
+    const scalar_t n = (mu_bar - rho * c + sqrt_disc) / (scalar_t(2.) * rho);
+    const scalar_t p = c + n;
+
+    elastic_init_pair out;
+    out.p = std::max(p, scalar_t(1e-16));
+    out.n = std::max(n, scalar_t(1e-16));
+    out.z_p = mu_bar / out.p;
+    out.z_n = mu_bar / out.n;
+    out.lambda = rho - out.z_p;
+    const scalar_t a = out.z_p / out.p;
+    const scalar_t b = out.z_n / out.n;
+    out.weight = (a > 0. && b > 0.) ? (a * b) / (a + b) : scalar_t(0.);
+    return out;
+}
+
+elastic_init_ineq_scalar resto_ineq_elastic_ipm_constr::initialize_elastic_ineq_scalar(scalar_t g,
+                                                                                        scalar_t rho,
+                                                                                        scalar_t mu_bar,
+                                                                                        scalar_t nu_t_init) {
+    if (!(rho > 0.)) {
+        throw std::runtime_error("initialize_elastic_ineq_scalar requires rho > 0");
+    }
+    if (!(mu_bar > 0.)) {
+        throw std::runtime_error("initialize_elastic_ineq_scalar requires mu_bar > 0");
+    }
+    if (!(nu_t_init > 0.)) {
+        throw std::runtime_error("initialize_elastic_ineq_scalar requires nu_t_init > 0");
+    }
+
+    elastic_init_ineq_scalar out;
+    const scalar_t eps = scalar_t(1e-16);
+    out.nu_t = std::max(nu_t_init, eps);
+    out.t = mu_bar / out.nu_t;
+    const auto pair = resto_eq_elastic_constr::initialize_elastic_pair(g + out.t, rho, mu_bar);
+    out.p = pair.p;
+    out.n = pair.n;
+    out.nu_p = pair.z_p;
+    out.nu_n = pair.z_n;
+    return out;
+}
+
+void resto_eq_elastic_constr::compute_local_model(detail::eq_local_state &elastic,
+                                                  const vector_const_ref &c,
+                                                  const vector_const_ref &lambda,
+                                                  scalar_t rho,
+                                                  scalar_t mu_bar,
+                                                  const vector *mu_p_target,
+                                                  const vector *mu_n_target,
+                                                  scalar_t lambda_reg) {
+    const scalar_t eps = 1e-16;
+    if (lambda_reg < 0.) {
+        throw std::runtime_error("compute_local_model requires lambda_reg >= 0");
+    }
+    if (c.size() != lambda.size() ||
+        c.size() != elastic.p.size() ||
+        c.size() != elastic.n.size() ||
+        c.size() != elastic.nu_p.size() ||
+        c.size() != elastic.nu_n.size()) {
+        throw std::runtime_error("compute_local_model size mismatch");
+    }
+
+    elastic.c_current = c;
+    elastic.r_c.noalias() = c - elastic.p + elastic.n;
+    elastic.r_p = vector::Constant(c.size(), rho) - lambda - elastic.nu_p;
+    elastic.r_n = vector::Constant(c.size(), rho) + lambda - elastic.nu_n;
+    if (mu_p_target != nullptr && mu_p_target->size() != c.size()) {
+        throw std::runtime_error("compute_local_model mu_p_target size mismatch");
+    }
+    if (mu_n_target != nullptr && mu_n_target->size() != c.size()) {
+        throw std::runtime_error("compute_local_model mu_n_target size mismatch");
+    }
+    for (Eigen::Index i = 0; i < c.size(); ++i) {
+        const scalar_t mu_p = mu_p_target ? (*mu_p_target)(i) : mu_bar;
+        const scalar_t mu_n = mu_n_target ? (*mu_n_target)(i) : mu_bar;
+        elastic.r_s_p(i) = elastic.nu_p(i) * elastic.p(i) - mu_p;
+        elastic.r_s_n(i) = elastic.nu_n(i) * elastic.n(i) - mu_n;
+    }
+
+    if (lambda_reg == 0.) {
+        const auto denom_p = elastic.nu_p.array().max(eps);
+        const auto denom_n = elastic.nu_n.array().max(eps);
+        elastic.combo_p =
+            (elastic.r_s_p.array() + elastic.p.array() * elastic.r_p.array()) / denom_p;
+        elastic.combo_n =
+            (elastic.r_s_n.array() + elastic.n.array() * elastic.r_n.array()) / denom_n;
+        elastic.minv_diag =
+            (elastic.p.array() / denom_p + elastic.n.array() / denom_n).inverse();
+    } else {
+        const auto denom_p = (elastic.p.array() + lambda_reg * elastic.nu_p.array()).max(eps);
+        const auto denom_n = (elastic.n.array() + lambda_reg * elastic.nu_n.array()).max(eps);
+        elastic.combo_p =
+            (elastic.p.array() * elastic.r_p.array() + lambda_reg * elastic.r_s_p.array()) / denom_p;
+        elastic.combo_n =
+            (elastic.n.array() * elastic.r_n.array() + lambda_reg * elastic.r_s_n.array()) / denom_n;
+        elastic.minv_diag =
+            (elastic.p.array() / denom_p + elastic.n.array() / denom_n).inverse();
+    }
+
+    elastic.b_c = elastic.r_c + elastic.combo_p - elastic.combo_n;
+    elastic.minv_bc = elastic.minv_diag.array() * elastic.b_c.array();
+}
+
+void resto_eq_elastic_constr::compute_local_model(detail::eq_local_state &elastic,
+                                                  const vector_const_ref &c,
+                                                  const vector_const_ref &lambda,
+                                                  scalar_t rho,
+                                                  scalar_t mu_bar,
+                                                  scalar_t lambda_reg) {
+    compute_local_model(elastic, c, lambda, rho, mu_bar, nullptr, nullptr, lambda_reg);
+}
+
+void resto_eq_elastic_constr::recover_local_step(const vector_const_ref &delta_c,
+                                                 detail::eq_local_state &elastic,
+                                                 scalar_t lambda_reg) {
+    const scalar_t eps = 1e-16;
+    if (delta_c.size() != local_state_dim(elastic)) {
+        throw std::runtime_error("recover_local_step size mismatch");
+    }
+    elastic.d_lambda = elastic.minv_diag.array() * (delta_c.array() + elastic.b_c.array());
+    if (lambda_reg == 0.) {
+        elastic.d_nu_p = elastic.r_p - elastic.d_lambda;
+        elastic.d_nu_n = elastic.r_n + elastic.d_lambda;
+        elastic.d_p =
+            -(elastic.r_s_p.array() + elastic.p.array() * elastic.d_nu_p.array()) /
+            elastic.nu_p.array().max(eps);
+        elastic.d_n =
+            -(elastic.r_s_n.array() + elastic.n.array() * elastic.d_nu_n.array()) /
+            elastic.nu_n.array().max(eps);
+    } else {
+        const auto denom_p = (elastic.p.array() + lambda_reg * elastic.nu_p.array()).max(eps);
+        const auto denom_n = (elastic.n.array() + lambda_reg * elastic.nu_n.array()).max(eps);
+        elastic.d_nu_p =
+            (elastic.nu_p.array() * (elastic.r_p.array() - elastic.d_lambda.array()) - elastic.r_s_p.array()) /
+            denom_p;
+        elastic.d_nu_n =
+            (elastic.nu_n.array() * (elastic.r_n.array() + elastic.d_lambda.array()) - elastic.r_s_n.array()) /
+            denom_n;
+        elastic.d_p =
+            elastic.d_lambda.array() + lambda_reg * elastic.d_nu_p.array() - elastic.r_p.array();
+        elastic.d_n =
+            -elastic.d_lambda.array() + lambda_reg * elastic.d_nu_n.array() - elastic.r_n.array();
+    }
+}
+
+void resto_ineq_elastic_ipm_constr::compute_local_model(detail::ineq_local_state &ineq,
+                                                        const vector_const_ref &g,
+                                                        scalar_t rho,
+                                                        scalar_t mu_bar,
+                                                        const vector *mu_t_target,
+                                                        const vector *mu_p_target,
+                                                        const vector *mu_n_target,
+                                                        scalar_t lambda_reg) {
+    const scalar_t eps = 1e-16;
+    if (lambda_reg < 0.) {
+        throw std::runtime_error("compute_local_model(ineq) requires lambda_reg >= 0");
+    }
+    if (g.size() != ineq.t.size() ||
+        g.size() != ineq.nu_t.size() ||
+        g.size() != ineq.p.size() ||
+        g.size() != ineq.n.size()) {
+        throw std::runtime_error("compute_local_model(ineq) size mismatch");
+    }
+
+    ineq.g_current = g;
+    ineq.r_d = g + ineq.t - ineq.p + ineq.n;
+    ineq.r_p = vector::Constant(g.size(), rho) - ineq.nu_t - ineq.nu_p;
+    ineq.r_n = vector::Constant(g.size(), rho) + ineq.nu_t - ineq.nu_n;
+    if (mu_t_target != nullptr && mu_t_target->size() != g.size()) {
+        throw std::runtime_error("compute_local_model(ineq) mu_t_target size mismatch");
+    }
+    if (mu_p_target != nullptr && mu_p_target->size() != g.size()) {
+        throw std::runtime_error("compute_local_model(ineq) mu_p_target size mismatch");
+    }
+    if (mu_n_target != nullptr && mu_n_target->size() != g.size()) {
+        throw std::runtime_error("compute_local_model(ineq) mu_n_target size mismatch");
+    }
+    for (Eigen::Index i = 0; i < g.size(); ++i) {
+        const scalar_t mu_t = mu_t_target ? (*mu_t_target)(i) : mu_bar;
+        const scalar_t mu_p = mu_p_target ? (*mu_p_target)(i) : mu_bar;
+        const scalar_t mu_n = mu_n_target ? (*mu_n_target)(i) : mu_bar;
+        ineq.r_s_t(i) = ineq.nu_t(i) * ineq.t(i) - mu_t;
+        ineq.r_s_p(i) = ineq.nu_p(i) * ineq.p(i) - mu_p;
+        ineq.r_s_n(i) = ineq.nu_n(i) * ineq.n(i) - mu_n;
+    }
+
+    ineq.denom_t = ineq.nu_t.array().max(eps);
+    ineq.denom_p = (ineq.p.array() + lambda_reg * ineq.nu_p.array()).max(eps);
+    ineq.denom_n = (ineq.n.array() + lambda_reg * ineq.nu_n.array()).max(eps);
+
+    ineq.combo_t = ineq.r_s_t.array() / ineq.denom_t.array();
+    ineq.combo_p =
+        (ineq.p.array() * ineq.r_p.array() + lambda_reg * ineq.r_s_p.array()) /
+        ineq.denom_p.array();
+    ineq.combo_n =
+        (ineq.n.array() * ineq.r_n.array() + lambda_reg * ineq.r_s_n.array()) /
+        ineq.denom_n.array();
+
+    ineq.minv_diag =
+        (ineq.t.array() / ineq.denom_t.array() +
+         ineq.p.array() / ineq.denom_p.array() +
+         ineq.n.array() / ineq.denom_n.array()).inverse();
+    ineq.b_d = ineq.r_d - ineq.combo_t + ineq.combo_p - ineq.combo_n;
+    ineq.minv_bd = ineq.minv_diag.array() * ineq.b_d.array();
+}
+
+void resto_ineq_elastic_ipm_constr::compute_local_model(detail::ineq_local_state &ineq,
+                                                        const vector_const_ref &g,
+                                                        scalar_t rho,
+                                                        scalar_t mu_bar,
+                                                        scalar_t lambda_reg) {
+    compute_local_model(ineq, g, rho, mu_bar, nullptr, nullptr, nullptr, lambda_reg);
+}
+
+void resto_ineq_elastic_ipm_constr::recover_local_step(const vector_const_ref &delta_g,
+                                                       detail::ineq_local_state &ineq,
+                                                       scalar_t lambda_reg) {
+    if (delta_g.size() != local_state_dim(ineq)) {
+        throw std::runtime_error("recover_local_step(ineq) size mismatch");
+    }
+    if (lambda_reg < 0.) {
+        throw std::runtime_error("recover_local_step(ineq) requires lambda_reg >= 0");
+    }
+    ineq.d_nu_t = ineq.minv_diag.array() * (delta_g.array() + ineq.b_d.array());
+    ineq.d_nu_p =
+        (ineq.nu_p.array() * (ineq.r_p.array() - ineq.d_nu_t.array()) - ineq.r_s_p.array()) /
+        ineq.denom_p.array();
+    ineq.d_nu_n =
+        (ineq.nu_n.array() * (ineq.r_n.array() + ineq.d_nu_t.array()) - ineq.r_s_n.array()) /
+        ineq.denom_n.array();
+    ineq.d_t =
+        -(ineq.r_s_t.array() + ineq.t.array() * ineq.d_nu_t.array()) /
+        ineq.denom_t.array();
+    ineq.d_p =
+        ineq.d_nu_t.array() + lambda_reg * ineq.d_nu_p.array() - ineq.r_p.array();
+    ineq.d_n =
+        -ineq.d_nu_t.array() + lambda_reg * ineq.d_nu_n.array() - ineq.r_n.array();
+}
+
+local_residual_summary resto_eq_elastic_constr::current_local_residuals(const detail::eq_local_state &elastic) {
+    local_residual_summary out;
+    if (local_state_dim(elastic) == 0) {
+        return out;
+    }
+    out.inf_prim = elastic.r_c.cwiseAbs().maxCoeff();
+    out.inf_stat = std::max(elastic.r_p.cwiseAbs().maxCoeff(), elastic.r_n.cwiseAbs().maxCoeff());
+    out.inf_comp = std::max(elastic.r_s_p.cwiseAbs().maxCoeff(), elastic.r_s_n.cwiseAbs().maxCoeff());
+    return out;
+}
+
+local_residual_summary resto_ineq_elastic_ipm_constr::current_local_residuals(const detail::ineq_local_state &ineq) {
+    local_residual_summary out;
+    if (local_state_dim(ineq) == 0) {
+        return out;
+    }
+    out.inf_prim = ineq.r_d.cwiseAbs().maxCoeff();
+    out.inf_stat = std::max({ineq.r_p.cwiseAbs().maxCoeff(), ineq.r_n.cwiseAbs().maxCoeff()});
+    out.inf_comp = std::max({ineq.r_s_t.cwiseAbs().maxCoeff(),
+                             ineq.r_s_p.cwiseAbs().maxCoeff(),
+                             ineq.r_s_n.cwiseAbs().maxCoeff()});
+    return out;
+}
+
+local_residual_summary resto_eq_elastic_constr::linearized_newton_residuals(const vector_const_ref &delta_c,
+                                                                            const detail::eq_local_state &elastic,
+                                                                            scalar_t lambda_reg) {
+    local_residual_summary out;
+    if (local_state_dim(elastic) == 0) {
+        return out;
+    }
+    const vector res_c = delta_c - elastic.d_p + elastic.d_n + elastic.r_c;
+    const vector res_p = elastic.d_p - elastic.d_lambda - lambda_reg * elastic.d_nu_p + elastic.r_p;
+    const vector res_n = elastic.d_n + elastic.d_lambda - lambda_reg * elastic.d_nu_n + elastic.r_n;
+    const vector res_sp =
+        elastic.nu_p.cwiseProduct(elastic.d_p) + elastic.p.cwiseProduct(elastic.d_nu_p) + elastic.r_s_p;
+    const vector res_sn =
+        elastic.nu_n.cwiseProduct(elastic.d_n) + elastic.n.cwiseProduct(elastic.d_nu_n) + elastic.r_s_n;
+    out.inf_prim = res_c.cwiseAbs().maxCoeff();
+    out.inf_stat = std::max(res_p.cwiseAbs().maxCoeff(), res_n.cwiseAbs().maxCoeff());
+    out.inf_comp = std::max(res_sp.cwiseAbs().maxCoeff(), res_sn.cwiseAbs().maxCoeff());
+    return out;
+}
+
+local_residual_summary resto_ineq_elastic_ipm_constr::linearized_newton_residuals(const vector_const_ref &delta_g,
+                                                                                   const detail::ineq_local_state &ineq,
+                                                                                   scalar_t lambda_reg) {
+    local_residual_summary out;
+    if (local_state_dim(ineq) == 0) {
+        return out;
+    }
+    const vector res_d = delta_g + ineq.d_t - ineq.d_p + ineq.d_n + ineq.r_d;
+    const vector res_p = ineq.d_p - ineq.d_nu_t - lambda_reg * ineq.d_nu_p + ineq.r_p;
+    const vector res_n = ineq.d_n + ineq.d_nu_t - lambda_reg * ineq.d_nu_n + ineq.r_n;
+    const vector res_st =
+        ineq.nu_t.cwiseProduct(ineq.d_t) + ineq.t.cwiseProduct(ineq.d_nu_t) + ineq.r_s_t;
+    const vector res_sp =
+        ineq.nu_p.cwiseProduct(ineq.d_p) + ineq.p.cwiseProduct(ineq.d_nu_p) + ineq.r_s_p;
+    const vector res_sn =
+        ineq.nu_n.cwiseProduct(ineq.d_n) + ineq.n.cwiseProduct(ineq.d_nu_n) + ineq.r_s_n;
+    out.inf_prim = res_d.cwiseAbs().maxCoeff();
+    out.inf_stat = std::max({res_p.cwiseAbs().maxCoeff(), res_n.cwiseAbs().maxCoeff()});
+    out.inf_comp = std::max({res_st.cwiseAbs().maxCoeff(),
+                             res_sp.cwiseAbs().maxCoeff(),
+                             res_sn.cwiseAbs().maxCoeff()});
+    return out;
+}
+
 namespace {
 
 scalar_t max_abs_or_zero(const vector &v) {
@@ -17,6 +383,16 @@ scalar_t max_abs_or_zero(const vector &v) {
 bool resto_local_debug_enabled() {
     static const bool enabled = [] {
         if (const char *env = std::getenv("MOTO_RESTO_DEBUG_LOCAL")) {
+            return std::string_view(env) != "0";
+        }
+        return false;
+    }();
+    return enabled;
+}
+
+bool resto_ls_debug_enabled() {
+    static const bool enabled = [] {
+        if (const char *env = std::getenv("MOTO_RESTO_DEBUG_LS")) {
             return std::string_view(env) != "0";
         }
         return false;
@@ -45,51 +421,6 @@ void forward_source_hessian(const Src &source, func_approx_data &data) {
     dynamic_cast<const generic_func &>(*source).hessian(data);
 }
 
-void refresh_local_state(resto_eq_elastic_constr::approx_data &d);
-void refresh_local_state(resto_ineq_elastic_ipm_constr::approx_data &d);
-void refresh_local_linearization(resto_eq_elastic_constr::approx_data &d);
-void refresh_local_linearization(resto_ineq_elastic_ipm_constr::approx_data &d);
-void refresh_local_corrector(resto_eq_elastic_constr::approx_data &d);
-void refresh_local_corrector(resto_ineq_elastic_ipm_constr::approx_data &d);
-
-template <typename Src, typename ApproxData>
-void pair_overlay_value_impl(const Src &source, func_approx_data &data) {
-    forward_source_value(source, data);
-    auto &d = data.as<ApproxData>();
-    d.base_residual = d.v_;
-    if (d.elastic.dim() == 0) {
-        d.v_ = d.base_residual;
-        if constexpr (requires(ApproxData &x) { x.comp_; }) {
-            d.comp_.setZero();
-        }
-        return;
-    }
-    d.v_ = d.base_residual - d.elastic.p + d.elastic.n;
-    refresh_local_state(d);
-}
-
-template <typename Src, typename ApproxData>
-void pair_overlay_jacobian_impl(const Src &source, func_approx_data &data) {
-    forward_source_jacobian(source, data);
-    auto &d = data.as<ApproxData>();
-    refresh_local_state(d);
-    if (d.ipm_cfg == nullptr || d.ipm_cfg->disable_corrections || d.elastic.dim() == 0) {
-        return;
-    }
-}
-
-template <typename Src, typename ApproxData>
-void pair_overlay_hessian_impl(const Src &source, func_approx_data &data) {
-    if (source->order() >= approx_order::second) {
-        forward_source_hessian(source, data);
-    }
-    auto &d = data.as<ApproxData>();
-    refresh_local_state(d);
-    if (d.ipm_cfg == nullptr || d.ipm_cfg->disable_corrections || d.elastic.dim() == 0) {
-        return;
-    }
-}
-
 std::string overlay_name(const generic_func &source, std::string_view suffix) {
     return fmt::format("{}__{}", source.name(), suffix);
 }
@@ -116,87 +447,58 @@ void copy_dual_slice(vector_ref dst, const node_data &outer, const Overlay &over
     dst = outer.problem().extract(outer.dense().dual_[source_field], exprs[overlay.source_pos()]);
 }
 
-void refresh_local_state(resto_eq_elastic_constr::approx_data &d) {
-    if (d.elastic.dim() == 0 || d.ipm_cfg == nullptr) {
-        return;
-    }
-    compute_local_model(d.base_residual, d.multiplier_, d.elastic, d.rho, d.ipm_cfg->mu, d.lambda_reg);
-}
-
-void refresh_local_state(resto_ineq_elastic_ipm_constr::approx_data &d) {
-    if (d.elastic.dim() == 0 || d.ipm_cfg == nullptr) {
-        return;
-    }
-    compute_local_model(d.base_residual, d.elastic, d.rho, d.ipm_cfg->mu, d.lambda_reg);
-    d.multiplier_ = d.elastic.nu_t;
-}
-
-void refresh_local_linearization(resto_eq_elastic_constr::approx_data &d) {
-    if (d.elastic.dim() == 0 || d.ipm_cfg == nullptr) {
-        return;
-    }
-    const scalar_t target_mu = d.ipm_cfg->ipm_enable_affine_step() ? scalar_t(0.) : d.ipm_cfg->mu;
-    compute_local_model(d.base_residual, d.multiplier_, d.elastic, d.rho, target_mu, d.lambda_reg);
-}
-
-void refresh_local_linearization(resto_ineq_elastic_ipm_constr::approx_data &d) {
-    if (d.elastic.dim() == 0 || d.ipm_cfg == nullptr) {
-        return;
-    }
-    const scalar_t target_mu = d.ipm_cfg->ipm_enable_affine_step() ? scalar_t(0.) : d.ipm_cfg->mu;
-    compute_local_model(d.base_residual, d.elastic, d.rho, target_mu, d.lambda_reg);
-    d.multiplier_ = d.elastic.nu_t;
-}
-
 template <typename ApproxData>
-void refresh_local_corrector_impl(ApproxData &d) {
-    if (d.elastic.dim() == 0 || d.ipm_cfg == nullptr) {
-        return;
-    }
-    if constexpr (requires { d.elastic.corrector_t; }) {
-        vector mu_t = vector::Constant(d.func_.dim(), d.ipm_cfg->mu) - d.elastic.corrector_t;
-        vector mu_p = vector::Constant(d.func_.dim(), d.ipm_cfg->mu) - d.elastic.corrector_p;
-        vector mu_n = vector::Constant(d.func_.dim(), d.ipm_cfg->mu) - d.elastic.corrector_n;
-        compute_local_model(d.base_residual, d.elastic, d.rho, d.ipm_cfg->mu, &mu_t, &mu_p, &mu_n, d.lambda_reg);
-    } else {
-        vector mu_p = vector::Constant(d.func_.dim(), d.ipm_cfg->mu) - d.elastic.corrector_p;
-        vector mu_n = vector::Constant(d.func_.dim(), d.ipm_cfg->mu) - d.elastic.corrector_n;
-        compute_local_model(d.base_residual, d.multiplier_, d.elastic, d.rho, d.ipm_cfg->mu, &mu_p, &mu_n, d.lambda_reg);
-    }
-    if constexpr (requires { d.elastic.nu_t; }) {
-        d.multiplier_ = d.elastic.nu_t;
-    }
-}
-
-void refresh_local_corrector(resto_eq_elastic_constr::approx_data &d) {
-    refresh_local_corrector_impl(d);
-}
-
-void refresh_local_corrector(resto_ineq_elastic_ipm_constr::approx_data &d) {
-    refresh_local_corrector_impl(d);
-}
-
-template <typename ApproxData>
-void finalize_predictor_pairs_like_ipm(ApproxData &d, workspace_data *cfg, scalar_t dual_alpha) {
+void finalize_predictor_pairs_like_ipm(ApproxData &d,
+                                       workspace_data *cfg,
+                                       scalar_t pair_dual_alpha) {
     auto &worker = cfg->as<solver::ipm_config::worker_type>();
     auto &ls = cfg->as<linesearch_config>();
     assert(d.ipm_cfg != nullptr);
     assert(d.ipm_cfg->ipm_computing_affine_step() &&
            "ipm affine step computation not started but affine step is requested");
-    d.elastic.finalize_predictor_step(ls, worker);
+    const scalar_t alpha_primal = ls.alpha_primal;
+    const scalar_t alpha_dual = pair_dual_alpha;
+    if constexpr (std::is_same_v<ApproxData, resto_eq_elastic_constr::approx_data>) {
+        for (const auto &[value, step, dual, dual_step] : {
+                 std::tuple{&d.elastic.p, &d.elastic.d_p, &d.elastic.nu_p, &d.elastic.d_nu_p},
+                 std::tuple{&d.elastic.n, &d.elastic.d_n, &d.elastic.nu_n, &d.elastic.d_nu_n},
+             }) {
+            if (value->size() == 0) {
+                continue;
+            }
+            worker.n_ipm_cstr += static_cast<size_t>(value->size());
+            worker.prev_aff_comp += dual->dot(*value);
+            worker.post_aff_comp +=
+                (*dual + alpha_dual * *dual_step).dot(*value + alpha_primal * *step);
+        }
+    } else {
+        for (const auto &[value, step, dual, dual_step] : {
+                 std::tuple{&d.elastic.t, &d.elastic.d_t, &d.elastic.nu_t, &d.elastic.d_nu_t},
+                 std::tuple{&d.elastic.p, &d.elastic.d_p, &d.elastic.nu_p, &d.elastic.d_nu_p},
+                 std::tuple{&d.elastic.n, &d.elastic.d_n, &d.elastic.nu_n, &d.elastic.d_nu_n},
+             }) {
+            if (value->size() == 0) {
+                continue;
+            }
+            worker.n_ipm_cstr += static_cast<size_t>(value->size());
+            worker.prev_aff_comp += dual->dot(*value);
+            worker.post_aff_comp +=
+                (*dual + alpha_dual * *dual_step).dot(*value + alpha_primal * *step);
+        }
+    }
     if constexpr (requires { d.elastic.corrector_t; d.elastic.d_nu_t; d.elastic.d_t; }) {
         d.elastic.corrector_t.array() =
-            dual_alpha * d.elastic.d_nu_t.array() * ls.alpha_primal * d.elastic.d_t.array();
+            pair_dual_alpha * d.elastic.d_nu_t.array() * ls.alpha_primal * d.elastic.d_t.array();
     }
     d.elastic.corrector_p.array() =
-        dual_alpha * d.elastic.d_nu_p.array() * ls.alpha_primal * d.elastic.d_p.array();
+        pair_dual_alpha * d.elastic.d_nu_p.array() * ls.alpha_primal * d.elastic.d_p.array();
     d.elastic.corrector_n.array() =
-        dual_alpha * d.elastic.d_nu_n.array() * ls.alpha_primal * d.elastic.d_n.array();
+        pair_dual_alpha * d.elastic.d_nu_n.array() * ls.alpha_primal * d.elastic.d_n.array();
 }
 
 template <typename ApproxData>
 void apply_corrector_pairs_like_ipm(ApproxData &d) {
-    if (d.ipm_cfg == nullptr || d.elastic.dim() == 0) {
+    if (d.ipm_cfg == nullptr || local_state_dim(d.elastic) == 0) {
         return;
     }
     if (!d.ipm_cfg->ipm_accept_corrector()) {
@@ -236,7 +538,7 @@ void propagate_pair_hessian(ApproxData &d) {
 
 template <typename ApproxData>
 void finalize_pair_newton_step(ApproxData &d) {
-    if (d.elastic.dim() == 0) {
+    if (local_state_dim(d.elastic) == 0) {
         return;
     }
     vector delta(d.func_.dim());
@@ -248,10 +550,15 @@ void finalize_pair_newton_step(ApproxData &d) {
         }
         ++arg_idx;
     }
-    recover_local_step(delta, d.elastic, d.lambda_reg);
+    if constexpr (std::is_same_v<ApproxData, resto_eq_elastic_constr::approx_data>) {
+        resto_eq_elastic_constr::recover_local_step(delta, d.elastic, d.lambda_reg);
+    } else {
+        resto_ineq_elastic_ipm_constr::recover_local_step(delta, d.elastic, d.lambda_reg);
+    }
     if constexpr (std::is_same_v<ApproxData, resto_ineq_elastic_ipm_constr::approx_data>) {
-        if (resto_local_debug_enabled() && d.elastic.dim() > 0) {
-            const auto summary = linearized_newton_residuals(delta, d.elastic, d.lambda_reg);
+        if (resto_local_debug_enabled() && local_state_dim(d.elastic) > 0) {
+            const auto summary =
+                resto_ineq_elastic_ipm_constr::linearized_newton_residuals(delta, d.elastic, d.lambda_reg);
             fmt::print("    [resto-newton:{}] linres prim={:.3e} stat={:.3e} comp={:.3e}\n",
                        d.func_.name(), summary.inf_prim, summary.inf_stat, summary.inf_comp);
         }
@@ -287,19 +594,33 @@ void initialize_pair_overlay(ApproxData &d, InitFn &&init_fn) {
         }
     }
     d.multiplier_backup = d.multiplier_;
-    refresh_local_state(d);
 }
 
 template <typename ApproxData>
-void apply_affine_pairs_like_ipm(ApproxData &d, workspace_data *cfg, scalar_t dual_alpha) {
+void apply_affine_pairs_like_ipm(ApproxData &d,
+                                 workspace_data *cfg,
+                                 scalar_t multiplier_dual_alpha,
+                                 scalar_t pair_dual_alpha) {
     auto &ls = cfg->as<linesearch_config>();
     assert(d.ipm_cfg != nullptr);
     assert(!d.ipm_cfg->ipm_computing_affine_step() && "ipm affine step computation not ended");
-    d.elastic.apply_affine_step(ls);
+    if constexpr (std::is_same_v<ApproxData, resto_eq_elastic_constr::approx_data>) {
+        positivity::apply_pair_step(d.elastic.p, d.elastic.d_p, ls.alpha_primal, d.elastic.nu_p, d.elastic.d_nu_p,
+                                    pair_dual_alpha);
+        positivity::apply_pair_step(d.elastic.n, d.elastic.d_n, ls.alpha_primal, d.elastic.nu_n, d.elastic.d_nu_n,
+                                    pair_dual_alpha);
+    } else {
+        positivity::apply_pair_step(d.elastic.t, d.elastic.d_t, ls.alpha_primal, d.elastic.nu_t, d.elastic.d_nu_t,
+                                    pair_dual_alpha);
+        positivity::apply_pair_step(d.elastic.p, d.elastic.d_p, ls.alpha_primal, d.elastic.nu_p, d.elastic.d_nu_p,
+                                    pair_dual_alpha);
+        positivity::apply_pair_step(d.elastic.n, d.elastic.d_n, ls.alpha_primal, d.elastic.nu_n, d.elastic.d_nu_n,
+                                    pair_dual_alpha);
+    }
     if constexpr (requires { d.elastic.nu_t; }) {
         d.multiplier_ = d.elastic.nu_t;
     } else {
-        d.multiplier_.noalias() += dual_alpha * d.d_multiplier_;
+        d.multiplier_.noalias() += multiplier_dual_alpha * d.d_multiplier_;
     }
     if (d.ipm_cfg->ipm_accept_corrector()) {
         if constexpr (requires { d.elastic.t; d.elastic.nu_t; }) {
@@ -327,8 +648,15 @@ void update_pair_ls_bounds_like_ipm(ApproxData &d,
     }
     const scalar_t alpha_p = alpha_candidate(d.elastic.p, d.elastic.d_p);
     const scalar_t alpha_n = alpha_candidate(d.elastic.n, d.elastic.d_n);
-    d.elastic.update_ls_bounds(ls);
-    if (ls.primal.alpha_max < before_primal) {
+    if constexpr (std::is_same_v<ApproxData, resto_eq_elastic_constr::approx_data>) {
+        positivity::update_pair_bounds(ls, d.elastic.p, d.elastic.d_p, d.elastic.nu_p, d.elastic.d_nu_p);
+        positivity::update_pair_bounds(ls, d.elastic.n, d.elastic.d_n, d.elastic.nu_n, d.elastic.d_nu_n);
+    } else {
+        positivity::update_pair_bounds(ls, d.elastic.t, d.elastic.d_t, d.elastic.nu_t, d.elastic.d_nu_t);
+        positivity::update_pair_bounds(ls, d.elastic.p, d.elastic.d_p, d.elastic.nu_p, d.elastic.d_nu_p);
+        positivity::update_pair_bounds(ls, d.elastic.n, d.elastic.d_n, d.elastic.nu_n, d.elastic.d_nu_n);
+    }
+    if (resto_ls_debug_enabled() && ls.primal.alpha_max < before_primal) {
         fmt::print("    [resto-ls:{}:{}] alpha_t={:.3e} alpha_p={:.3e} (p={:.3e}, dp={:.3e}) alpha_n={:.3e} (n={:.3e}, dn={:.3e}) -> primal.alpha_max={:.3e}\n",
                    kind, name,
                    alpha_t,
@@ -340,75 +668,38 @@ void update_pair_ls_bounds_like_ipm(ApproxData &d,
 
 template <typename ApproxData>
 void backup_trial_pairs_like_ipm(ApproxData &d) {
-    d.elastic.backup_trial_state();
+    if constexpr (std::is_same_v<ApproxData, resto_eq_elastic_constr::approx_data>) {
+        positivity::backup_pair(d.elastic.p, d.elastic.p_backup, d.elastic.nu_p, d.elastic.nu_p_backup);
+        positivity::backup_pair(d.elastic.n, d.elastic.n_backup, d.elastic.nu_n, d.elastic.nu_n_backup);
+    } else {
+        positivity::backup_pair(d.elastic.t, d.elastic.t_backup, d.elastic.nu_t, d.elastic.nu_t_backup);
+        positivity::backup_pair(d.elastic.p, d.elastic.p_backup, d.elastic.nu_p, d.elastic.nu_p_backup);
+        positivity::backup_pair(d.elastic.n, d.elastic.n_backup, d.elastic.nu_n, d.elastic.nu_n_backup);
+    }
     d.multiplier_backup = d.multiplier_;
 }
 
 template <typename ApproxData>
 void restore_trial_pairs_like_ipm(ApproxData &d) {
-    d.elastic.restore_trial_state();
+    if constexpr (std::is_same_v<ApproxData, resto_eq_elastic_constr::approx_data>) {
+        positivity::restore_pair(d.elastic.p, d.elastic.p_backup, d.elastic.nu_p, d.elastic.nu_p_backup);
+        positivity::restore_pair(d.elastic.n, d.elastic.n_backup, d.elastic.nu_n, d.elastic.nu_n_backup);
+    } else {
+        positivity::restore_pair(d.elastic.t, d.elastic.t_backup, d.elastic.nu_t, d.elastic.nu_t_backup);
+        positivity::restore_pair(d.elastic.p, d.elastic.p_backup, d.elastic.nu_p, d.elastic.nu_p_backup);
+        positivity::restore_pair(d.elastic.n, d.elastic.n_backup, d.elastic.nu_n, d.elastic.nu_n_backup);
+    }
     d.multiplier_ = d.multiplier_backup;
 }
 
 template <typename ApproxData>
-local_residual_summary current_pair_residuals(const ApproxData &d) {
-    if constexpr (std::is_same_v<ApproxData, resto_eq_elastic_constr::approx_data>) {
-        auto elastic = d.elastic;
-        if (elastic.dim() == 0 || d.ipm_cfg == nullptr) {
-            return current_local_residuals(elastic);
-        }
-        compute_local_model(d.base_residual, d.multiplier_, elastic, d.rho, d.ipm_cfg->mu, d.lambda_reg);
-        return current_local_residuals(elastic);
-    }
-    if constexpr (std::is_same_v<ApproxData, resto_ineq_elastic_ipm_constr::approx_data>) {
-        auto elastic = d.elastic;
-        if (elastic.dim() != 0 && d.ipm_cfg != nullptr) {
-            compute_local_model(d.base_residual, elastic, d.rho, d.ipm_cfg->mu, d.lambda_reg);
-        }
-        const auto summary = current_local_residuals(elastic);
-        if (resto_local_debug_enabled() && (summary.inf_stat > 1e-6 || summary.inf_comp > 1e-6)) {
-            const auto &e = elastic;
-            Eigen::Index i_rp = 0, i_rn = 0, i_rst = 0, i_rsp = 0, i_rsn = 0;
-            const scalar_t max_rp = e.r_p.size() ? e.r_p.cwiseAbs().maxCoeff(&i_rp) : 0.;
-            const scalar_t max_rn = e.r_n.size() ? e.r_n.cwiseAbs().maxCoeff(&i_rn) : 0.;
-            const scalar_t max_rst = e.r_s_t.size() ? e.r_s_t.cwiseAbs().maxCoeff(&i_rst) : 0.;
-            const scalar_t max_rsp = e.r_s_p.size() ? e.r_s_p.cwiseAbs().maxCoeff(&i_rsp) : 0.;
-            const scalar_t max_rsn = e.r_s_n.size() ? e.r_s_n.cwiseAbs().maxCoeff(&i_rsn) : 0.;
-            const bool p_dominates = max_rp >= max_rn;
-            const Eigen::Index i_stat = p_dominates ? i_rp : i_rn;
-            Eigen::Index i_comp = i_rst;
-            const char *which_comp = "r_s_t";
-            if (max_rsp >= max_rst && max_rsp >= max_rsn) {
-                i_comp = i_rsp;
-                which_comp = "r_s_p";
-            } else if (max_rsn >= max_rst && max_rsn >= max_rsp) {
-                i_comp = i_rsn;
-                which_comp = "r_s_n";
-            }
-            fmt::print(
-                "    [resto-local:{}] stat={:.3e} comp={:.3e} "
-                "r_p({})={:.3e} r_n({})={:.3e} {}({})=[{:.3e},{:.3e},{:.3e}] "
-                "state(stat) t={:.3e} p={:.3e} n={:.3e} nu_t={:.3e} nu_p={:.3e} nu_n={:.3e} "
-                "state(comp) t={:.3e} p={:.3e} n={:.3e} nu_t={:.3e} nu_p={:.3e} nu_n={:.3e}\n",
-                d.func_.name(), summary.inf_stat, summary.inf_comp,
-                i_rp, e.r_p(i_rp), i_rn, e.r_n(i_rn), which_comp, i_comp,
-                e.r_s_t(i_comp), e.r_s_p(i_comp), e.r_s_n(i_comp),
-                e.t(i_stat), e.p(i_stat), e.n(i_stat), e.nu_t(i_stat), e.nu_p(i_stat), e.nu_n(i_stat),
-                e.t(i_comp), e.p(i_comp), e.n(i_comp), e.nu_t(i_comp), e.nu_p(i_comp), e.nu_n(i_comp));
-        }
-        return summary;
-    }
-    return current_local_residuals(d.elastic);
-}
-
-template <typename ApproxData>
 scalar_t objective_penalty_from_pairs(const ApproxData &d) {
-    return d.rho * d.elastic.penalty_sum();
+    return d.rho * (d.elastic.p.sum() + d.elastic.n.sum());
 }
 
 template <typename ApproxData>
 scalar_t objective_penalty_dir_deriv_from_pairs(const ApproxData &d) {
-    return d.rho * d.elastic.penalty_dir_deriv();
+    return d.rho * (d.elastic.d_p.sum() + d.elastic.d_n.sum());
 }
 
 template <typename ApproxData>
@@ -416,7 +707,16 @@ scalar_t search_penalty_from_pairs(const ApproxData &d) {
     if (d.ipm_cfg == nullptr) {
         return 0.;
     }
-    return d.ipm_cfg->mu * d.elastic.barrier_log_sum();
+    if constexpr (std::is_same_v<ApproxData, resto_eq_elastic_constr::approx_data>) {
+        return d.ipm_cfg->mu *
+               (d.elastic.p.array().max(scalar_t(1e-16)).log().sum() +
+                d.elastic.n.array().max(scalar_t(1e-16)).log().sum());
+    } else {
+        return d.ipm_cfg->mu *
+               (d.elastic.t.array().max(scalar_t(1e-16)).log().sum() +
+                d.elastic.p.array().max(scalar_t(1e-16)).log().sum() +
+                d.elastic.n.array().max(scalar_t(1e-16)).log().sum());
+    }
 }
 
 template <typename ApproxData>
@@ -424,7 +724,16 @@ scalar_t search_penalty_dir_deriv_from_pairs(const ApproxData &d) {
     if (d.ipm_cfg == nullptr) {
         return 0.;
     }
-    return d.ipm_cfg->mu * d.elastic.barrier_dir_deriv();
+    if constexpr (std::is_same_v<ApproxData, resto_eq_elastic_constr::approx_data>) {
+        return d.ipm_cfg->mu *
+               ((d.elastic.d_p.array() / d.elastic.p_backup.array().max(scalar_t(1e-16))).sum() +
+                (d.elastic.d_n.array() / d.elastic.n_backup.array().max(scalar_t(1e-16))).sum());
+    } else {
+        return d.ipm_cfg->mu *
+               ((d.elastic.d_t.array() / d.elastic.t_backup.array().max(scalar_t(1e-16))).sum() +
+                (d.elastic.d_p.array() / d.elastic.p_backup.array().max(scalar_t(1e-16))).sum() +
+                (d.elastic.d_n.array() / d.elastic.n_backup.array().max(scalar_t(1e-16))).sum());
+    }
 }
 
 } // namespace
@@ -531,27 +840,72 @@ func_approx_data_ptr_t resto_eq_elastic_constr::create_approx_data(sym_data &pri
     return std::make_unique<approx_data>(std::move(*base_d));
 }
 
+void resto_eq_elastic_constr::compute_local_model(approx_data &d,
+                                                  scalar_t mu_bar,
+                                                  const vector *mu_p_target,
+                                                  const vector *mu_n_target) const {
+    if (local_state_dim(d.elastic) == 0 || d.ipm_cfg == nullptr) {
+        return;
+    }
+    resto_eq_elastic_constr::compute_local_model(d.elastic,
+                                                 d.base_residual,
+                                                 d.multiplier_,
+                                                 d.rho,
+                                                 mu_bar,
+                                                 mu_p_target,
+                                                 mu_n_target,
+                                                 d.lambda_reg);
+}
+
+local_residual_summary resto_eq_elastic_constr::current_local_residuals(const approx_data &data) const {
+    auto elastic = data.elastic;
+    if (local_state_dim(elastic) == 0 || data.ipm_cfg == nullptr) {
+        return resto_eq_elastic_constr::current_local_residuals(elastic);
+    }
+    resto_eq_elastic_constr::compute_local_model(elastic,
+                                                 data.base_residual,
+                                                 data.multiplier_,
+                                                 data.rho,
+                                                 data.ipm_cfg->mu,
+                                                 data.lambda_reg);
+    return resto_eq_elastic_constr::current_local_residuals(elastic);
+}
+
 void resto_eq_elastic_constr::value_impl(func_approx_data &data) const {
-    pair_overlay_value_impl<constr, approx_data>(source_, data);
+    forward_source_value(source_, data);
+    auto &d = data.as<approx_data>();
+    d.base_residual = d.v_;
+    if (local_state_dim(d.elastic) == 0) {
+        d.v_ = d.base_residual;
+        return;
+    }
+    d.v_ = d.base_residual - d.elastic.p + d.elastic.n;
+    compute_local_model(d, d.ipm_cfg->mu);
 }
 
 void resto_eq_elastic_constr::jacobian_impl(func_approx_data &data) const {
-    pair_overlay_jacobian_impl<constr, approx_data>(source_, data);
+    forward_source_jacobian(source_, data);
     auto &d = data.as<approx_data>();
-    if (d.ipm_cfg == nullptr || d.ipm_cfg->disable_corrections || d.elastic.dim() == 0) {
+    compute_local_model(d, d.ipm_cfg->mu);
+    if (d.ipm_cfg == nullptr || d.ipm_cfg->disable_corrections || local_state_dim(d.elastic) == 0) {
         return;
     }
-    refresh_local_linearization(d);
+    const scalar_t target_mu = d.ipm_cfg->ipm_enable_affine_step() ? scalar_t(0.) : d.ipm_cfg->mu;
+    compute_local_model(d, target_mu);
     propagate_jacobian(d);
 }
 
 void resto_eq_elastic_constr::hessian_impl(func_approx_data &data) const {
-    pair_overlay_hessian_impl<constr, approx_data>(source_, data);
+    if (source_->order() >= approx_order::second) {
+        forward_source_hessian(source_, data);
+    }
     auto &d = data.as<approx_data>();
-    if (d.ipm_cfg == nullptr || d.ipm_cfg->disable_corrections || d.elastic.dim() == 0) {
+    compute_local_model(d, d.ipm_cfg->mu);
+    if (d.ipm_cfg == nullptr || d.ipm_cfg->disable_corrections || local_state_dim(d.elastic) == 0) {
         return;
     }
-    refresh_local_linearization(d);
+    const scalar_t target_mu = d.ipm_cfg->ipm_enable_affine_step() ? scalar_t(0.) : d.ipm_cfg->mu;
+    compute_local_model(d, target_mu);
     propagate_hessian(d);
 }
 
@@ -567,10 +921,11 @@ void resto_eq_elastic_constr::propagate_res_stats(func_approx_data &) const {}
 
 void resto_eq_elastic_constr::initialize(data_map_t &data) const {
     auto &d = data.as<approx_data>();
-    d.elastic.resize(0, d.func_.dim());
+    resto_eq_elastic_constr::resize_local_state(d.elastic, 0, d.func_.dim());
     initialize_pair_overlay(d, [&](Eigen::Index i) {
-        return initialize_elastic_pair(d.base_residual(i), d.rho, d.ipm_cfg->mu);
+        return resto_eq_elastic_constr::initialize_elastic_pair(d.base_residual(i), d.rho, d.ipm_cfg->mu);
     });
+    compute_local_model(d, d.ipm_cfg->mu);
 }
 
 void resto_eq_elastic_constr::finalize_newton_step(data_map_t &data) const {
@@ -579,19 +934,22 @@ void resto_eq_elastic_constr::finalize_newton_step(data_map_t &data) const {
 
 void resto_eq_elastic_constr::finalize_predictor_step(data_map_t &data, workspace_data *cfg) const {
     auto &d = data.as<approx_data>();
-    finalize_predictor_pairs_like_ipm(d, cfg, cfg->as<linesearch_config>().dual_alpha_for_eq());
+    finalize_predictor_pairs_like_ipm(d, cfg, cfg->as<linesearch_config>().dual_alpha_for_ineq());
 }
 
 void resto_eq_elastic_constr::apply_corrector_step(data_map_t &data) const {
     auto &d = data.as<approx_data>();
     apply_corrector_pairs_like_ipm(d);
-    refresh_local_corrector(d);
+    vector mu_p = vector::Constant(d.func_.dim(), d.ipm_cfg->mu) - d.elastic.corrector_p;
+    vector mu_n = vector::Constant(d.func_.dim(), d.ipm_cfg->mu) - d.elastic.corrector_n;
+    compute_local_model(d, d.ipm_cfg->mu, &mu_p, &mu_n);
     propagate_jacobian(d);
 }
 
 void resto_eq_elastic_constr::apply_affine_step(data_map_t &data, workspace_data *cfg) const {
     auto &d = data.as<approx_data>();
-    apply_affine_pairs_like_ipm(d, cfg, cfg->as<linesearch_config>().dual_alpha_for_eq());
+    auto &ls = cfg->as<linesearch_config>();
+    apply_affine_pairs_like_ipm(d, cfg, ls.dual_alpha_for_eq(), ls.dual_alpha_for_ineq());
 }
 
 void resto_eq_elastic_constr::update_ls_bounds(data_map_t &data, workspace_data *cfg) const {
@@ -624,11 +982,11 @@ scalar_t resto_eq_elastic_constr::search_penalty_dir_deriv(const func_approx_dat
 }
 
 scalar_t resto_eq_elastic_constr::local_stat_residual_inf(const func_approx_data &data) const {
-    return current_pair_residuals(static_cast<const approx_data &>(data)).inf_stat;
+    return current_local_residuals(static_cast<const approx_data &>(data)).inf_stat;
 }
 
 scalar_t resto_eq_elastic_constr::local_comp_residual_inf(const func_approx_data &data) const {
-    return current_pair_residuals(static_cast<const approx_data &>(data)).inf_comp;
+    return current_local_residuals(static_cast<const approx_data &>(data)).inf_comp;
 }
 
 resto_ineq_elastic_ipm_constr::resto_ineq_elastic_ipm_constr(const std::string &name,
@@ -661,6 +1019,73 @@ func_approx_data_ptr_t resto_ineq_elastic_ipm_constr::create_approx_data(sym_dat
     return std::make_unique<approx_data>(std::move(*base_d));
 }
 
+void resto_ineq_elastic_ipm_constr::compute_local_model(approx_data &d,
+                                                        scalar_t mu_bar,
+                                                        const vector *mu_t_target,
+                                                        const vector *mu_p_target,
+                                                        const vector *mu_n_target) const {
+    if (local_state_dim(d.elastic) == 0 || d.ipm_cfg == nullptr) {
+        return;
+    }
+    resto_ineq_elastic_ipm_constr::compute_local_model(d.elastic,
+                                                       d.base_residual,
+                                                       d.rho,
+                                                       mu_bar,
+                                                       mu_t_target,
+                                                       mu_p_target,
+                                                       mu_n_target,
+                                                       d.lambda_reg);
+    d.multiplier_ = d.elastic.nu_t;
+}
+
+local_residual_summary resto_ineq_elastic_ipm_constr::current_local_residuals(const approx_data &data) const {
+    auto elastic = data.elastic;
+    if (local_state_dim(elastic) != 0 && data.ipm_cfg != nullptr) {
+        resto_ineq_elastic_ipm_constr::compute_local_model(elastic,
+                                                           data.base_residual,
+                                                           data.rho,
+                                                           data.ipm_cfg->mu,
+                                                           data.lambda_reg);
+    }
+    const auto summary = resto_ineq_elastic_ipm_constr::current_local_residuals(elastic);
+    if (resto_local_debug_enabled() && (summary.inf_stat > 1e-6 || summary.inf_comp > 1e-6)) {
+        const auto &e = elastic;
+        Eigen::Index i_rp = 0, i_rn = 0, i_rst = 0, i_rsp = 0, i_rsn = 0;
+        const scalar_t max_rp = e.r_p.size() ? e.r_p.cwiseAbs().maxCoeff(&i_rp) : 0.;
+        const scalar_t max_rn = e.r_n.size() ? e.r_n.cwiseAbs().maxCoeff(&i_rn) : 0.;
+        const scalar_t max_rst = e.r_s_t.size() ? e.r_s_t.cwiseAbs().maxCoeff(&i_rst) : 0.;
+        const scalar_t max_rsp = e.r_s_p.size() ? e.r_s_p.cwiseAbs().maxCoeff(&i_rsp) : 0.;
+        const scalar_t max_rsn = e.r_s_n.size() ? e.r_s_n.cwiseAbs().maxCoeff(&i_rsn) : 0.;
+        const bool p_dominates = max_rp >= max_rn;
+        const Eigen::Index i_stat = p_dominates ? i_rp : i_rn;
+        Eigen::Index i_comp = i_rst;
+        const char *which_comp = "r_s_t";
+        if (max_rsp >= max_rst && max_rsp >= max_rsn) {
+            i_comp = i_rsp;
+            which_comp = "r_s_p";
+        } else if (max_rsn >= max_rst && max_rsn >= max_rsp) {
+            i_comp = i_rsn;
+            which_comp = "r_s_n";
+        }
+        const char *which_stat = p_dominates ? "r_p" : "r_n";
+        const scalar_t stat_value = p_dominates ? e.r_p(i_stat) : e.r_n(i_stat);
+        const scalar_t comp_value =
+            std::string_view(which_comp) == "r_s_t" ? e.r_s_t(i_comp)
+            : std::string_view(which_comp) == "r_s_p" ? e.r_s_p(i_comp)
+                                                      : e.r_s_n(i_comp);
+        fmt::print(
+            "    [resto-local:{}] stat={:.3e} {}({})={:.3e} "
+            "comp={:.3e} {}({})={:.3e} "
+            "state[stat]=[t={:.3e} p={:.3e} n={:.3e} nu_t={:.3e} nu_p={:.3e} nu_n={:.3e}] "
+            "state[comp]=[t={:.3e} p={:.3e} n={:.3e} nu_t={:.3e} nu_p={:.3e} nu_n={:.3e}]\n",
+            data.func_.name(), summary.inf_stat, which_stat, i_stat, stat_value,
+            summary.inf_comp, which_comp, i_comp, comp_value,
+            e.t(i_stat), e.p(i_stat), e.n(i_stat), e.nu_t(i_stat), e.nu_p(i_stat), e.nu_n(i_stat),
+            e.t(i_comp), e.p(i_comp), e.n(i_comp), e.nu_t(i_comp), e.nu_p(i_comp), e.nu_n(i_comp));
+    }
+    return summary;
+}
+
 void resto_ineq_elastic_ipm_constr::value_impl(func_approx_data &data) const {
     forward_source_value(source_, data);
     auto &d = data.as<approx_data>();
@@ -669,31 +1094,37 @@ void resto_ineq_elastic_ipm_constr::value_impl(func_approx_data &data) const {
     // current local model. Keep lag_data::comp_ neutral so public stage comp
     // statistics are not polluted by restoration-only bookkeeping.
     d.comp_.setZero();
-    if (d.elastic.dim() == 0) {
+    if (local_state_dim(d.elastic) == 0) {
         d.v_ = d.base_residual;
         return;
     }
     d.v_ = d.base_residual + d.elastic.t - d.elastic.p + d.elastic.n;
-    refresh_local_state(d);
+    compute_local_model(d, d.ipm_cfg->mu);
 }
 
 void resto_ineq_elastic_ipm_constr::jacobian_impl(func_approx_data &data) const {
-    pair_overlay_jacobian_impl<constr, approx_data>(source_, data);
+    forward_source_jacobian(source_, data);
     auto &d = data.as<approx_data>();
-    if (d.ipm_cfg == nullptr || d.ipm_cfg->disable_corrections || d.elastic.dim() == 0) {
+    compute_local_model(d, d.ipm_cfg->mu);
+    if (d.ipm_cfg == nullptr || d.ipm_cfg->disable_corrections || local_state_dim(d.elastic) == 0) {
         return;
     }
-    refresh_local_linearization(d);
+    const scalar_t target_mu = d.ipm_cfg->ipm_enable_affine_step() ? scalar_t(0.) : d.ipm_cfg->mu;
+    compute_local_model(d, target_mu);
     propagate_jacobian(d);
 }
 
 void resto_ineq_elastic_ipm_constr::hessian_impl(func_approx_data &data) const {
-    pair_overlay_hessian_impl<constr, approx_data>(source_, data);
+    if (source_->order() >= approx_order::second) {
+        forward_source_hessian(source_, data);
+    }
     auto &d = data.as<approx_data>();
-    if (d.ipm_cfg == nullptr || d.ipm_cfg->disable_corrections || d.elastic.dim() == 0) {
+    compute_local_model(d, d.ipm_cfg->mu);
+    if (d.ipm_cfg == nullptr || d.ipm_cfg->disable_corrections || local_state_dim(d.elastic) == 0) {
         return;
     }
-    refresh_local_linearization(d);
+    const scalar_t target_mu = d.ipm_cfg->ipm_enable_affine_step() ? scalar_t(0.) : d.ipm_cfg->mu;
+    compute_local_model(d, target_mu);
     propagate_hessian(d);
 }
 
@@ -709,11 +1140,12 @@ void resto_ineq_elastic_ipm_constr::propagate_res_stats(func_approx_data &) cons
 
 void resto_ineq_elastic_ipm_constr::initialize(data_map_t &data) const {
     auto &d = data.as<approx_data>();
-    d.elastic.resize(d.func_.dim(), 0);
+    resto_ineq_elastic_ipm_constr::resize_local_state(d.elastic, d.func_.dim(), 0);
     const scalar_t eps = scalar_t(1e-16);
     for (Eigen::Index i = 0; i < d.base_residual.size(); ++i) {
         const scalar_t nu_t0 = std::max(std::min(d.rho, d.multiplier_(i)), eps);
-        const auto init = initialize_elastic_ineq_scalar(d.base_residual(i), d.rho, d.ipm_cfg->mu, nu_t0);
+        const auto init =
+            resto_ineq_elastic_ipm_constr::initialize_elastic_ineq_scalar(d.base_residual(i), d.rho, d.ipm_cfg->mu, nu_t0);
         d.elastic.t(i) = init.t;
         d.elastic.p(i) = init.p;
         d.elastic.n(i) = init.n;
@@ -723,7 +1155,7 @@ void resto_ineq_elastic_ipm_constr::initialize(data_map_t &data) const {
         d.multiplier_(i) = init.nu_t;
     }
     d.multiplier_backup = d.multiplier_;
-    refresh_local_state(d);
+    compute_local_model(d, d.ipm_cfg->mu);
 }
 
 void resto_ineq_elastic_ipm_constr::finalize_newton_step(data_map_t &data) const {
@@ -739,13 +1171,17 @@ void resto_ineq_elastic_ipm_constr::finalize_predictor_step(data_map_t &data, wo
 void resto_ineq_elastic_ipm_constr::apply_corrector_step(data_map_t &data) const {
     auto &d = data.as<approx_data>();
     apply_corrector_pairs_like_ipm(d);
-    refresh_local_corrector(d);
+    vector mu_t = vector::Constant(d.func_.dim(), d.ipm_cfg->mu) - d.elastic.corrector_t;
+    vector mu_p = vector::Constant(d.func_.dim(), d.ipm_cfg->mu) - d.elastic.corrector_p;
+    vector mu_n = vector::Constant(d.func_.dim(), d.ipm_cfg->mu) - d.elastic.corrector_n;
+    compute_local_model(d, d.ipm_cfg->mu, &mu_t, &mu_p, &mu_n);
     propagate_jacobian(d);
 }
 
 void resto_ineq_elastic_ipm_constr::apply_affine_step(data_map_t &data, workspace_data *cfg) const {
     auto &d = data.as<approx_data>();
-    apply_affine_pairs_like_ipm(d, cfg, cfg->as<linesearch_config>().dual_alpha_for_ineq());
+    const scalar_t alpha_dual = cfg->as<linesearch_config>().dual_alpha_for_ineq();
+    apply_affine_pairs_like_ipm(d, cfg, alpha_dual, alpha_dual);
 }
 
 void resto_ineq_elastic_ipm_constr::update_ls_bounds(data_map_t &data, workspace_data *cfg) const {
@@ -778,11 +1214,11 @@ scalar_t resto_ineq_elastic_ipm_constr::search_penalty_dir_deriv(const func_appr
 }
 
 scalar_t resto_ineq_elastic_ipm_constr::local_stat_residual_inf(const func_approx_data &data) const {
-    return current_pair_residuals(static_cast<const approx_data &>(data)).inf_stat;
+    return current_local_residuals(static_cast<const approx_data &>(data)).inf_stat;
 }
 
 scalar_t resto_ineq_elastic_ipm_constr::local_comp_residual_inf(const func_approx_data &data) const {
-    return current_pair_residuals(static_cast<const approx_data &>(data)).inf_comp;
+    return current_local_residuals(static_cast<const approx_data &>(data)).inf_comp;
 }
 
 ocp_ptr_t build_restoration_overlay_problem(const ocp_ptr_t &source_prob,

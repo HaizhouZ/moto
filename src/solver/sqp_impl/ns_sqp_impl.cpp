@@ -676,7 +676,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                 ls.failure_reason == filter_linesearch_per_iter_data::failure_reason_t::tiny_step &&
                 settings.restoration.enabled &&
                 kkt_last.inf_prim_res > settings.prim_tol &&
-                settings.ls.alpha_primal <= current_phase_alpha_min(ls);
+                settings.ls.alpha_primal <= current_linesearch_alpha_min(ls);
 
             if (tiny_step_trigger) {
                 kkt_last = restoration_update(kkt_last, ls);

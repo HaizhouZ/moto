@@ -43,10 +43,6 @@ bool resto_eq_debug_enabled() {
 
 void dump_resto_eq_node(ns_sqp::data &d, std::string_view label) {
     fmt::print("=== resto-eq-debug:{} node={} ===\n", label, d.problem().uid());
-    fmt::print("  dims: eq_x={} eq_xu={} eq_x_soft={} eq_xu_soft={} ineq_x={} ineq_xu={}\n",
-               d.problem().dim(__eq_x), d.problem().dim(__eq_xu),
-               d.problem().dim(__eq_x_soft), d.problem().dim(__eq_xu_soft),
-               d.problem().dim(__ineq_x), d.problem().dim(__ineq_xu));
     fmt::print("  lag_jac_corr[x]={:.3e} lag_jac_corr[u]={:.3e} lag_jac_corr[y]={:.3e}\n",
                d.dense().lag_jac_corr_[__x].size() ? d.dense().lag_jac_corr_[__x].cwiseAbs().maxCoeff() : 0.,
                d.dense().lag_jac_corr_[__u].size() ? d.dense().lag_jac_corr_[__u].cwiseAbs().maxCoeff() : 0.,
@@ -56,34 +52,21 @@ void dump_resto_eq_node(ns_sqp::data &d, std::string_view label) {
                d.Q_yx_mod.dense().allFinite(),
                d.Q_yy_mod.dense().size() ? d.Q_yy_mod.dense().cwiseAbs().maxCoeff() : 0.,
                d.Q_yy_mod.dense().allFinite());
-    d.for_each(__eq_x_soft, [&](const solver::restoration::resto_eq_elastic_constr &overlay,
-                                solver::restoration::resto_eq_elastic_constr::approx_data &ad) {
-        fmt::print("  eq_soft {} src_field={} src_pos={}\n",
-                   overlay.name(), static_cast<int>(overlay.source_field()), overlay.source_pos());
-        fmt::print("    base={:.3e} v={:.3e} lambda={:.3e}\n",
-                   ad.base_residual.size() ? ad.base_residual.cwiseAbs().maxCoeff() : 0.,
-                   ad.v_.size() ? ad.v_.cwiseAbs().maxCoeff() : 0.,
-                   ad.multiplier_.size() ? ad.multiplier_.cwiseAbs().maxCoeff() : 0.);
-        fmt::print("    minv_bc={:.3e} minv_diag={:.3e} local_stat={:.3e} local_comp={:.3e}\n",
-                   ad.elastic.minv_bc.size() ? ad.elastic.minv_bc.cwiseAbs().maxCoeff() : 0.,
-                   ad.elastic.minv_diag.size() ? ad.elastic.minv_diag.cwiseAbs().maxCoeff() : 0.,
-                   solver::restoration::current_local_residuals(ad.elastic).inf_stat,
-                   solver::restoration::current_local_residuals(ad.elastic).inf_comp);
-    });
-    d.for_each(__eq_xu_soft, [&](const solver::restoration::resto_eq_elastic_constr &overlay,
-                                 solver::restoration::resto_eq_elastic_constr::approx_data &ad) {
-        fmt::print("  eq_xu_soft {} src_field={} src_pos={}\n",
-                   overlay.name(), static_cast<int>(overlay.source_field()), overlay.source_pos());
-        fmt::print("    base={:.3e} v={:.3e} lambda={:.3e}\n",
-                   ad.base_residual.size() ? ad.base_residual.cwiseAbs().maxCoeff() : 0.,
-                   ad.v_.size() ? ad.v_.cwiseAbs().maxCoeff() : 0.,
-                   ad.multiplier_.size() ? ad.multiplier_.cwiseAbs().maxCoeff() : 0.);
-        fmt::print("    minv_bc={:.3e} minv_diag={:.3e} local_stat={:.3e} local_comp={:.3e}\n",
-                   ad.elastic.minv_bc.size() ? ad.elastic.minv_bc.cwiseAbs().maxCoeff() : 0.,
-                   ad.elastic.minv_diag.size() ? ad.elastic.minv_diag.cwiseAbs().maxCoeff() : 0.,
-                   solver::restoration::current_local_residuals(ad.elastic).inf_stat,
-                   solver::restoration::current_local_residuals(ad.elastic).inf_comp);
-    });
+    auto print_overlay_summary = [&](field_t field) {
+        d.for_each(field, [&](const solver::restoration::resto_eq_elastic_constr &overlay,
+                              solver::restoration::resto_eq_elastic_constr::approx_data &ad) {
+            const auto residuals =
+                solver::restoration::resto_eq_elastic_constr::current_local_residuals(ad.elastic);
+            fmt::print("  {} src_pos={} |v|={:.3e} |base|={:.3e} minv={:.3e} stat={:.3e} comp={:.3e}\n",
+                       overlay.name(), overlay.source_pos(),
+                       ad.v_.size() ? ad.v_.cwiseAbs().maxCoeff() : 0.,
+                       ad.base_residual.size() ? ad.base_residual.cwiseAbs().maxCoeff() : 0.,
+                       ad.elastic.minv_diag.size() ? ad.elastic.minv_diag.cwiseAbs().maxCoeff() : 0.,
+                       residuals.inf_stat, residuals.inf_comp);
+        });
+    };
+    print_overlay_summary(__eq_x_soft);
+    print_overlay_summary(__eq_xu_soft);
 }
 
 } // namespace

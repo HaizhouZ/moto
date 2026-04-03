@@ -4,7 +4,10 @@
 #include <moto/ocp/ineq_constr.hpp>
 #include <moto/ocp/problem.hpp>
 #include <moto/solver/ipm/ipm_config.hpp>
-#include <moto/solver/restoration/resto_local_kkt.hpp>
+#include <moto/solver/ipm/positivity_step.hpp>
+#include <moto/solver/linesearch_config.hpp>
+
+#include <array>
 
 namespace moto {
 struct node_data;
@@ -14,6 +17,60 @@ struct ns_riccati_data;
 }
 
 namespace moto::solver::restoration {
+
+namespace detail {
+
+struct eq_local_state {
+    size_t ns = 0;
+    size_t nc = 0;
+
+    vector p, p_backup, d_p, nu_p, nu_p_backup, d_nu_p;
+    vector n, n_backup, d_n, nu_n, nu_n_backup, d_nu_n;
+    vector c_current, r_c, r_p, r_n, r_s_p, r_s_n;
+    vector combo_p, combo_n, b_c, minv_diag, minv_bc, d_lambda;
+    vector corrector_p, corrector_n;
+
+};
+
+struct ineq_local_state {
+    size_t nx = 0;
+    size_t nu = 0;
+
+    vector t, t_backup, d_t, nu_t, nu_t_backup, d_nu_t;
+    vector p, p_backup, d_p, nu_p, nu_p_backup, d_nu_p;
+    vector n, n_backup, d_n, nu_n, nu_n_backup, d_nu_n;
+    vector g_current, r_d, r_p, r_n, r_s_t, r_s_p, r_s_n;
+    vector denom_t, denom_p, denom_n;
+    vector combo_t, combo_p, combo_n, b_d, minv_diag, minv_bd;
+    vector corrector_t, corrector_p, corrector_n;
+
+};
+
+} // namespace detail
+
+struct elastic_init_pair {
+    scalar_t p = 0.;
+    scalar_t n = 0.;
+    scalar_t z_p = 0.;
+    scalar_t z_n = 0.;
+    scalar_t lambda = 0.;
+    scalar_t weight = 0.;
+};
+
+struct elastic_init_ineq_scalar {
+    scalar_t t = 0.;
+    scalar_t p = 0.;
+    scalar_t n = 0.;
+    scalar_t nu_t = 0.;
+    scalar_t nu_p = 0.;
+    scalar_t nu_n = 0.;
+};
+
+struct local_residual_summary {
+    scalar_t inf_prim = 0.;
+    scalar_t inf_stat = 0.;
+    scalar_t inf_comp = 0.;
+};
 
 struct restoration_overlay_settings {
     scalar_t rho_u = 1e-4;
@@ -96,6 +153,28 @@ class resto_eq_elastic_constr final : public soft_constr {
     scalar_t search_penalty_dir_deriv(const func_approx_data &data) const override;
     scalar_t local_stat_residual_inf(const func_approx_data &data) const override;
     scalar_t local_comp_residual_inf(const func_approx_data &data) const override;
+    static elastic_init_pair initialize_elastic_pair(scalar_t c, scalar_t rho, scalar_t mu_bar);
+    static void compute_local_model(detail::eq_local_state &elastic,
+                                    const vector_const_ref &base_residual,
+                                    const vector_const_ref &multiplier,
+                                    scalar_t rho,
+                                    scalar_t mu_bar,
+                                    const vector *mu_p_target,
+                                    const vector *mu_n_target,
+                                    scalar_t lambda_reg);
+    static void compute_local_model(detail::eq_local_state &elastic,
+                                    const vector_const_ref &base_residual,
+                                    const vector_const_ref &multiplier,
+                                    scalar_t rho,
+                                    scalar_t mu_bar,
+                                    scalar_t lambda_reg);
+    static void recover_local_step(const vector_const_ref &delta_c,
+                                   detail::eq_local_state &elastic,
+                                   scalar_t lambda_reg);
+    static local_residual_summary current_local_residuals(const detail::eq_local_state &elastic);
+    static local_residual_summary linearized_newton_residuals(const vector_const_ref &delta_c,
+                                                              const detail::eq_local_state &elastic,
+                                                              scalar_t lambda_reg);
     const constr &source() const { return source_; }
     field_t source_field() const { return source_->field(); }
     size_t source_pos() const { return source_pos_; }
@@ -103,6 +182,13 @@ class resto_eq_elastic_constr final : public soft_constr {
     DEF_DEFAULT_CLONE(resto_eq_elastic_constr)
 
   private:
+    static void resize_local_state(detail::eq_local_state &state, size_t ns_dim, size_t nc_dim);
+    void compute_local_model(approx_data &data,
+                             scalar_t mu_bar,
+                             const vector *mu_p_target = nullptr,
+                             const vector *mu_n_target = nullptr) const;
+    local_residual_summary current_local_residuals(const approx_data &data) const;
+
     constr source_;
     size_t source_pos_ = 0;
     scalar_t rho_ = 1000.0;
@@ -155,6 +241,30 @@ class resto_ineq_elastic_ipm_constr final : public ineq_constr {
     scalar_t search_penalty_dir_deriv(const func_approx_data &data) const override;
     scalar_t local_stat_residual_inf(const func_approx_data &data) const override;
     scalar_t local_comp_residual_inf(const func_approx_data &data) const override;
+    static elastic_init_ineq_scalar initialize_elastic_ineq_scalar(scalar_t g,
+                                                                   scalar_t rho,
+                                                                   scalar_t mu_bar,
+                                                                   scalar_t nu_t_init);
+    static void compute_local_model(detail::ineq_local_state &elastic,
+                                    const vector_const_ref &base_residual,
+                                    scalar_t rho,
+                                    scalar_t mu_bar,
+                                    const vector *mu_t_target,
+                                    const vector *mu_p_target,
+                                    const vector *mu_n_target,
+                                    scalar_t lambda_reg);
+    static void compute_local_model(detail::ineq_local_state &elastic,
+                                    const vector_const_ref &base_residual,
+                                    scalar_t rho,
+                                    scalar_t mu_bar,
+                                    scalar_t lambda_reg);
+    static void recover_local_step(const vector_const_ref &delta_g,
+                                   detail::ineq_local_state &ineq,
+                                   scalar_t lambda_reg);
+    static local_residual_summary current_local_residuals(const detail::ineq_local_state &ineq);
+    static local_residual_summary linearized_newton_residuals(const vector_const_ref &delta_g,
+                                                              const detail::ineq_local_state &ineq,
+                                                              scalar_t lambda_reg);
     const constr &source() const { return source_; }
     field_t source_field() const { return source_->field(); }
     size_t source_pos() const { return source_pos_; }
@@ -162,6 +272,14 @@ class resto_ineq_elastic_ipm_constr final : public ineq_constr {
     DEF_DEFAULT_CLONE(resto_ineq_elastic_ipm_constr)
 
   private:
+    static void resize_local_state(detail::ineq_local_state &state, size_t nx_dim, size_t nu_dim);
+    void compute_local_model(approx_data &data,
+                             scalar_t mu_bar,
+                             const vector *mu_t_target = nullptr,
+                             const vector *mu_p_target = nullptr,
+                             const vector *mu_n_target = nullptr) const;
+    local_residual_summary current_local_residuals(const approx_data &data) const;
+
     constr source_;
     size_t source_pos_ = 0;
     scalar_t rho_ = 1000.0;
