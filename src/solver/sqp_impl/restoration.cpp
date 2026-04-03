@@ -2,7 +2,9 @@
 #include <moto/ocp/ineq_constr.hpp>
 #include <moto/solver/ineq_soft.hpp>
 #include <moto/solver/restoration/resto_overlay.hpp>
+#include <moto/solver/ipm/ipm_constr.hpp>
 #include <cstdlib>
+#include <limits>
 
 namespace moto {
 namespace {
@@ -21,10 +23,23 @@ void for_each_overlay_pair(ns_sqp::solver_graph_type &outer_graph,
     }
 }
 
+void dump_overlay_pair_order(ns_sqp::solver_graph_type &outer_graph,
+                             ns_sqp::solver_graph_type &resto_graph,
+                             size_t max_pairs = std::numeric_limits<size_t>::max()) {
+    auto outer_nodes = outer_graph.flatten_nodes();
+    auto resto_nodes = resto_graph.flatten_nodes();
+    fmt::print("  [resto-pairs] first {} pairs:\n", std::min(max_pairs, outer_nodes.size()));
+    for (size_t i = 0; i < std::min({max_pairs, outer_nodes.size(), resto_nodes.size()}); ++i) {
+        fmt::print("    pair {}: outer_uid={} resto_uid={}\n",
+                   i, outer_nodes[i]->problem().uid(), resto_nodes[i]->problem().uid());
+    }
+}
+
 void sync_primal_state(node_data &src, node_data &dst) {
     for (auto field : primal_fields) {
         dst.sym_val().value_[field] = src.sym_val().value_[field];
     }
+    dst.sym_val().value_[__p] = src.sym_val().value_[__p];
 }
 
 void sync_hard_duals(node_data &src, node_data &dst) {
@@ -39,6 +54,148 @@ void sync_hard_duals(node_data &src, node_data &dst) {
 bool resto_eq_debug_enabled() {
     const char *flag = std::getenv("MOTO_RESTO_EQ_DEBUG");
     return flag != nullptr && std::string_view(flag) != "0";
+}
+
+bool resto_entry_debug_enabled() {
+    const char *flag = std::getenv("MOTO_RESTO_ENTRY_DEBUG");
+    return flag != nullptr && std::string_view(flag) != "0";
+}
+
+void dump_outer_overlay_source_values(ns_sqp::solver_graph_type &outer_graph,
+                                      ns_sqp::solver_graph_type &resto_graph) {
+    for_each_overlay_pair(outer_graph, resto_graph, [&](node_data &outer, node_data &resto) {
+        auto dump_field = [&](field_t field) {
+            resto.for_each(field, [&](const solver::restoration::resto_eq_elastic_constr &overlay,
+                                      solver::restoration::resto_eq_elastic_constr::approx_data &) {
+                const auto src_field = overlay.source_field();
+                const size_t src_pos = overlay.source_pos();
+                const auto &outer_exprs = outer.problem().exprs(src_field);
+                if (src_pos >= outer_exprs.size()) {
+                    fmt::print("  [resto-source:{}] outer node={} field={} pos={} is out of range (size={})\n",
+                               overlay.name(), outer.problem().uid(), field::name(src_field), src_pos, outer_exprs.size());
+                    return;
+                }
+                const auto &outer_expr = outer_exprs[src_pos];
+                const func outer_func = std::dynamic_pointer_cast<generic_func>(outer_expr);
+                const auto &outer_ad = outer.data(outer_func);
+                const auto &source = overlay.source();
+                const auto &source_gf = dynamic_cast<const generic_func &>(*source);
+                const auto &outer_gf = dynamic_cast<const generic_func &>(*outer_func);
+                fmt::print("  [resto-source:{}] outer_node={} outer_prob={} src_field={} src_pos={} source_uid={} outer_uid={} same_uid={}\n",
+                           overlay.name(),
+                           outer.problem().uid(),
+                           outer.problem().uid(),
+                           field::name(src_field),
+                           src_pos,
+                           source->uid(),
+                           outer_expr->uid(),
+                           source->uid() == outer_expr->uid() ? "yes" : "no");
+                fmt::print("    source_name={} outer_name={} outer_v=[",
+                           source->name(), outer_expr->name());
+                for (Eigen::Index i = 0; i < outer_ad.v_.size(); ++i) {
+                    fmt::print("{}{:.6e}", i == 0 ? "" : ", ", outer_ad.v_(i));
+                }
+                fmt::print("]\n");
+                const scalar_t y_diff =
+                    (outer.sym_val().value_[__y].size() == resto.sym_val().value_[__y].size() && outer.sym_val().value_[__y].size() > 0)
+                        ? (outer.sym_val().value_[__y] - resto.sym_val().value_[__y]).cwiseAbs().maxCoeff()
+                        : scalar_t(0.);
+                const scalar_t p_diff =
+                    (outer.sym_val().value_[__p].size() == resto.sym_val().value_[__p].size() && outer.sym_val().value_[__p].size() > 0)
+                        ? (outer.sym_val().value_[__p] - resto.sym_val().value_[__p]).cwiseAbs().maxCoeff()
+                        : scalar_t(0.);
+                fmt::print("    sync_diff: |y_outer-y_resto|_inf={:.3e} |p_outer-p_resto|_inf={:.3e}\n", y_diff, p_diff);
+                if (!source_gf.in_args().empty() && !outer_gf.in_args().empty()) {
+                    fmt::print("    source_first_arg_field={} outer_first_arg_field={} source_nargs={} outer_nargs={}\n",
+                               field::name(source_gf.in_args().front()->field()),
+                               field::name(outer_gf.in_args().front()->field()),
+                               source_gf.in_args().size(),
+                               outer_gf.in_args().size());
+                    fmt::print("    source_arg_sig=[");
+                    for (size_t i = 0; i < source_gf.in_args().size(); ++i) {
+                        const auto &arg = source_gf.in_args()[i];
+                        fmt::print("{}{}:{}", i == 0 ? "" : ", ", field::name(arg->field()), arg->dim());
+                    }
+                    fmt::print("] outer_arg_sig=[");
+                    for (size_t i = 0; i < outer_gf.in_args().size(); ++i) {
+                        const auto &arg = outer_gf.in_args()[i];
+                        fmt::print("{}{}:{}", i == 0 ? "" : ", ", field::name(arg->field()), arg->dim());
+                    }
+                    fmt::print("]\n");
+                }
+            });
+        };
+        dump_field(__eq_x_soft);
+        dump_field(__eq_xu_soft);
+    });
+}
+
+void dump_outer_entry_equalities(ns_sqp::solver_graph_type &graph) {
+    for (auto *n : graph.flatten_nodes()) {
+        auto dump_field = [&](field_t field) {
+            n->for_each(field, [&](const generic_constr &c, func_approx_data &ad) {
+                if (c.name() != "arm_ee_constr") {
+                    return;
+                }
+                fmt::print("  [resto-entry:{}:{}] v=[", n->problem().uid(), c.name());
+                for (Eigen::Index i = 0; i < ad.v_.size(); ++i) {
+                    fmt::print("{}{:.6e}", i == 0 ? "" : ", ", ad.v_(i));
+                }
+                fmt::print("]\n");
+            });
+        };
+        dump_field(__eq_x);
+        dump_field(__eq_xu);
+    }
+}
+
+void dump_outer_entry_inequalities(ns_sqp::solver_graph_type &graph) {
+    bool printed = false;
+    scalar_t worst_tq_v = 0.;
+    size_t worst_tq_uid = 0;
+    Eigen::Index worst_tq_idx = -1;
+    for (auto *n : graph.flatten_nodes()) {
+        n->for_each<ineq_constr_fields>([&](const generic_constr &c, func_approx_data &ad) {
+            if (c.name() != "arm_tq_limit") {
+                return;
+            }
+            const auto *ipm_c = dynamic_cast<const solver::ipm_constr *>(&c);
+            if (ipm_c == nullptr) {
+                return;
+            }
+            const auto &ipm_d = ad.as<solver::ipm_constr::ipm_data>();
+            Eigen::Index local_idx = -1;
+            const scalar_t local_worst = ad.v_.size() ? ad.v_.cwiseAbs().maxCoeff(&local_idx) : 0.;
+            if (local_worst > worst_tq_v) {
+                worst_tq_v = local_worst;
+                worst_tq_uid = n->problem().uid();
+                worst_tq_idx = local_idx;
+            }
+            if (printed) {
+                return;
+            }
+            fmt::print("  [resto-entry:{}:{}] g=[", n->problem().uid(), c.name());
+            for (Eigen::Index i = 0; i < ipm_d.g_.size(); ++i) {
+                fmt::print("{}{:.6e}", i == 0 ? "" : ", ", ipm_d.g_(i));
+            }
+            fmt::print("]\n");
+            fmt::print("  [resto-entry:{}:{}] slack=[", n->problem().uid(), c.name());
+            for (Eigen::Index i = 0; i < ipm_d.slack_.size(); ++i) {
+                fmt::print("{}{:.6e}", i == 0 ? "" : ", ", ipm_d.slack_(i));
+            }
+            fmt::print("]\n");
+            fmt::print("  [resto-entry:{}:{}] v=[", n->problem().uid(), c.name());
+            for (Eigen::Index i = 0; i < ad.v_.size(); ++i) {
+                fmt::print("{}{:.6e}", i == 0 ? "" : ", ", ad.v_(i));
+            }
+            fmt::print("]\n");
+            printed = true;
+        });
+    }
+    if (worst_tq_idx >= 0) {
+        fmt::print("  [resto-entry:arm_tq_limit] worst |g+s| = {:.6e} at node {} idx {}\n",
+                   worst_tq_v, worst_tq_uid, worst_tq_idx);
+    }
 }
 
 void dump_resto_eq_node(ns_sqp::data &d, std::string_view label) {
@@ -57,11 +214,11 @@ void dump_resto_eq_node(ns_sqp::data &d, std::string_view label) {
                               solver::restoration::resto_eq_elastic_constr::approx_data &ad) {
             const auto residuals =
                 solver::restoration::resto_eq_elastic_constr::current_local_residuals(ad.elastic);
-            fmt::print("  {} src_pos={} |v|={:.3e} |base|={:.3e} minv={:.3e} stat={:.3e} comp={:.3e}\n",
+            fmt::print("  {} src_pos={} |v|={:.3e} |base|={:.3e} schur_inv={:.3e} stat={:.3e} comp={:.3e}\n",
                        overlay.name(), overlay.source_pos(),
                        ad.v_.size() ? ad.v_.cwiseAbs().maxCoeff() : 0.,
                        ad.base_residual.size() ? ad.base_residual.cwiseAbs().maxCoeff() : 0.,
-                       ad.elastic.minv_diag.size() ? ad.elastic.minv_diag.cwiseAbs().maxCoeff() : 0.,
+                       ad.elastic.schur_inv_diag.size() ? ad.elastic.schur_inv_diag.cwiseAbs().maxCoeff() : 0.,
                        residuals.inf_stat, residuals.inf_comp);
         });
     };
@@ -83,6 +240,10 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         fmt::print("  entry iter={}  outer objective={:.3e}  outer search_obj={:.3e}  prim={:.3e}  dual={:.3e}  comp={:.3e}\n",
                    kkt_before.num_iter, kkt_before.objective, kkt_before.penalized_obj,
                    kkt_before.prim_res_l1, kkt_before.inf_dual_res, kkt_before.inf_comp_res);
+        if (resto_entry_debug_enabled()) {
+            dump_outer_entry_equalities(outer_graph);
+            dump_outer_entry_inequalities(outer_graph);
+        }
     }
     settings.in_restoration = true;
     set_phase_graph_override(resto_graph);
@@ -93,6 +254,10 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         solver::restoration::sync_restoration_overlay_duals(outer, resto);
         solver::restoration::seed_restoration_overlay_refs(resto, prox_eps);
     });
+    if (settings.verbose && resto_entry_debug_enabled()) {
+        dump_overlay_pair_order(outer_graph, resto_graph);
+        dump_outer_overlay_source_values(outer_graph, resto_graph);
+    }
 
     resto_graph.for_each_parallel([this](data *d) {
         d->for_each_constr([this](const generic_func &c, func_approx_data &fd) { c.setup_workspace_data(fd, &settings); });
@@ -110,12 +275,18 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
 
     ls.augment_filter_for_restoration_start(kkt_before, settings);
     filter_linesearch_data rls;
-    rls.constr_vio_min = ls.constr_vio_min;
+    // Reset the switching threshold for the restoration subproblem. Reusing the
+    // outer line-search threshold makes restoration switch to Armijo mode based
+    // on the very first outer residual, which can be orders of magnitude looser
+    // than the residual at restoration entry.
+    rls.constr_vio_min =
+        std::max(kkt_before.prim_res_l1 * settings.ls.constr_vio_min_frac, settings.prim_tol);
 
     kkt_info kkt_rest = compute_kkt_info();
     kkt_info kkt_outer_trial{};
     bool resto_accept = false;
     bool resto_stalled = false;
+    bool resto_hit_max_iter = false;
     size_t stalled_iters = 0;
     const size_t max_resto_iters =
         std::min(settings.restoration.max_iter,
@@ -141,6 +312,10 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
             for_each_overlay_pair(resto_graph, outer_graph, [&](data &resto, data &outer) {
                 sync_primal_state(resto, outer);
                 sync_hard_duals(resto, outer);
+                solver::restoration::commit_restoration_overlay_bound_state(
+                    outer, resto,
+                    settings.restoration.bound_mult_reset_threshold,
+                    scalar_t(1.0));
             });
             outer_graph.for_each_parallel([](data *d) {
                 d->update_approximation(node_data::update_mode::eval_val, true);
@@ -160,9 +335,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
             kkt_rest.ls_steps = rls.step_cnt;
 
             const bool outer_accept = outer_filter_accepts(ls, kkt_outer_trial, kkt_before);
-            const bool prim_improved =
-                kkt_outer_trial.prim_res_l1 <
-                settings.restoration.restoration_improvement_frac * kkt_before.prim_res_l1;
+            const bool prim_improved = kkt_outer_trial.prim_res_l1 < kkt_before.prim_res_l1;
             if (outer_accept && prim_improved) {
                 resto_accept = true;
                 break;
@@ -180,17 +353,21 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         }
         resto_stalled = stalled_iters >= 2;
     }
+    resto_hit_max_iter = !resto_accept && !resto_stalled;
 
     const auto cleanup = [&](bool success) {
         if (success) {
             for_each_overlay_pair(resto_graph, outer_graph, [&](data &resto, data &outer) {
                 sync_primal_state(resto, outer);
                 sync_hard_duals(resto, outer);
+                solver::restoration::commit_restoration_overlay_bound_state(
+                    outer, resto,
+                    settings.restoration.bound_mult_reset_threshold,
+                    scalar_t(1.0));
             });
             clear_phase_graph_override();
             outer_graph.for_each_parallel([this](data *d) {
                 d->update_approximation(node_data::update_mode::eval_val, true);
-                solver::ineq_soft::initialize(d);
                 solver::restoration::reset_equality_duals(*d, settings.restoration.constr_mult_reset_threshold);
                 d->update_approximation(node_data::update_mode::eval_derivatives, true);
             });
@@ -200,6 +377,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         settings.in_restoration = false;
         if (!success) {
             outer_graph.for_each_parallel([this](data *d) {
+                d->update_approximation(node_data::update_mode::eval_val, true);
                 d->update_approximation(node_data::update_mode::eval_derivatives, true);
             });
         }
@@ -210,16 +388,19 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     result.num_iter = kkt_rest.num_iter;
     result.ls_steps = kkt_rest.ls_steps;
     if (resto_accept) {
-        result.result = iter_result_t::success;
+        result.result = iter_result_t::unknown;
     } else if (resto_stalled && result.inf_dual_res < settings.dual_tol && result.prim_res_l1 > settings.prim_tol) {
         result.result = iter_result_t::infeasible_stationary;
+    } else if (resto_hit_max_iter) {
+        result.result = iter_result_t::restoration_reached_max_iter;
     } else {
         result.result = iter_result_t::restoration_failed;
     }
     if (settings.verbose) {
         fmt::print("=== leave restoration: {} ===\n\n",
                    resto_accept ? "success" :
-                                  (result.result == iter_result_t::infeasible_stationary ? "infeasible_stationary" : "failed"));
+                                  (result.result == iter_result_t::infeasible_stationary ? "infeasible_stationary" :
+                                   (result.result == iter_result_t::restoration_reached_max_iter ? "reached_max_iter" : "failed")));
     }
     return result;
 }

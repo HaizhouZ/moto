@@ -1,680 +1,742 @@
-# Restoration Problem
+# Restoration Math Note
 
-This note describes the restoration phase that is **currently implemented** in:
+This note records the restoration overlay formulation used by the elastic
+restoration wrappers in:
 
-- [src/solver/sqp_impl/restoration.cpp](/home/harper/Documents/moto/src/solver/sqp_impl/restoration.cpp)
-- [src/solver/restoration/resto_overlay.cpp](/home/harper/Documents/moto/src/solver/restoration/resto_overlay.cpp)
-- [src/solver/sqp_impl/line_search.cpp](/home/harper/Documents/moto/src/solver/sqp_impl/line_search.cpp)
-- [src/solver/sqp_impl/ns_sqp_impl.cpp](/home/harper/Documents/moto/src/solver/sqp_impl/ns_sqp_impl.cpp)
+- `resto_prox_cost`
+- `resto_eq_elastic_constr`
+- `resto_ineq_elastic_ipm_constr`
 
-The old framework-external `resto_runtime` path has been removed. Restoration
-now runs on a separate **overlay graph** built from finalized composed
-`edge_ocp`s, and it reuses the normal solver shell:
+The goal here is narrow:
 
-- `update_approximation`
-- soft/ineq lifecycle
-- NSP / Riccati
-- iterative refinement
-- line-search skeleton
+- state the restoration NLP
+- derive the local KKT systems
+- show the condensation used by the wrappers
+- show how the eliminated local Newton steps are recovered
 
-The phase difference is only in the active problem definition:
+There is no extra `lambda_reg` term or separate regularization multiplier in
+this derivation.
 
-- cost becomes `proximal + exact elastic penalty`
-- non-dynamics constraints are replaced by elastic restoration wrappers
-- globalization uses restoration phase metrics
+## 1. Restoration NLP
 
-The restoration overlay graph is now cached inside the active SQP graph state.
-It is rebuilt only when:
-
-- the modeled graph is dirty
-- restoration overlay settings change
-
-## 1. Entry Condition
-
-The outer SQP loop enters restoration when normal globalization returns a
-tiny-step failure while primal infeasibility is still too large:
-
-$$
-\mathrm{action}_k = \mathrm{failure},
-\qquad
-\mathrm{failure\_reason}_k = \mathrm{tiny\_step},
-\qquad
-\|r_{\mathrm{prim}}(w_k)\|_\infty > \varepsilon_{\mathrm{prim}}.
-$$
-
-In code this is the `tiny_step_trigger` in
-[ns_sqp_impl.cpp](/home/harper/Documents/moto/src/solver/sqp_impl/ns_sqp_impl.cpp).
-
-At restoration entry the solver now prints:
-
-- `=== enter restoration ===`
-- one summary line for the outer iterate at entry
-
-Restoration iterations themselves are printed by the same `print_stats(...)`
-path as normal iterations, but with an `r` suffix in the iteration counter
-such as `25r`, `26r`, and so on.
-
-## 2. Restoration Overlay Graph
-
-Restoration does **not** mutate the already-constructed normal `node_data`
-objects in place.
-
-Instead, `ns_sqp::restoration_graph()` lazily creates or refreshes a second
-solver graph from the active model graph:
-
-1. each model edge is composed into a finalized interval `edge_ocp`
-2. a restoration overlay problem is built on top of that composed problem
-3. the overlay graph is realized into its own `node_data` / dense storage
-
-That realized overlay runtime is cached and reused across restoration entries
-until the graph or overlay settings invalidate it.
-
-So normal and restoration do **not** share:
-
-- `node_data`
-- `lag_data`
-- merit / KKT storage
-- stage Jacobian/Hessian buffers
-
-They only synchronize selected state at restoration entry and exit.
-
-## 3. Restoration NLP
+Let `w` denote the stage primal variables seen by the restoration overlay. In
+practice this is the stage `x/u/y` primal block used by the normal solver.
 
 Let
 
 $$
-w := (x,u,y),
-\qquad
 F(w)=0
 $$
 
-denote the hard dynamics constraints, and let
+denote the hard dynamics constraints,
 
 $$
 c(w)=0
 $$
 
-denote the stacked equalities formed from `__eq_x` and `__eq_xu`, and
+the hard equality constraints that are made elastic in restoration, and
 
 $$
 g(w)\le 0
 $$
 
-denote the stacked inequalities formed from `__ineq_x` and `__ineq_xu`.
+the inequality constraints that are made elastic in restoration.
 
-The restoration original problem is
+The restoration problem is
 
 $$
 \begin{aligned}
-\min_{w,p_c,n_c,p_d,n_d}\quad &
-\operatorname{obj}_R(w)
- + \varrho_c \mathbf{1}^T (p_c+n_c)
- + \varrho_d \mathbf{1}^T (p_d+n_d) \\
+\min_{w,p_c,n_c,p_d,n_d,t}\quad &
+\phi_R(w)
+\;+\;
+\rho_c \mathbf{1}^T(p_c+n_c)
+\;+\;
+\rho_d \mathbf{1}^T(p_d+n_d) \\
 \text{s.t.}\quad &
 F(w)=0, \\
 &
 c(w)-p_c+n_c=0, \\
 &
-g(w)-p_d+n_d \le 0, \\
+g(w)+t-p_d+n_d=0, \\
 &
-p_c \succeq 0,\quad n_c \succeq 0,\quad
-p_d \succeq 0,\quad n_d \succeq 0 .
+t \succ 0,\quad p_c \succ 0,\quad n_c \succ 0,\quad p_d \succ 0,\quad n_d \succ 0.
 \end{aligned}
 $$
 
 Here:
 
-- `F(w)=0` remains hard
-- `c(w)` is elastic through `(p_c,n_c)`
-- `g(w)` is elastic through `(p_d,n_d)`
-- `\varrho_c = settings.restoration.rho_eq`
-- `\varrho_d = settings.restoration.rho_ineq`
-- `\operatorname{obj}_R(w)` is currently the proximal anchoring cost on `u/y`
+- `\phi_R(w)` is the proximal restoration cost
+- `\rho_c > 0` is the equality elastic weight
+- `\rho_d > 0` is the inequality elastic weight
+- `t` is the explicit positive slack for the inequality block
 
-## 4. Restoration Lagrangian And Primal-Dual IPM Form
+The restoration wrappers are local. They do not alter the hard dynamics block;
+they only modify how `c(w)` and `g(w)` enter the stage QP.
 
-For the restoration NLP, introduce multipliers
+## 2. Equality Elastic Block
 
-$$
-\lambda_F,\qquad \lambda_c
-$$
-
-for
+For one equality block, introduce local variables
 
 $$
-F(w)=0,\qquad c(w)-p_c+n_c=0.
+p \succ 0,\qquad n \succ 0,
 $$
 
-The restoration Lagrangian is
+and the equality multiplier
 
 $$
-\begin{aligned}
-\mathcal{L}_R
-=\;&
-\operatorname{obj}_R(w)
-+ \varrho_c \mathbf{1}^T (p_c+n_c)
-+ \varrho_d \mathbf{1}^T (p_d+n_d) \\
-&+ \lambda_F^T F(w)
-+ \lambda_c^T \bigl(c(w)-p_c+n_c\bigr).
-\end{aligned}
+\lambda.
 $$
 
-This is the barrier-free original restoration problem. No log-barrier term
-belongs to `\mathcal{L}_R`.
-
-For the implemented primal-dual search model, one must additionally include the
-positivity-dual products. In other words, the local search blocks are derived
-from Lagrangians of the form
+The local equality relation is
 
 $$
-\mathcal{L}_{R,\mathrm{search}}
-=
-\mathcal{L}_R
--
-(\nu_p^c)^T p_c
--
-(\nu_n^c)^T n_c
--
-(\nu_t)^T t
--
-(\nu_p^d)^T p_d
--
-(\nu_n^d)^T n_d ,
+c(w)-p+n=0.
 $$
 
-with the understanding that only the variables relevant to a given local block
-are present. The complementarity perturbation by `\mu` then appears in the KKT
-system, not as an extra term inside the original objective.
-
-For the inequality-elastic part, the implementation does not introduce a
-separate global `\lambda_d` term on top of the slackened relation. Instead, the
-search model is written directly in terms of the local slack/elastic variables
-and their positivity duals.
-
-### 4.1 Equality Elastic Block
-
-For equality elastic constraints, the search model keeps
+The positivity duals for `p,n` are
 
 $$
-c(w)-p_c+n_c=0,\qquad
-p_c>0,\qquad n_c>0.
+z_p \succ 0,\qquad z_n \succ 0.
 $$
 
-With positivity duals `\nu_p^c,\nu_n^c`, the primal-dual IPM KKT block is
-
-$$
-\mathcal{L}_{R,\mathrm{eq\text{-}search}}
-=
-\operatorname{obj}_R(w)
-+ \varrho_c \mathbf{1}^T (p_c+n_c)
-+ \lambda_F^T F(w)
-+ \lambda_c^T \bigl(c(w)-p_c+n_c\bigr)
-- (\nu_p^c)^T p_c
-- (\nu_n^c)^T n_c .
-$$
+The local primal-dual residuals are
 
 $$
 \begin{aligned}
-r_c   &= c(w)-p_c+n_c, \\
-r_p^c &= \varrho_c - \lambda_c - \nu_p^c, \\
-r_n^c &= \varrho_c + \lambda_c - \nu_n^c, \\
-r_{s,p}^c &= \nu_p^c \circ p_c - \mu \mathbf{1}, \\
-r_{s,n}^c &= \nu_n^c \circ n_c - \mu \mathbf{1}.
+r_c   &= c(w)-p+n, \\
+r_p   &= \rho_c-\lambda-z_p, \\
+r_n   &= \rho_c+\lambda-z_n, \\
+r_{s,p} &= z_p \circ p - \mu \mathbf{1}, \\
+r_{s,n} &= z_n \circ n - \mu \mathbf{1}.
 \end{aligned}
 $$
 
-This is the local system condensed by `resto_eq_elastic_constr`.
+These are exactly the residuals computed by the local model:
 
-#### Equality Linearized Local KKT
+- `r_c` is the elastic equality residual
+- `r_p,r_n` are the local stationarity rows
+- `r_{s,p},r_{s,n}` are the local complementarity rows
 
-Given a stage perturbation `\delta c`, the local Newton system is
+### 2.1 Linearized KKT System
 
-$$
-\begin{aligned}
-\delta c - \delta p_c + \delta n_c &= -r_c, \\
--\delta \lambda_c - \delta \nu_p^c &= -r_p^c, \\
-\delta \lambda_c - \delta \nu_n^c &= -r_n^c, \\
-\nu_p^c \circ \delta p_c + p_c \circ \delta \nu_p^c &= -r_{s,p}^c, \\
-\nu_n^c \circ \delta n_c + n_c \circ \delta \nu_n^c &= -r_{s,n}^c .
-\end{aligned}
-$$
-
-With the current implementation's regularization parameter `\lambda_{\mathrm{reg}}`,
-the code uses the condensed quantities
+Let
 
 $$
-\begin{aligned}
-\mathrm{combo}_p^c &=
-\frac{p_c \circ r_p^c + \lambda_{\mathrm{reg}} r_{s,p}^c}
-     {p_c + \lambda_{\mathrm{reg}} \nu_p^c}, \\
-\mathrm{combo}_n^c &=
-\frac{n_c \circ r_n^c + \lambda_{\mathrm{reg}} r_{s,n}^c}
-     {n_c + \lambda_{\mathrm{reg}} \nu_n^c}.
-\end{aligned}
-$$
-
-Then
-
-$$
-\begin{aligned}
-M_c^{-1} &=
-\left(
-\frac{p_c}{p_c + \lambda_{\mathrm{reg}} \nu_p^c}
-+
-\frac{n_c}{n_c + \lambda_{\mathrm{reg}} \nu_n^c}
-\right)^{-1}, \\
-b_c &= r_c + \mathrm{combo}_p^c - \mathrm{combo}_n^c,
-\end{aligned}
-$$
-
-and the condensed dual step is
-
-$$
-\delta \lambda_c = M_c^{-1}(\delta c + b_c).
-$$
-
-The local recover formulas are
-
-$$
-\begin{aligned}
-\delta \nu_p^c &= \frac{\nu_p^c \circ (r_p^c-\delta\lambda_c)-r_{s,p}^c}
-                      {p_c+\lambda_{\mathrm{reg}}\nu_p^c}, \\
-\delta \nu_n^c &= \frac{\nu_n^c \circ (r_n^c+\delta\lambda_c)-r_{s,n}^c}
-                      {n_c+\lambda_{\mathrm{reg}}\nu_n^c}, \\
-\delta p_c &= \delta\lambda_c + \lambda_{\mathrm{reg}}\delta\nu_p^c - r_p^c, \\
-\delta n_c &= -\delta\lambda_c + \lambda_{\mathrm{reg}}\delta\nu_n^c - r_n^c .
-\end{aligned}
-$$
-
-This is exactly the object condensed into `lag_jac_corr_` and
-`hessian_modification_`.
-
-### 4.2 Inequality Elastic Block With Slack `t`
-
-For inequality elastic constraints, the restoration wrapper first rewrites the
-original inequality through a positive slack:
-
-$$
-g(w)+t-p_d+n_d=0,
+\delta c = J_c \delta w,
 \qquad
-t>0,\quad p_d>0,\quad n_d>0.
+J_c := \frac{\partial c}{\partial w}.
 $$
 
-There is **no separate** `\lambda_d` in the local restoration block. The
-active local variables are
-
-$$
-t,\;p_d,\;n_d,\qquad \nu_t,\;\nu_p^d,\;\nu_n^d .
-$$
-
-The exact penalty acts only on `p_d,n_d`, while the positivity duals
-`\nu_t,\nu_p^d,\nu_n^d` belong to the search model. The reduced local KKT block
-is derived from
-
-$$
-\mathcal{L}_{R,\mathrm{ineq\text{-}search}}
-=
-\operatorname{obj}_R(w)
-+ \varrho_d \mathbf{1}^T (p_d+n_d)
-- (\nu_t)^T t
-- (\nu_p^d)^T p_d
-- (\nu_n^d)^T n_d
-$$
-
-together with the slack relation `g(w)+t-p_d+n_d=0`, and is therefore
+The local Newton system is
 
 $$
 \begin{aligned}
-r_d   &= g(w)+t-p_d+n_d, \\
-r_p^d &= \varrho_d-\nu_t-\nu_p^d, \\
-r_n^d &= \varrho_d+\nu_t-\nu_n^d, \\
-r_{s,t} &= \nu_t \circ t - \mu \mathbf{1}, \\
-r_{s,p}^d &= \nu_p^d \circ p_d - \mu \mathbf{1}, \\
-r_{s,n}^d &= \nu_n^d \circ n_d - \mu \mathbf{1}.
+\delta c - \delta p + \delta n &= -r_c, \\
+-\delta\lambda - \delta z_p &= -r_p, \\
+\delta\lambda - \delta z_n &= -r_n, \\
+z_p \circ \delta p + p \circ \delta z_p &= -r_{s,p}, \\
+z_n \circ \delta n + n \circ \delta z_n &= -r_{s,n}.
 \end{aligned}
 $$
 
-This is the local slack-plus-elastic search block that the restoration
-implementation should condense.
+The stage solver only needs the condensed relation between `\delta c` and
+`\delta\lambda`. The local elastic variables are eliminated inside the wrapper.
 
-#### Inequality Linearized Local KKT
+### 2.2 Condensation
 
-Given a stage perturbation `\delta g`, the local Newton system is
+Introduce the diagonal matrices
+
+$$
+P := \operatorname{diag}(p),
+\qquad
+N := \operatorname{diag}(n),
+\qquad
+Z_p := \operatorname{diag}(z_p),
+\qquad
+Z_n := \operatorname{diag}(z_n).
+$$
+
+From the stationarity rows,
+
+$$
+\delta z_p = r_p - \delta\lambda,
+\qquad
+\delta z_n = r_n + \delta\lambda.
+$$
+
+Substitute these into the complementarity rows:
 
 $$
 \begin{aligned}
-\delta g + \delta t - \delta p_d + \delta n_d &= -r_d, \\
-\delta p_d - \delta \nu_t - \lambda_{\mathrm{reg}} \delta \nu_p^d &= -r_p^d, \\
-\delta n_d + \delta \nu_t - \lambda_{\mathrm{reg}} \delta \nu_n^d &= -r_n^d, \\
-\nu_t \circ \delta t + t \circ \delta \nu_t &= -r_{s,t}, \\
-\nu_p^d \circ \delta p_d + p_d \circ \delta \nu_p^d &= -r_{s,p}^d, \\
-\nu_n^d \circ \delta n_d + n_d \circ \delta \nu_n^d &= -r_{s,n}^d .
+\delta p
+&=
+P Z_p^{-1}\delta\lambda
+- P Z_p^{-1} r_p
+- Z_p^{-1} r_{s,p}, \\
+\delta n
+&=
+-N Z_n^{-1}\delta\lambda
+- N Z_n^{-1} r_n
+- Z_n^{-1} r_{s,n}.
 \end{aligned}
 $$
 
-Here `\lambda_{\mathrm{reg}}` plays the same role as in the equality-elastic
-block: it regularizes the dual recovery equations for the positive variables.
-
-Introduce the regularized diagonal denominators
+Now substitute `\delta p,\delta n` into
 
 $$
-\begin{aligned}
-D_t^d &:= \nu_t, \\
-D_p^d &:= p_d + \lambda_{\mathrm{reg}} \nu_p^d, \\
-D_n^d &:= n_d + \lambda_{\mathrm{reg}} \nu_n^d .
-\end{aligned}
+\delta c-\delta p+\delta n=-r_c.
 $$
 
-Define the condensed quantities
+This gives the condensed equality block
 
 $$
-\begin{aligned}
-\mathrm{combo}_t &= \frac{r_{s,t}}{D_t^d}, \\
-\mathrm{combo}_p^d &=
-\frac{p_d \circ r_p^d + \lambda_{\mathrm{reg}} r_{s,p}^d}
-     {D_p^d}, \\
-\mathrm{combo}_n^d &=
-\frac{n_d \circ r_n^d + \lambda_{\mathrm{reg}} r_{s,n}^d}
-     {D_n^d}.
-\end{aligned}
-$$
-
-Substituting
-
-$$
-\begin{aligned}
-\delta t   &= -\mathrm{combo}_t   - \frac{t}{D_t^d}\delta\nu_t, \\
-\delta p_d &= -\mathrm{combo}_p^d + \frac{p_d}{D_p^d}\delta\nu_t, \\
-\delta n_d &= -\mathrm{combo}_n^d - \frac{n_d}{D_n^d}\delta\nu_t
-\end{aligned}
-$$
-
-into the primal equation gives
-
-$$
-\left(
-\frac{t}{D_t^d}
-+
-\frac{p_d}{D_p^d}
-+
-\frac{n_d}{D_n^d}
-\right)\delta\nu_t
-=
-\delta g + b_d,
+-M_c \,\delta\lambda + \delta c = -\hat r_c,
 $$
 
 with
 
 $$
-b_d = r_d - \mathrm{combo}_t + \mathrm{combo}_p^d - \mathrm{combo}_n^d .
+M_c := P Z_p^{-1} + N Z_n^{-1},
 $$
 
-Therefore the condensed step is
+and
+
+$$
+\hat r_c
+:=
+r_c
++
+P Z_p^{-1} r_p
++
+Z_p^{-1} r_{s,p}
+-
+N Z_n^{-1} r_n
+-
+Z_n^{-1} r_{s,n}.
+$$
+
+Equivalently,
+
+$$
+\delta\lambda = M_c^{-1}(\delta c + \hat r_c).
+$$
+
+This is exactly the scalar/vector formula implemented in the wrapper through
+the cached diagonal inverse
+
+$$
+M_c^{-1}
+=
+\left(\operatorname{diag}\!\left(\frac{p}{z_p}+\frac{n}{z_n}\right)\right)^{-1}.
+$$
+
+### 2.3 Newton-Step Recovery
+
+Once the stage solve provides `\delta w`, the wrapper forms
+
+$$
+\delta c = J_c \delta w
+$$
+
+and recovers the eliminated local steps by back-substitution:
 
 $$
 \begin{aligned}
-M_d^{-1} &=
-\left(
-\frac{t}{D_t^d}
-+
-\frac{p_d}{D_p^d}
-+
-\frac{n_d}{D_n^d}
-\right)^{-1}, \\
-\delta \nu_t &= M_d^{-1}(\delta g + b_d), \\
-\delta \nu_p^d &=
-\frac{\nu_p^d \circ (r_p^d-\delta\nu_t)-r_{s,p}^d}
-     {D_p^d}, \\
-\delta \nu_n^d &=
-\frac{\nu_n^d \circ (r_n^d+\delta\nu_t)-r_{s,n}^d}
-     {D_n^d}.
+\delta\lambda &= M_c^{-1}(\delta c + \hat r_c), \\
+\delta p &=
+P Z_p^{-1}\delta\lambda
+- P Z_p^{-1} r_p
+- Z_p^{-1} r_{s,p}, \\
+\delta n &=
+-N Z_n^{-1}\delta\lambda
+- N Z_n^{-1} r_n
+- Z_n^{-1} r_{s,n}, \\
+\delta z_p &= r_p - \delta\lambda, \\
+\delta z_n &= r_n + \delta\lambda .
 \end{aligned}
 $$
 
-The local recover formulas are then
+The code stores:
+
+- `d_lambda = \delta\lambda`
+- `d_value[p] = \delta p`
+- `d_value[n] = \delta n`
+- `d_dual[p] = \delta z_p`
+- `d_dual[n] = \delta z_n`
+
+### 2.4 Contribution To The Stage QP
+
+Because `\delta\lambda = M_c^{-1}(J_c \delta w + \hat r_c)`, the eliminated
+equality block contributes
 
 $$
-\begin{aligned}
-\delta t   &= -\frac{r_{s,t} + t \circ \delta\nu_t}{D_t^d}, \\
-\delta p_d &= \delta\nu_t + \lambda_{\mathrm{reg}}\delta\nu_p^d - r_p^d, \\
-\delta n_d &= -\delta\nu_t + \lambda_{\mathrm{reg}}\delta\nu_n^d - r_n^d.
-\end{aligned}
+J_c^T M_c^{-1}\hat r_c
 $$
 
-This is the regularized reduced local solve that the restoration inequality
-wrapper is intended to implement. In code terms:
-
-- `M_d^{-1}` corresponds to `minv_diag`
-- `b_d` corresponds to the condensed right-hand side used to build `minv_bd`
-- the recovered `\delta\nu_t,\delta\nu_p^d,\delta\nu_n^d,\delta t,\delta p_d,\delta n_d`
-  correspond to the local Newton step recovered in `recover_local_step(...)`
-
-### 4.3 Interpretation Of `\nu_t`
-
-The important point is:
-
-- there is no separate `\lambda_d` in the implemented local block
-- `\nu_t` is the positivity dual associated with the slack `t`
-- the search model perturbs the inequality through `t>0`
-- `p_d,n_d` remain the exact-penalty elastic variables
-
-Equivalently, the search block can be viewed as a perturbed treatment of
+to the first-order correction and
 
 $$
-g(w)-p_d+n_d < 0
+J_c^T M_c^{-1} J_c
 $$
 
-with `t` as its explicit positive slack and `\nu_t` as the corresponding
-positivity dual. This is the mathematical reference for
-`resto_ineq_elastic_ipm_constr`.
+to the Hessian modification.
 
-## 5. Search Model vs Original Objective
+That is exactly why the wrapper propagates:
 
-The current implementation now makes a strict distinction between:
+- `lag_jac_corr += J_c^T M_c^{-1}\hat r_c`
+- `hessian_modification += J_c^T M_c^{-1}J_c`
 
-- `objective`
-- `penalized_obj`
+## 3. Inequality Elastic Block
 
-### 5.1 `objective`
-
-`objective` is the **original phase objective**.
-
-For restoration:
+For one inequality block, restoration introduces a positive slack `t` and the
+elastic pair `p,n`:
 
 $$
-\mathrm{objective}_R
-=
-\operatorname{obj}_R(w)
- + \varrho_c \mathbf{1}^T (p_c+n_c)
- + \varrho_d \mathbf{1}^T (p_d+n_d).
-$$
-
-This is what is shown in the `obj` column of `print_stats(...)`.
-
-### 5.2 `penalized_obj`
-
-`penalized_obj` is the **search objective** used by restoration line search.
-
-The positivity barriers are not part of the restoration original NLP, but they
-are part of the primal-dual IPM search model. The current code stores their
-aggregate contribution in `search_penalty(...)` and reports
-
-$$
-\mathrm{penalized\_obj}_R
-=
-\mathrm{objective}_R - \mathrm{search\_barrier\_value}.
-$$
-
-Since the barrier log-sum is negative, this makes the search objective
-numerically larger than the original objective.
-
-The logs therefore show both:
-
-- `obj` in the table = original restoration objective
-- `search_obj` on the extra restoration line = line-search objective
-
-This is why the restoration logs can show, for example:
-
-- `objective ≈ 1.95e4`
-- `search_obj ≈ 8.11e4`
-
-at the same iterate.
-
-## 6. Overlay Wrapper Structure
-
-Restoration is implemented as standard `cost/constr` overlays.
-
-### 6.1 Proximal Cost
-
-`resto_prox_cost` is a real `__cost` function.
-
-It contributes through the standard cost channels:
-
-- value into `cost_`
-- gradient into `cost_jac_` and `lag_jac_`
-- Hessian into base `lag_hess_`
-
-No hand-injected restoration Hessian storage remains.
-
-### 6.2 Elastic Equality Wrapper
-
-`resto_eq_elastic_constr` wraps a source equality and represents
-
-$$
-c(w)-p_c+n_c=0,
+g(w)+t-p+n=0,
 \qquad
-p_c>0,\quad n_c>0
+t \succ 0,\quad p \succ 0,\quad n \succ 0.
 $$
 
-for the search model.
-
-Its condensed contributions go through the normal non-cost channels:
-
-- first-order correction into `lag_jac_corr_`
-- second-order correction into `hessian_modification_`
-
-### 6.3 Elastic Inequality Wrapper
-
-`resto_ineq_elastic_ipm_constr` wraps a source inequality and represents
+The local duals are
 
 $$
-g(w)+t-p_d+n_d = 0
+\nu_t \succ 0,\qquad \nu_p \succ 0,\qquad \nu_n \succ 0.
 $$
 
-with positivity variables
+The reduced inequality block keeps `\nu_t` as the active multiplier carried by
+the stage solver.
+
+The local residuals are
 
 $$
-t>0,\qquad p_d>0,\qquad n_d>0
+\begin{aligned}
+r_d   &= g(w)+t-p+n, \\
+r_p   &= \rho_d-\nu_t-\nu_p, \\
+r_n   &= \rho_d+\nu_t-\nu_n, \\
+r_{s,t} &= \nu_t \circ t - \mu \mathbf{1}, \\
+r_{s,p} &= \nu_p \circ p - \mu \mathbf{1}, \\
+r_{s,n} &= \nu_n \circ n - \mu \mathbf{1}.
+\end{aligned}
 $$
 
-in the search model.
+There is no extra local `\lambda_d` here. The remaining local multiplier is
+`\nu_t`.
 
-This is a restoration-specific elastic-IPM wrapper built from the slack form of
-the original inequality. It is not the normal `ipm_constr`, but it follows the
-same lifecycle style:
+### 3.1 Linearized KKT System
 
-- initialize
-- finalize Newton step
-- predictor bookkeeping
-- line-search bounds
-- backup / restore
-- affine step
-
-## 7. Iterative Refinement
-
-Restoration reuses the same iterative-refinement shell as normal.
-
-The important current fact is:
-
-- iterative refinement does not depend on a framework-external restoration
-  residual object
-- if restoration local residual summaries are printed, they are aggregated from
-  the currently active restoration wrappers on the overlay graph
-
-So there is now no separate runtime residual object outside the active
-`cost/constr` framework.
-
-## 8. Line Search And `alpha_min`
-
-Restoration line search uses the same backtracking shell as normal, but with a
-restoration phase metric:
-
-- primal metric: `inf_prim_res`
-- dual metric: `max(inf_dual_res, inf_comp_res)`
-- objective metric: `penalized_obj`
-
-Current implementation detail:
-
-- restoration is only supported with filter line search
-- `merit_backtracking` currently throws at restoration entry
-
-The current restoration `alpha_min` is **not** an independent absolute floor.
-It is computed as
+Let
 
 $$
-\alpha_{\min}
-
-=
-\max\!\Bigl(
-\texttt{settings.ls.primal.alpha\_min},
-\texttt{settings.restoration.alpha\_min\_factor}\cdot \alpha_{\mathrm{init}}
-\Bigr),
+\delta g = J_d \delta w,
+\qquad
+J_d := \frac{\partial g}{\partial w}.
 $$
 
-where `\alpha_init` is the current iteration's initial primal step bound.
+The local Newton system is
 
-This means restoration can still end up with a very small `alpha_min` if the
-initial primal bound is already tiny.
+$$
+\begin{aligned}
+\delta g + \delta t - \delta p + \delta n &= -r_d, \\
+-\delta\nu_t - \delta\nu_p &= -r_p, \\
+\delta\nu_t - \delta\nu_n &= -r_n, \\
+\nu_t \circ \delta t + t \circ \delta\nu_t &= -r_{s,t}, \\
+\nu_p \circ \delta p + p \circ \delta\nu_p &= -r_{s,p}, \\
+\nu_n \circ \delta n + n \circ \delta\nu_n &= -r_{s,n}.
+\end{aligned}
+$$
 
-The current `arm` logs show exactly that behavior: restoration does trigger its
-own `alpha_min` rule, but the resulting minimum is still small because the
-restoration step is already heavily clipped before backtracking starts.
+### 3.2 Condensation
 
-## 9. Entry / Exit Synchronization
+Introduce
 
-At restoration entry:
+$$
+T := \operatorname{diag}(t),
+\qquad
+P := \operatorname{diag}(p),
+\qquad
+N := \operatorname{diag}(n),
+$$
 
-- primal state is copied from outer graph to overlay graph
-- hard duals are copied from outer graph to overlay graph
-- proximal references are seeded from the current overlay primal state
-- overlay constraints are initialized through the standard `ineq_soft::initialize`
-  path
+$$
+Z_t := \operatorname{diag}(\nu_t),
+\qquad
+Z_p := \operatorname{diag}(\nu_p),
+\qquad
+Z_n := \operatorname{diag}(\nu_n).
+$$
 
-At restoration success:
+From the local stationarity rows,
 
-- primal state is copied back
-- hard duals are copied back
-- equality duals are reset according to the restoration threshold policy
-- outer graph derivatives are recomputed in normal mode
-- the accepted restoration point must also satisfy the outer filter acceptance
-  test and a primal-improvement threshold before restoration is declared
-  successful
+$$
+\delta\nu_p = r_p - \delta\nu_t,
+\qquad
+\delta\nu_n = r_n + \delta\nu_t.
+$$
 
-At restoration failure:
+Substitute into the complementarity rows:
 
-- the outer graph remains the active source of truth
-- outer derivatives are refreshed in normal mode before returning
-- the cached restoration graph remains available for future restoration entries;
-  only phase-local active state is cleared
+$$
+\begin{aligned}
+\delta t
+&=
+-T Z_t^{-1}\delta\nu_t
+- Z_t^{-1} r_{s,t}, \\
+\delta p
+&=
+P Z_p^{-1}\delta\nu_t
+- P Z_p^{-1} r_p
+- Z_p^{-1} r_{s,p}, \\
+\delta n
+&=
+-N Z_n^{-1}\delta\nu_t
+- N Z_n^{-1} r_n
+- Z_n^{-1} r_{s,n}.
+\end{aligned}
+$$
 
-## 10. Current Numerical Behavior
+Substitute these into
 
-As of the current implementation:
+$$
+\delta g+\delta t-\delta p+\delta n=-r_d.
+$$
 
-- `quadruped` normal behavior remains intact
-- `arm` enters restoration on the overlay graph without mutating the normal
-  graph in place
-- restoration prints:
-  - explicit entry / exit markers
-  - full per-iteration stats with `r`-suffixed iteration numbers
-  - a separate line showing `objective`, `search_obj`, and barrier contribution
+This gives the condensed inequality block
 
-The most common remaining failure mode is not graph synchronization or
-objective bookkeeping. It is still a globalization / direction-quality issue:
+$$
+-M_d\,\delta\nu_t + \delta g = -\hat r_d,
+$$
 
-- restoration may reduce primal infeasibility while accepting only very small
-  steps
-- backtracking can still terminate on the tiny-step condition
-- the resulting status is either `iter_result_restoration_failed` or
-  `iter_result_infeasible_stationary`, depending on the post-restoration KKT
-  state
+with
+
+$$
+M_d := T Z_t^{-1} + P Z_p^{-1} + N Z_n^{-1},
+$$
+
+and
+
+$$
+\hat r_d
+:=
+r_d
+- Z_t^{-1} r_{s,t}
++
+P Z_p^{-1} r_p
++
+Z_p^{-1} r_{s,p}
+-
+N Z_n^{-1} r_n
+-
+Z_n^{-1} r_{s,n}.
+$$
+
+Equivalently,
+
+$$
+\delta\nu_t = M_d^{-1}(\delta g + \hat r_d).
+$$
+
+Again, this matches the implementation exactly: the wrapper computes the
+diagonal inverse of
+
+$$
+\operatorname{diag}\!\left(\frac{t}{\nu_t}+\frac{p}{\nu_p}+\frac{n}{\nu_n}\right).
+$$
+
+### 3.3 Newton-Step Recovery
+
+Once the stage solve provides `\delta w`, the wrapper forms
+
+$$
+\delta g = J_d \delta w
+$$
+
+and recovers the eliminated local steps as
+
+$$
+\begin{aligned}
+\delta\nu_t &= M_d^{-1}(\delta g + \hat r_d), \\
+\delta t &=
+-T Z_t^{-1}\delta\nu_t
+- Z_t^{-1} r_{s,t}, \\
+\delta p &=
+P Z_p^{-1}\delta\nu_t
+- P Z_p^{-1} r_p
+- Z_p^{-1} r_{s,p}, \\
+\delta n &=
+-N Z_n^{-1}\delta\nu_t
+- N Z_n^{-1} r_n
+- Z_n^{-1} r_{s,n}, \\
+\delta\nu_p &= r_p - \delta\nu_t, \\
+\delta\nu_n &= r_n + \delta\nu_t .
+\end{aligned}
+$$
+
+The code stores:
+
+- `d_dual[t] = \delta\nu_t`
+- `d_value[t] = \delta t`
+- `d_value[p] = \delta p`
+- `d_value[n] = \delta n`
+- `d_dual[p] = \delta\nu_p`
+- `d_dual[n] = \delta\nu_n`
+
+The reduced multiplier seen by the stage QP is exactly `\nu_t`, so the wrapper
+exports
+
+$$
+d\_multiplier = \delta\nu_t.
+$$
+
+### 3.4 Contribution To The Stage QP
+
+Because
+
+$$
+\delta\nu_t = M_d^{-1}(J_d \delta w + \hat r_d),
+$$
+
+the eliminated inequality block contributes
+
+$$
+J_d^T M_d^{-1}\hat r_d
+$$
+
+to the first-order correction and
+
+$$
+J_d^T M_d^{-1}J_d
+$$
+
+to the Hessian modification.
+
+This is the same condensed structure as the equality block; only the local
+diagonal `M_d` and the residual `\hat r_d` differ.
+
+## 4. Initialization Used By The Wrappers
+
+The wrapper initialization matters because the condensed local solve is only
+well behaved when the local elastic state starts reasonably centered.
+
+### 4.1 Equality Elastic Initialization
+
+For one scalar equality residual `c`, the equality wrapper initializes `p,n`
+from the centered local system
+
+$$
+p-n=c,
+\qquad
+\frac{\mu}{p}+\frac{\mu}{n}=2\rho_c.
+$$
+
+Eliminating `p=c+n` gives the scalar quadratic solved in the code:
+
+$$
+\rho_c n^2 + \rho_c c\, n - \mu n - \frac{\mu c}{2} = 0,
+$$
+
+which is written in the implementation as
+
+$$
+n=\frac{\mu-\rho_c c+\sqrt{(\mu-\rho_c c)^2+2\rho_c\mu c}}{2\rho_c},
+\qquad
+p=c+n.
+$$
+
+Then
+
+$$
+z_p=\frac{\mu}{p},
+\qquad
+z_n=\frac{\mu}{n},
+\qquad
+\lambda=\rho_c-z_p.
+$$
+
+So the initializer satisfies
+
+$$
+p-n=c,
+\qquad
+z_p p = \mu,
+\qquad
+z_n n = \mu,
+\qquad
+z_p+z_n=2\rho_c.
+$$
+
+It does **not** use an `O(1)` lower bound on `p,n`; the code only applies a
+tiny numerical floor.
+
+### 4.2 Inequality Elastic Initialization
+
+For one scalar inequality residual `g`, the active restoration multiplier is
+`\nu_t`, and the wrapper initializes
+
+$$
+\nu_p = \rho_d-\nu_t,
+\qquad
+\nu_n = \rho_d+\nu_t,
+\qquad
+p = \frac{\mu}{\nu_p},
+\qquad
+n = \frac{\mu}{\nu_n},
+\qquad
+t = -g + p - n.
+$$
+
+This centers the local inequality-elastic block exactly:
+
+$$
+g+t-p+n=0,
+\qquad
+\rho_d-\nu_t-\nu_p=0,
+\qquad
+\rho_d+\nu_t-\nu_n=0,
+$$
+
+and
+
+$$
+\nu_t t \approx \mu,
+\qquad
+\nu_p p = \mu,
+\qquad
+\nu_n n = \mu.
+$$
+
+In the actual implementation, `\nu_t` is clamped strictly inside `(0,\rho_d)`
+before these formulas are applied, so the centered initialization never
+degenerates to `\nu_p \approx 0`.
+
+## 5. Search Objective
+
+The restoration line search distinguishes:
+
+- the original restoration objective
+- the barrier-augmented search objective
+
+The original restoration objective is
+
+$$
+\phi_R(w)
+\;+\;
+\rho_c \mathbf{1}^T(p_c+n_c)
+\;+\;
+\rho_d \mathbf{1}^T(p_d+n_d).
+$$
+
+The positivity barriers are not part of the original NLP. They appear only in
+the primal-dual search model through the complementarity residuals and the
+barrier parameter `\mu`.
+
+## 6. Wrapper Lifecycle, Metrics, And Exit Check
+
+### 6.1 Pre-Initialization Value Pass
+
+On restoration entry, the overlay graph is evaluated once in value mode before
+the soft-constraint initializer sizes and seeds the local elastic state.
+
+So during that first value-only pass, the elastic wrappers simply forward the
+source residuals:
+
+- equality overlay: `v = c(w)`
+- inequality overlay: `v = g(w)`
+
+and only after `solver::ineq_soft::initialize(...)` do they switch to the full
+elastic residuals `c-p+n` and `g+t-p+n`.
+
+### 6.2 Restoration Iteration Metric
+
+During restoration iterations, the printed
+
+$$
+r(\mathrm{prim})
+$$
+
+is still the infinity norm of the **active restoration-overlay residual
+vectors**. In particular it includes:
+
+- hard residuals kept active in the overlay, such as dynamics
+- equality elastic residuals `c-p+n`
+- inequality elastic residuals `g+t-p+n`
+
+So the per-iteration restoration log is not the original-problem infeasibility
+metric.
+
+### 6.3 Outer Trial Check
+
+The actual restoration success test is stricter:
+
+1. accept a restoration trial on the overlay graph,
+2. sync the trial primal state and hard duals back to the normal graph,
+3. commit the restoration inequality bound state back to the outer IPM blocks,
+3. evaluate the normal graph,
+4. require both
+
+$$
+\text{outer\_filter\_accept}
+$$
+
+and
+
+$$
+\|r_{\mathrm{prim}}^{\mathrm{outer,trial}}\|_1
+<
+\|r_{\mathrm{prim}}^{\mathrm{outer,before}}\|_1,
+$$
+
+so restoration exits only after improving the **original** normal problem's
+`L^1` primal residual, not merely after reducing the overlay metric.
+
+The extra bound-state commit in the outer trial check matters. The outer normal
+problem must be evaluated with
+
+- outer slack `s \leftarrow t`
+- outer multiplier `z \leftarrow \nu_t`
+
+for the original IPM inequality residuals to be consistent with the candidate
+restoration point.
+
+### 6.4 Successful Exit Cleanup
+
+On successful exit, the implementation also commits restoration inequality
+bound state back to the normal IPM constraints:
+
+- outer slack `s \leftarrow t`
+- outer multiplier `z \leftarrow \nu_t`
+
+and then re-evaluates the normal problem values and derivatives. Equality-side
+dual blocks are reset afterward according to the configured threshold rule.
+
+### 6.5 Return Semantics
+
+If restoration exhausts its budget without satisfying the exit test, the solver
+returns
+
+$$
+\texttt{restoration\_reached\_max\_iter}.
+$$
+
+If restoration succeeds, it does **not** mark the whole SQP solve as
+converged. Instead it returns control to the normal phase with the updated
+outer state, and the main SQP loop continues from the post-restoration
+iteration count.
+
+## 7. Summary
+
+The restoration wrappers use a fully local elimination:
+
+- the stage solver computes `\delta w`
+- the local wrapper computes `\delta c` or `\delta g`
+- the condensed diagonal system recovers the local multiplier step
+- the remaining elastic primal/dual steps are recovered by back-substitution
+
+The mathematically relevant condensed operators are:
+
+$$
+M_c = \operatorname{diag}\!\left(\frac{p}{z_p}+\frac{n}{z_n}\right),
+\qquad
+M_d = \operatorname{diag}\!\left(\frac{t}{\nu_t}+\frac{p}{\nu_p}+\frac{n}{\nu_n}\right).
+$$
+
+Those are the exact local Schur complements used by the restoration overlay.

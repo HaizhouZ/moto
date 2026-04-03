@@ -79,7 +79,7 @@ class soft_constr : public generic_constr {
     virtual scalar_t search_penalty(const func_approx_data &data) const { return 0.; }
     /// @brief directional derivative of @ref search_penalty along the current trial step
     virtual scalar_t search_penalty_dir_deriv(const func_approx_data &data) const { return 0.; }
-    /// @brief optional local stationarity summary owned by the constraint
+    /// @brief optional local stationarity residual summary owned by the constraint
     virtual scalar_t local_stat_residual_inf(const func_approx_data &data) const { return 0.; }
     /// @brief optional local complementarity summary owned by the constraint
     virtual scalar_t local_comp_residual_inf(const func_approx_data &data) const { return 0.; }

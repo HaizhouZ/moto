@@ -95,8 +95,8 @@ vector &slot_denom(State &state, detail::elastic_slot_t slot) {
 }
 
 template <typename State>
-vector &slot_combo(State &state, detail::elastic_slot_t slot) {
-    return state.combo[slot];
+vector &slot_backsub_rhs(State &state, detail::elastic_slot_t slot) {
+    return state.backsub_rhs[slot];
 }
 
 template <typename State>
@@ -113,12 +113,13 @@ void resize_eq_state(restoration::detail::eq_local_state &state, size_t ns_dim, 
     state.nc = nc_dim;
     const auto dim_eig = static_cast<Eigen::Index>(state.ns + state.nc);
     for (auto *arr : {&state.value, &state.value_backup, &state.d_value, &state.dual, &state.dual_backup,
-                      &state.d_dual, &state.r_stat, &state.r_comp, &state.combo, &state.corrector}) {
+                      &state.d_dual, &state.r_stat, &state.r_comp, &state.backsub_rhs, &state.corrector}) {
         for (auto &v : *arr) {
             resize_zero(v, dim_eig);
         }
     }
-    for (auto *v : {&state.base_residual, &state.r_c, &state.b_c, &state.minv_diag, &state.minv_bc, &state.d_lambda}) {
+    for (auto *v : {&state.base_residual, &state.r_c, &state.condensed_rhs,
+                    &state.schur_inv_diag, &state.schur_rhs, &state.d_multiplier}) {
         resize_zero(*v, dim_eig);
     }
 }
@@ -132,7 +133,7 @@ void resize_ineq_state(restoration::detail::ineq_local_state &state, size_t nx_d
     state.nu = nu_dim;
     const auto dim_eig = static_cast<Eigen::Index>(state.nx + state.nu);
     for (auto *arr : {&state.value, &state.value_backup, &state.d_value, &state.dual, &state.dual_backup,
-                      &state.d_dual, &state.r_comp, &state.denom, &state.combo, &state.corrector}) {
+                      &state.d_dual, &state.r_comp, &state.denom, &state.backsub_rhs, &state.corrector}) {
         for (auto &v : *arr) {
             resize_zero(v, dim_eig);
         }
@@ -142,13 +143,14 @@ void resize_ineq_state(restoration::detail::ineq_local_state &state, size_t nx_d
             resize_zero(v, dim_eig);
         }
     }
-    for (auto *v : {&state.base_residual, &state.r_d, &state.b_d, &state.minv_diag, &state.minv_bd}) {
+    for (auto *v : {&state.base_residual, &state.r_d, &state.condensed_rhs,
+                    &state.schur_inv_diag, &state.schur_rhs}) {
         resize_zero(*v, dim_eig);
     }
 }
 } // namespace
 
-TEST_CASE("restoration equality local KKT recovery satisfies regularized linearization") {
+TEST_CASE("restoration equality local KKT recovery satisfies full-KKT linearization") {
     detail::eq_local_state eq;
     resize_eq_state(eq, 1, 2);
     slot_value(eq, detail::slot_p) << 0.7, 0.9, 1.2;
@@ -162,26 +164,23 @@ TEST_CASE("restoration equality local KKT recovery satisfies regularized lineari
     lambda << 0.1, -0.2, 0.15;
     const scalar_t rho = 2.0;
     const scalar_t mu_bar = 0.3;
-    const scalar_t lambda_reg = 1e-3;
 
-    resto_eq_elastic_constr::compute_local_model(eq, c, lambda, rho, mu_bar, lambda_reg);
+    resto_eq_elastic_constr::compute_local_model(eq, c, lambda, rho, mu_bar);
 
     vector delta_c(3);
     delta_c << -0.11, 0.07, 0.19;
-    resto_eq_elastic_constr::recover_local_step(delta_c, eq, lambda_reg);
+    resto_eq_elastic_constr::recover_local_step(delta_c, eq);
 
     const vector res_c = delta_c - slot_step(eq, detail::slot_p) + slot_step(eq, detail::slot_n) + eq.r_c;
-    const vector res_p = slot_step(eq, detail::slot_p) - eq.d_lambda -
-                         lambda_reg * slot_dual_step(eq, detail::slot_p) + slot_r_stat(eq, detail::slot_p);
-    const vector res_n = slot_step(eq, detail::slot_n) + eq.d_lambda -
-                         lambda_reg * slot_dual_step(eq, detail::slot_n) + slot_r_stat(eq, detail::slot_n);
+    const vector res_p = -eq.d_multiplier - slot_dual_step(eq, detail::slot_p) + slot_r_stat(eq, detail::slot_p);
+    const vector res_n = eq.d_multiplier - slot_dual_step(eq, detail::slot_n) + slot_r_stat(eq, detail::slot_n);
     const vector res_sp = slot_dual(eq, detail::slot_p).cwiseProduct(slot_step(eq, detail::slot_p)) +
                           slot_value(eq, detail::slot_p).cwiseProduct(slot_dual_step(eq, detail::slot_p)) +
                           slot_r_comp(eq, detail::slot_p);
     const vector res_sn = slot_dual(eq, detail::slot_n).cwiseProduct(slot_step(eq, detail::slot_n)) +
                           slot_value(eq, detail::slot_n).cwiseProduct(slot_dual_step(eq, detail::slot_n)) +
                           slot_r_comp(eq, detail::slot_n);
-    const auto summary = resto_eq_elastic_constr::linearized_newton_residuals(delta_c, eq, lambda_reg);
+    const auto summary = resto_eq_elastic_constr::linearized_newton_residuals(delta_c, eq);
 
     REQUIRE(approx_zero(res_c));
     REQUIRE(approx_zero(res_p));
@@ -207,21 +206,18 @@ TEST_CASE("restoration equality local KKT recovery satisfies affine predictor li
     lambda << 0.1, -0.2;
     const scalar_t rho = 2.0;
     const scalar_t mu_bar = 0.3;
-    const scalar_t lambda_reg = 1e-3;
 
     vector mu_p = vector::Zero(2);
     vector mu_n = vector::Zero(2);
-    resto_eq_elastic_constr::compute_local_model(eq, c, lambda, rho, mu_bar, &mu_p, &mu_n, lambda_reg);
+    resto_eq_elastic_constr::compute_local_model(eq, c, lambda, rho, mu_bar, &mu_p, &mu_n);
 
     vector delta_c(2);
     delta_c << -0.11, 0.07;
-    resto_eq_elastic_constr::recover_local_step(delta_c, eq, lambda_reg);
+    resto_eq_elastic_constr::recover_local_step(delta_c, eq);
 
     const vector res_c = delta_c - slot_step(eq, detail::slot_p) + slot_step(eq, detail::slot_n) + eq.r_c;
-    const vector res_p = slot_step(eq, detail::slot_p) - eq.d_lambda -
-                         lambda_reg * slot_dual_step(eq, detail::slot_p) + slot_r_stat(eq, detail::slot_p);
-    const vector res_n = slot_step(eq, detail::slot_n) + eq.d_lambda -
-                         lambda_reg * slot_dual_step(eq, detail::slot_n) + slot_r_stat(eq, detail::slot_n);
+    const vector res_p = -eq.d_multiplier - slot_dual_step(eq, detail::slot_p) + slot_r_stat(eq, detail::slot_p);
+    const vector res_n = eq.d_multiplier - slot_dual_step(eq, detail::slot_n) + slot_r_stat(eq, detail::slot_n);
     const vector res_sp = slot_dual(eq, detail::slot_p).cwiseProduct(slot_step(eq, detail::slot_p)) +
                           slot_value(eq, detail::slot_p).cwiseProduct(slot_dual_step(eq, detail::slot_p)) +
                           slot_r_comp(eq, detail::slot_p);
@@ -250,22 +246,19 @@ TEST_CASE("restoration equality local KKT recovery satisfies corrector lineariza
     lambda << 0.1, -0.2;
     const scalar_t rho = 2.0;
     const scalar_t mu_bar = 0.3;
-    const scalar_t lambda_reg = 1e-3;
 
     vector mu_p(2), mu_n(2);
     mu_p << 0.25, 0.28;
     mu_n << 0.27, 0.29;
-    resto_eq_elastic_constr::compute_local_model(eq, c, lambda, rho, mu_bar, &mu_p, &mu_n, lambda_reg);
+    resto_eq_elastic_constr::compute_local_model(eq, c, lambda, rho, mu_bar, &mu_p, &mu_n);
 
     vector delta_c(2);
     delta_c << -0.11, 0.07;
-    resto_eq_elastic_constr::recover_local_step(delta_c, eq, lambda_reg);
+    resto_eq_elastic_constr::recover_local_step(delta_c, eq);
 
     const vector res_c = delta_c - slot_step(eq, detail::slot_p) + slot_step(eq, detail::slot_n) + eq.r_c;
-    const vector res_p = slot_step(eq, detail::slot_p) - eq.d_lambda -
-                         lambda_reg * slot_dual_step(eq, detail::slot_p) + slot_r_stat(eq, detail::slot_p);
-    const vector res_n = slot_step(eq, detail::slot_n) + eq.d_lambda -
-                         lambda_reg * slot_dual_step(eq, detail::slot_n) + slot_r_stat(eq, detail::slot_n);
+    const vector res_p = -eq.d_multiplier - slot_dual_step(eq, detail::slot_p) + slot_r_stat(eq, detail::slot_p);
+    const vector res_n = eq.d_multiplier - slot_dual_step(eq, detail::slot_n) + slot_r_stat(eq, detail::slot_n);
     const vector res_sp = slot_dual(eq, detail::slot_p).cwiseProduct(slot_step(eq, detail::slot_p)) +
                           slot_value(eq, detail::slot_p).cwiseProduct(slot_dual_step(eq, detail::slot_p)) +
                           slot_r_comp(eq, detail::slot_p);
@@ -341,7 +334,6 @@ TEST_CASE("restoration overlay problem keeps dyn and replaces non-dynamics with 
             .rho_y = 1e-4,
             .rho_eq = 10.0,
             .rho_ineq = 20.0,
-            .lambda_reg = 1e-8,
         });
 
     REQUIRE(resto->num(__dyn) == 1);
@@ -362,7 +354,7 @@ TEST_CASE("restoration overlay problem keeps dyn and replaces non-dynamics with 
     REQUIRE(ineq_overlay->source()->name() == iq->name());
 }
 
-TEST_CASE("restoration inequality local KKT recovery satisfies regularized linearization") {
+TEST_CASE("restoration inequality local KKT recovery satisfies reduced linearization") {
     detail::ineq_local_state iq;
     resize_ineq_state(iq, 2, 1);
     slot_value(iq, detail::slot_t) << 1.1, 0.8, 1.4;
@@ -376,20 +368,19 @@ TEST_CASE("restoration inequality local KKT recovery satisfies regularized linea
     g << -0.2, 0.5, -0.1;
     const scalar_t rho = 3.0;
     const scalar_t mu_bar = 0.25;
-    const scalar_t lambda_reg = 1e-3;
 
-    resto_ineq_elastic_ipm_constr::compute_local_model(iq, g, rho, mu_bar, lambda_reg);
+    resto_ineq_elastic_ipm_constr::compute_local_model(iq, g, rho, mu_bar);
 
     vector delta_g(3);
     delta_g << 0.08, -0.12, 0.04;
-    resto_ineq_elastic_ipm_constr::recover_local_step(delta_g, iq, lambda_reg);
+    resto_ineq_elastic_ipm_constr::recover_local_step(delta_g, iq);
 
     const vector res_d = delta_g + slot_step(iq, detail::slot_t) - slot_step(iq, detail::slot_p) +
                          slot_step(iq, detail::slot_n) + iq.r_d;
-    const vector res_p = slot_step(iq, detail::slot_p) - slot_dual_step(iq, detail::slot_t) -
-                         lambda_reg * slot_dual_step(iq, detail::slot_p) + slot_r_stat(iq, detail::slot_p);
-    const vector res_n = slot_step(iq, detail::slot_n) + slot_dual_step(iq, detail::slot_t) -
-                         lambda_reg * slot_dual_step(iq, detail::slot_n) + slot_r_stat(iq, detail::slot_n);
+    const vector res_p =
+        -slot_dual_step(iq, detail::slot_t) - slot_dual_step(iq, detail::slot_p) + slot_r_stat(iq, detail::slot_p);
+    const vector res_n =
+        slot_dual_step(iq, detail::slot_t) - slot_dual_step(iq, detail::slot_n) + slot_r_stat(iq, detail::slot_n);
     const vector res_st = slot_dual(iq, detail::slot_t).cwiseProduct(slot_step(iq, detail::slot_t)) +
                           slot_value(iq, detail::slot_t).cwiseProduct(slot_dual_step(iq, detail::slot_t)) +
                           slot_r_comp(iq, detail::slot_t);
@@ -399,7 +390,7 @@ TEST_CASE("restoration inequality local KKT recovery satisfies regularized linea
     const vector res_sn = slot_dual(iq, detail::slot_n).cwiseProduct(slot_step(iq, detail::slot_n)) +
                           slot_value(iq, detail::slot_n).cwiseProduct(slot_dual_step(iq, detail::slot_n)) +
                           slot_r_comp(iq, detail::slot_n);
-    const auto summary = resto_ineq_elastic_ipm_constr::linearized_newton_residuals(delta_g, iq, lambda_reg);
+    const auto summary = resto_ineq_elastic_ipm_constr::linearized_newton_residuals(delta_g, iq);
 
     REQUIRE(approx_zero(res_d));
     REQUIRE(approx_zero(res_p));
@@ -412,7 +403,7 @@ TEST_CASE("restoration inequality local KKT recovery satisfies regularized linea
     REQUIRE(summary.inf_comp < 1e-12);
 }
 
-TEST_CASE("restoration inequality initialization follows slack-plus-elastic centering") {
+TEST_CASE("restoration inequality initialization centers local elastic KKT system") {
     const scalar_t g = -0.25;
     const scalar_t rho = 3.0;
     const scalar_t mu_bar = 0.2;
@@ -421,17 +412,22 @@ TEST_CASE("restoration inequality initialization follows slack-plus-elastic cent
     const auto init = resto_ineq_elastic_ipm_constr::initialize_elastic_ineq_scalar(g, rho, mu_bar, nu_t0);
 
     REQUIRE(approx_scalar(init.nu_t, nu_t0));
-    REQUIRE(approx_scalar(init.t, mu_bar / nu_t0));
+    REQUIRE(init.t > 0.);
     REQUIRE(init.p > 0.);
     REQUIRE(init.n > 0.);
     REQUIRE(init.nu_p > 0.);
     REQUIRE(init.nu_n > 0.);
+    REQUIRE(approx_scalar(init.nu_p, rho - init.nu_t, 1e-12));
+    REQUIRE(approx_scalar(init.nu_n, rho + init.nu_t, 1e-12));
+    REQUIRE(approx_scalar(g + init.t - init.p + init.n, 0.0, 1e-12));
     REQUIRE(approx_scalar(init.nu_p * init.p, mu_bar, 1e-10));
     REQUIRE(approx_scalar(init.nu_n * init.n, mu_bar, 1e-10));
-    REQUIRE(approx_scalar(g + init.t - init.p + init.n, 0., 1e-10));
+    REQUIRE(approx_scalar(init.t * init.nu_t - mu_bar,
+                          nu_t0 * (-g + init.p - init.n) - mu_bar,
+                          1e-12));
 }
 
-TEST_CASE("restoration inequality initializer centers primal and complementarity") {
+TEST_CASE("restoration inequality initializer yields centered local model") {
     const scalar_t g = -0.35;
     const scalar_t rho = 3.0;
     const scalar_t mu_bar = 0.25;
@@ -450,14 +446,14 @@ TEST_CASE("restoration inequality initializer centers primal and complementarity
 
     vector g_vec(1);
     g_vec << g;
-    resto_ineq_elastic_ipm_constr::compute_local_model(iq, g_vec, rho, mu_bar, 0.0);
+    resto_ineq_elastic_ipm_constr::compute_local_model(iq, g_vec, rho, mu_bar);
 
-    REQUIRE(approx_zero(iq.r_d, 1e-10));
-    REQUIRE(approx_zero(slot_r_comp(iq, detail::slot_t), 1e-10));
-    REQUIRE(approx_zero(slot_r_comp(iq, detail::slot_p), 1e-10));
-    REQUIRE(approx_zero(slot_r_comp(iq, detail::slot_n), 1e-10));
-    REQUIRE(slot_r_stat(iq, detail::slot_p).allFinite());
-    REQUIRE(slot_r_stat(iq, detail::slot_n).allFinite());
+    REQUIRE(approx_zero(iq.r_d));
+    REQUIRE(approx_zero(slot_r_comp(iq, detail::slot_p)));
+    REQUIRE(approx_zero(slot_r_comp(iq, detail::slot_n)));
+    REQUIRE(approx_zero(slot_r_stat(iq, detail::slot_p)));
+    REQUIRE(approx_zero(slot_r_stat(iq, detail::slot_n)));
+    REQUIRE(slot_r_comp(iq, detail::slot_t).allFinite());
 }
 
 TEST_CASE("positivity helper reuses consistent alpha and backup semantics") {

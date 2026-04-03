@@ -8,8 +8,7 @@ bool same_restoration_cfg(const solver::restoration::restoration_overlay_setting
     return lhs.rho_u == rhs.rho_u &&
            lhs.rho_y == rhs.rho_y &&
            lhs.rho_eq == rhs.rho_eq &&
-           lhs.rho_ineq == rhs.rho_ineq &&
-           lhs.lambda_reg == rhs.lambda_reg;
+           lhs.rho_ineq == rhs.rho_ineq;
 }
 } // namespace
 
@@ -29,7 +28,6 @@ ns_sqp::solver_graph_type &ns_sqp::restoration_graph() {
         .rho_y = settings.restoration.rho_y,
         .rho_eq = settings.restoration.rho_eq,
         .rho_ineq = settings.restoration.rho_ineq,
-        .lambda_reg = settings.restoration.lambda_reg,
     };
     const bool needs_rebuild =
         !active_model_graph_->restoration_runtime ||

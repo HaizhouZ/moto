@@ -148,12 +148,11 @@ struct ns_sqp {
 
     struct restoration_settings {
         bool enabled = true;
-        size_t max_iter = 50;
-        scalar_t rho_u = 1e-4;
-        scalar_t rho_y = 1e-4;
+        size_t max_iter = 100;
+        scalar_t rho_u = 1.0;
+        scalar_t rho_y = 1.0;
         scalar_t rho_eq = 1000.0;
         scalar_t rho_ineq = 1000.0;
-        scalar_t lambda_reg = 1e-8;
         scalar_t restoration_improvement_frac = 0.9;
         scalar_t alpha_min_factor = 5e-2;
         scalar_t bound_mult_reset_threshold = 1e4;
@@ -214,6 +213,7 @@ struct ns_sqp {
         success,               ///< converged to a KKT point within tolerances
         exceed_max_iter,       ///< reached maximum number of iterations without convergence
         restoration_failed,    ///< restoration was triggered but failed to make sufficient progress
+        restoration_reached_max_iter, ///< restoration reached its iteration budget without satisfying the exit test
         infeasible_stationary, ///< reached an infeasible stationary point (e.g. due to LICQ failure) and cannot make progress
     };
 

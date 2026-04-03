@@ -53,7 +53,6 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("rho_y", &ns_sqp::restoration_settings::rho_y, "Restoration proximal weight on y")
         .def_rw("rho_eq", &ns_sqp::restoration_settings::rho_eq, "Elastic penalty weight for restoration equalities")
         .def_rw("rho_ineq", &ns_sqp::restoration_settings::rho_ineq, "Elastic penalty weight for restoration inequalities")
-        .def_rw("lambda_reg", &ns_sqp::restoration_settings::lambda_reg, "Regularization on restoration local multiplier rows")
         .def_rw("restoration_improvement_frac", &ns_sqp::restoration_settings::restoration_improvement_frac, "Required fraction of primal infeasibility improvement to accept restoration exit")
         .def_rw("alpha_min_factor", &ns_sqp::restoration_settings::alpha_min_factor, "Tiny-step trigger factor used before entering restoration")
         .def_rw("bound_mult_reset_threshold", &ns_sqp::restoration_settings::bound_mult_reset_threshold, "Reset copied-back bound multipliers when they exceed this threshold")

@@ -389,14 +389,17 @@ void ns_sqp::refresh_ls_bounds() {
 void ns_sqp::ineq_constr_correction(iteration_context &ctx) {
     if (settings.ipm.ipm_enable_affine_step()) {
         auto &graph = solver_graph();
+        for (auto &worker_cfg : setting_per_thread) {
+            worker_cfg.as<solver::ipm_config::worker_type>() = {};
+        }
         graph.for_each_parallel([this](size_t tid, data *d) {
             solver::ineq_soft::finalize_predictor_step(d, &setting_per_thread[tid]);
         });
         settings.ipm.ipm_end_predictor_computation(); // ipm affine step computation is done
         // collect worker ipm data
-        solver::ipm_config::worker &main_worker = setting_per_thread[0];
+        solver::ipm_config::worker main_worker{};
         for (size_t i : range(settings.n_worker)) {
-            main_worker += setting_per_thread[i];
+            main_worker += setting_per_thread[i].as<solver::ipm_config::worker_type>();
         }
         if (settings.has_ipm_ineq) {
             settings.ipm.adaptive_mu_update(main_worker);
@@ -507,6 +510,9 @@ void ns_sqp::prepare_globalization(filter_linesearch_data &ls, iteration_context
             solver::ineq_soft::backup_trial_state(d);
         }
     });
+    // Refresh direction-dependent KKT diagnostics for the Newton step that was
+    // just assembled. Line search reads these values from ctx.current.
+    ctx.current = compute_kkt_info();
     if (ctx.mu_changed) {
         ls.points.clear(); // the QP objective changed, so old filter points are no longer comparable
     }
@@ -654,7 +660,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
         // ls.constr_vio_min = kkt_last.prim_res_l1 * settings.ls.constr_vio_min_frac;
         refresh_problem_flags();
         settings.max_iter = n_iter;
-        for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
+        for (size_t i_iter = kkt_last.num_iter; i_iter < n_iter;) {
             profiler_.start_iteration(i_iter);
             timed_block_start("sqp_single_iter");
             const scalar_t inf_prim_before = kkt_last.inf_prim_res;
@@ -680,11 +686,13 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             if (tiny_step_trigger) {
                 kkt_last = restoration_update(kkt_last, ls);
                 ls.reset_per_iter_data();
-                if (kkt_last.result == iter_result_t::success ||
-                    kkt_last.result == iter_result_t::restoration_failed ||
+                if (kkt_last.result == iter_result_t::restoration_failed ||
+                    kkt_last.result == iter_result_t::restoration_reached_max_iter ||
                     kkt_last.result == iter_result_t::infeasible_stationary) {
                     break;
                 }
+                i_iter = kkt_last.num_iter;
+                continue;
             }
 
             if (kkt_last.inf_dual_res < settings.dual_tol &&
@@ -720,6 +728,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                 }
                 settings.ipm.mu = std::max(settings.ipm.mu, 1e-11);
             }
+            ++i_iter;
         }
         if (kkt_last.result == iter_result_t::unknown) {
             kkt_last.result = iter_result_t::exceed_max_iter;
@@ -856,7 +865,11 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
                 if (update_dual_res && n->dense().lag_jac_[__u].size() > 0) {
                     accumulate_u_stationarity(n->dense().lag_jac_[__u], kkt, dual_res_l1, n_dual_res);
                 }
-                accumulate_constraint_objective_terms(kkt, *n, false, false);
+                // In restoration, the elastic overlay wrappers own the relevant
+                // local stationarity and complementarity residuals. Include them
+                // here so the reported phase KKT metrics reflect the active
+                // restoration problem instead of printing zeros for r(dual)/r(comp).
+                accumulate_constraint_objective_terms(kkt, *n, false, true);
                 accumulate_dual_norms(kkt, n->dense().dual_, true);
                 accumulate_primal_step_and_obj_dec(kkt, *n, false);
                 accumulate_dual_step_info(kkt, n->trial_dual_step);
