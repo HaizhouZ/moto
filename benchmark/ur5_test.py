@@ -179,7 +179,6 @@ class pinCasadiModel(cpin.Model):
                     "ee_cost", self.pos_args + [self.r_des, self.quat_des], res
                 )
                 .set_gauss_newton(self.W_ee_cost)
-                .as_terminal()
             )
         if not soft:
             return moto.constr.create(
@@ -231,7 +230,7 @@ class pinCasadiModel(cpin.Model):
             "c", state_args + [self.q_nom], state_cost
         ).set_diag_hess()
         if terminal:
-            return cost.as_terminal()
+            return cost
         return cost
 
     def get_input_cost(self):
@@ -258,8 +257,8 @@ prob.add(model.get_state_cost())
 prob.add(model.get_input_cost())
 
 prob_term = prob.clone()
-prob_term.add(model.make_ee_pos_constr(soft=args.soft, cost=args.cost))
-prob_term.add(model.get_state_cost(terminal=True))
+prob_term.add_terminal(model.make_ee_pos_constr(soft=args.soft, cost=args.cost))
+prob_term.add_terminal(model.get_state_cost(terminal=True))
 
 prob.print_summary()
 print("--" * 15)

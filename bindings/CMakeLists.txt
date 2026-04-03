@@ -41,6 +41,8 @@ foreach(SUBDIR ${BINDING_SUBDIRS})
   endif()
 endforeach()
 
+list(APPEND BINDING_FILES ${CMAKE_CURRENT_SOURCE_DIR}/definition/model.cpp)
+
 nanobind_add_module(${PYTHON_MODULE_NAME} NB_STATIC ${BINDING_FILES} setup_bindings.cpp)
 target_link_libraries(${PYTHON_MODULE_NAME} PRIVATE ${PROJECT_NAME} ${PLUGIN_LIBS})
 target_include_directories(${PYTHON_MODULE_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

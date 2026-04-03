@@ -3,13 +3,14 @@ import casadi as cs
 import numpy as np
 import pinocchio as pin
 import pinocchio.casadi as cpin
+import os
 
 from example_robot_data import load
 import meshcat.geometry as mg
 import meshcat.transformations as tf
 import meshcat_shapes as mcs
 
-full = False
+full = True
 soft = False
 
 
@@ -60,21 +61,6 @@ class pinCasadiModel(cpin.Model):
         # self.a = cs.vcat([self.ab, self.aj]) if self.is_floating_based else self.aj
         self.tq = moto.sym.inputs(name + "_tq", self.nj)
 
-        # implicit euler
-        def implicit_euler():
-            q_next = cpin.integrate(self, self.q.sx, self.vn * dt)
-            # v_next = self.v[-self.nj :] + self.aj * dt
-            # v_next = self.v + self.a * dt
-            # return moto.dense_dynamics(
-            #     name + "_euler",
-            #     [self.q, self.v, self.qn, self.vn, self.a, dt],
-            #     cs.vcat([self.qn - q_next, self.vn - v_next]),
-            # )
-            # return cs.vcat([self.qn - q_next, self.vn[-self.nj :] - v_next])
-            # return cs.vcat([self.qn - q_next, self.vn - v_next])
-            return cs.vcat([self.qn - q_next])
-
-        self.joint_euler = implicit_euler()
         # self.ntq = model.nv - 6 if self.is_floating_based else model.nv
         self.q_stack = self.q.sx
         self.v_stack = self.v.sx
@@ -105,10 +91,10 @@ class pinCasadiModel(cpin.Model):
             for f in foot_frames
         ]
         self.F_f = [self.foot_jacs[i].T @ self.f_f[i] for i in range(len(foot_frames))]
-        self.z_f = cs.vcat([self.data.oMf[f].translation[2] for f in self.foot_idx])
+        self.v_f, self.z_f = self.compute_foot_kinematics(self.q_stack, self.v_stack)
 
         self.kin_constr = [
-            self.make_foot_kin_constr(i) for i in range(len(foot_frames))
+            self.make_foot_kin_constr(i, soft) for i in range(len(foot_frames))
         ]
         self.kin_cost = [self.make_foot_kin_cost(i) for i in range(len(foot_frames))]
 
@@ -137,7 +123,6 @@ class pinCasadiModel(cpin.Model):
         #     self.rnea_base = self.rnea[:6]
         # self.tq = self.rnea[-self.nj :]
 
-        self.dyn = self.make_dynamics()
 
         self.mu = moto.sym.params("mu", default_val=0.7)  # friction coefficient
         self.fric = [self.make_fric_cone(i, f) for i, f in enumerate(self.f_f)]
@@ -148,14 +133,33 @@ class pinCasadiModel(cpin.Model):
             default_val=q_nom if q_nom is not None else np.zeros(self.nq),
         )
 
+                # implicit euler
+        def implicit_euler():
+            q_next = cpin.integrate(self, self.q.sx, (self.v + self.aba) * dt)
+            # v_next = self.v[-self.nj :] + self.aj * dt
+            # v_next = self.v + self.a * dt
+            # return moto.dense_dynamics(
+            #     name + "_euler",
+            #     [self.q, self.v, self.qn, self.vn, self.a, dt],
+            #     cs.vcat([self.qn - q_next, self.vn - v_next]),
+            # )
+            # return cs.vcat([self.qn - q_next, self.vn[-self.nj :] - v_next])
+            # return cs.vcat([self.qn - q_next, self.vn - v_next])
+            return cs.vcat([self.qn - q_next])
+
+        self.joint_euler = implicit_euler()
+
+        self.dyn = self.make_dynamics()
+
+
     def make_dynamics(self):
         args = (
             self.pos_args
             + self.vel_args
             + self.pos_args_n
             + self.vel_args_n
-            + [*self.f_f]
             + self.acc_args
+            + [*self.f_f]
         )
         if isinstance(self.dt, cs.SX):
             args.append(self.dt)
@@ -184,39 +188,56 @@ class pinCasadiModel(cpin.Model):
             )
         # return moto.dense_dynamics(self.name + "_fb_fd", args, cs.vcat(out))
 
-    def make_foot_kin_constr(self, i: int, soft: bool = False):
-        self.v_f = cs.hcat(
+    def compute_foot_kinematics(self, q_stack, v_stack):
+        data = self.createData()
+        cpin.forwardKinematics(self, data, q_stack, v_stack)
+        cpin.computeJointJacobians(self, data)
+        cpin.updateFramePlacements(self, data)
+        v_f = cs.hcat(
             [
-                cpin.getFrameVelocity(
-                    self, self.data, f, pin.LOCAL_WORLD_ALIGNED
-                ).linear
+                cpin.getFrameVelocity(self, data, f, pin.LOCAL_WORLD_ALIGNED).linear
                 for f in self.foot_idx
             ]
         )
-        res = cs.vcat([self.v_f[:2, i], self.k_f * self.z_f[i] + self.v_f[2, i]])
+        z_f = cs.vcat([data.oMf[f].translation[2] for f in self.foot_idx])
+        return v_f, z_f
+
+    def make_foot_kin_constr(self, i: int, soft: bool = False):
+        pos_args = self.pos_args
+        vel_args = self.vel_args
+        v_f = self.v_f
+        z_f = self.z_f
+        res = cs.vcat([v_f[:2, i], self.k_f * z_f[i] + v_f[2, i]])
         c = moto.constr.create(
             f"kin_{self.foot_frames[i]}" + ("_soft" if soft else ""),
-            self.pos_args + self.vel_args + [self.k_f],  # self.z_clip],
+            pos_args + vel_args + [self.k_f],  # self.z_clip],
             # [self.q, k_f, *active_foot, z_clip],
             # cs.vcat([self.v_f[:2, i], self.k_f * cs.tanh(self.z_f[i]) * self.z_clip + self.v_f[2, i]]) * self.active_foot[i],
-            cs.vcat([res, -res]) if soft else res,
+            res,  # if not soft else cs.vcat([-res, res]),
+            # res,
             # cs.vcat([v_f[:2, i], z_f[i]]) * active_foot[i],
         )
         c.enable_if_all([self.f_f[i]])
-
-        return c.cast_ineq() if soft else c
+        # return c
+        # return c.cast_ineq() if soft else c
+        if not soft:
+            return c
+        else:
+            soft_c: moto.pmm_constr = c.cast_soft()
+            soft_c.rho = 1e-8
+        return soft_c
 
     def make_foot_kin_cost(self, i: int):
+        pos_args = self.pos_args
+        z_f = self.z_f
         pos_cost = (
             moto.cost.create(
-                f"kin_pos_cost_{self.foot_frames[i]}", self.pos_args, self.z_f[i]
+                f"kin_pos_cost_{self.foot_frames[i]}", pos_args, z_f[i]
             )
             .set_gauss_newton(
                 moto.sym.params(f"W_kin_{self.foot_frames[i]}", 1, default_val=1e3)
             )
-            .as_terminal()
         )
-        pos_cost.name = pos_cost.name.replace("_terminal", "")
         pos_cost.enable_if_all([self.f_f[i]])
         return pos_cost
 
@@ -257,6 +278,7 @@ class pinCasadiModel(cpin.Model):
         c = moto.constr.create(
             f"fric_{self.foot_frames[i]}", [f, self.mu], cone
         ).cast_ineq()
+        c.enable_if_all([f])
         return c
 
     def add_dt_constr_and_cost(self, prob: moto.ocp, dt_nom: moto.var):
@@ -278,12 +300,14 @@ class pinCasadiModel(cpin.Model):
             prob.add(timing_cost)
 
     def get_state_cost(self, terminal: bool = False):
-        q_nom_res = self.q_stack - self.q_nom
+        q_stack = self.q_stack
+        v_stack = self.v_stack
+        q_nom_res = q_stack - self.q_nom
         state_cost = (
             100.0 * cs.sumsqr(q_nom_res[: self.nqb])
             + 1 * cs.sumsqr(q_nom_res[self.nqb :])
-            + 1.0 * cs.sumsqr(self.v_stack[:6])
-            + 0.01 * cs.sumsqr(self.v_stack[6:])
+            + 1.0 * cs.sumsqr(v_stack[:6])
+            + 0.01 * cs.sumsqr(v_stack[6:])
         )
         state_args = self.pos_args + self.vel_args
         cost = moto.cost.create("c", state_args + [self.q_nom], state_cost)
@@ -333,7 +357,15 @@ class pinCasadiModel(cpin.Model):
 dt_nom = moto.sym.params("dt_nom", 1, default_val=0.02)
 dt = 0.02
 display = True
-go2 = load("go2", display=display, verbose=True)
+try:
+    go2 = load("go2", display=display, verbose=True)
+except Exception as exc:
+    if display:
+        print(f"viewer init failed, retrying with display disabled: {exc}")
+        display = False
+        go2 = load("go2", display=False, verbose=True)
+    else:
+        raise
 q_d = np.copy(go2.q0)
 root_joint = pin.JointModelComposite()
 root_joint.addJoint(pin.JointModelTranslation())
@@ -347,26 +379,22 @@ model = pinCasadiModel(
     model, dt=dt, q_nom=q_d, dense=True, foot_frames=foot_frames, use_fwd_dyn=True
 )
 
-prob = moto.ocp.create()
-prob.add(model.dyn)
-if full:
-    prob.add(model.fric)
-prob.add(model.kin_constr)
-if not full:
-    prob.add(model.kin_cost)
-# prob.add(model.zf_constr)
-prob.add(model.make_tq_limit_constr())
-prob.add(model.make_joint_limit_constr())
-model.add_dt_constr_and_cost(prob, dt_nom)
-prob.add(model.get_state_cost())
-prob.add(model.get_input_cost())
-# prob.add(model.make_foot_lift_cost(lifted=True))
+def build_stage_node_prob(robot: pinCasadiModel):
+    stage_node_prob = moto.node_ocp.create()
+    # if full:
+    #     stage_node_prob.add(robot.fric)
+    stage_node_prob.add(robot.kin_constr)
+    if not full:
+        stage_node_prob.add(robot.kin_cost)
+    robot.add_dt_constr_and_cost(stage_node_prob, dt_nom)
+    stage_node_prob.add(robot.get_state_cost())
+    stage_node_prob.add(robot.get_input_cost())
+    # stage_node_prob.add(robot.make_foot_lift_cost(lifted=True))
+    return stage_node_prob
 
-prob_term = prob.clone()
-prob_term.add(model.get_state_cost(terminal=True))
 
-prob.print_summary()
-print("--" * 15)
+stage_node_proto = build_stage_node_prob(model)
+terminal_node_proto = stage_node_proto.clone()
 
 N_horizon = 100
 
@@ -377,59 +405,110 @@ total_gait_steps = steps * nodes_per_step
 stance_length = int((N_horizon - total_gait_steps) / 2)
 print(f"stance_length: {stance_length}, nodes_per_step: {nodes_per_step}")
 
-gait = "trot"
-# gait = "hopping"
+# gait = "trot"
+gait = "hopping"
 gait_setting = {
     "trot": [1, 1, 0, 0],
     "hopping": [0, 0, 0, 0],
 }
 sqp = moto.sqp(n_job=10)
-g = sqp.graph
-n0 = g.set_head(g.add(sqp.create_node(prob)))
+modeled = sqp.create_graph()
 
 
-def create_phase_problem(step):
+def create_phase_config(step):
     constr_to_disable = []
     for idx, f in enumerate([0, 3, 1, 2]):
         if step % 2 == 0:
             if not gait_setting[gait][idx]:
-                constr_to_disable += [model.f_f[f]]
+                constr_to_disable.append(model.f_f[f])
         else:
             if gait_setting[gait][idx]:
-                constr_to_disable += [model.f_f[f]]
-    phase_prob = prob.clone(
-        moto.ocp.active_status_config(deactivate_list=constr_to_disable)
-    )
-    return phase_prob
+                constr_to_disable.append(model.f_f[f])
+    return moto.ocp.active_status_config(deactivate_list=constr_to_disable)
 
 
-for step in range(steps):
-    np = g.add(sqp.create_node(create_phase_problem(step + 1)))
-    np.data.prob.print_summary()
-    if step == 0:
-        g.add_edge(n0, np, stance_length, include_ed=False)
-    else:
-        g.add_edge(n_prev, np, nodes_per_step, include_ed=False)
-    n_prev = np
+stage_node = modeled.create_node(stage_node_proto)
+segment_lengths = [stance_length]
+segment_lengths.extend([nodes_per_step] * steps)
+segment_lengths.append(stance_length)
 
-nstop = g.add(sqp.create_node(prob))
-g.add_edge(n_prev, nstop, nodes_per_step, include_ed=False)
-n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
-g.add_edge(nstop, n1, stance_length)
+
+def add_segment(start, end_prob, n_edges):
+    end_node = modeled.create_node(end_prob)
+    edges = modeled.add_path(start, end_node, n_edges)
+    for edge in edges:
+        edge.add(model.dyn)
+    return end_node
+
+
+current_node = stage_node
+for step, n_edges in enumerate(segment_lengths[:-2], start=1):
+    current_node = add_segment(current_node, stage_node_proto.clone(create_phase_config(step)), n_edges)
+current_node = add_segment(current_node, stage_node_proto.clone(), segment_lengths[-2])
+add_segment(current_node, terminal_node_proto, segment_lengths[-1])
+
+if os.getenv("MOTO_DEBUG_SOLVER_PROBS"):
+    flat_nodes = sqp.graph.flatten_nodes()
+    print("--" * 15)
+    print("Terminal node prototype:")
+    terminal_node_proto.print_summary()
+    print("Head solver node problem:")
+    flat_nodes[0].prob.print_summary()
+    print("Tail solver node problem:")
+    flat_nodes[-1].prob.print_summary()
+
+if os.getenv("MOTO_DEBUG_GRAPH_LAYOUT"):
+    print("Flattened solver graph layout:")
+    for idx, node in enumerate(sqp.graph.flatten_nodes()):
+        prob = node.prob
+        print(
+            f"  node[{idx}] uid={prob.uid} "
+            f"x={prob.dim(moto.field___x)} "
+            f"u={prob.dim(moto.field___u)} "
+            f"y={prob.dim(moto.field___y)} "
+            f"dyn={len(prob.exprs(moto.field___dyn))}"
+        )
 # g.add_edge(n0, n1, N_horizon)
-# print(g.flatten_nodes())
+# print(len(g.flatten_nodes()))
+# names = [[] for _ in range(len(g.flatten_nodes()))]
+# idx = 0
+# def print_node_info(node: moto.sqp.data_type):
+#     global names, idx
+#     names[idx] = []
+#     for c in node.prob.exprs(moto.field___u):
+#         names[idx].append(c.name)
+#     idx += 1
+
+
+# sqp.apply_forward(print_node_info)
+# print("Node variable names:")
+# for i, n in enumerate(g.flatten_nodes()):
+#     print(f"Node {i}: {names[i]}")
+
+# exit(0)
 
 sqp.settings.ipm.mu0 = 1.0
-sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
-# sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.monotonic_decrease
+# sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
+sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.monotonic_decrease
 # sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.quality_function_based
 sqp.settings.ipm_conditional_corrector = True
 sqp.settings.prim_tol = 1e-3
 sqp.settings.dual_tol = 1e-3
 sqp.settings.comp_tol = 1e-3
 sqp.settings.rf.max_iters = 2
-sqp.settings.ls.max_soc_iter = 4
-sqp.settings.ls.update_alpha_dual = True
+sqp.settings.ls.update_alpha_dual = False
+# sqp.settings.scaling.scaling_mode = moto.sqp.scaling_settings.mode_gradient
+sqp.settings.ls.primal_gamma = 1e-4
+sqp.settings.ls.method = moto.ns_sqp.search_method_filter
+sqp.settings.ls.merit_sigma = 100
+sqp.settings.ls.max_steps = 100
+
+max_update_iter = int(os.getenv("MOTO_SQP_MAX_ITER", "2"))
+bench_runs = int(os.getenv("MOTO_SQP_BENCH_RUNS", "1"))
+print(f"SQP update iters: {max_update_iter}")
+print(f"SQP benchmark runs: {bench_runs}")
+
+# sqp.settings.ls.backtrack_scheme = moto.ns_sqp.backtrack_scheme_geometric
 # cfg = [
 #     [-0.9595959595959596, -0.6161616161616161],
 #     [-0.9595959595959596, 0.31313131313131315],
@@ -439,10 +518,19 @@ cfg = [
     [-0.8383838383838383, 0.2525252525252526],
     [-0.4949494949494949, 0.8989898989898992],
 ]
+cfg = [
+    [-0.8181818181818181, 0.3737373737373739],
+    [0.4545454545454546, -0.21212121212121204],
+]
+# simple hopping reduced
+# cfg = [
+#     [-0.19444444444444445, -0.17929292929292928],
+#     [-0.3888888888888889, -0.35858585858585856],
+# ]
 step = 0
 node_idx = 0
 
-
+print("")
 def gait_setup(data: moto.sqp.data_type):
     global step, node_idx
     if node_idx >= stance_length and node_idx + stance_length < N_horizon:
@@ -467,22 +555,54 @@ def gait_setup(data: moto.sqp.data_type):
         data.value[model.q_nom][1] = cfg[0][1] + node_idx / N_horizon * (
             cfg[1][1] - cfg[0][1]
         )
+    # data.value[model.q] = data.value[model.qn] = data.value[model.q_nom]
+
     node_idx += 1
 
 
 sqp.apply_forward(gait_setup)
+# exit(0)
 import time
 
 cnt = 0
 iters = 0
 start = time.perf_counter()
-# while cnt < 50:
-res = sqp.update(100, verbose=True)
-sqp.settings.ipm.warm_start = True
-cnt += 1
-iters += res.num_iter
-print(f"sqp.update() took {(time.perf_counter() - start) / cnt:.3f} seconds")
-print(f"per iteration took {(time.perf_counter() - start) / iters * 1000:.3f} ms")
+res = None
+for i in range(bench_runs):
+    bench_verbose = os.getenv("MOTO_SQP_BENCH_VERBOSE") is not None or i + 1 == bench_runs
+    res = sqp.update(max_update_iter, verbose=bench_verbose)
+    sqp.settings.ipm.warm_start = True
+    cnt += 1
+    iters += res.num_iter
+elapsed = time.perf_counter() - start
+
+print(f"sqp.update() took {elapsed / cnt:.3f} seconds")
+print(f"per iteration took {elapsed / iters * 1000:.3f} ms")
+
+if os.getenv("MOTO_PROFILE_SQP"):
+    report = sqp.get_profile_report()
+    print(
+        f"profile total={report.total_ms:.1f} ms "
+        f"init={report.initialize_ms:.1f} ms "
+        f"iters={report.sqp_iterations} "
+        f"trial_evals={report.trial_evaluations}"
+    )
+    top_phases = sorted(report.phases, key=lambda p: p.total_ms, reverse=True)[:10]
+    print("top profile phases:")
+    for phase in top_phases:
+        print(
+            f"  {phase.name:24s} total={phase.total_ms:9.3f} ms "
+            f"avg={phase.avg_ms:8.3f} ms "
+            f"calls={phase.calls:4d} "
+            f"share={phase.share_of_update * 100:6.2f}%"
+        )
+    print("per-iteration profile:")
+    for it in report.iterations:
+        print(
+            f"  iter {it.index:2d}: total={it.total_ms:9.3f} ms "
+            f"ls_steps={it.ls_steps:3d} "
+            f"trial_evals={it.trial_evaluations:3d}"
+        )
 
 q_res = []
 dt_res = []
@@ -502,7 +622,7 @@ def get_sym(node: moto.sqp.data_type):
 
 
 sqp.apply_forward(get_sym)
-
+exit(0)
 if display:
     import time
 

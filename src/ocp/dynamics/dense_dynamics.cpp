@@ -10,9 +10,13 @@ dense_dynamics::approx_data::~approx_data() {
     }
 }
 
+void dense_dynamics::approx_data::reset() {
+    new (lu_.get()) lu_t(); // reset the LU factorizer
+}
+
 dense_dynamics::approx_data::approx_data(generic_constr::approx_data &&rhs)
     : generic_dynamics::approx_data(std::move(rhs)), lu_(new lu_t()) {
-    auto &prob = *merit_data_->prob_;
+    auto &prob = *lag_data_->prob_;
     size_t f_st = prob.get_expr_start(func_);
     size_t arg_idx = 0;
     auto &in_args = func_.in_args();
@@ -153,19 +157,19 @@ void dense_dynamics::mark_shared_inputs(const var_inarg_list &args) {
     setup_ocpwise_info(prob);     \
     return ((info &)*ocpwise_info_map_->at(prob->uid())).var_name
 
-size_t dense_dynamics::active_dim_exclusive_inputs(const ocp *prob) const {
+size_t dense_dynamics::active_dim_exclusive_inputs(const ocp_base *prob) const {
     access_ocp_info(dim_exclusive_inputs_);
 }
-size_t dense_dynamics::active_dim_shared_inputs(const ocp *prob) const {
+size_t dense_dynamics::active_dim_shared_inputs(const ocp_base *prob) const {
     access_ocp_info(dim_shared_inputs_);
 }
-size_t dense_dynamics::active_num_exclusive_inputs(const ocp *prob) const {
+size_t dense_dynamics::active_num_exclusive_inputs(const ocp_base *prob) const {
     access_ocp_info(num_exclusive_inputs_);
 }
-size_t dense_dynamics::active_num_shared_inputs(const ocp *prob) const {
+size_t dense_dynamics::active_num_shared_inputs(const ocp_base *prob) const {
     access_ocp_info(num_shared_inputs_);
 }
-bool dense_dynamics::setup_ocpwise_info(const ocp *prob) const {
+bool dense_dynamics::setup_ocpwise_info(const ocp_base *prob) const {
     if (generic_func::setup_ocpwise_info(prob)) {
         auto &_info = ocpwise_info_map_->at(prob->uid()).replace([](generic_func::info &old) {
             return new info(std::move(old));

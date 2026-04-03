@@ -27,9 +27,7 @@ expr::expr(const std::string &name, size_t dim, field_t field) {
 }
 expr::expr(const expr &rhs)
     : name_(rhs.name_), dim_(rhs.dim_), tdim_(rhs.tdim_), field_(rhs.field_),
-      uid_(rhs.uid_), finalized_(false), dep_(rhs.dep_) {
-    fmt::print("Copying expr {} with uid {} to new uid {}\n", rhs.name_, rhs.uid_, uid_);
-} ///< copy constructor
+      uid_(rhs.uid_), finalized_(false), dep_(rhs.dep_) {} ///< copy constructor
 
 std::string format_as(const expr &e) {
     return fmt::format("expr(name={}, uid={}, dim={}, field={})", e.name(), e.uid(), e.dim(), e.field());

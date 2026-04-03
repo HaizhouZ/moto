@@ -1,6 +1,7 @@
 #ifndef __OPT_FIELDS__
 #define __OPT_FIELDS__
 
+#include <cstdint>
 #include <magic_enum/magic_enum.hpp>
 #include <moto/core/fwd.hpp>
 
@@ -9,6 +10,7 @@ enum field_t : size_t {
     __x = 0,
     __u,
     __y,
+    __s,          // solver-managed shared slack storage (non-primal)
     __p,          // non-decision parameters
     __dyn,        // dynamic model
     __eq_x,       // "state equality constraints"

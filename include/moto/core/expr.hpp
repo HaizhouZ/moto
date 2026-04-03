@@ -32,7 +32,7 @@ constexpr size_t dim_tbd = 0;
     void __set_##mem_name(const decltype(mem_name##_) &value) { mem_name##_ = value; } \
     const auto &__get_##mem_name() const { return mem_name##_; }
 
-class ocp;
+class ocp_base;
 /**
  * @brief general expression base class (now merged with impl)
  */
@@ -98,7 +98,8 @@ class expr : public std::enable_shared_from_this<expr>, public utils::clone_base
         }
     }
 
-    virtual void add_to_ocp_callback(ocp *) {} /// callback when added to an ocp
+    virtual void add_to_ocp_callback(ocp_base *) {} /// callback when added to an ocp
+    virtual void prepare_add_to_ocp(bool terminal) {}
 
     explicit operator bool() const { return uid_.is_valid(); }
 

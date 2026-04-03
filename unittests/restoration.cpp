@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <cstdlib>
 #include <cmath>
 
 #include <moto/ocp/impl/node_data.hpp>
@@ -12,6 +13,11 @@ using namespace moto::solver;
 using namespace moto::solver::restoration;
 
 namespace {
+const bool force_sync_codegen_for_test = []() {
+    setenv("MOTO_SYNC_CODEGEN", "1", 1);
+    return true;
+}();
+
 bool approx_zero(const vector &v, scalar_t tol = 1e-9) {
     return v.size() == 0 || v.cwiseAbs().maxCoeff() < tol;
 }
@@ -483,7 +489,6 @@ TEST_CASE("restoration overlay wraps box-lowered ipm inequality without special 
     REQUIRE(ineq_overlay->source()->name() == box->name());
     REQUIRE(ineq_overlay->source()->dim() == 4);
 }
-
 TEST_CASE("restoration inequality local KKT recovery satisfies reduced linearization") {
     detail::ineq_local_state iq;
     resize_ineq_state(iq, 2, 1);

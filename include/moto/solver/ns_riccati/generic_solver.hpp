@@ -12,11 +12,16 @@ struct generic_solver {
 
     virtual ns_riccati_data create_data(node_data *full_data);
     /**
-     * @brief factorization for the nullspace kernel using the hard constraints
-     * @details will directly add related parts to the Q-derivatives
-     * @param cur current node data
+     * @brief factorization for the nullspace kernel using the hard constraints.
+     * @details will directly add related parts to the Q-derivatives.
+     *          When @p gauss_newton is true, instead of projecting the equality constraints
+     *          into the cost via nullspace, treats them as objectives (Gauss-Newton mode)
+     *          and runs the Riccati in unconstrained mode while preserving lu_eq_
+     *          for the dual step.
+     * @param cur          current node data
+     * @param gauss_newton if true, run in Gauss-Newton mode
      */
-    virtual void ns_factorization(ns_riccati_data *cur);
+    virtual void ns_factorization(ns_riccati_data *cur, bool gauss_newton = false);
     /**
      * @brief factorization for the correction step
      * @details reuses the standard nullspace factorization without merging Jacobian modifications

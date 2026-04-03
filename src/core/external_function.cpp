@@ -1,6 +1,8 @@
 #include <moto/core/external_function.hpp>
 
+#include <chrono>
 #include <filesystem>
+#include <thread>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -18,13 +20,44 @@
 
 namespace moto {
 void *load_from_shared(const std::string &lib_path, const std::string &func_name) {
-    void *handle = LOAD_LIBRARY(lib_path.data());
-    if (!handle)
-        throw std::runtime_error(fmt::format("Failed to open library: {}", lib_path));
-    void *func_sym = GET_SYMBOL(handle, func_name.data());
-    if (!func_sym)
-        throw std::runtime_error(fmt::format("Failed to get function symbol: {}", func_name));
-    return func_sym;
+    std::string last_error;
+    for (int attempt = 0; attempt < 20; ++attempt) {
+#ifndef _WIN32
+        dlerror();
+#endif
+        void *handle = LOAD_LIBRARY(lib_path.data());
+        if (handle) {
+#ifndef _WIN32
+            dlerror();
+#endif
+            void *func_sym = GET_SYMBOL(handle, func_name.data());
+            if (func_sym) {
+                return func_sym;
+            }
+#ifdef _WIN32
+            last_error = fmt::format("GetProcAddress failed for {}", func_name);
+#else
+            if (const char *err = dlerror()) {
+                last_error = err;
+            } else {
+                last_error = fmt::format("missing symbol {}", func_name);
+            }
+#endif
+            CLOSE_LIBRARY(handle);
+        } else {
+#ifdef _WIN32
+            last_error = fmt::format("LoadLibrary failed for {}", lib_path);
+#else
+            if (const char *err = dlerror()) {
+                last_error = err;
+            } else {
+                last_error = "unknown dlopen error";
+            }
+#endif
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    throw std::runtime_error(fmt::format("Failed to load symbol {} from {}: {}", func_name, lib_path, last_error));
 }
 
 ext_func::ext_func(const std::string &func_name, const std::string &lib_path) {

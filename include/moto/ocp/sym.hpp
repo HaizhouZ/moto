@@ -118,6 +118,10 @@ class sym : public expr, public cs::SX {
     static var params(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
         return std::make_shared<sym>(name, dim, __p, default_val);
     }
+    /// @brief make a solver-managed slack storage symbol
+    static var slacks(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
+        return std::make_shared<sym>(name, dim, __s, default_val);
+    }
     /// @brief make a pair of symbolic state
     static auto states(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
         auto temp = var(std::make_shared<sym>(name, dim, __x, default_val));

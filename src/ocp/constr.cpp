@@ -5,6 +5,11 @@
 #include <unordered_set>
 
 namespace moto {
+void generic_constr::add_to_ocp_callback(ocp_base *prob) {
+    lower_x_to_y_ = dynamic_cast<node_ocp *>(prob) == nullptr &&
+                    dynamic_cast<edge_ocp *>(prob) == nullptr;
+}
+
 namespace {
 
 struct normalized_box_bound {
@@ -189,24 +194,24 @@ constr generic_constr::create_box(const std::string &name,
 }
 
 generic_constr::approx_data::approx_data(func_approx_data &&d)
-    : approx_data(d.merit_data_->prob_->extract(d.merit_data_->dual_[d.func_.field()], d.func_), *d.merit_data_, std::move(d)) {
+    : approx_data(d.lag_data_->prob_->extract(d.lag_data_->dual_[d.func_.field()], d.func_), *d.lag_data_, std::move(d)) {
 }
 generic_constr::approx_data::approx_data(vector_ref multiplier,
-                                         merit_data &raw,
+                                         lag_data &raw,
                                          func_approx_data &&d)
-    : func_approx_data(std::move(d)), merit_(&raw.merit_),
+    : func_approx_data(std::move(d)), lag_(&raw.lag_),
       multiplier_(multiplier) {
     if (func_.order() >= approx_order::second) { // for hessian from vjp autodiff codegen
         in_args_.push_back(multiplier_);
     }
-    if (in_field(func_.field(), merit_data::stored_constr_fields) && func_.field() != __dyn) {
-        auto prob_ = merit_data_->prob_;
+    if (in_field(func_.field(), lag_data::stored_constr_fields) && func_.field() != __dyn) {
+        auto prob_ = lag_data_->prob_;
         size_t f_st = prob_->get_expr_start(func_);
         size_t arg_idx = 0;
         for (const sym &arg : func_.in_args()) {
             field_t f = arg.field();
             if (f < field::num_prim && prob_->is_active(arg)) {
-                auto d = merit_data_->approx_[func_.field()].jac_[f].insert(
+                auto d = lag_data_->approx_[func_.field()].jac_[f].insert(
                     f_st, prob_->get_expr_start_tangent(arg), func_.dim(), arg.tdim(), sparsity::dense);
                 new (&jac_[arg_idx]) matrix_ref(d);
             }
@@ -214,7 +219,7 @@ generic_constr::approx_data::approx_data(vector_ref multiplier,
         }
     }
 }
-void generic_constr::approx_data::map_merit_jac_from_raw(decltype(merit_data::jac_) &raw, std::vector<row_vector_ref> &jac) {
+void generic_constr::approx_data::map_lag_jac_from_raw(decltype(lag_data::lag_jac_) &raw, std::vector<row_vector_ref> &jac) {
     auto &in_args = func_.in_args();
     jac.clear();
     for (size_t i = 0; i < in_args.size(); ++i) {
@@ -258,28 +263,26 @@ void generic_constr::finalize_impl() {
                                                      name_, has_[__x], has_[__u], has_[__y], field_hint_.is_soft));
         }
     }
-    if (in_field(field_, std::array{__eq_x, __ineq_x, __eq_x_soft})) {
-        // do in_arg substitute
+    if ((lower_x_to_y_ || terminal_add_) &&
+        in_field(field_, std::array{__eq_x, __ineq_x, __eq_x_soft})) {
         try {
             bool pure_x = true;
             for (const sym &arg : in_args_) {
-                if (arg.field() == __y) {
+                if (arg.field() == __y && in_field(arg.field(), primal_fields)) {
                     pure_x = false;
                     break;
                 }
             }
             if (pure_x) {
                 for (sym &arg : in_args_) {
-                    // here is a bit tricky, we substitute __x to __y if only __x exists in the in_args
-                    // but __y existing dont mean the constraint is solvable - probably it is not
-                    if (arg.field() == __x && pure_x) {
+                    if (arg.field() == __x) {
                         fmt::print("warning: substitution in generic_constr {} of type {}: inarg {} with {}\n",
                                    name_, field::name(field_), arg.name(), arg.name() + "_nxt");
                         substitute(arg, arg.next());
                     }
                 }
             }
-        } catch (const std::exception &ex) {
+        } catch (const std::exception &) {
             fmt::print("exception during substitution");
             throw;
         }

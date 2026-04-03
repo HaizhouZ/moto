@@ -35,7 +35,7 @@ class generic_custom_func : public generic_func {
      * @param shared shared_data the shared data of the problem
      * @return func_arg_map_ptr_t
      */
-    virtual func_arg_map_ptr_t create_custom_data(sym_data &primal, merit_data &raw, shared_data &shared) const {
+    virtual func_arg_map_ptr_t create_custom_data(sym_data &primal, lag_data &raw, shared_data &shared) const {
         return std::make_unique<func_arg_map>(primal, shared, *this);
     }
     /// @brief callback to make data（for non-approx) @note will not be called in @ref create_approx_data

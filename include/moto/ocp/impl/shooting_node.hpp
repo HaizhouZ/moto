@@ -32,6 +32,9 @@ struct shooting_node final : public graph_types::node_base<T, shooting_node<T>> 
     shooting_node(const shooting_node &rhs) : base(rhs), mem_(rhs.mem_) {
         base::data_ = dynamic_cast<data_type *>(mem_.acquire(rhs.data_));
     }
+    static shooting_node bridge_clone(const shooting_node &, const shooting_node &ed) {
+        return shooting_node(ed);
+    }
     shooting_node(shooting_node &&rhs) noexcept : base(static_cast<base &&>(rhs)), mem_(rhs.mem_) {
     }
 

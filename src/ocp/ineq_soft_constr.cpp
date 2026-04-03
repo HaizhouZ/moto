@@ -18,7 +18,7 @@ void ineq_constr::finalize_impl() {
 
 ineq_constr::approx_data::approx_data(approx_data::data_base &&d)
     : base::approx_data(std::move(d)),
-      comp_(problem()->extract(merit_data_->comp_[func_.field()], func_)) {}
+      comp_(problem()->extract(lag_data_->comp_[func_.field()], func_)) {}
 
 void ineq_constr::value_impl(func_approx_data &data) const {
     base::value_impl(data);

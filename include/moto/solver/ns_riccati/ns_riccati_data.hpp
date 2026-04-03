@@ -2,7 +2,6 @@
 #define __NS_RICCATI_DATA__
 
 #include <moto/solver/data_base.hpp>
-
 #include <Eigen/Cholesky>
 #include <Eigen/LU>
 #include <moto/utils/blasfeo_factorizer/blasfeo_llt.hpp>
