@@ -58,6 +58,17 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("bound_mult_reset_threshold", &ns_sqp::restoration_settings::bound_mult_reset_threshold, "Reset copied-back bound multipliers when they exceed this threshold")
         .def_rw("constr_mult_reset_threshold", &ns_sqp::restoration_settings::constr_mult_reset_threshold, "Reset copied-back equality multipliers when they exceed this threshold");
 
+    nb::class_<ns_sqp::equality_multiplier_init_settings> eq_init_setting(sqp, "equality_multiplier_init_settings");
+    eq_init_setting
+        .def_rw("enabled", &ns_sqp::equality_multiplier_init_settings::enabled,
+                "Whether equality-type multipliers are rebuilt during initialization")
+        .def_rw("rebuild_after_restoration_exit", &ns_sqp::equality_multiplier_init_settings::rebuild_after_restoration_exit,
+                "Whether to rebuild equality-type multipliers after restoration exits successfully")
+        .def_rw("rho_eq", &ns_sqp::equality_multiplier_init_settings::rho_eq,
+                "PMM penalty used for equality-type constraints in the equality-init overlay")
+        .def_rw("rf", &ns_sqp::equality_multiplier_init_settings::rf,
+                "Dedicated iterative-refinement settings used only during equality-multiplier initialization");
+
     auto ls_config_base = nb::class_<solver::linesearch_config>(m, "linesearch_config");
     ls_config_base.def_rw("update_alpha_dual", &solver::linesearch_config::update_alpha_dual, "Whether to update the dual step size during line search")
         .def_rw("eq_dual_alpha_source", &solver::linesearch_config::eq_dual_alpha_source, "Source for dual step size for equality constraints")
@@ -96,6 +107,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_prop_ro("ipm", [](ns_sqp::settings_t &self) -> auto & { return self.ipm; }, "IPM settings")
         .def_rw("rf", &ns_sqp::settings_t::rf, "Iterative refinement settings")
         .def_rw("restoration", &ns_sqp::settings_t::restoration, "Restoration settings")
+        .def_rw("eq_init", &ns_sqp::settings_t::eq_init, "Equality multiplier initialization settings")
         .def_prop_ro("ls", [](ns_sqp::settings_t &self) -> auto & { return self.ls; }, "Line search settings")
         .def_rw("scaling", &ns_sqp::settings_t::scaling, "Jacobian scaling settings")
         .def_rw("no_except", &ns_sqp::settings_t::no_except, "Whether to suppress exceptions in parallel jobs")
