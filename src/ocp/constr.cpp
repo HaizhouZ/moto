@@ -1,7 +1,193 @@
 #include <moto/ocp/constr.hpp>
 #include <moto/ocp/problem.hpp>
 
+#include <limits>
+#include <unordered_set>
+
 namespace moto {
+namespace {
+
+struct normalized_box_bound {
+    cs::SX sx;
+};
+
+struct affine_single_arg_model {
+    vector offset;
+    matrix jacobian;
+};
+
+vector sx_to_vector(const cs::SX &sx) {
+    const Eigen::Index rows = static_cast<Eigen::Index>(sx.size1());
+    const Eigen::Index cols = static_cast<Eigen::Index>(sx.size2());
+    if (cols != 1) {
+        throw std::runtime_error(fmt::format("expected column vector SX, got shape {}x{}", rows, cols));
+    }
+    vector out(rows);
+    for (Eigen::Index i = 0; i < rows; ++i) {
+        out(i) = cs::DM(sx(static_cast<casadi_int>(i))).scalar();
+    }
+    return out;
+}
+
+matrix sx_to_matrix(const cs::SX &sx) {
+    const Eigen::Index rows = static_cast<Eigen::Index>(sx.size1());
+    const Eigen::Index cols = static_cast<Eigen::Index>(sx.size2());
+    matrix out(rows, cols);
+    for (Eigen::Index i = 0; i < rows; ++i) {
+        for (Eigen::Index j = 0; j < cols; ++j) {
+            out(i, j) = cs::DM(sx(static_cast<casadi_int>(i), static_cast<casadi_int>(j))).scalar();
+        }
+    }
+    return out;
+}
+
+normalized_box_bound normalize_box_bound(const generic_constr::box_bound_t &bound, casadi_int dim, std::string_view which) {
+    return std::visit(
+        [&](const auto &value) -> normalized_box_bound {
+            using T = std::decay_t<decltype(value)>;
+            if constexpr (std::is_same_v<T, scalar_t>) {
+                return {.sx = cs::SX::ones(dim, 1) * value};
+            } else if constexpr (std::is_same_v<T, vector>) {
+                if (value.size() != dim) {
+                    throw std::runtime_error(fmt::format("box {} bound has dim {}, expected {}", which, value.size(), dim));
+                }
+                std::vector<scalar_t> entries(value.data(), value.data() + value.size());
+                return {.sx = cs::DM(entries)};
+            } else {
+                if (value.is_scalar()) {
+                    return {.sx = cs::SX::repmat(value, dim, 1)};
+                }
+                if (value.numel() != dim) {
+                    throw std::runtime_error(fmt::format("box {} bound has numel {}, expected {}", which, value.numel(), dim));
+                }
+                return {.sx = cs::SX::reshape(value, dim, 1)};
+            }
+        },
+        bound);
+}
+
+bool scalar_is_pos_inf(const cs::SX &sx) {
+    return sx.is_constant() && sx.scalar().is_inf();
+}
+
+bool scalar_is_neg_inf(const cs::SX &sx) {
+    return sx.is_constant() && sx.scalar().is_minus_inf();
+}
+
+cs::SX build_box_residual(const cs::SX &out,
+                          const normalized_box_bound &lb,
+                          const normalized_box_bound &ub) {
+    std::vector<cs::SX> rows;
+    rows.reserve(static_cast<size_t>(2 * out.numel()));
+    for (casadi_int i = 0; i < out.numel(); ++i) {
+        const cs::SX out_i = out(i);
+        const cs::SX lb_i = lb.sx(i);
+        const cs::SX ub_i = ub.sx(i);
+        if (!scalar_is_pos_inf(ub_i)) {
+            rows.push_back(out_i - ub_i);
+        }
+        if (!scalar_is_neg_inf(lb_i)) {
+            rows.push_back(lb_i - out_i);
+        }
+    }
+    if (rows.empty()) {
+        throw std::runtime_error("create_box received no finite lower or upper bounds");
+    }
+    return cs::SX::vertcat(rows);
+}
+
+void validate_residual_args(const var_inarg_list &args, const cs::SX &residual) {
+    std::unordered_set<std::string> arg_names;
+    arg_names.reserve(args.size());
+    for (const sym &arg : args) {
+        arg_names.insert(arg.name());
+    }
+    for (const cs::SX &s : cs::SX::symvar(residual)) {
+        const std::string sym_name = s.name();
+        bool covered = arg_names.contains(sym_name);
+        if (!covered) {
+            for (const sym &arg : args) {
+                const std::string prefix = arg.name() + "_";
+                if (sym_name.rfind(prefix, 0) == 0) {
+                    covered = true;
+                    break;
+                }
+            }
+        }
+        if (!covered) {
+            throw std::runtime_error(fmt::format("box residual depends on symbolic input '{}' that is not listed in in_args", s.name()));
+        }
+    }
+}
+
+bool try_build_affine_single_arg_model(const var_inarg_list &args,
+                                       const cs::SX &residual,
+                                       affine_single_arg_model &model) {
+    if (args.size() != 1) {
+        return false;
+    }
+    const sym &arg = args.front().get();
+    const cs::SX arg_sx = static_cast<const cs::SX &>(arg);
+    const cs::SX jac_sx = cs::SX::jacobian(residual, arg_sx);
+    if (!jac_sx.is_constant() || cs::SX::depends_on(jac_sx, arg_sx)) {
+        return false;
+    }
+    const cs::SX offset_sx = cs::SX::substitute(residual, arg_sx, cs::SX::zeros(arg.dim(), 1));
+    if (!offset_sx.is_constant()) {
+        return false;
+    }
+    model.offset = sx_to_vector(offset_sx);
+    model.jacobian = sx_to_matrix(jac_sx);
+    return true;
+}
+
+constr make_affine_single_arg_box(const std::string &name,
+                                  const sym &arg,
+                                  affine_single_arg_model model,
+                                  approx_order order,
+                                  field_t field) {
+    auto c = std::make_shared<generic_constr>(name, order, static_cast<size_t>(model.offset.size()), field);
+    c->field_hint().is_eq = false;
+    c->add_argument(arg);
+    const matrix jacobian = std::move(model.jacobian);
+    const vector offset = std::move(model.offset);
+    c->value = [jacobian, offset](func_approx_data &d) {
+        d.v_.noalias() = jacobian * d[0];
+        d.v_ += offset;
+    };
+    c->jacobian = [jacobian](func_approx_data &d) {
+        d.jac_[0] = jacobian;
+    };
+    c->hessian = [](func_approx_data &) {};
+    return c;
+}
+
+} // namespace
+
+constr generic_constr::create_box(const std::string &name,
+                                  const var_inarg_list &args,
+                                  const cs::SX &out,
+                                  const box_bound_t &lb,
+                                  const box_bound_t &ub,
+                                  approx_order order,
+                                  field_t field) {
+    const casadi_int dim = out.numel();
+    const cs::SX out_vec = cs::SX::reshape(out, dim, 1);
+    const normalized_box_bound lb_norm = normalize_box_bound(lb, dim, "lower");
+    const normalized_box_bound ub_norm = normalize_box_bound(ub, dim, "upper");
+    const cs::SX residual = build_box_residual(out_vec, lb_norm, ub_norm);
+    validate_residual_args(args, residual);
+
+    affine_single_arg_model affine_model;
+    if (try_build_affine_single_arg_model(args, residual, affine_model)) {
+        return make_affine_single_arg_box(name, args.front().get(), std::move(affine_model), order, field);
+    }
+
+    auto c = std::make_shared<generic_constr>(name, args, residual, order, field);
+    c->field_hint().is_eq = false;
+    return c;
+}
+
 generic_constr::approx_data::approx_data(func_approx_data &&d)
     : approx_data(d.merit_data_->prob_->extract(d.merit_data_->dual_[d.func_.field()], d.func_), *d.merit_data_, std::move(d)) {
 }
@@ -31,10 +217,10 @@ generic_constr::approx_data::approx_data(vector_ref multiplier,
 void generic_constr::approx_data::map_merit_jac_from_raw(decltype(merit_data::jac_) &raw, std::vector<row_vector_ref> &jac) {
     auto &in_args = func_.in_args();
     jac.clear();
-    for (size_t i : range(in_args.size())) {
+    for (size_t i = 0; i < in_args.size(); ++i) {
         if (in_args[i]->field() < field::num_prim && problem()->is_active(in_args[i])) {
             jac.push_back(problem()->extract_tangent(raw[in_args[i]->field()], in_args[i]));
-        } else { // useless
+        } else {
             static row_vector empty;
             jac.push_back(empty);
         }
@@ -43,12 +229,11 @@ void generic_constr::approx_data::map_merit_jac_from_raw(decltype(merit_data::ja
 
 void generic_constr::finalize_impl() {
     if (field_ == __undefined) {
-        bool has_[3] = {false, false, false}; // x, u, y
+        bool has_[3] = {false, false, false};
         for (const sym &arg : in_args_) {
             if (arg.field() <= __y)
                 has_[arg.field()] = true;
         }
-        // make this long enough so that people will not easily remove the const :D
         auto &_field = field_;
         if (field_hint_.is_eq == utils::optional_bool::Unset) {
             throw std::runtime_error(fmt::format("generic_constr {} eq/ineq hint unset, please set it using as_eq_ or cast_ineq_", name_));
@@ -56,7 +241,7 @@ void generic_constr::finalize_impl() {
         if (field_hint_.is_eq) {
             if (has_[__u] && !has_[__y])
                 _field = field_hint_.is_soft ? __eq_xu_soft : __eq_xu;
-            else if (has_[__x] && has_[__y] && !field_hint_.is_soft) // we dont assume x can be converted to y
+            else if (has_[__x] && has_[__y] && !field_hint_.is_soft)
                 _field = __dyn;
             else if (!has_[__u] && (has_[__x] || has_[__y]))
                 _field = field_hint_.is_soft ? __eq_x_soft : __eq_x;
