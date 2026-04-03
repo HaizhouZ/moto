@@ -187,6 +187,7 @@ struct ns_sqp {
         size_t n_worker = MAX_THREADS; ///< number of worker threads
         bool in_restoration = false;
         bool has_ineq_soft = false;    ///< whether the problem has inequality constraints (used to adjust printouts and possibly other settings)
+        bool has_ipm_ineq = false;     ///< whether the problem contains true IPM inequalities (__ineq_x / __ineq_xu)
         bool initialized = false;     ///< whether the settings have been initialized based on the problem (used to trigger one-time initialization in the first iteration, e.g. setting initial mu based on initial residuals)
     } settings;
 
@@ -262,13 +263,18 @@ struct ns_sqp {
     ~ns_sqp() = default;
     using node_type = impl::shooting_node<data>;
     using solver_graph_type = directed_graph<node_type>;
+    struct sqp_graph_state : model::graph_model_state {
+        std::shared_ptr<solver_graph_type> restoration_runtime;
+        solver::restoration::restoration_overlay_settings restoration_cfg{};
+        bool restoration_cfg_valid = false;
+    };
 
     void reset_riccati_solver(solver_type *s) {
         riccati_solver_.reset(s);
     }
 
     model::graph_model create_graph() {
-        active_model_graph_ = std::make_shared<model::graph_model_state>();
+        active_model_graph_ = std::make_shared<sqp_graph_state>();
         active_model_graph_->template ensure_runtime<solver_graph_type>(graph_n_jobs_);
         return model::graph_model(active_model_graph_);
     }
@@ -309,12 +315,12 @@ struct ns_sqp {
     void clear_phase_graph_override() { phase_graph_override_ = nullptr; }
     void set_phase_graph_override(solver_graph_type &graph) { phase_graph_override_ = &graph; }
     bool using_restoration_overlay_graph() const {
-        return settings.in_restoration && phase_graph_override_ != nullptr && restoration_graph_.get() == phase_graph_override_;
+        return settings.in_restoration && phase_graph_override_ != nullptr && active_model_graph_ &&
+               active_model_graph_->restoration_runtime.get() == phase_graph_override_;
     }
 
     std::unique_ptr<solver_type> riccati_solver_ = nullptr;
-    std::shared_ptr<model::graph_model_state> active_model_graph_;
-    std::shared_ptr<solver_graph_type> restoration_graph_;
+    std::shared_ptr<sqp_graph_state> active_model_graph_;
     solver_graph_type *phase_graph_override_ = nullptr;
     size_t graph_n_jobs_ = MAX_THREADS;
 
@@ -330,7 +336,7 @@ struct ns_sqp {
     };
 
     stacked_workers<settings_t::worker> setting_per_thread;
-    using profile_clock = std::chrono::steady_clock;
+    using profile_clock = std::chrono::high_resolution_clock;
 
     struct profile_state {
         std::array<double, static_cast<size_t>(profile_phase::count)> total_ms{};
@@ -507,6 +513,7 @@ struct ns_sqp {
     bool use_normal_soft_phase() const { return !settings.in_restoration; }
 
     void second_order_correction();
+    void refresh_problem_flags();
     void ineq_constr_correction(iteration_context &ctx);
     void ineq_constr_prediction();
     /// initialize the solver before the first iteration or after a reset, returns the initial kkt info

@@ -283,11 +283,34 @@ void ns_sqp::update_phase_problem(data *d, node_data::update_mode mode) {
     d->update_approximation(mode, true);
 }
 
+void ns_sqp::refresh_problem_flags() {
+    settings.has_ineq_soft = false;
+    settings.has_ipm_ineq = false;
+    for (data &n : solver_graph().nodes()) {
+        for (auto ct : ineq_soft_constr_fields) {
+            if (n.problem().dim(ct) > 0) {
+                settings.has_ineq_soft = true;
+                break;
+            }
+        }
+        for (auto ct : ineq_constr_fields) {
+            if (n.problem().dim(ct) > 0) {
+                settings.has_ipm_ineq = true;
+                break;
+            }
+        }
+        if (settings.has_ineq_soft && settings.has_ipm_ineq) {
+            break;
+        }
+    }
+}
+
 ns_sqp::kkt_info ns_sqp::initialize() {
     auto total_profile = profile_scope(profile_phase::initialize_total);
     auto &graph = solver_graph();
     if (settings.verbose)
         fmt::print("Initialization for SQP...\n");
+    refresh_problem_flags();
     if (!settings.ipm.warm_start)
         settings.ipm.mu = settings.ipm.mu0; // initialize mu before setting up workspace data, as it may be used in the workspace data setup
     {
@@ -375,23 +398,8 @@ void ns_sqp::ineq_constr_correction(iteration_context &ctx) {
         for (size_t i : range(settings.n_worker)) {
             main_worker += setting_per_thread[i];
         }
-        // adaptive mu update
-        settings.ipm.adaptive_mu_update(main_worker);
-        // if (std::max({
-        //         kkt_last.inf_prim_res,
-        //         kkt_last.inf_dual_res,
-        //         kkt_last.inf_comp_res,
-        //     }) < settings.ipm.mu_monotone_fraction_threshold * settings.ipm.mu) {
-        //     // if we are close enough to the feasible region, switch to monotone decrease of mu to accelerate convergence
-        //     if (settings.verbose) {
-        //         fmt::print("Switching to monotone decrease of mu since we are close to the feasible region (max residual: {:.3e} < {:.3e} * mu: {:.3e})\n",
-        //                    std::max({kkt_last.inf_prim_res, kkt_last.inf_dual_res, kkt_last.inf_comp_res}),
-        //                    settings.ipm.mu_monotone_fraction_threshold, settings.ipm.mu);
-        //     }
-        //     settings.ipm.mu = std::max(settings.ipm.mu_trial, settings.ipm.mu_monotone_factor * settings.ipm.mu);
-        //     settings.mu_changed = true;
-        // }
-        {
+        if (settings.has_ipm_ineq) {
+            settings.ipm.adaptive_mu_update(main_worker);
             settings.ipm.mu = settings.ipm.mu_trial;
             ctx.mu_changed = true;
         }
@@ -644,16 +652,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
         filter_linesearch_data ls;
         ls.constr_vio_min = std::max(kkt_last.prim_res_l1 * settings.ls.constr_vio_min_frac, settings.prim_tol);
         // ls.constr_vio_min = kkt_last.prim_res_l1 * settings.ls.constr_vio_min_frac;
-
-        settings.has_ineq_soft = false;
-        for (data &n : graph.nodes()) {
-            for (auto ct : ineq_soft_constr_fields) {
-                if (n.problem().dim(ct) > 0) {
-                    settings.has_ineq_soft = true;
-                    break;
-                }
-            }
-        }
+        refresh_problem_flags();
         settings.max_iter = n_iter;
         for ([[maybe_unused]] size_t i_iter : range(n_iter)) {
             profiler_.start_iteration(i_iter);
@@ -697,7 +696,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                 break;
             }
 
-            if (settings.has_ineq_soft && settings.ipm.mu_method == solver::ipm_config::monotonic_decrease) {
+            if (settings.has_ipm_ineq && settings.ipm.mu_method == solver::ipm_config::monotonic_decrease) {
                 bool mu_changed = false;
                 while (kkt_last.inf_prim_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold &&
                        kkt_last.inf_dual_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold &&

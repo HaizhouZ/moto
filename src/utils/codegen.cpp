@@ -196,7 +196,11 @@ void run(
     std::lock_guard<std::mutex> func_lock(*func_mutex);
 
     fs::path so_file_path = fs::path(output_dir) / ("lib" + func_name + ".so");
+    fs::path so_tmp_path = so_file_path;
+    so_tmp_path += ".tmp";
     fs::path json_path = fs::path(output_dir) / (func_name + ".json");
+    fs::path json_tmp_path = json_path;
+    json_tmp_path += ".tmp";
     const std::string cache_key = (fs::path(output_dir) / func_name).string();
 
     if (!force_recompile) {
@@ -307,7 +311,7 @@ void run(
     if (needs_compile) {
         std::string eigen_include_path = "/usr/include/eigen3"; // Adjust if necessary
         std::string compile_command = "g++ -shared -fPIC -std=c++20 " + compile_flag +
-                                      " -o " + so_file_path.string() + " " + final_cpp_path +
+                                      " -o " + so_tmp_path.string() + " " + final_cpp_path +
                                       " -I " + eigen_include_path;
         int ret = std::system(compile_command.c_str());
         if (verbose) {
@@ -317,6 +321,13 @@ void run(
                 std::cerr << "Compilation failed for: " << func_name << std::endl;
             }
         }
+        if (ret != 0) {
+            std::error_code ec;
+            fs::remove(so_tmp_path, ec);
+            throw std::runtime_error(fmt::format("Compilation failed for {} with exit code {}", func_name, ret));
+        }
+
+        fs::rename(so_tmp_path, so_file_path);
 
         // Step 6: Create JSON metadata and cleanup
         json j; /// @todo the order here is not guaranteed
@@ -325,13 +336,15 @@ void run(
             j["inputs"][e.name()] = {e.dim(), static_cast<int>(e.field())};
         }
         for (const auto &e : filtered_outputs) {
-            j["outputs"].push_back({e.rows(), e.columns()});
+        j["outputs"].push_back({e.rows(), e.columns()});
         }
         j["md5"] = md5_hash;
         j["compile_flag"] = compile_flag;
 
-        std::ofstream o(fs::path(output_dir) / (func_name + ".json"));
+        std::ofstream o(json_tmp_path);
         o << std::setw(4) << j << std::endl;
+        o.close();
+        fs::rename(json_tmp_path, json_path);
         if (!keep_generated_src) {
             fs::remove(raw_c_path);
             fs::remove(final_cpp_path);

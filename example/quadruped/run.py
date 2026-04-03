@@ -11,7 +11,7 @@ import meshcat.transformations as tf
 import meshcat_shapes as mcs
 
 full = True
-soft = True
+soft = False
 
 
 class pinCasadiModel(cpin.Model):
@@ -495,7 +495,7 @@ sqp.settings.ipm_conditional_corrector = True
 sqp.settings.prim_tol = 1e-3
 sqp.settings.dual_tol = 1e-3
 sqp.settings.comp_tol = 1e-3
-sqp.settings.rf.max_iters = 4
+sqp.settings.rf.max_iters = 2
 sqp.settings.ls.update_alpha_dual = False
 # sqp.settings.scaling.scaling_mode = moto.sqp.scaling_settings.mode_gradient
 sqp.settings.ls.primal_gamma = 1e-4
@@ -504,10 +504,9 @@ sqp.settings.ls.merit_sigma = 100
 sqp.settings.ls.max_steps = 100
 
 max_update_iter = int(os.getenv("MOTO_SQP_MAX_ITER", "2"))
-warmup_runs = int(os.getenv("MOTO_SQP_WARMUP", "1"))
 bench_runs = int(os.getenv("MOTO_SQP_BENCH_RUNS", "1"))
 print(f"SQP update iters: {max_update_iter}")
-print(f"SQP warmup runs: {warmup_runs}, benchmark runs: {bench_runs}")
+print(f"SQP benchmark runs: {bench_runs}")
 
 # sqp.settings.ls.backtrack_scheme = moto.ns_sqp.backtrack_scheme_geometric
 # cfg = [
@@ -567,15 +566,6 @@ import time
 
 cnt = 0
 iters = 0
-for i in range(warmup_runs):
-    warmup_verbose = os.getenv("MOTO_SQP_WARMUP_VERBOSE") is not None
-    warmup_res = sqp.update(max_update_iter, verbose=warmup_verbose)
-    sqp.settings.ipm.warm_start = True
-    print(
-        f"warmup {i + 1}/{warmup_runs}: "
-        f"iters={warmup_res.num_iter} solved={warmup_res.solved}"
-    )
-
 start = time.perf_counter()
 res = None
 for i in range(bench_runs):
