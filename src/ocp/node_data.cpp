@@ -173,22 +173,26 @@ void node_data::print_residuals() const {
 }
 
 namespace impl {
+std::shared_ptr<data_mgr::data_pool> data_mgr::get_pool(size_t uid) {
+    std::lock_guard _lock(data_mtx_);
+    auto [it, inserted] = data_.try_emplace(uid, std::make_shared<data_pool>());
+    return it->second;
+}
+
 void data_mgr::create_data_batch(const ocp_ptr_t &prob, size_t N) {
-    data_.try_emplace(prob->uid());
-    auto &pool = data_[prob->uid()];
-    std::lock_guard _lock(pool.mtx_);
+    auto pool = get_pool(prob->uid());
+    std::lock_guard _lock(pool->mtx_);
     for (size_t i = 0; i < N; i++) {
-        pool.emplace(maker_(prob));
+        pool->emplace(maker_(prob));
     }
 }
 
 node_data_ptr_t data_mgr::get_data(const ocp_ptr_t &prob) {
-    data_.try_emplace(prob->uid());
-    auto &pool = data_[prob->uid()];
-    std::lock_guard _lock(pool.mtx_);
-    if (!pool.empty()) {
-        auto p = std::move(pool.top());
-        pool.pop();
+    auto pool = get_pool(prob->uid());
+    std::lock_guard _lock(pool->mtx_);
+    if (!pool->empty()) {
+        auto p = std::move(pool->top());
+        pool->pop();
         return p;
     } else {
         return nullptr;
@@ -209,9 +213,9 @@ node_data *data_mgr::acquire(const node_data *rhs) {
 }
 
 void data_mgr::release(node_data *data) {
-    auto &pool = data_[data->prob_->uid()];
-    std::lock_guard _lock(pool.mtx_);
-    pool.emplace(data);
+    auto pool = get_pool(data->prob_->uid());
+    std::lock_guard _lock(pool->mtx_);
+    pool->emplace(data);
 }
 } // namespace impl
 } // namespace moto

@@ -207,11 +207,6 @@ class resto_eq_elastic_constr final : public soft_constr {
 
   private:
     static void resize_local_state(detail::eq_local_state &state, size_t ns_dim, size_t nc_dim);
-    void compute_local_model(approx_data &data,
-                             scalar_t mu_bar,
-                             const vector *mu_p_target = nullptr,
-                             const vector *mu_n_target = nullptr) const;
-    local_residual_summary current_local_residuals(const approx_data &data) const;
 
     constr source_;
     size_t source_pos_ = 0;
@@ -295,11 +290,6 @@ class resto_ineq_elastic_ipm_constr final : public ineq_constr {
 
   private:
     static void resize_local_state(detail::ineq_local_state &state, size_t nx_dim, size_t nu_dim);
-    void compute_local_model(approx_data &data,
-                             scalar_t mu_bar,
-                             const vector *mu_t_target = nullptr,
-                             const vector *mu_p_target = nullptr,
-                             const vector *mu_n_target = nullptr) const;
     local_residual_summary current_local_residuals(const approx_data &data) const;
 
     constr source_;

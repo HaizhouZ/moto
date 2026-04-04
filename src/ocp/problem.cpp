@@ -116,6 +116,10 @@ void append_node_terms(const node_ocp_ptr_t &node_prob,
 } // namespace
 
 bool ocp_base::add_impl(expr &ex) {
+    // This path intentionally reuses the existing shared owner of `ex`.
+    // If `shared_expr(ex)` throws bad_weak_ptr, the expression was produced
+    // incorrectly and the caller must be fixed; do not replace this with a
+    // clone fallback or it will hide ownership bugs and change expression identity.
     return add_impl(shared_expr(ex));
 }
 bool ocp_base::add_impl(shared_expr ex, bool terminal) {
@@ -173,6 +177,9 @@ bool ocp_base::add_impl(shared_expr ex, bool terminal) {
 }
 bool ocp_base::add_terminal_impl(expr &ex) {
     if (ex.finalized()) {
+        // Re-clone only for terminal insertion semantics after we have recovered
+        // the original shared owner of `ex`. The shared_expr(ex) conversion itself
+        // must stay strict for the same ownership reasons as add_impl(expr&).
         auto ex_terminal = shared_expr(ex).clone();
         return add_impl(std::move(ex_terminal), true);
     }

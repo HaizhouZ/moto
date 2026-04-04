@@ -21,6 +21,7 @@ class data_mgr {
     };
     using data_constructor = std::function<node_data *(const ocp_ptr_t &)>;
     node_data_ptr_t get_data(const ocp_ptr_t &prob);
+    std::shared_ptr<data_pool> get_pool(size_t uid);
 
     data_mgr() = default;
     data_mgr(data_mgr &) = delete;
@@ -80,8 +81,9 @@ class data_mgr {
 
   private:
     data_constructor maker_;
+    std::mutex data_mtx_;
     /// mapping [uid of problem, data pool]
-    std::unordered_map<size_t, data_pool> data_;
+    std::unordered_map<size_t, std::shared_ptr<data_pool>> data_;
 };
 } // namespace impl
 } // namespace moto
