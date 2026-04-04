@@ -8,13 +8,9 @@
 namespace moto {
 struct node_data;
 def_unique_ptr(node_data);
-namespace impl {
-class data_mgr;
-} // namespace impl
 /**
  * @brief node data class
  * stores the shooting node data including symbolics, raw approximation and its sparse mapping
- * @note to use your own data class with data_mgr, inherit this class and implement constructor C(ocp_ptr_t)
  */
 struct MOTO_ALIGN_NO_SHARING node_data {
     scalar_t inf_prim_res_ = 0.;
@@ -29,7 +25,6 @@ struct MOTO_ALIGN_NO_SHARING node_data {
     shifted_array<std::vector<func_approx_data_ptr_t>, field::num_func, __dyn>
         sparse_; /// < sparse view per func
 
-    friend class impl::data_mgr; ///< data manager can access private members
   public:
     node_data(const ocp_ptr_t &prob);
     node_data(const node_data &rhs) = delete;
@@ -40,6 +35,7 @@ struct MOTO_ALIGN_NO_SHARING node_data {
     auto &dense() const { return *dense_; }   ///< getter for dense_
     auto &shared() const { return *shared_; } ///< getter for shared_
     auto &problem() const { return *prob_; }  ///< getter for prob_
+    const ocp_ptr_t &problem_ptr() const { return prob_; }
 
     // get value of the whole field
     auto &value(field_t f) const {

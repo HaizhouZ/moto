@@ -13,8 +13,7 @@ bool same_restoration_cfg(const solver::restoration::restoration_overlay_setting
 } // namespace
 
 ns_sqp::ns_sqp(size_t n_jobs)
-    : mem_(impl::data_mgr::create<ns_sqp::data>()),
-      graph_n_jobs_(std::min(n_jobs, size_t(MAX_THREADS))),
+    : graph_n_jobs_(std::min(n_jobs, size_t(MAX_THREADS))),
       riccati_solver_(new solver_type()) {
     Eigen::setNbThreads(1);
 }
@@ -39,7 +38,7 @@ ns_sqp::solver_graph_type &ns_sqp::restoration_graph() {
         model::graph_model(active_model_graph_).realize_into(
             *active_model_graph_->restoration_runtime,
             [this, &cfg](const ocp_ptr_t &formulation) {
-                return node_type(solver::restoration::build_restoration_overlay_problem(formulation, cfg), mem_);
+                return node_type(solver::restoration::build_restoration_overlay_problem(formulation, cfg));
             });
         active_model_graph_->restoration_cfg = cfg;
         active_model_graph_->restoration_cfg_valid = true;

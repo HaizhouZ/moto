@@ -3,7 +3,8 @@
 
 #include <moto/model/graph_model.hpp>
 #include <moto/ocp/constr.hpp>
-#include <moto/ocp/impl/shooting_node.hpp>
+#include <moto/ocp/impl/node_data.hpp>
+#include <moto/core/directed_graph.hpp>
 #include <moto/solver/ipm/ipm_config.hpp>
 #include <moto/solver/linesearch_config.hpp>
 #include <moto/solver/ns_riccati/generic_solver.hpp>
@@ -258,10 +259,32 @@ struct ns_sqp {
     const profile_report &profile() const { return profile_report_; }
     void reset_profile();
 
+    struct node_type final : graph_types::node_base<data, node_type> {
+        using base = graph_types::node_base<data, node_type>;
+        using data_type = typename base::data_type;
+
+        node_type() = default;
+
+        explicit node_type(const ocp_ptr_t &formulation) {
+            base::data_ = new data_type(formulation);
+        }
+
+        node_type(const node_type &rhs) : base(rhs) {
+            if (rhs.data_) {
+                base::data_ = new data_type(rhs.data_->problem_ptr());
+            }
+        }
+
+        node_type(node_type &&rhs) noexcept = default;
+
+        static node_type bridge_clone(const node_type &, const node_type &ed) {
+            return node_type(ed);
+        }
+    };
+
     ns_sqp(size_t n_jobs = MAX_THREADS);
     ns_sqp(const ns_sqp &) = delete;
     ~ns_sqp() = default;
-    using node_type = impl::shooting_node<data>;
     using solver_graph_type = directed_graph<node_type>;
     struct sqp_graph_state : model::graph_model_state {
         std::shared_ptr<solver_graph_type> restoration_runtime;
@@ -283,8 +306,6 @@ struct ns_sqp {
         return solver_graph();
     }
 
-    impl::data_mgr mem_;
-
   private:
     struct filter_linesearch_data;
 
@@ -305,7 +326,7 @@ struct ns_sqp {
         auto graph = state->template ensure_runtime<solver_graph_type>(graph_n_jobs_);
         if (state->dirty) {
             model::graph_model(state).realize_into(*graph, [this](const ocp_ptr_t &formulation) {
-                return node_type(formulation, mem_);
+                return node_type(formulation);
             });
         }
         return *graph;
