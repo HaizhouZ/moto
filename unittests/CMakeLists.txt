@@ -46,6 +46,7 @@ endfunction()
 
 add_moto_test(sym_test)
 add_moto_test(graph_model_compose)
+add_moto_test(equality_multiplier_init)
 add_moto_test(restoration)
 add_moto_test(projection_dense_reference)
 add_moto_python_test(projector_layout_python_test unittests/projector_layout_python.py)

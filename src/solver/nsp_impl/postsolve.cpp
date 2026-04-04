@@ -4,6 +4,17 @@
 namespace moto {
 namespace solver {
 namespace ns_riccati {
+namespace {
+void ensure_nullspace_factorization(ns_riccati_data &d) {
+    auto &nsp = d.nsp_;
+    const auto factor_rows = static_cast<Eigen::Index>(nsp.llt_ns_.L_.data_.m);
+    const auto factor_cols = static_cast<Eigen::Index>(nsp.llt_ns_.L_.data_.n);
+    if (factor_rows != nsp.Q_zz.rows() || factor_cols != nsp.Q_zz.cols()) {
+        nsp.llt_ns_.compute(nsp.Q_zz);
+    }
+}
+} // namespace
+
 void generic_solver::compute_primal_sensitivity(ns_riccati_data *cur) {
     auto &d = *cur;
     auto &nsp = d.nsp_;
@@ -11,6 +22,7 @@ void generic_solver::compute_primal_sensitivity(ns_riccati_data *cur) {
     if (d.rank_status_ == rank_status::unconstrained) {
         // nsp.z_k = -nsp.z_0_k;
         // nsp.llt_ns_.solveInPlace(nsp.z_k);
+        ensure_nullspace_factorization(d);
         nsp.llt_ns_.solve(nsp.z_0_k, nsp.z_k, -1.0);
         d.d_u.k = nsp.z_k;
         d.d_u.K = nsp.z_K;
@@ -23,6 +35,7 @@ void generic_solver::compute_primal_sensitivity(ns_riccati_data *cur) {
     } else {
         // nsp.z_k = -nsp.z_0_k;
         // nsp.llt_ns_.solveInPlace(nsp.z_k);
+        ensure_nullspace_factorization(d);
         nsp.llt_ns_.solve(nsp.z_0_k, nsp.z_k, -1.0);
         d.d_u.k.noalias() = nsp.Z_u * nsp.z_k - nsp.u_y_k;
         if (d.d_u.k.hasNaN()) {
@@ -47,6 +60,7 @@ void generic_solver::compute_primal_sensitivity_correction(ns_riccati_data *cur)
     if (d.rank_status_ == rank_status::unconstrained) {
         // nsp.z_k = -nsp.z_0_k;
         // nsp.llt_ns_.solveInPlace(nsp.z_k);
+        ensure_nullspace_factorization(d);
         nsp.llt_ns_.solve(nsp.z_0_k, nsp.z_k, -1.0);
         // k_y correction
         // d.d_y.k.noalias() = -nsp.F_u * d.d_u.k;
@@ -61,6 +75,7 @@ void generic_solver::compute_primal_sensitivity_correction(ns_riccati_data *cur)
     } else {
         // nsp.z_k = -nsp.z_0_k;
         // nsp.llt_ns_.solveInPlace(nsp.z_k);
+        ensure_nullspace_factorization(d);
         nsp.llt_ns_.solve(nsp.z_0_k, nsp.z_k, -1.0);
         d.d_u.k.noalias() = nsp.Z_u * nsp.z_k; // - nsp.u_y_k;
         d.d_y.k.noalias() = nsp.Z_y * nsp.z_k; // - nsp.y_y_k;

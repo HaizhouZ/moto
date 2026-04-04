@@ -13,13 +13,24 @@ template <typename Fn>
 void for_each_overlay_pair(ns_sqp::solver_graph_type &outer_graph,
                            ns_sqp::solver_graph_type &resto_graph,
                            Fn &&fn) {
-    auto outer_nodes = outer_graph.flatten_nodes();
-    auto resto_nodes = resto_graph.flatten_nodes();
-    if (outer_nodes.size() != resto_nodes.size()) {
-        throw std::runtime_error("restoration overlay graph/node mismatch");
-    }
-    for (size_t i = 0; i < outer_nodes.size(); ++i) {
-        fn(*outer_nodes[i], *resto_nodes[i]);
+    auto outer_view = outer_graph.forward_view();
+    auto resto_view = resto_graph.forward_view();
+
+    for (;;) {
+        const bool outer_ok = outer_view.update();
+        const bool resto_ok = resto_view.update();
+        if (outer_ok != resto_ok) {
+            throw std::runtime_error("restoration overlay graph traversal mismatch");
+        }
+        if (!outer_ok) {
+            break;
+        }
+        if (outer_view.size() != resto_view.size()) {
+            throw std::runtime_error("restoration overlay graph/node mismatch");
+        }
+        for (size_t i = 0; i < outer_view.size(); ++i) {
+            fn(*outer_view[i], *resto_view[i]);
+        }
     }
 }
 
@@ -369,8 +380,14 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
             outer_graph.for_each_parallel([this](data *d) {
                 d->update_approximation(node_data::update_mode::eval_val, true);
                 solver::restoration::reset_equality_duals(*d, settings.restoration.constr_mult_reset_threshold);
-                d->update_approximation(node_data::update_mode::eval_derivatives, true);
             });
+            if (settings.eq_init.enabled && settings.eq_init.rebuild_after_restoration_exit) {
+                initialize_equality_multipliers();
+            } else {
+                outer_graph.for_each_parallel([this](data *d) {
+                    d->update_approximation(node_data::update_mode::eval_derivatives, true);
+                });
+            }
         } else {
             clear_phase_graph_override();
         }

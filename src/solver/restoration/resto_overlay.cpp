@@ -871,11 +871,14 @@ void resto_prox_cost::value_impl(func_approx_data &data) const {
     size_t arg_idx = 0;
     for (const sym &arg : in_args()) {
         const auto &x = d[arg];
-        const auto &ref = d.arg_ref[arg_idx];
-        const auto &sigma = d.arg_sigma_sq[arg_idx];
+        const auto &ref = d.ref_by_arg[arg_idx];
+        const auto &sigma = d.sigma_sq_by_arg[arg_idx];
         if (x.size() == 0 || ref.size() == 0) {
             ++arg_idx;
             continue;
+        }
+        if (x.size() != ref.size() || sigma.size() != ref.size()) {
+            throw std::runtime_error("restoration prox value size mismatch");
         }
         const vector delta = x - ref;
         value += scalar_t(0.5) * sigma.dot(delta.cwiseProduct(delta));
@@ -893,8 +896,11 @@ void resto_prox_cost::jacobian_impl(func_approx_data &data) const {
             ++arg_idx;
             continue;
         }
-        const auto &ref = d.arg_ref[arg_idx];
-        const auto &sigma = d.arg_sigma_sq[arg_idx];
+        const auto &ref = d.ref_by_arg[arg_idx];
+        const auto &sigma = d.sigma_sq_by_arg[arg_idx];
+        if (d[arg].size() != ref.size() || sigma.size() != ref.size()) {
+            throw std::runtime_error("restoration prox jacobian size mismatch");
+        }
         const vector delta = d[arg] - ref;
         grad.array() += (sigma.array() * delta.array()).transpose();
         ++arg_idx;
@@ -912,11 +918,19 @@ void resto_prox_cost::hessian_impl(func_approx_data &data) const {
         if (block.size() == 0) {
             continue;
         }
-        const auto &sigma = d.arg_sigma_sq[i];
-        if (sigma.size() == 0) {
+        const auto &sigma = d.sigma_sq_by_arg[i];
+        if (block.cols() == 1 && block.rows() == sigma.size()) {
+            block.array() += sigma.array();
             continue;
         }
-        block.array() += sigma.array();
+        if (block.diagonal().size() != sigma.size()) {
+            throw std::runtime_error(
+                "restoration prox hessian size mismatch for arg " + std::to_string(i) +
+                " (" + arg.name() + ", field=" + std::string(field::name(arg.field())) +
+                "): diag=" + std::to_string(block.diagonal().size()) +
+                " sigma=" + std::to_string(sigma.size()));
+        }
+        block.diagonal().array() += sigma.array();
     }
 }
 
@@ -1462,13 +1476,15 @@ ocp_ptr_t build_restoration_overlay_problem(const ocp_ptr_t &source_prob,
 
 void seed_restoration_overlay_refs(node_data &resto, scalar_t prox_eps) {
     resto.for_each(__cost, [&](const resto_prox_cost &c, resto_prox_cost::approx_data &d) {
-        d.arg_ref.resize(c.in_args().size());
-        d.arg_sigma_sq.resize(c.in_args().size());
+        d.ref_by_arg.resize(c.in_args().size());
+        d.sigma_sq_by_arg.resize(c.in_args().size());
         for (size_t i = 0; i < c.in_args().size(); ++i) {
-            const sym &arg = c.in_args()[i];
-            d.arg_ref[i] = d[arg];
-            const scalar_t weight = arg.field() == __u ? c.rho_u() : c.rho_y();
-            fill_sigma(d.arg_ref[i], d.arg_sigma_sq[i], prox_eps, weight);
+            const auto &arg = c.in_args()[i];
+            d.ref_by_arg[i] = d[static_cast<const sym &>(*arg)];
+            fill_sigma(d.ref_by_arg[i],
+                       d.sigma_sq_by_arg[i],
+                       prox_eps,
+                       arg->field() == __u ? c.rho_u() : c.rho_y());
         }
     });
 }

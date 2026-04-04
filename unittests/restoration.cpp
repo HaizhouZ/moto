@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <cstdlib>
 #include <cmath>
 #include <cstdlib>
 
@@ -409,6 +411,134 @@ TEST_CASE("restoration prox cost stores per-argument references for split fields
     REQUIRE(data.dense().lag_hess_[__y][__y].dense().diagonal().isApprox(expected_y_hess_diag));
 }
 
+TEST_CASE("box helper lowers to doubled one-sided inequality rows") {
+    auto [x, _y] = sym::states("x_box", 2);
+    const vector lb = (vector(2) << -1.0, 0.5).finished();
+    const vector ub = (vector(2) << 2.0, 3.0).finished();
+
+    auto box = generic_constr::create_box("x_box_bound", var_inarg_list{*x}, static_cast<const cs::SX &>(x), lb, ub);
+    REQUIRE(box->dim() == 4);
+    REQUIRE(box->field_hint().is_eq == utils::optional_bool::False);
+
+    REQUIRE(box->finalize());
+    REQUIRE(box->field() == __ineq_x);
+}
+
+TEST_CASE("box helper uses affine fast path for single-arg linear selection") {
+    auto [x, _y] = sym::states("x_sel", 5);
+    const vector lb = (vector(2) << -1.0, 2.0).finished();
+    const vector ub = (vector(2) << 4.0, 5.0).finished();
+
+    auto bound = generic_constr::create_box(
+        "x_sel_bound",
+        var_inarg_list{*x},
+        cs::SX::vertcat(std::vector<cs::SX>{x(0), x(3)}),
+        lb,
+        ub);
+    REQUIRE(bound->dim() == 4);
+    REQUIRE(bound->field_hint().is_eq == utils::optional_bool::False);
+    REQUIRE(bound->get_codegen_task() == nullptr);
+
+    REQUIRE(bound->finalize());
+    REQUIRE(bound->field() == __ineq_x);
+}
+
+TEST_CASE("box helper drops unbounded sides row-wise") {
+    auto [x, _y] = sym::states("x_half_box", 2);
+    const vector lb = (vector(2) << -std::numeric_limits<scalar_t>::infinity(), 0.5).finished();
+    const vector ub = (vector(2) << 2.0, std::numeric_limits<scalar_t>::infinity()).finished();
+
+    auto box = generic_constr::create_box("x_half_box_bound", var_inarg_list{*x}, static_cast<const cs::SX &>(x), lb, ub);
+    REQUIRE(box->dim() == 2);
+    REQUIRE(box->field_hint().is_eq == utils::optional_bool::False);
+
+    REQUIRE(box->finalize());
+    REQUIRE(box->field() == __ineq_x);
+}
+
+TEST_CASE("box helper accepts symbolic parameter bounds through generic casadi lowering") {
+    auto [x, _y] = sym::states("x_param_box", 2);
+    auto p = sym::params("p_box", 2);
+
+    auto box = generic_constr::create_box(
+        "x_param_box_bound",
+        var_inarg_list{*x, *p},
+        static_cast<const cs::SX &>(x),
+        -std::numeric_limits<scalar_t>::infinity(),
+        static_cast<const cs::SX &>(p));
+    REQUIRE(box->dim() == 2);
+    REQUIRE(box->field_hint().is_eq == utils::optional_bool::False);
+    REQUIRE(box->get_codegen_task() != nullptr);
+
+    REQUIRE(box->finalize());
+    REQUIRE(box->field() == __ineq_x);
+}
+
+TEST_CASE("box helper rejects symbolic bounds whose dependencies are missing from in_args") {
+    auto [x, _y] = sym::states("x_missing_box", 2);
+    auto p = sym::params("p_missing_box", 2);
+
+    REQUIRE_THROWS_WITH(
+        generic_constr::create_box(
+            "x_missing_box_bound",
+            var_inarg_list{*x},
+            static_cast<const cs::SX &>(x),
+            -std::numeric_limits<scalar_t>::infinity(),
+            static_cast<const cs::SX &>(p)),
+        Catch::Matchers::ContainsSubstring("not listed in in_args"));
+}
+
+TEST_CASE("restoration overlay wraps box-lowered ipm inequality without special casing") {
+    auto prob = ocp::create();
+
+    auto [x, y] = sym::states("x", 2);
+    auto u = sym::inputs("u", 1);
+
+    prob->add(*x);
+    prob->add(*u);
+    prob->add(*y);
+
+    auto dyn = constr(new generic_constr("dyn", approx_order::first, 2, __dyn));
+    dynamic_cast<generic_func &>(*dyn).add_argument(x);
+    dynamic_cast<generic_func &>(*dyn).add_argument(u);
+    dynamic_cast<generic_func &>(*dyn).add_argument(y);
+    dyn->value = [](func_approx_data &d) { d.v_ = d[2] - d[0]; };
+    dyn->jacobian = [](func_approx_data &d) {
+        d.jac_[0].setZero();
+        d.jac_[2].setZero();
+        d.jac_[0].diagonal().array() = -1.;
+        d.jac_[2].diagonal().array() = 1.;
+    };
+    prob->add(*dyn);
+
+    const vector lb = (vector(2) << -1.0, -2.0).finished();
+    const vector ub = (vector(2) << 3.0, 4.0).finished();
+    auto box_base = generic_constr::create_box(
+        "x_box_bound",
+        var_inarg_list{*u},
+        cs::SX::vertcat(std::vector<cs::SX>{u(0), scalar_t(2.0) * u(0)}),
+        lb,
+        ub);
+    constr box(box_base->cast_ineq("ipm"));
+    prob->add(*box);
+
+    prob->wait_until_ready();
+
+    const auto resto = build_restoration_overlay_problem(
+        prob,
+        restoration_overlay_settings{
+            .rho_u = 1e-4,
+            .rho_y = 1e-4,
+            .rho_eq = 10.0,
+            .rho_ineq = 20.0,
+        });
+
+    REQUIRE(resto->num(__ineq_xu) == 1);
+    const auto *ineq_overlay = dynamic_cast<const resto_ineq_elastic_ipm_constr *>(resto->exprs(__ineq_xu).front().get());
+    REQUIRE(ineq_overlay != nullptr);
+    REQUIRE(ineq_overlay->source()->name() == box->name());
+    REQUIRE(ineq_overlay->source()->dim() == 4);
+}
 TEST_CASE("restoration inequality local KKT recovery satisfies reduced linearization") {
     detail::ineq_local_state iq;
     resize_ineq_state(iq, 2, 1);

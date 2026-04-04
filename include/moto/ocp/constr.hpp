@@ -5,6 +5,7 @@
 #include <moto/ocp/impl/func.hpp>
 #include <moto/solver/linesearch_config.hpp>
 #include <moto/utils/optional_boolean.hpp>
+#include <variant>
 
 namespace moto {
 class generic_constr;                         ///< forward declaration
@@ -14,6 +15,7 @@ using constr = utils::shared<generic_constr>; ///< generic constr holder
  */
 class generic_constr : public generic_func {
   public:
+    using box_bound_t = std::variant<scalar_t, vector, cs::SX>;
     /**
      * @brief constraint approximation map
      * derived from func_approx_data with multipler and vjp (for cost) mapping in addition
@@ -99,6 +101,14 @@ class generic_constr : public generic_func {
      */
     OVERLOAD_CREATE_APPROX_DATA(generic_constr);
     DEF_DEFAULT_CLONE(generic_constr);
+
+    static constr create_box(const std::string &name,
+                             const var_inarg_list &args,
+                             const cs::SX &out,
+                             const box_bound_t &lb,
+                             const box_bound_t &ub,
+                             approx_order order = approx_order::first,
+                             field_t field = field_t::__undefined);
 
     // @brief make an inequality constraint from this constraint by moving
     generic_constr *cast_ineq(std::string_view type_name);

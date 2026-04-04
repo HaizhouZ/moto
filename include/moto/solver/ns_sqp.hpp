@@ -5,10 +5,10 @@
 #include <moto/ocp/constr.hpp>
 #include <moto/ocp/impl/shooting_node.hpp>
 #include <moto/solver/ipm/ipm_config.hpp>
+#include <moto/solver/equality_init/eq_init_overlay.hpp>
 #include <moto/solver/linesearch_config.hpp>
 #include <moto/solver/ns_riccati/generic_solver.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
-#include <moto/solver/restoration/resto_overlay.hpp>
 #include <moto/solver/restoration/resto_overlay.hpp>
 #include <array>
 #include <chrono>
@@ -159,6 +159,17 @@ struct ns_sqp {
         scalar_t constr_mult_reset_threshold = 0.0;
     };
 
+    struct equality_multiplier_init_settings {
+        bool enabled = true;
+        bool rebuild_after_restoration_exit = true;
+        scalar_t rho_eq = 1.0;
+        iterative_refinement_setting rf = [] {
+            iterative_refinement_setting cfg;
+            cfg.enabled = false;
+            return cfg;
+        }();
+    };
+
     struct settings_t : public workspace_data_collection<linesearch_setting, ipm_config> {
         using base = workspace_data_collection<linesearch_setting, ipm_config>;
         using worker = typename base::worker;
@@ -174,6 +185,7 @@ struct ns_sqp {
         iterative_refinement_setting rf;
         scaling_settings scaling;
         restoration_settings restoration;
+        equality_multiplier_init_settings eq_init;
 
         bool no_except = false;
 
@@ -267,6 +279,9 @@ struct ns_sqp {
         std::shared_ptr<solver_graph_type> restoration_runtime;
         solver::restoration::restoration_overlay_settings restoration_cfg{};
         bool restoration_cfg_valid = false;
+        std::shared_ptr<solver_graph_type> equality_init_runtime;
+        solver::equality_init::equality_init_overlay_settings equality_init_cfg{};
+        bool equality_init_cfg_valid = false;
     };
 
     void reset_riccati_solver(solver_type *s) {
@@ -312,6 +327,7 @@ struct ns_sqp {
     }
 
     solver_graph_type &restoration_graph();
+    solver_graph_type &equality_init_graph();
     void clear_phase_graph_override() { phase_graph_override_ = nullptr; }
     void set_phase_graph_override(solver_graph_type &graph) { phase_graph_override_ = &graph; }
     bool using_restoration_overlay_graph() const {
@@ -385,6 +401,7 @@ struct ns_sqp {
     void print_stats(const kkt_info &info);
     /// compute the kkt information of the current solution
     kkt_info compute_kkt_info(bool update_dual_res = true);
+    void initialize_equality_multipliers();
     kkt_info restoration_update(const kkt_info &kkt_before, filter_linesearch_data &ls);
     void update_phase_problem(data *d, node_data::update_mode mode);
     /// perform iterative refinement to improve the solution accuracy, will modify the current solution in place
