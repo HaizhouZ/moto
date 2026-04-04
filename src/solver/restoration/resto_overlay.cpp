@@ -1,6 +1,7 @@
 #include <moto/solver/restoration/resto_overlay.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <string_view>
 #include <tuple>
@@ -478,12 +479,27 @@ std::string overlay_name(const generic_func &source, std::string_view suffix) {
     return fmt::format("{}__{}", source.name(), suffix);
 }
 
-void fill_sigma(const vector &ref, vector &sigma_sq, scalar_t eps, scalar_t weight) {
-    sigma_sq.resizeLike(ref);
-    if (ref.size() == 0) {
+void fill_sigma_tangent(const sym &arg,
+                        vector_ref ref,
+                        vector_ref sigma_sq,
+                        scalar_t eps,
+                        scalar_t weight) {
+    if (sigma_sq.size() == 0) {
         return;
     }
-    sigma_sq = weight * ref.array().abs().max(eps).inverse().square().min(1.);
+    if (arg.tdim() == arg.dim()) {
+        sigma_sq = weight * ref.array().abs().max(eps).inverse().square().min(1.);
+        return;
+    }
+    const scalar_t scale_ref = ref.size() > 0 ? ref.cwiseAbs().maxCoeff() : scalar_t(0.);
+    const scalar_t sigma = std::min(weight / std::pow(std::max(scale_ref, eps), 2), scalar_t(1.));
+    sigma_sq.setConstant(sigma);
+}
+
+vector compute_tangent_delta(const sym &arg, vector_ref x, vector_ref ref) {
+    vector delta(arg.tdim());
+    arg.difference(x, ref, delta);
+    return delta;
 }
 
 template <typename Overlay>
@@ -865,21 +881,29 @@ func_approx_data_ptr_t resto_prox_cost::create_approx_data(sym_data &primal,
     return std::make_unique<approx_data>(primal, raw, shared, *this);
 }
 
+void resto_prox_cost::finalize_impl() {
+    generic_cost::finalize_impl();
+    for (size_t i = 0; i < in_args().size(); ++i) {
+        for (size_t j = 0; j < in_args().size(); ++j) {
+            hess_sp_[i][j] = (i == j) ? sparsity::diag : sparsity::unknown;
+        }
+    }
+}
+
 void resto_prox_cost::value_impl(func_approx_data &data) const {
     auto &d = data.as<approx_data>();
     scalar_t value = 0.;
-    size_t arg_idx = 0;
     for (const sym &arg : in_args()) {
-        const auto &x = d[arg];
-        const auto *ref = arg.field() == __u ? &d.u_ref : &d.y_ref;
-        const auto *sigma = arg.field() == __u ? &d.sigma_u_sq : &d.sigma_y_sq;
-        if (x.size() == 0 || ref->size() == 0) {
-            ++arg_idx;
+        auto &ref_field = arg.field() == __u ? d.u_ref : d.y_ref;
+        auto &sigma_field = arg.field() == __u ? d.sigma_u_sq : d.sigma_y_sq;
+        const auto x = d[arg];
+        auto ref = d.problem()->extract(ref_field, arg);
+        auto sigma = d.problem()->extract_tangent(sigma_field, arg);
+        if (x.size() == 0 || ref.size() == 0 || sigma.size() == 0) {
             continue;
         }
-        const vector delta = x - *ref;
-        value += scalar_t(0.5) * sigma->dot(delta.cwiseProduct(delta));
-        ++arg_idx;
+        const vector delta = compute_tangent_delta(arg, x, ref);
+        value += scalar_t(0.5) * sigma.dot(delta.cwiseProduct(delta));
     }
     d.v_(0) += value;
 }
@@ -893,10 +917,12 @@ void resto_prox_cost::jacobian_impl(func_approx_data &data) const {
             ++arg_idx;
             continue;
         }
-        const auto *ref = arg.field() == __u ? &d.u_ref : &d.y_ref;
-        const auto *sigma = arg.field() == __u ? &d.sigma_u_sq : &d.sigma_y_sq;
-        const vector delta = d[arg] - *ref;
-        grad.array() += (sigma->array() * delta.array()).transpose();
+        auto &ref_field = arg.field() == __u ? d.u_ref : d.y_ref;
+        auto &sigma_field = arg.field() == __u ? d.sigma_u_sq : d.sigma_y_sq;
+        auto ref = d.problem()->extract(ref_field, arg);
+        auto sigma = d.problem()->extract_tangent(sigma_field, arg);
+        const vector delta = compute_tangent_delta(arg, d[arg], ref);
+        grad.array() += (sigma.array() * delta.array()).transpose();
         ++arg_idx;
     }
 }
@@ -912,7 +938,8 @@ void resto_prox_cost::hessian_impl(func_approx_data &data) const {
         if (block.size() == 0) {
             continue;
         }
-        const auto &sigma = arg.field() == __u ? d.sigma_u_sq : d.sigma_y_sq;
+        auto &sigma_field = arg.field() == __u ? d.sigma_u_sq : d.sigma_y_sq;
+        auto sigma = d.problem()->extract_tangent(sigma_field, arg);
         block.diagonal().array() += sigma.array();
     }
 }
@@ -1461,8 +1488,24 @@ void seed_restoration_overlay_refs(node_data &resto, scalar_t prox_eps) {
     resto.for_each(__cost, [&](const resto_prox_cost &c, resto_prox_cost::approx_data &d) {
         d.u_ref = d.primal_->value_[__u];
         d.y_ref = d.primal_->value_[__y];
-        fill_sigma(d.u_ref, d.sigma_u_sq, prox_eps, c.rho_u());
-        fill_sigma(d.y_ref, d.sigma_y_sq, prox_eps, c.rho_y());
+        d.sigma_u_sq.resize(d.problem()->tdim(__u));
+        d.sigma_u_sq.setZero();
+        for (const sym &arg : d.problem()->exprs(__u)) {
+            fill_sigma_tangent(arg,
+                               d.problem()->extract(d.u_ref, arg),
+                               d.problem()->extract_tangent(d.sigma_u_sq, arg),
+                               prox_eps,
+                               c.rho_u());
+        }
+        d.sigma_y_sq.resize(d.problem()->tdim(__y));
+        d.sigma_y_sq.setZero();
+        for (const sym &arg : d.problem()->exprs(__y)) {
+            fill_sigma_tangent(arg,
+                               d.problem()->extract(d.y_ref, arg),
+                               d.problem()->extract_tangent(d.sigma_y_sq, arg),
+                               prox_eps,
+                               c.rho_y());
+        }
     });
 }
 

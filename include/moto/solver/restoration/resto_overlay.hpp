@@ -123,6 +123,7 @@ class resto_prox_cost final : public generic_cost {
                                               lag_data &raw,
                                               shared_data &shared) const override;
 
+    void finalize_impl() override;
     void value_impl(func_approx_data &data) const override;
     void jacobian_impl(func_approx_data &data) const override;
     void hessian_impl(func_approx_data &data) const override;
