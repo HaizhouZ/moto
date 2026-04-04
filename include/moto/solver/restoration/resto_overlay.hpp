@@ -104,10 +104,8 @@ struct restoration_overlay_settings {
 class resto_prox_cost final : public generic_cost {
   public:
     struct approx_data : public func_approx_data {
-        vector u_ref;
-        vector y_ref;
-        vector sigma_u_sq;
-        vector sigma_y_sq;
+        std::vector<vector> arg_ref;
+        std::vector<vector> arg_sigma_sq;
 
         approx_data(sym_data &primal, lag_data &raw, shared_data &shared, const generic_func &f)
             : func_approx_data(primal, raw, shared, f) {}

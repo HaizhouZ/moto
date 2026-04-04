@@ -25,9 +25,12 @@ class dense_dynamics : public generic_dynamics {
         using lu_t = utils::blasfeo_lu;
         movable_ptr<lu_t> lu_;                             ///< LU decomposition for dense dynamics
         aligned_map_t f_x_, f_y_;                          ///< Jacobian of f_y
-        aligned_map_t f_u_exclusive_, proj_f_u_exclusive_; ///< Jacobian of f_u (exclusive of shared inputs)
+        matrix f_u_exclusive_storage_, proj_f_u_exclusive_storage_;
+        aligned_map_t f_u_exclusive_, proj_f_u_exclusive_; ///< packed Jacobian of exclusive u inputs
+        std::vector<aligned_map_t> f_u_exclusive_blocks_;  ///< global Jacobian blocks for exclusive u inputs
         std::vector<aligned_map_t> f_u_shared_;            ///< Jacobian of other fields
         aligned_map_t proj_f_x_;                           ///< Jacobian of x
+        std::vector<aligned_map_t> proj_f_u_exclusive_blocks_; ///< global projected blocks for exclusive u inputs
         std::vector<aligned_map_t> proj_f_u_shared_;       ///< projection of f_u
         approx_data(generic_constr::approx_data &&rhs);
         void reset() override;

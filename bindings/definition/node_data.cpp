@@ -16,14 +16,68 @@ nb::list to_py_list(const moto::var_list &items) {
 
 void register_submodule_node_data(nb::module_ &m) {
     using namespace moto;
+    nb::class_<projector_group>(m, "projector_group")
+        .def("require_primal",
+             [](projector_group &self, const expr_inarg_list &vars) -> projector_group & {
+                 var_inarg_list primal_vars;
+                 primal_vars.reserve(vars.size());
+                 for (expr &entry : vars) {
+                     primal_vars.emplace_back(static_cast<sym &>(entry));
+                 }
+                 return self.require_primal(primal_vars);
+             },
+             nb::arg("vars"),
+             nb::rv_policy::reference_internal)
+        .def("require_constraint",
+             [](projector_group &self, const expr_inarg_list &exprs) -> projector_group & {
+                 return self.require_constraint(exprs);
+             },
+             nb::arg("exprs"),
+             nb::rv_policy::reference_internal)
+        .def("require_before",
+             [](projector_group &self, const projector_group &after) -> projector_group & {
+                 return self.require_before(after);
+             },
+             nb::arg("after"),
+             nb::rv_policy::reference_internal)
+        .def("require_after",
+             [](projector_group &self, const projector_group &before) -> projector_group & {
+                 return self.require_after(before);
+             },
+             nb::arg("before"),
+             nb::rv_policy::reference_internal)
+        .def_prop_ro("id", &projector_group::id);
+
+    nb::class_<projector_layout>(m, "projector_layout")
+        .def("group",
+             [](projector_layout &self) { return self.group(); },
+             nb::rv_policy::move,
+             nb::keep_alive<0, 1>());
+
+    nb::class_<projector_hard_constraint_block>(m, "projector_hard_constraint_block")
+        .def_prop_ro("field", [](const projector_hard_constraint_block &self) { return self.field; })
+        .def_prop_ro("source_begin", [](const projector_hard_constraint_block &self) { return self.source_begin; })
+        .def_prop_ro("source_count", [](const projector_hard_constraint_block &self) { return self.source_count; })
+        .def_prop_ro("group_id", [](const projector_hard_constraint_block &self) { return self.group_id; })
+        .def_prop_ro("group", [](const projector_hard_constraint_block &self) -> const auto & { return self.group; },
+                     nb::rv_policy::reference_internal);
+
     auto ocp_base_handle =
         nb::class_<ocp_base>(m, "ocp_base")
             .def("add", [](ocp_base &self, expr_inarg_list &&exprs) { self.add(exprs); }, nb::arg("exprs"), "Add a list of expressions to the OCP problem")
             .def("add", [](ocp_base &self, shared_expr ex) { self.add(ex); }, nb::arg("ex"), "Add an expression to the OCP problem")
             .def("add_terminal", [](ocp_base &self, expr_inarg_list &&exprs) { self.add_terminal(exprs); }, nb::arg("exprs"), "Add a list of terminal expressions to the OCP problem")
             .def("add_terminal", [](ocp_base &self, shared_expr ex) { self.add_terminal(ex); }, nb::arg("ex"), "Add a terminal expression to the OCP problem")
+            .def("projector", &ocp_base::projector, nb::keep_alive<0, 1>(),
+                 "Access the projector layout spec on this problem")
             .def("dim", [](ocp_base &self, field_t field) { return self.dim(field); }, nb::arg("field"), "Get the dimension of the field")
             .def("exprs", [](ocp_base &self, field_t field) -> const auto & { return static_cast<const std::vector<shared_expr> &>(self.exprs(field)); }, nb::arg("field"), "Get the expressions in the field", nb::rv_policy::reference_internal)
+            .def_prop_ro("compiled_hard_constraint_blocks",
+                         [](const ocp_base &self) -> const auto & {
+                             return self.compiled_hard_constraint_blocks();
+                         },
+                         nb::rv_policy::reference_internal,
+                         "Get the compiled hard-constraint block order for this finalized problem")
             .def_prop_ro("uid", &ocp_base::uid, "Get the unique identifier of the OCP problem")
             .def("wait_until_ready", &ocp_base::wait_until_ready, "Wait until all expressions in the OCP problem are ready")
             .def("update_active_status", &ocp_base::update_active_status, nb::arg("config"), nb::arg("update_sub_probs") = true, "Update the active status of the OCP problem based on the provided configuration")

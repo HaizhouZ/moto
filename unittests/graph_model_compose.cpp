@@ -14,6 +14,8 @@
 #include <moto/solver/ns_sqp.hpp>
 
 namespace {
+namespace cs = casadi;
+
 const bool force_sync_codegen_for_test = []() {
     setenv("MOTO_SYNC_CODEGEN", "1", 1);
     return true;
@@ -225,6 +227,183 @@ TEST_CASE("graph_model composed stages can be consumed by sqp create_node") {
     const auto composed = modeled.compose_all();
     REQUIRE(composed.size() == 1);
 
+}
+
+TEST_CASE("graph_model compose_interval applies projector-driven control and hard-constraint layout") {
+    using namespace moto;
+    using namespace moto::model;
+
+    auto [x, xn] = sym::states("x_projector_layout", 1);
+    auto u0 = sym::inputs("u0_projector_layout", 1);
+    auto u1 = sym::inputs("u1_projector_layout", 1);
+    const var_inarg_list dyn_args = var_list{x, xn, u0, u1};
+    const var_inarg_list x_args = var_list{x};
+
+    auto dyn = dynamics(new dense_dynamics("dyn_projector_layout",
+                                           dyn_args,
+                                           xn - x - u0 - cs::SX(2.0) * u1,
+                                           approx_order::second, __dyn));
+
+    auto node_prob = node_ocp::create();
+    auto eq_state = constr(new generic_constr("eq_state_projector_layout",
+                                              x_args,
+                                              x,
+                                              approx_order::second,
+                                              __eq_x));
+    node_prob->add(*eq_state);
+    auto state_group = node_prob->projector().group();
+    state_group.require_constraint(expr_list{eq_state});
+
+    auto edge_prob = edge_ocp::create();
+    auto eq_u0 = constr(new generic_constr("eq_u0_projector_layout",
+                                           var_list{u0},
+                                           u0,
+                                           approx_order::second,
+                                           __eq_xu));
+    auto eq_u1 = constr(new generic_constr("eq_u1_projector_layout",
+                                           var_list{u1},
+                                           u1,
+                                           approx_order::second,
+                                           __eq_xu));
+    edge_prob->add(*dyn);
+    edge_prob->add(*eq_u0);
+    edge_prob->add(*eq_u1);
+
+    auto proj = edge_prob->projector();
+    auto drive_group = proj.group();
+    drive_group.require_primal(var_list{u1});
+    drive_group.require_constraint(expr_list{eq_u1});
+    auto balance_group = proj.group();
+    balance_group.require_primal(var_list{u0});
+    balance_group.require_constraint(expr_list{eq_u0});
+    drive_group.require_before(state_group);
+    state_group.require_before(balance_group);
+
+    graph_model modeled;
+    auto n0 = modeled.create_node(node_prob);
+    auto n1 = modeled.create_node();
+    auto e01 = modeled.connect(n0, n1, edge_prob);
+
+    auto composed = modeled.compose_interval(e01);
+    const std::vector<std::string> expected_u_names{
+        "u1_projector_layout",
+        "u0_projector_layout",
+    };
+    const std::vector<std::string> expected_eq_xu_names{
+        "eq_u1_projector_layout",
+        "eq_u0_projector_layout",
+    };
+    REQUIRE(expr_names(composed, __u) == expected_u_names);
+    REQUIRE(expr_names(composed, __eq_xu) == expected_eq_xu_names);
+
+    const auto &blocks = composed->compiled_hard_constraint_blocks();
+    REQUIRE(blocks.size() == 3);
+    REQUIRE(blocks[0].field == __eq_xu);
+    REQUIRE(blocks[0].group_id == drive_group.id());
+    REQUIRE(blocks[1].field == __eq_x);
+    REQUIRE(blocks[1].group_id == state_group.id());
+    REQUIRE(blocks[2].field == __eq_xu);
+    REQUIRE(blocks[2].group_id == balance_group.id());
+
+    ns_sqp::data stage(std::static_pointer_cast<ocp>(composed));
+    REQUIRE(stage.default_elimination_stage_.rows.size() == 3);
+    REQUIRE(stage.default_elimination_stage_.rows[0].kind == solver::projection::row_kind::state_input_eq);
+    REQUIRE(stage.default_elimination_stage_.rows[1].kind == solver::projection::row_kind::projected_state_eq);
+    REQUIRE(stage.default_elimination_stage_.rows[2].kind == solver::projection::row_kind::state_input_eq);
+}
+
+TEST_CASE("edge_ocp compose applies projector-driven layout without graph_model") {
+    using namespace moto;
+
+    auto [x, xn] = sym::states("x_direct_projector_layout", 1);
+    auto u0 = sym::inputs("u0_direct_projector_layout", 1);
+    auto u1 = sym::inputs("u1_direct_projector_layout", 1);
+
+    auto node_prob = node_ocp::create();
+    auto eq_state = constr(new generic_constr("eq_state_direct_projector_layout",
+                                              var_list{x},
+                                              x,
+                                              approx_order::second,
+                                              __eq_x));
+    node_prob->add(*eq_state);
+    auto state_group = node_prob->projector().group();
+    state_group.require_constraint(expr_list{eq_state});
+
+    auto edge_prob = edge_ocp::create();
+    auto dyn = dynamics(new dense_dynamics("dyn_direct_projector_layout",
+                                           var_list{x, xn, u0, u1},
+                                           xn - x - u0 - cs::SX(2.0) * u1,
+                                           approx_order::second,
+                                           __dyn));
+    auto eq_u0 = constr(new generic_constr("eq_u0_direct_projector_layout",
+                                           var_list{u0},
+                                           u0,
+                                           approx_order::second,
+                                           __eq_xu));
+    auto eq_u1 = constr(new generic_constr("eq_u1_direct_projector_layout",
+                                           var_list{u1},
+                                           u1,
+                                           approx_order::second,
+                                           __eq_xu));
+    edge_prob->add(*dyn);
+    edge_prob->add(*eq_u0);
+    edge_prob->add(*eq_u1);
+
+    auto proj = edge_prob->projector();
+    auto drive_group = proj.group();
+    drive_group.require_primal(var_list{u1});
+    drive_group.require_constraint(expr_list{eq_u1});
+    auto balance_group = proj.group();
+    balance_group.require_primal(var_list{u0});
+    balance_group.require_constraint(expr_list{eq_u0});
+    drive_group.require_before(state_group);
+    state_group.require_before(balance_group);
+
+    auto composed = edge_ocp::compose(node_prob, edge_prob);
+    composed->wait_until_ready();
+
+    REQUIRE(expr_names(composed, __u) == std::vector<std::string>{
+                                          "u1_direct_projector_layout",
+                                          "u0_direct_projector_layout",
+                                      });
+    REQUIRE(expr_names(composed, __eq_xu) == std::vector<std::string>{
+                                             "eq_u1_direct_projector_layout",
+                                             "eq_u0_direct_projector_layout",
+                                         });
+
+    const auto &blocks = composed->compiled_hard_constraint_blocks();
+    REQUIRE(blocks.size() == 3);
+    REQUIRE(blocks[0].group_id == drive_group.id());
+    REQUIRE(blocks[1].group_id == state_group.id());
+    REQUIRE(blocks[2].group_id == balance_group.id());
+}
+
+TEST_CASE("graph_model compose_interval rejects incompatible projector ownership") {
+    using namespace moto;
+    using namespace moto::model;
+    using Catch::Matchers::ContainsSubstring;
+
+    auto [x, xn] = sym::states("x_projector_conflict", 1);
+    auto u = sym::inputs("u_projector_conflict", 1);
+    const var_inarg_list dyn_args = var_list{x, xn, u};
+
+    auto dyn = dynamics(new dense_dynamics("dyn_projector_conflict",
+                                           dyn_args,
+                                           xn - x - u,
+                                           approx_order::second, __dyn));
+
+    auto edge_prob = edge_ocp::create();
+    edge_prob->add(*dyn);
+    auto proj = edge_prob->projector();
+    proj.group().require_primal(var_list{u});
+    proj.group().require_primal(var_list{u});
+
+    graph_model modeled;
+    auto n0 = modeled.create_node();
+    auto n1 = modeled.create_node();
+    auto e01 = modeled.connect(n0, n1, edge_prob);
+
+    REQUIRE_THROWS_WITH(modeled.compose_interval(e01), ContainsSubstring("projector layout conflict"));
 }
 
 TEST_CASE("ns_sqp create_graph can synchronize model graph paths into the internal directed graph") {

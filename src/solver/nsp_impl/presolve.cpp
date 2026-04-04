@@ -14,7 +14,7 @@ extern void print_debug(ns_riccati_data *cur);
 void generic_solver::ns_factorization_correction(ns_riccati_data *cur) {
     auto &d = *cur;
     auto &nsp = d.nsp_;
-    auto &_approx = d.dense_->approx_;
+    const auto &stage = d.default_elimination_stage_;
 
     cur->update_projected_dynamics_residual();
 
@@ -29,25 +29,13 @@ void generic_solver::ns_factorization_correction(ns_riccati_data *cur) {
         return;
     }
 
-    auto constr_s = d.ns + d.nis;
-    auto constr_c = d.nc + d.nic;
-    d.ncstr = constr_s + constr_c;
-
-    nsp.s_c_stacked_0_k.conservativeResize(d.ncstr);
+    stage.prepare_residual_problem(d);
     timed_block_start("setup ns residuals");
-    if (constr_s) {
-        nsp.s_0_p_k.conservativeResize(constr_s);
-        nsp.s_0_p_k.noalias() = _approx[__eq_x].v_;
-        d.s_y.times<false>(d.F_0, nsp.s_0_p_k);
-        nsp.s_c_stacked_0_k.head(constr_s) = nsp.s_0_p_k;
-    }
-    if (constr_c) {
-        nsp.s_c_stacked_0_k.tail(d.nc) = _approx[__eq_xu].v_;
-    }
+    stage.assemble_residual(d);
     timed_block_end("setup ns residuals");
 
     timed_block_start("precompute_u_y");
-    nsp.u_y_k.noalias() = nsp.lu_eq_.solve(nsp.s_c_stacked_0_k);
+    stage.compose_particular(d, nsp.s_c_stacked_0_k, nsp.u_y_k);
     timed_block_end("precompute_u_y");
 
     timed_block_start("precompute_u0p");
@@ -80,7 +68,7 @@ void generic_solver::ns_factorization_correction(ns_riccati_data *cur) {
 void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
     auto &d = *cur;
     auto &nsp = d.nsp_;
-    auto &_approx = d.dense_->approx_;
+    const auto &stage = d.default_elimination_stage_;
     timed_block_start("update_projected_dynamics");
     cur->update_projected_dynamics();
     timed_block_end("update_projected_dynamics");
@@ -128,24 +116,10 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
         return;
     }
 
-    d.nis = 0;
-    d.nic = 0;
-    size_t constr_s = d.ns + d.nis;
-    size_t constr_c = d.nc + d.nic;
-    d.ncstr = constr_s + constr_c;
-    nsp.s_c_stacked.conservativeResize(d.ncstr, Eigen::NoChange);
-    nsp.s_c_stacked.setZero();
-    d.d_lbd_s_c.conservativeResize(d.ncstr);
+    stage.prepare_factorization_problem(d);
 
     timed_block_start("copy_lhs_derivatives");
-    if (constr_s) {
-        nsp.s_u.setZero();
-        d.s_y.times<false>(d.F_u, nsp.s_u);
-        nsp.s_c_stacked.topRows(constr_s) = nsp.s_u;
-    }
-    if (constr_c) {
-        d.c_u.dump_into(nsp.s_c_stacked.bottomRows(d.nc), spmm::dump_config{.overwrite = true});
-    }
+    stage.assemble_control_jacobian(d);
     timed_block_end("copy_lhs_derivatives");
 
     timed_block_start("lu_eq_compute");
@@ -154,18 +128,7 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
     timed_block_end("lu_eq_compute");
 
     // build s_c_stacked_0_K (needed for GN mode and for the normal constrained path)
-    nsp.s_c_stacked_0_K.conservativeResize(d.ncstr, Eigen::NoChange);
-    nsp.s_c_stacked_0_K.setZero();
-    if (constr_s) {
-        nsp.s_0_p_K.conservativeResize(constr_s, Eigen::NoChange);
-        nsp.s_0_p_K.setZero();
-        d.s_x.dump_into(nsp.s_0_p_K);
-        d.s_y.times<false>(d.F_x, nsp.s_0_p_K);
-        nsp.s_c_stacked_0_K.topRows(constr_s) = nsp.s_0_p_K;
-    }
-    if (constr_c) {
-        d.c_x.dump_into(nsp.s_c_stacked_0_K.bottomRows(d.nc));
-    }
+    stage.assemble_state_jacobian(d);
 
     auto &rank = nsp.rank;
     if (rank == 0) {
@@ -176,13 +139,20 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
         return;
     }
 
-    if (rank == d.nu) {
-        d.rank_status_ = rank_status::fully_constrained;
-    } else {
-        timed_block_start("compute_nullspace");
-        nsp.Z_u = nsp.lu_eq_.kernel();
-        timed_block_end("compute_nullspace");
+    timed_block_start("compose_ordered_elimination");
+    stage.compose_particular_and_nullspace(d, nsp.s_c_stacked_0_K, nsp.u_y_K, nsp.Z_u);
+    timed_block_end("compose_ordered_elimination");
 
+    if (nsp.Z_u.cols() == 0) {
+        d.rank_status_ = rank_status::fully_constrained;
+        nsp.Z_u.resize(d.nu, 0);
+        nsp.Z_y.resize(d.ny, 0);
+        nsp.Q_zz.resize(0, 0);
+        nsp.z_k.resize(0);
+        nsp.z_K.resize(0, d.nx);
+        nsp.z_0_k.resize(0);
+        nsp.z_0_K.resize(0, d.nx);
+    } else {
         timed_block_start("compute_Zy");
         nsp.Z_y.resize(d.ny, nsp.Z_u.cols());
         nsp.Z_y.setZero();
@@ -207,10 +177,6 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
     }
 
     if (d.rank_status_ != rank_status::unconstrained) {
-        timed_block_start("precompute_u_y");
-        nsp.u_y_K.noalias() = nsp.lu_eq_.solve(nsp.s_c_stacked_0_K);
-        timed_block_end("precompute_u_y");
-
         timed_block_start("precompute_u0p");
         d.Q_uu.times<false>(nsp.u_y_K, nsp.u_0_p_K);
         d.Q_uu_mod.times<false>(nsp.u_y_K, nsp.u_0_p_K);

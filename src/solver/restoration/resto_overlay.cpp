@@ -871,14 +871,14 @@ void resto_prox_cost::value_impl(func_approx_data &data) const {
     size_t arg_idx = 0;
     for (const sym &arg : in_args()) {
         const auto &x = d[arg];
-        const auto *ref = arg.field() == __u ? &d.u_ref : &d.y_ref;
-        const auto *sigma = arg.field() == __u ? &d.sigma_u_sq : &d.sigma_y_sq;
-        if (x.size() == 0 || ref->size() == 0) {
+        const auto &ref = d.arg_ref[arg_idx];
+        const auto &sigma = d.arg_sigma_sq[arg_idx];
+        if (x.size() == 0 || ref.size() == 0) {
             ++arg_idx;
             continue;
         }
-        const vector delta = x - *ref;
-        value += scalar_t(0.5) * sigma->dot(delta.cwiseProduct(delta));
+        const vector delta = x - ref;
+        value += scalar_t(0.5) * sigma.dot(delta.cwiseProduct(delta));
         ++arg_idx;
     }
     d.v_(0) += value;
@@ -893,10 +893,10 @@ void resto_prox_cost::jacobian_impl(func_approx_data &data) const {
             ++arg_idx;
             continue;
         }
-        const auto *ref = arg.field() == __u ? &d.u_ref : &d.y_ref;
-        const auto *sigma = arg.field() == __u ? &d.sigma_u_sq : &d.sigma_y_sq;
-        const vector delta = d[arg] - *ref;
-        grad.array() += (sigma->array() * delta.array()).transpose();
+        const auto &ref = d.arg_ref[arg_idx];
+        const auto &sigma = d.arg_sigma_sq[arg_idx];
+        const vector delta = d[arg] - ref;
+        grad.array() += (sigma.array() * delta.array()).transpose();
         ++arg_idx;
     }
 }
@@ -912,8 +912,11 @@ void resto_prox_cost::hessian_impl(func_approx_data &data) const {
         if (block.size() == 0) {
             continue;
         }
-        const auto &sigma = arg.field() == __u ? d.sigma_u_sq : d.sigma_y_sq;
-        block.diagonal().array() += sigma.array();
+        const auto &sigma = d.arg_sigma_sq[i];
+        if (sigma.size() == 0) {
+            continue;
+        }
+        block.array() += sigma.array();
     }
 }
 
@@ -1459,10 +1462,14 @@ ocp_ptr_t build_restoration_overlay_problem(const ocp_ptr_t &source_prob,
 
 void seed_restoration_overlay_refs(node_data &resto, scalar_t prox_eps) {
     resto.for_each(__cost, [&](const resto_prox_cost &c, resto_prox_cost::approx_data &d) {
-        d.u_ref = d.primal_->value_[__u];
-        d.y_ref = d.primal_->value_[__y];
-        fill_sigma(d.u_ref, d.sigma_u_sq, prox_eps, c.rho_u());
-        fill_sigma(d.y_ref, d.sigma_y_sq, prox_eps, c.rho_y());
+        d.arg_ref.resize(c.in_args().size());
+        d.arg_sigma_sq.resize(c.in_args().size());
+        for (size_t i = 0; i < c.in_args().size(); ++i) {
+            const sym &arg = c.in_args()[i];
+            d.arg_ref[i] = d[arg];
+            const scalar_t weight = arg.field() == __u ? c.rho_u() : c.rho_y();
+            fill_sigma(d.arg_ref[i], d.arg_sigma_sq[i], prox_eps, weight);
+        }
     });
 }
 

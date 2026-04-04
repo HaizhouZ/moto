@@ -198,6 +198,10 @@ void ocp_base::finalize() {
     static std::mutex finalize_mutex_;
     std::lock_guard lock(finalize_mutex_);
     if (!finalized_) {
+        compiled_projector_layout_.clear();
+        if (apply_projector_layout_ && !projector_layout_.empty()) {
+            compile_projector_layout();
+        }
         if (expr_[__dyn].size() > 0 && automatic_reorder_primal_)
             maintain_order();
         this->set_dim_and_idx();
@@ -234,6 +238,7 @@ void ocp_base::set_dim_and_idx() {
         }
     }
 }
+
 void ocp_base::maintain_order() {
     expr_list tmp;
     for (auto f : {__x, __y}) {
@@ -299,6 +304,7 @@ bool ocp_base::accepts_term(const shared_expr &ex, bool terminal, std::string *r
     }
     return true;
 }
+
 ocp_ptr_t ocp::clone(const active_status_config &config) const {
     auto prob = ocp_ptr_t(new ocp(*this));
     prob->refresh_after_clone(config);
@@ -352,6 +358,7 @@ edge_ocp_ptr_t edge_ocp::compose(const node_ocp_ptr_t &st_node_prob,
                                  const node_ocp_ptr_t &lowered_node_prob,
                                  bool skip_st_path_state_terms) {
     auto prob = edge_prob ? edge_prob->clone_edge() : edge_ocp::create();
+    prob->__set_apply_projector_layout(true);
     prob->bind_nodes(st_node_prob, edge_prob ? edge_prob->ed_node_prob() : node_ocp_ptr_t{});
     if (st_node_prob && edge_prob) {
         active_status_config config;
@@ -369,6 +376,12 @@ edge_ocp_ptr_t edge_ocp::compose(const node_ocp_ptr_t &st_node_prob,
     }
     append_node_terms(st_node_prob, prob, true, skip_st_path_state_terms);
     append_node_terms(lowered_node_prob, prob, true, false, true);
+    if (st_node_prob) {
+        prob->merge_projector_layout_from(*st_node_prob);
+    }
+    if (lowered_node_prob) {
+        prob->merge_projector_layout_from(*lowered_node_prob);
+    }
     return prob;
 }
 void edge_ocp::bind_nodes(const node_ocp_ptr_t &st, const node_ocp_ptr_t &ed) {

@@ -32,16 +32,18 @@ dense_dynamics::approx_data::approx_data(generic_constr::approx_data &&rhs)
     // set up projected f_x
     auto p_x = dyn_proj_->proj_f_x_.insert(f_st, prob.get_expr_start_tangent(first_x_arg), func_.dim(), func_.arg_tdim(__x), sparsity::dense);
     proj_f_x_.reset(p_x);
-    // setup f_u_exclusive_ and proj_f_u_exclusive_
-    auto &first_u_arg = func_.active_args(__u, &prob)[0];
-    auto jac_u = approx_->jac_[__u].insert(f_st, prob.get_expr_start_tangent(first_u_arg), func_.dim(), dyn.active_dim_exclusive_inputs(&prob), sparsity::dense);
-    f_u_exclusive_.reset(jac_u);
-    auto p_u = dyn_proj_->proj_f_u_.insert(f_st, prob.get_expr_start_tangent(first_u_arg), func_.dim(), dyn.active_dim_exclusive_inputs(&prob), sparsity::dense);
-    proj_f_u_exclusive_.reset(p_u);
+    const size_t exclusive_dim = dyn.active_dim_exclusive_inputs(&prob);
+    if (exclusive_dim > 0) {
+        f_u_exclusive_storage_.setZero(func_.dim(), exclusive_dim);
+        proj_f_u_exclusive_storage_.setZero(func_.dim(), exclusive_dim);
+        f_u_exclusive_.reset(f_u_exclusive_storage_);
+        proj_f_u_exclusive_.reset(proj_f_u_exclusive_storage_);
+    }
+    f_u_exclusive_blocks_.reserve(dyn.active_num_exclusive_inputs(&prob));
+    proj_f_u_exclusive_blocks_.reserve(dyn.active_num_exclusive_inputs(&prob));
     // allocate f_u and proj_f_u_
     f_u_shared_.reserve(dyn.active_dim_shared_inputs(&prob));
     proj_f_u_shared_.reserve(dyn.active_dim_shared_inputs(&prob));
-    size_t u_col_offset = 0;
     for (const sym &arg : in_args) {
         auto f = arg.field();
         if (prob.is_active(arg))
@@ -57,9 +59,13 @@ dense_dynamics::approx_data::approx_data(generic_constr::approx_data &&rhs)
                                                     func_.dim(), arg.tdim(), sparsity::dense));
 
                 } else {
-                    auto cols = f_u_exclusive_.middleCols(u_col_offset, arg.tdim());
-                    new (&jac_[arg_idx]) matrix_ref(cols);
-                    u_col_offset += arg.tdim();
+                    f_u_exclusive_blocks_.emplace_back(
+                        approx_->jac_[__u].insert(f_st, prob.get_expr_start_tangent(arg),
+                                                  func_.dim(), arg.tdim(), sparsity::dense));
+                    proj_f_u_exclusive_blocks_.emplace_back(
+                        dyn_proj_->proj_f_u_.insert(f_st, prob.get_expr_start_tangent(arg),
+                                                    func_.dim(), arg.tdim(), sparsity::dense));
+                    new (&jac_[arg_idx]) matrix_ref(f_u_exclusive_blocks_.back());
                 }
             } else if (f == __y) {
                 auto cols = f_y_.middleCols(prob.get_expr_start_tangent(arg), arg.tdim());
@@ -81,7 +87,21 @@ void dense_dynamics::compute_project_jacobians(func_approx_data &data) const {
     auto &d = data.as<approx_data>();
     d.lu_->compute(d.f_y_);                                // LU decomposition of the dense Jacobian
     d.lu_->solve(d.f_x_, d.proj_f_x_);                     // Solve for the projection of f_x
-    d.lu_->solve(d.f_u_exclusive_, d.proj_f_u_exclusive_); // Solve for the projection of exclusive f_u
+    if (!d.f_u_exclusive_blocks_.empty()) {
+        size_t u_col_offset = 0;
+        for (size_t i : range(d.f_u_exclusive_blocks_.size())) {
+            auto &src = d.f_u_exclusive_blocks_[i];
+            d.f_u_exclusive_.middleCols(u_col_offset, src.cols()) = src;
+            u_col_offset += src.cols();
+        }
+        d.lu_->solve(d.f_u_exclusive_, d.proj_f_u_exclusive_); // Solve for the projection of exclusive f_u
+        u_col_offset = 0;
+        for (size_t i : range(d.proj_f_u_exclusive_blocks_.size())) {
+            auto &dst = d.proj_f_u_exclusive_blocks_[i];
+            dst = d.proj_f_u_exclusive_.middleCols(u_col_offset, dst.cols());
+            u_col_offset += dst.cols();
+        }
+    }
     for (size_t i : range(get_info().num_shared_inputs_)) {
         d.lu_->solve(d.f_u_shared_[i], d.proj_f_u_shared_[i]); // Solve for the projection of shared f_u
     }

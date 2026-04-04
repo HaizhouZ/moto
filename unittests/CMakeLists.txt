@@ -33,13 +33,13 @@ endfunction()
 function(add_moto_python_test name script)
     add_test(
         NAME ${name}
-        COMMAND ${Python_EXECUTABLE} ${script}
+        COMMAND ${Python_EXECUTABLE} -S ${script}
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     )
     set_tests_properties(
         ${name}
         PROPERTIES
-        ENVIRONMENT "OMP_NUM_THREADS=1"
+        ENVIRONMENT "OMP_NUM_THREADS=1;PYTHONPATH=${CMAKE_BINARY_DIR}/bindings;LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}:$ENV{LD_LIBRARY_PATH}"
     )
 endfunction()
 
@@ -47,6 +47,8 @@ endfunction()
 add_moto_test(sym_test)
 add_moto_test(graph_model_compose)
 add_moto_test(restoration)
+add_moto_test(projection_dense_reference)
+add_moto_python_test(projector_layout_python_test unittests/projector_layout_python.py)
 # add_moto_test(expr_ownership)
 # add_moto_test(constr_cast)
 # add_moto_test(dynamics)

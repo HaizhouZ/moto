@@ -2,6 +2,7 @@
 #define __NS_RICCATI_DATA__
 
 #include <moto/solver/data_base.hpp>
+#include <moto/solver/projection/default_stage.hpp>
 #include <Eigen/Cholesky>
 #include <Eigen/LU>
 #include <moto/utils/blasfeo_factorizer/blasfeo_llt.hpp>
@@ -76,6 +77,7 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
     } d_u, d_y;
     // multiplier sensitivity
     vector d_lbd_f, d_lbd_s_c_pre_solve, d_lbd_s_c;
+    projection::compiled_default_elimination_stage default_elimination_stage_;
 
     ns_riccati_data(node_data *full_data);
     ns_riccati_data(const ns_riccati_data &rhs) = delete;

@@ -32,6 +32,9 @@ ns_riccati_data::ns_riccati_data(node_data *full_data)
       ns(dense_->approx_[__eq_x].v_.size()),
       nc(dense_->approx_[__eq_xu].v_.size()), ncstr(ns + nc), d_u(nu, nx),
       d_y(nx, nx), d_lbd_f(nx), d_lbd_s_c_pre_solve(nu), d_lbd_s_c(ncstr),
+      default_elimination_stage_(dense_->approx_[__eq_x].v_.size(),
+                                 dense_->approx_[__eq_xu].v_.size(),
+                                 nu),
       F_x(dense_->proj_f_x()),
       F_u(dense_->proj_f_u()),
       s_y(dense_->approx_[__eq_x].jac_[__y]),
@@ -64,6 +67,23 @@ ns_riccati_data::ns_riccati_data(node_data *full_data)
     nsp_.s_c_stacked_0_k.resize(ncstr);
     nsp_.s_c_stacked_0_K.resize(ncstr, nx);
     d_y.K.setZero();
+    const auto &hard_constraint_blocks = full_data_->problem().compiled_hard_constraint_blocks();
+    if (!hard_constraint_blocks.empty()) {
+        std::vector<projection::equality_block_spec> stage_blocks;
+        stage_blocks.reserve(hard_constraint_blocks.size());
+        for (const auto &block : hard_constraint_blocks) {
+            const auto kind = block.field == __eq_x
+                                  ? projection::equality_block_kind::projected_state
+                                  : projection::equality_block_kind::state_input;
+            stage_blocks.push_back(projection::equality_block_spec{
+                .kind = kind,
+                .source_begin = block.source_begin,
+                .source_count = block.source_count,
+                .group = block.group,
+            });
+        }
+        default_elimination_stage_.configure_blocks(ns, nc, nu, stage_blocks);
+    }
     // if (nsp_->sparse_factorizer_)
     // nsp_->sparse_factorizer_->init(nsp_);
 }

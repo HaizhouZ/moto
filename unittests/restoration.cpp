@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <cstdlib>
 
 #include <moto/ocp/impl/node_data.hpp>
 #include <moto/solver/ipm/positivity_step.hpp>
@@ -11,6 +12,11 @@ using namespace moto::solver;
 using namespace moto::solver::restoration;
 
 namespace {
+const bool force_sync_codegen_for_test = []() {
+    setenv("MOTO_SYNC_CODEGEN", "1", 1);
+    return true;
+}();
+
 bool approx_zero(const vector &v, scalar_t tol = 1e-9) {
     return v.size() == 0 || v.cwiseAbs().maxCoeff() < tol;
 }
@@ -352,6 +358,55 @@ TEST_CASE("restoration overlay problem keeps dyn and replaces non-dynamics with 
     const auto *ineq_overlay = dynamic_cast<const resto_ineq_elastic_ipm_constr *>(resto->exprs(__ineq_xu).front().get());
     REQUIRE(ineq_overlay != nullptr);
     REQUIRE(ineq_overlay->source()->name() == iq->name());
+}
+
+TEST_CASE("restoration prox cost stores per-argument references for split fields") {
+    auto prob = ocp::create();
+
+    auto [x0, y0] = sym::states("x_resto_split_a", 1);
+    auto [x1, y1] = sym::states("x_resto_split_b", 1);
+    auto u0 = sym::inputs("u_resto_split_a", 1);
+    auto u1 = sym::inputs("u_resto_split_b", 1);
+
+    for (const auto &s : {x0, x1, y0, y1, u0, u1}) {
+        s->set_default_value(vector::Zero(1));
+        prob->add(*s);
+    }
+
+    prob->wait_until_ready();
+
+    const auto resto = build_restoration_overlay_problem(
+        prob,
+        restoration_overlay_settings{
+            .rho_u = 1.0,
+            .rho_y = 2.0,
+            .rho_eq = 10.0,
+            .rho_ineq = 20.0,
+        });
+
+    node_data data(resto);
+    seed_restoration_overlay_refs(data, 1.0);
+
+    data.sym_val().value_[__u] << 1.0, -2.0;
+    data.sym_val().value_[__y] << 3.0, -4.0;
+
+    REQUIRE_NOTHROW(data.update_approximation(node_data::update_mode::eval_all));
+
+    REQUIRE(approx_scalar(data.dense().cost_, 27.5));
+
+    row_vector expected_u_grad(2);
+    expected_u_grad << 1.0, -2.0;
+    row_vector expected_y_grad(2);
+    expected_y_grad << 6.0, -8.0;
+    REQUIRE(data.dense().cost_jac_[__u].isApprox(expected_u_grad));
+    REQUIRE(data.dense().cost_jac_[__y].isApprox(expected_y_grad));
+
+    vector expected_u_hess_diag(2);
+    expected_u_hess_diag << 1.0, 1.0;
+    vector expected_y_hess_diag(2);
+    expected_y_hess_diag << 2.0, 2.0;
+    REQUIRE(data.dense().lag_hess_[__u][__u].dense().diagonal().isApprox(expected_u_hess_diag));
+    REQUIRE(data.dense().lag_hess_[__y][__y].dense().diagonal().isApprox(expected_y_hess_diag));
 }
 
 TEST_CASE("restoration inequality local KKT recovery satisfies reduced linearization") {

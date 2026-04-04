@@ -38,7 +38,25 @@ struct null_init_map : public Base {
     null_init_map(U &&other) : Base(other.data(), other.rows(), other.cols()) {}
     template <typename U>
     void reset(U &&other) { new (this) null_init_map(other); }
-    auto& get() { return static_cast<Base&>(*this); }
+    null_init_map &operator=(const null_init_map &other) {
+        if (this != &other) {
+            get() = other.get();
+        }
+        return *this;
+    }
+    null_init_map &operator=(null_init_map &&other) {
+        if (this != &other) {
+            get() = other.get();
+        }
+        return *this;
+    }
+    template <typename U>
+    null_init_map &operator=(const U &other) {
+        get() = other;
+        return *this;
+    }
+    auto &get() { return static_cast<Base &>(*this); }
+    const auto &get() const { return static_cast<const Base &>(*this); }
 };
 using aligned_map_t = null_init_map<matrix>;
 using aligned_vector_map_t = null_init_map<vector>;

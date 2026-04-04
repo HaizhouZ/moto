@@ -2,14 +2,14 @@
 #define __MOTO_PROBLEM_HPP__
 
 #include <array>
-#include <map>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include <moto/core/expr.hpp>
-#include <moto/ocp/sym.hpp>
+#include <moto/ocp/impl/projector_layout_data.hpp>
+#include <moto/ocp/projector_layout.hpp>
 
 namespace moto {
 class ocp_base;
@@ -55,9 +55,15 @@ class ocp_base {
     std::array<size_t, field::num> dim_{};
     std::array<size_t, field::num_prim> tdim_{};
     std::unordered_set<size_t> uids_, disabled_uids_, pruned_uids_;
+    /// Projector authoring specs and compiled hard-constraint layout are kept
+    /// on the problem object, but the implementation lives in
+    /// `src/ocp/projector_layout.cpp`.
+    projector_layout_spec projector_layout_;
+    compiled_projector_layout_data compiled_projector_layout_;
 
     void set_dim_and_idx();
     void finalize();
+    void compile_projector_layout();
     /// Refresh clone-local caches and recursively clone sub-problems after a
     /// copy-construction based clone.
     void refresh_after_clone(const active_status_config &config);
@@ -168,16 +174,25 @@ class ocp_base {
     virtual bool accepts_term(const shared_expr &ex, bool terminal = false, std::string *reason = nullptr) const;
     /// Apply activation/deactivation rules and lazy pruning.
     void update_active_status(const active_status_config &config, bool update_sub_probs = true);
+    projector_layout projector();
+    void merge_projector_layout_from(const ocp_base &rhs);
 
   protected:
     bool allow_inconsistent_dynamics_ = false;
     bool automatic_reorder_primal_ = true;
+    bool apply_projector_layout_ = false;
     std::vector<ocp_base_ptr_t> sub_probs_;
+    friend class projector_layout;
+    friend class projector_group;
 
   public:
     PROPERTY(allow_inconsistent_dynamics)
     PROPERTY(automatic_reorder_primal)
+    PROPERTY(apply_projector_layout)
     const auto &sub_probs() const { return sub_probs_; }
+    const auto &compiled_hard_constraint_blocks() const {
+        return compiled_projector_layout_.hard_constraint_blocks;
+    }
 };
 
 class ocp : public ocp_base {
