@@ -599,6 +599,8 @@ ns_sqp::line_search_action ns_sqp::handle_globalization_failure(filter_linesearc
             if (use_normal_soft_phase() || in_restoration_phase()) {
                 solver::ineq_soft::restore_trial_state(d);
             }
+            update_phase_problem(d, in_restoration_phase() ? node_data::update_mode::eval_raw_derivatives
+                                                           : node_data::update_mode::eval_derivatives);
         });
         ctx.current = compute_kkt_info();
         return line_search_action::failure;
