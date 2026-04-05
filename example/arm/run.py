@@ -1,14 +1,11 @@
+import argparse
 import moto
 import casadi as cs
 import numpy as np
 import pinocchio as pin
 import pinocchio.casadi as cpin
 
-# from pinocchio.visualize import meshcat_visualizer as pin_meshcat
 from example_robot_data import load
-import meshcat.geometry as mg
-import meshcat.transformations as tf
-import meshcat_shapes as mcs
 
 
 class pinCasadiModel(cpin.Model):
@@ -26,7 +23,7 @@ class pinCasadiModel(cpin.Model):
         super().__init__(model)
         if name:
             model.name = name
-        else:
+        else: 
             name = model.name.replace("_description", "")
             self.name = name
         self.is_floating_based: bool = self.nv > self.njoints
@@ -140,7 +137,7 @@ class pinCasadiModel(cpin.Model):
         if self.use_fwd_dyn:
             v_next = self.v + self.aba
             return moto.dense_dynamics.create(
-                self.name + "_fd", args, cs.vcat(out + [self.vn - v_next])
+                "arm_" + self.name + "_fd", args, cs.vcat(out + [self.vn - v_next])
             )
         else:
             tau = (
@@ -149,7 +146,9 @@ class pinCasadiModel(cpin.Model):
                 else self.tq
             )
             return moto.dense_dynamics.create(
-                self.name + "_id", args, cs.vcat(out + [self.rnea - tau * self.dt])
+                "arm_" + self.name + "_id",
+                args,
+                cs.vcat(out + [self.rnea - tau * self.dt]),
             )
         # return moto.dense_dynamics(self.name + "_fb_fd", args, cs.vcat(out))
 
@@ -161,11 +160,15 @@ class pinCasadiModel(cpin.Model):
             )
         ee_des = cpin.XYZQUATToSE3(cs.vcat([self.r_des, self.quat_des]))
         ee_pos = self.data.oMf[self.ee_id]
-        return moto.constr.create(
-            "ee_constr",
+        c: moto.pmm_constr = moto.constr.create(
+            "arm_ee_constr",
             self.pos_args + [self.r_des, self.quat_des],
             cpin.log6(ee_pos.inverse() * ee_des).np,
         )
+        return c
+        c = c.cast_soft()
+        c.rho = 1e-8
+        return c
         res = cpin.log6(ee_des.inverse() * ee_pos).np
         # res = cs.vcat([ee_pos.translation - ee_des.translation, cpin.log3(ee_des.rotation.T @ ee_pos.rotation)])
         # return moto.constr.create("ee_constr_ineq", self.pos_args + [self.r_des, self.quat_des], cs.vcat([res, -res])).cast_ineq()
@@ -174,16 +177,12 @@ class pinCasadiModel(cpin.Model):
                 "W_ee_cost", 6, default_val=np.array([40.0, 40.0, 40.0, 0.0, 0.0, 0.0])
             )
         ee_lifted = moto.sym.inputs("ee_lifted", 6, default_val=np.zeros(6))
-        return (
-            moto.cost.create(
-                # "ee_cost", self.pos_args + [self.r_des, self.quat_des, self.W_ee_cost], cs.sumsqr(self.W_ee_cost * res)
-                "ee_cost",
-                self.pos_args + [self.r_des, self.quat_des],
-                res,
-            )
-            .set_gauss_newton(self.W_ee_cost)
-            .as_terminal()
-        )
+        return moto.cost.create(
+            # "arm_ee_cost", self.pos_args + [self.r_des, self.quat_des, self.W_ee_cost], cs.sumsqr(self.W_ee_cost * res)
+            "arm_ee_cost",
+            self.pos_args + [self.r_des, self.quat_des],
+            res,
+        ).set_gauss_newton(self.W_ee_cost)
         # return [
         #     moto.cost.create(
         #         "ee_cost_lifted", [ee_lifted, self.W_ee_cost], 0.5 * cs.sumsqr(cs.sqrt(self.W_ee_cost) * ee_lifted)
@@ -201,17 +200,17 @@ class pinCasadiModel(cpin.Model):
         self.q_max = q_max
         self.v_lim = v_lim
         return moto.constr.create(
-            "q_limit",
+            "arm_q_limit",
             [self.q, self.v],
             cs.vcat([q_min - qj, qj - q_max, vj - v_lim, -vj - v_lim]),
         ).cast_ineq()
 
     def make_tq_limit_constr(self):
-        tq_limit = model.effortLimit[-self.nj :]
+        tq_limit = self.fmodel.effortLimit[-self.nj :]
         in_arg = [self.tq]
         # in_arg = self.pos_args + self.vel_args + self.acc_args + [*self.active_foot, *self.f_f] + ([self.dt] if isinstance(self.dt, cs.SX) else [])
         return moto.constr.create(
-            "tq_limit", in_arg, cs.vcat([self.tq - tq_limit, -self.tq - tq_limit])
+            "arm_tq_limit", in_arg, cs.vcat([self.tq - tq_limit, -self.tq - tq_limit])
         ).cast_ineq()
 
     def get_state_cost(self, terminal: bool = False):
@@ -227,16 +226,18 @@ class pinCasadiModel(cpin.Model):
             state_cost = 0.1 * cs.sumsqr(q_nom_res) + 0.1 * cs.sumsqr(self.v_stack)
         state_args = self.pos_args + self.vel_args
         cost = moto.cost.create(
-            "c", state_args + [self.q_nom], state_cost
+            "arm_state_cost", state_args + [self.q_nom], state_cost
         ).set_diag_hess()
         if terminal:
-            return cost.as_terminal()
+            return cost
         return cost
 
     def get_input_cost(self):
         input_args = self.acc_args
         input_cost = 1e-4 * cs.sumsqr(self.tq)
-        return moto.cost.create("c_u", input_args, input_cost).set_diag_hess()
+        return moto.cost.create(
+            "arm_input_cost", input_args, input_cost
+        ).set_diag_hess()
 
     def get_dt_reg(self, dt_nom):
         if not isinstance(self.dt, cs.SX):
@@ -244,10 +245,10 @@ class pinCasadiModel(cpin.Model):
         W_dt = moto.sym.params("W_dt", 1, default_val=1e3)
         return [
             moto.cost.create(
-                "dt_reg", [self.dt, dt_nom, W_dt], W_dt * (self.dt - dt_nom) ** 2
+                "arm_dt_reg", [self.dt, dt_nom, W_dt], W_dt * (self.dt - dt_nom) ** 2
             ),
             moto.constr.create(
-                "dt_bound", [self.dt], cs.vcat([self.dt - 0.1, 1e-2 - self.dt])
+                "arm_dt_bound", [self.dt], cs.vcat([self.dt - 0.1, 1e-2 - self.dt])
             ).cast_ineq(),
         ]
 
@@ -255,124 +256,130 @@ class pinCasadiModel(cpin.Model):
 # dt = moto.sym.inputs("dt", 1, default_val=0.02)
 dt_nom = moto.sym.params("dt_nom", 1, default_val=0.02)
 dt = 0.02
-display = True
-ur5 = load("ur5_limited", display=display, verbose=True)
-q_d = np.copy(ur5.q0)
-# q_d = np.array([0.0, -np.pi / 2, 0.0, -np.pi / 2, 0.0, 0.0])
-model = pin.buildModelFromUrdf(ur5.urdf)
-# model.gravity.linear = np.array([0.0, 0.0, 0])
-np.set_printoptions(precision=3, suppress=True, linewidth=200)
-model = pinCasadiModel(model, dt=dt, q_nom=q_d, dense=True, use_fwd_dyn=False)
-
-prob = moto.ocp.create()
-prob.add(model.dyn)
-prob.add(model.make_tq_limit_constr())
-prob.add(model.make_joint_limit_constr())
-prob.add(model.get_state_cost())
-prob.add(model.get_input_cost())
-# prob.add(model.get_dt_reg(dt_nom))
-
-prob_term = prob.clone()
-prob_term.add(model.make_ee_pos_constr())
-prob_term.add(model.get_state_cost(terminal=True))
-
-prob.print_summary()
-prob_term.print_summary()
-print("--" * 15)
-# moto.print_problem(prob_term)
-
-N_horizon = 50
-
-sqp = moto.sqp(n_job=4)
-g = sqp.graph
-n0 = g.set_head(g.add(sqp.create_node(prob)))
-n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
-g.add_edge(n0, n1, N_horizon)
-cfg = [
-    # [0.4, 0.4, 0.4, 0.0, 0.0, 0.0, 1.0],
-    # [0.0] * 6,
-    [
-        0.29330284554440844,
-        -0.4822177449570157,
-        0.35490485263950977,
-        0.685024579972181,
-        -0.4567935245973314,
-        -0.2681559031137524,
-        -0.5001733822837158,
-    ],
-    [
-        0.3602555199390869,
-        -0.9113326884740325,
-        -0.28553691838581385,
-        0.36474866340717416,
-        0.06126558758673073,
-        0.8544954685368089,
-    ],
-]
-
-n1.data.value[model.r_des] = np.array(cfg[0][:3])
-n1.data.value[model.quat_des] = np.array(cfg[0][3:7])
-if hasattr(model, "W_ee_cost"):
-    n1.data.value[model.W_ee_cost] = np.ones(6) * 1e8
 
 
-def set_initial_state(data: moto.sqp.data_type):
-    data.value[model.q] = np.array(cfg[1])
-    data.value[model.qn] = np.array(cfg[1])
-    # data.value[model.r_des] = np.array(cfg[0][:3])
-    # data.value[model.quat_des] = np.array(cfg[0][3:7])
-    # data.value[model.W_ee_cost] = np.ones(6) * 4
+def build_sqp(display: bool, n_job: int = 4):
+    ur5 = load("ur5_limited", display=display, verbose=True)
+    q_d = np.copy(ur5.q0)
+    model = pin.buildModelFromUrdf(ur5.urdf)
+    np.set_printoptions(precision=3, suppress=True, linewidth=200)
+    model = pinCasadiModel(model, dt=dt, q_nom=q_d, dense=True, use_fwd_dyn=False)
+
+    stage_prob = moto.node_ocp.create()
+    stage_prob.add(model.make_tq_limit_constr())
+    stage_prob.add(model.make_joint_limit_constr())
+    stage_prob.add(model.get_state_cost())
+    stage_prob.add(model.get_input_cost())
+
+    terminal_prob = stage_prob.clone()
+    terminal_prob.add_terminal(model.make_ee_pos_constr())
+
+    stage_prob.print_summary()
+    terminal_prob.print_summary()
+    print("--" * 15)
+
+    horizon = 50
+    sqp = moto.sqp(n_job=n_job)
+    modeled = sqp.create_graph()
+    start_node = modeled.create_node(stage_prob)
+    terminal_node = modeled.create_node(terminal_prob)
+    for edge in modeled.add_path(start_node, terminal_node, horizon):
+        edge.add(model.dyn)
+
+    # cfg = [
+    #     [
+    #         0.29330284554440844,
+    #         -0.4822177449570157,
+    #         0.35490485263950977,
+    #         0.685024579972181,
+    #         -0.4567935245973314,
+    #         -0.2681559031137524,
+    #         -0.5001733822837158,
+    #     ],
+    #     [
+    #         0.3602555199390869,
+    #         -0.9113326884740325,
+    #         -0.28553691838581385,
+    #         0.36474866340717416,
+    #         0.06126558758673073,
+    #         0.8544954685368089,
+    #     ],
+    # ]
+    # bad setting
+    cfg = [
+        [
+            -0.20386130721377144,
+            -0.2780080314109077,
+            0.05367065178434891,
+            0.6564066614217499,
+            -0.7069685526302121,
+            0.262510077975368,
+            -0.020352380560065237,
+        ],
+        [
+            0.39077402479947176,
+            0.2908006855904619,
+            -0.5419511019201957,
+            0.22346096937115068,
+            -0.20115318796212112,
+            0.3804248223817164,
+        ],
+    ]
+
+    def set_initial_state(data: moto.sqp.data_type):
+        data.value[model.q] = np.array(cfg[1])
+        data.value[model.qn] = np.array(cfg[1])
+        if data.prob.dim(moto.field___eq_x) > 0:
+            data.value[model.r_des] = np.array(cfg[0][:3])
+            data.value[model.quat_des] = np.array(cfg[0][3:7])
+            if hasattr(model, "W_ee_cost"):
+                data.value[model.W_ee_cost] = np.ones(6) * 1e8
+
+    sqp.apply_forward(set_initial_state)
+
+    sqp.settings.ipm.mu0 = 1
+    sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
+    sqp.settings.prim_tol = 1e-3
+    sqp.settings.dual_tol = 1e-3
+    sqp.settings.comp_tol = 1e-3
+    sqp.settings.restoration.rho_eq = 1e3
+    sqp.settings.restoration.rho_ineq = 1e3
+    sqp.settings.restoration.rho_u = 0.0001
+    sqp.settings.restoration.rho_y = 0.0001
+    sqp.settings.ls.update_alpha_dual = False
+
+    return sqp, model, ur5, cfg, horizon
 
 
-set_initial_state(n0.data)
-sqp.apply_forward(set_initial_state)
+def collect_trajectory(sqp, model, horizon):
+    q_res = []
+    dt_res = []
+    node_idx = 0
 
-sqp.settings.ipm.mu0 = 1
-sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
-sqp.settings.prim_tol = 1e-3
-sqp.settings.dual_tol = 1e-3
-sqp.settings.comp_tol = 1e-3
+    def get_sym(node: moto.sqp.data_type):
+        nonlocal node_idx
+        q_res.append(node.value[model.q])
+        if isinstance(dt, float):
+            dt_res.append(dt)
+        else:
+            dt_res.append(node.value[dt])
+        node_idx += 1
+        if node_idx >= horizon:
+            q_res.append(node.value[model.qn])
 
-import time
-
-start = time.perf_counter()
-sqp.update(100)
-print(f"sqp.update(100) took {time.perf_counter() - start:.3f} seconds")
-
-q_res = []
-dt_res = []
-node_idx = 0
-
-
-def get_sym(node: moto.sqp.data_type):
-    global node_idx
-    q_res.append(node.value[model.q])
-    if isinstance(dt, float):
-        dt_res.append(dt)
-    else:
-        dt_res.append(node.value[dt])
-    node_idx += 1
-    if node_idx >= N_horizon:
-        q_res.append(node.value[model.qn])
+    sqp.apply_forward(get_sym)
+    return q_res, dt_res
 
 
-sqp.apply_forward(get_sym)
-
-# compute the final end-effector position error
-fdata = model.fmodel.createData()
-pin.forwardKinematics(model.fmodel, fdata, q_res[-1])
-pin.updateFramePlacements(model.fmodel, fdata)
-eef = fdata.oMf[model.ee_id]
-eef_des = pin.XYZQUATToSE3(cfg[0])
-print("final ee pos err:", pin.log6(eef_des.inverse() * eef).np)
-
-if display:
+def visualize_solution(ur5, model, cfg, q_res, dt_res, horizon):
+    import meshcat.geometry as mg
+    import meshcat.transformations as tf
+    import meshcat_shapes as mcs
     import time
     from scipy.spatial.transform.rotation import Rotation as R
+
     viz = ur5.viz
-
     target = mg.Sphere(0.02)
-
     viz.viewer["/target"].set_object(target)
     quat = cfg[0][3:7]
     r = R.from_quat(quat).as_matrix()
@@ -381,21 +388,62 @@ if display:
     rot[:3, :3] = r
     viz.viewer["/target"].set_transform(target_pose)
 
-    target_frame = mcs.frame(viz.viewer["/frame"])
+    mcs.frame(viz.viewer["/frame"])
     viz.viewer["/frame"].set_transform(target_pose.dot(rot))
 
-    data = model.fmodel.createData()
     while True:
         for i in range(len(q_res)):
-            # print((q_res[i] - model.q_max) > 0)
-            # print((model.q_min - q_res[i]) > 0)
             start = time.perf_counter()
             ur5.display(q_res[i])
-            if i is not N_horizon:
+            if i != horizon:
                 dt_ = dt_res[i]
                 while time.perf_counter() - start < dt_:
                     pass
         time.sleep(0.5)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--display", action="store_true", help="enable meshcat visualization"
+    )
+    parser.add_argument(
+        "--n-job", type=int, default=4, help="number of solver worker jobs"
+    )
+    parser.add_argument(
+        "--max-iter", type=int, default=100, help="maximum SQP iterations"
+    )
+    args = parser.parse_args()
+
+    sqp, model, ur5, cfg, horizon = build_sqp(display=args.display, n_job=args.n_job)
+
+    import time
+
+    start = time.perf_counter()
+    kkt = sqp.update(args.max_iter)
+    print(f"sqp.update({args.max_iter}) took {time.perf_counter() - start:.3f} seconds")
+    print(f"result       : {kkt.result}")
+    print(f"num_iter     : {kkt.num_iter}")
+    print(f"prim_res     : {kkt.inf_prim_res:.3e}")
+    print(f"dual_res     : {kkt.inf_dual_res:.3e}")
+    print(f"comp_res     : {kkt.inf_comp_res:.3e}")
+    print(f"solved       : {kkt.solved}")
+
+    q_res, dt_res = collect_trajectory(sqp, model, horizon)
+
+    fdata = model.fmodel.createData()
+    pin.forwardKinematics(model.fmodel, fdata, q_res[-1])
+    pin.updateFramePlacements(model.fmodel, fdata)
+    eef = fdata.oMf[model.ee_id]
+    eef_des = pin.XYZQUATToSE3(cfg[0])
+    print("final ee pos err:", pin.log6(eef_des.inverse() * eef).np)
+
+    if args.display:
+        visualize_solution(ur5, model, cfg, q_res, dt_res, horizon)
+
+
+if __name__ == "__main__":
+    main()
 
 # def print_sym(node: moto.sqp.data_type):
 #     node.sym.print()

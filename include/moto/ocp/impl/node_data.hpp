@@ -8,27 +8,23 @@
 namespace moto {
 struct node_data;
 def_unique_ptr(node_data);
-namespace impl {
-class data_mgr;
-} // namespace impl
 /**
  * @brief node data class
  * stores the shooting node data including symbolics, raw approximation and its sparse mapping
- * @note to use your own data class with data_mgr, inherit this class and implement constructor C(ocp_ptr_t)
  */
 struct MOTO_ALIGN_NO_SHARING node_data {
     scalar_t inf_prim_res_ = 0.;
+    scalar_t prim_res_l1_ = 0.;
     scalar_t inf_comp_res_ = 0.;
 
   protected:
     ocp_ptr_t prob_;           /// < pointer to the problem
     sym_data_ptr_t sym_;       /// < dense storage of symbolic data
-    merit_data_ptr_t dense_;   /// <dense storage of the func data
+    lag_data_ptr_t dense_;     /// <dense storage of the func data
     shared_data_ptr_t shared_; /// < shared data
     shifted_array<std::vector<func_approx_data_ptr_t>, field::num_func, __dyn>
         sparse_; /// < sparse view per func
 
-    friend class impl::data_mgr; ///< data manager can access private members
   public:
     node_data(const ocp_ptr_t &prob);
     node_data(const node_data &rhs) = delete;
@@ -39,6 +35,7 @@ struct MOTO_ALIGN_NO_SHARING node_data {
     auto &dense() const { return *dense_; }   ///< getter for dense_
     auto &shared() const { return *shared_; } ///< getter for shared_
     auto &problem() const { return *prob_; }  ///< getter for prob_
+    const ocp_ptr_t &problem_ptr() const { return prob_; }
 
     // get value of the whole field
     auto &value(field_t f) const {
@@ -60,7 +57,7 @@ struct MOTO_ALIGN_NO_SHARING node_data {
         return *sparse_[f->field()][prob_->pos(f)];
     }
 
-    auto &data(const custom_func &f) const { return shared_->get(f->uid()); }
+    // auto &data(const custom_func &f) const { return shared_->get(f->uid()); }
 
     scalar_t cost() const { return dense_->cost_; }
 
@@ -69,6 +66,7 @@ struct MOTO_ALIGN_NO_SHARING node_data {
         eval_jac,         ///< evaluate jacobian
         eval_hess,        ///< evaluate hessian
         eval_derivatives, ///< evaluate derivatives (jacobian, hessian)
+        eval_raw_derivatives, ///< evaluate derivatives but do not assemble lag/lag_jac/lag_hess
         eval_all,         ///< evaluate all (value, jacobian, hessian)
     };
     /**
@@ -76,7 +74,8 @@ struct MOTO_ALIGN_NO_SHARING node_data {
      *
      * @param eval_only
      */
-    void update_approximation(update_mode config = update_mode::eval_all);
+    void update_approximation(update_mode config = update_mode::eval_all,
+                              bool include_original_cost = true);
 
     template <typename Callback>
     void for_each(field_t field, Callback &&callback) {
@@ -106,8 +105,8 @@ struct MOTO_ALIGN_NO_SHARING node_data {
         for_each<constr_fields>(std::forward<Callback>(f));
     }
 
-    void clear_merit_jac();
-    void clear_merit_hessian();
+    void clear_lag_jac();
+    void clear_lag_hessian();
 
     void print_residuals() const;
 };

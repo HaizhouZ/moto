@@ -17,10 +17,10 @@ func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, const generic_
     }
 }
 
-vector_ref get_value_ref(const generic_func &f, merit_data &raw) {
+vector_ref get_value_ref(const generic_func &f, lag_data &raw) {
     if (f.field() == __cost) {
         return vector_ref(mapped_vector(&raw.cost_, 1));
-    } else if (in_field(f.field(), merit_data::stored_constr_fields)) {
+    } else if (in_field(f.field(), lag_data::stored_constr_fields)) {
         return raw.approx_[f.field()].v_.segment(raw.prob_->get_expr_start(f), f.dim());
     } else {
         throw std::runtime_error(fmt::format("Function {} in field {} with uid {} does not have stored value",
@@ -29,22 +29,27 @@ vector_ref get_value_ref(const generic_func &f, merit_data &raw) {
 }
 
 func_approx_data::func_approx_data(sym_data &primal,
-                                   merit_data &raw,
+                                   lag_data &raw,
                                    shared_data &shared,
                                    const generic_func &f)
-    : func_arg_map(primal, shared, f), v_(get_value_ref(f, raw)), merit_data_(&raw) {
+    : func_arg_map(primal, shared, f), v_(get_value_ref(f, raw)), lag_data_(&raw) {
     auto &in_args = f.in_args();
     size_t f_st = raw.prob_->get_expr_start(f);
     // for non-cost
     if (f.order() >= approx_order::first) {
-        // bind merit jacobian
-        merit_jac_.reserve(in_args_.size());
+        // Bind first-order storage. For pure costs, write directly into
+        // cost_jac_; node_data::update_approximation() decides whether that
+        // pure cost gradient should participate in the active lagrangian.
+        lag_jac_.reserve(in_args_.size());
         for (size_t i : range(in_args_.size())) {
             if (in_args[i]->field() < field::num_prim && raw.prob_->is_active(in_args[i])) {
-                merit_jac_.push_back(raw.prob_->extract_tangent(raw.jac_[in_args[i]->field()], in_args[i]));
+                auto &jac_store = (f.field() == __cost)
+                                      ? raw.cost_jac_[in_args[i]->field()]
+                                      : raw.lag_jac_[in_args[i]->field()];
+                lag_jac_.push_back(raw.prob_->extract_tangent(jac_store, in_args[i]));
             } else { // useless
                 static row_vector empty;
-                merit_jac_.push_back(empty);
+                lag_jac_.push_back(empty);
             }
         }
         // bind approx jacobian
@@ -52,8 +57,8 @@ func_approx_data::func_approx_data(sym_data &primal,
             static matrix empty;
             jac_.assign(in_args_.size(), empty);
         } else {
-            jac_.reserve(merit_jac_.size());
-            jac_.assign(merit_jac_.begin(), merit_jac_.end());
+            jac_.reserve(lag_jac_.size());
+            jac_.assign(lag_jac_.begin(), lag_jac_.end());
         }
     }
     setup_hessian();
@@ -62,28 +67,28 @@ func_approx_data::func_approx_data(sym_data &primal,
 void func_approx_data::setup_hessian() {
     auto &f = func_;
     auto &in_args = f.in_args();
-    assert(merit_data_ != nullptr && "merit_data_ should not be null");
-    auto &raw = *merit_data_;
+    assert(lag_data_ != nullptr && "lag_data_ should not be null");
+    auto &raw = *lag_data_;
     if (f.order() >= approx_order::second || in_field(f.field(), ineq_soft_constr_fields)) {
         size_t field_1, field_2;
-        auto *hessian = f.field() == __cost ? &raw.hessian_ : &raw.hessian_modification_;
-        merit_hess_.resize(in_args_.size());
+        auto *hessian = f.field() == __cost ? &raw.lag_hess_ : &raw.hessian_modification_;
+        lag_hess_.resize(in_args_.size());
         for (size_t i : range(in_args_.size())) {
             if (in_args[i]->field() < field::num_prim) {
-                merit_hess_[i].reserve(in_args_.size());
+                lag_hess_[i].reserve(in_args_.size());
                 for (size_t j : range(in_args_.size())) {
                     field_1 = in_args[i]->field();
                     field_2 = in_args[j]->field();
                     if (raw.prob_->is_active(in_args[i]) &&
                         field_2 < field::num_prim &&
                         raw.prob_->is_active(in_args[j])) {
-                        /// @note order matches merit_data
+                        /// @note order matches lag_data
                         /// h[i][j] = h[j][i] if i, j in the same field or field(i) < field(j)
                         /// otherwise only keep h[i][j] (empty)
                         if (func_.hess_sp_[i][j] == sparsity::unknown) {
                             goto BIND_EMPTY_HESS;
                         } else if (field_1 >= field_2) {
-                            merit_hess_[i].push_back((*hessian)[field_1][field_2].insert(
+                            lag_hess_[i].push_back((*hessian)[field_1][field_2].insert(
                                 raw.prob_->get_expr_start_tangent(in_args[i]),
                                 raw.prob_->get_expr_start_tangent(in_args[j]),
                                 in_args[i]->tdim(), in_args[j]->tdim(), func_.hess_sp_[i][j]));
@@ -91,13 +96,13 @@ void func_approx_data::setup_hessian() {
                         }
                     }
                 BIND_EMPTY_HESS:
-                    // this should be empty. do this anyway to make the shape of merit_hess_ right
+                    // this should be empty. do this anyway to make the shape of lag_hess_ right
                     static matrix empty;
-                    merit_hess_[i].push_back(empty);
+                    lag_hess_[i].push_back(empty);
                 }
             }
         }
-        merit_hess_.shrink_to_fit();
+        lag_hess_.shrink_to_fit();
     }
 }
 } // namespace moto

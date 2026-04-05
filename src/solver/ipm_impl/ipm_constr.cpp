@@ -6,6 +6,8 @@ ipm_constr::approx_data::approx_data(base::approx_data &&rhs)
     : base::approx_data(std::move(rhs)) {
     slack_.resize(func_.dim());
     slack_.setConstant(1e-6);
+    slack_backup_.resize(func_.dim());
+    slack_backup_.setConstant(1e-6);
     diag_scaling.resize(func_.dim());
     diag_scaling.setZero();
     scaled_res_last_.resize(func_.dim());
@@ -20,8 +22,8 @@ ipm_constr::approx_data::approx_data(base::approx_data &&rhs)
     reg_T_inv_.setZero();
     active_.resize(func_.dim());
     active_.setZero();
-    multipler_backup_.resize(func_.dim());
-    multipler_backup_.setZero();
+    multiplier_backup_.resize(func_.dim());
+    multiplier_backup_.setZero();
 }
 void ipm_constr::initialize(ipm::data_map_t &data) const {
     // dont call value_impl here
@@ -30,10 +32,10 @@ void ipm_constr::initialize(ipm::data_map_t &data) const {
     d.slack_ = (-d.g_).cwiseMax(1); // clip
     d.v_ = d.g_ + d.slack_;            // r_g = g_ + slack
     d.multiplier_.array() = d.ipm_cfg->mu / d.slack_.array();
-    d.multiplier_ = d.multiplier_.cwiseMin(1); // clip
+    // d.multiplier_ = d.multiplier_.cwiseMin(1); // clip
+    d.multiplier_.setConstant(1.0);
     d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array();
-    d.multipler_backup_ = d.multiplier_;
-
+    d.multiplier_backup_ = d.multiplier_;
     if (d.multiplier_.hasNaN() || d.slack_.hasNaN()) {
         fmt::print("multiplier: {}\n", d.multiplier_);
         fmt::print("slack: {}\n", d.slack_);
@@ -59,25 +61,12 @@ void ipm_constr::finalize_newton_step(ipm::data_map_t &data) const {
     else {
         d.d_multiplier_.array() = -(d.r_s_.array() - d.ipm_cfg->mu + d.multiplier_.array() * d.d_slack_.array()) / d.reg_T_inv_.array();
 
-        // vector dist = d.ipm_cfg->mu * d.slack_.cwiseInverse().cwiseAbs2().cwiseQuotient(d.diag_scaling);
-        // vector diff = d.ipm_cfg->mu * d.slack_.cwiseInverse().cwiseAbs2() - d.diag_scaling;
-        // // vector dist = d.multiplier_.cwiseProduct(d.slack_) / d.ipm_cfg->mu;
-        // if ((dist.array() - 1 > 1e-3).any()) {
-        //     fmt::print("ideal: {}\n", d.ipm_cfg->mu * d.slack_.cwiseInverse().cwiseAbs2().transpose());
-        //     fmt::print("actual: {}\n", d.diag_scaling.transpose());
-        //     fmt::print("dist to central path: ratio {}, diff: {}\n", dist.transpose(), diff.transpose());
-        // }
     }
-    // d.d_multiplier_.array() = -d.multiplier_.array() + d.ipm_cfg->mu / (d.slack_.array() + d.reg_) - d.diag_scaling.array() * d.d_slack_.array();
     d.d_slack_.array() += d.reg_.array() * d.d_multiplier_.array();
     d.d_slack_.array() *= d.active_.array();      // apply the active set
     d.d_multiplier_.array() *= d.active_.array(); // apply the active set
-    d.multipler_backup_ = d.multiplier_;
-
-    // if (!d.ipm_cfg->ipm_computing_affine_step()) {
-    //     fmt::print("diag_scaling: {:.3}, {:.3}\n", d.diag_scaling.transpose(), (d.active_.array() * d.multiplier_.array() / d.slack_.array()).matrix().transpose());
-    //     fmt::print("ipm_constr: d_slack: {}, d_multiplier: {}\n", d.d_slack_.transpose(), d.d_multiplier_.transpose());
-    // }
+    d.multiplier_backup_ = d.multiplier_;
+    d.slack_backup_ = d.slack_;
 }
 void ipm_constr::apply_corrector_step(data_map_t &data) const {
     auto &d = data.as<ipm_data>();
@@ -97,27 +86,33 @@ void ipm_constr::apply_corrector_step(data_map_t &data) const {
     propagate_jacobian(d);
 }
 void ipm_constr::update_ls_bounds(ipm::data_map_t &data, workspace_data *cfg) const {
-    constexpr scalar_t tau = 0.995; // scaling factor
-    scalar_t alpha_max = 1.0;       // default max step size
     auto &d = data.as<ipm_data>();
     auto &ls_cfg = cfg->as<solver::linesearch_config>();
-    // compute alpha_max
-    for (size_t idx : range(dim_)) {
-        if (d.d_slack_(idx) < 0 and d.active_(idx) > 0) {
-            alpha_max = (-tau) * d.slack_(idx) / d.d_slack_(idx);
-            ls_cfg.primal.clip(alpha_max);
-            ls_cfg.primal.alpha_max = alpha_max;
-        }
-        if (d.d_multiplier_(idx) < 0 and d.active_(idx) > 0) {
-            alpha_max = (-tau) * d.multiplier_(idx) / d.d_multiplier_(idx);
-            ls_cfg.dual.clip(alpha_max);
-            ls_cfg.dual.alpha_max = alpha_max;
-        }
-    }
-    // ls_cfg.primal.alpha_max = std::max(ls_cfg.primal.alpha_max, d.reg_);
-    // ls_cfg.dual.alpha_max = std::m ax(ls_cfg.dual.alpha_max, d.reg_);
+    positivity::update_pair_bounds(ls_cfg, d.slack_, d.d_slack_, d.multiplier_, d.d_multiplier_);
     assert(ls_cfg.primal.alpha_max >= 0);
     assert(ls_cfg.dual.alpha_max > 1e-20);
+}
+void ipm_constr::backup_trial_state(ipm::data_map_t &data) const {
+    auto &d = data.as<ipm_data>();
+    positivity::backup_pair(d.slack_, d.slack_backup_, d.multiplier_, d.multiplier_backup_);
+}
+void ipm_constr::restore_trial_state(ipm::data_map_t &data) const {
+    auto &d = data.as<ipm_data>();
+    positivity::restore_pair(d.slack_, d.slack_backup_, d.multiplier_, d.multiplier_backup_);
+}
+scalar_t ipm_constr::search_penalty(const func_approx_data &data) const {
+    const auto &d = static_cast<const ipm_data &>(data);
+    if (d.ipm_cfg == nullptr || d.slack_.size() == 0) {
+        return 0.;
+    }
+    return d.ipm_cfg->mu * d.slack_.array().log().sum();
+}
+scalar_t ipm_constr::search_penalty_dir_deriv(const func_approx_data &data) const {
+    const auto &d = static_cast<const ipm_data &>(data);
+    if (d.ipm_cfg == nullptr || d.d_slack_.size() == 0 || d.slack_backup_.size() == 0) {
+        return 0.;
+    }
+    return d.ipm_cfg->mu * (d.d_slack_.array() / d.slack_backup_.array()).sum();
 }
 void ipm_constr::finalize_predictor_step(ipm::data_map_t &data, workspace_data *cfg) const {
     auto &d = data.as<ipm_data>();
@@ -130,9 +125,6 @@ void ipm_constr::finalize_predictor_step(ipm::data_map_t &data, workspace_data *
     ipm_worker.prev_aff_comp += d.multiplier_.dot(d.slack_.cwiseProduct(d.active_));
     // finalize the affine step
     d.corrector_.array() = ls_cfg.alpha_dual * d.d_multiplier_.array() * ls_cfg.alpha_primal * d.d_slack_.array();
-    // d.corrector_.array() = d.d_multiplier_.array() * d.d_slack_.array();
-    // d.d_multiplier_.array() *= ls_cfg.alpha_dual;
-    // d.d_slack_.array() *= ls_cfg.alpha_primal;
     ipm_worker.post_aff_comp += (d.multiplier_ + ls_cfg.alpha_dual * d.d_multiplier_)
                                     .cwiseProduct(d.active_)
                                     .dot(d.slack_ + ls_cfg.alpha_primal * d.d_slack_);
@@ -144,13 +136,8 @@ void ipm_constr::apply_affine_step(ipm::data_map_t &data, workspace_data *cfg) c
     auto &d = data.as<ipm_data>();
     auto &ls_cfg = cfg->as<solver::linesearch_config>();
     assert(!d.ipm_cfg->ipm_computing_affine_step() && "ipm affine step computation not ended");
-    // d.d_slack_.array() *= ls_cfg.alpha_primal;
-    // d.d_multiplier_.array() *= ls_cfg.alpha_dual;
-    // d.slack_.array() += d.d_slack_.array();
-    // d.multiplier_.array() += d.d_multiplier_.array();
-    d.slack_.array() += ls_cfg.alpha_primal * d.d_slack_.array();
-    // d.multiplier_.array() += std::min(ls_cfg.alpha_primal, ls_cfg.alpha_dual) * d.d_multiplier_.array();
-    d.multiplier_.noalias() = d.multipler_backup_ + ls_cfg.alpha_dual * d.d_multiplier_;
+    positivity::apply_pair_step(d.slack_, d.d_slack_, ls_cfg.alpha_primal,
+                                d.multiplier_, d.d_multiplier_, ls_cfg.dual_alpha_for_ineq());
     if (d.ipm_cfg->ipm_accept_corrector()) {
         d.slack_ = d.slack_.array().max(1e-20);
         d.multiplier_ = d.multiplier_.array().max(1e-20);
@@ -169,25 +156,16 @@ void ipm_constr::value_impl(func_approx_data &data) const {
         fmt::print("slack: {}\n", d.slack_.transpose());
         throw std::runtime_error("ipm_constr value_impl failed due to NaN");
     }
-    // for (size_t i = 0; i < dim_; i++) {
-    //     if (d.slack_(i) < 1e-8 && d.v_(i) < 1e-8) {
-    //         d.reg_(i) = 1e-8; // regularization for slack variables
-    //         d.active_[i] = 0; // active constraint
-    //         d.slack_(i) = 1e-8;
-    //         fmt::println("{} active almost", name_);
-    //     } else {
-    //         d.active_[i] = 0; // inactive constraint
-    //         d.reg_(i) = 1e-8; // regularization for slack variables
-    //     }
-    // }
     d.reg_.setConstant(1e-8);
     d.active_.setConstant(1.0);
-    // d.active_.array() = 1 - d.active_.array(); // invert the active set
     d.r_s_.array() = d.multiplier_.cwiseProduct(d.slack_).array();
 }
 void ipm_constr::jacobian_impl(func_approx_data &data) const {
     base::jacobian_impl(data);
     auto &d = data.as<ipm_data>();
+    if (d.ipm_cfg != nullptr && d.ipm_cfg->disable_corrections) {
+        return;
+    }
 
     // setup T^{-1} N
     d.reg_T_inv_.array() = d.slack_.array() + d.reg_.array() * d.multiplier_.array();
@@ -198,21 +176,6 @@ void ipm_constr::jacobian_impl(func_approx_data &data) const {
         d.scaled_res_.array() += d.ipm_cfg->mu / d.reg_T_inv_.array();
     }
     d.scaled_res_.array() *= d.active_.array(); // only active constraints contribute to the scaled residual
-    // row_vector diag_change  = (d.diag_scaling - d.diag_scaling_last_).transpose();
-    // row_vector scaled_res_change = (d.scaled_res_ - d.scaled_res_last_).transpose();
-    // bool header_output = true;
-    // if (diag_change.cwiseAbs().maxCoeff() > 1e-12) {
-    //     fmt::print("ipm_constr::jacobian_impl {}\n", name_);
-    //     header_output = false;
-    //     fmt::print("diag scaling change: {:.3}\n", diag_change);
-    // }
-    // if (scaled_res_change.cwiseAbs().maxCoeff() > 1e-12) {
-    //     if (header_output)
-    //         fmt::print("ipm_constr::jacobian_impl {}\n", name_);
-    //     fmt::print("scaled residual change: {:.3}\n", scaled_res_change);
-    // }
-    // d.scaled_res_last_ = d.scaled_res_;
-    // d.diag_scaling_last_ = d.diag_scaling;
     propagate_jacobian(d);
     propagate_hessian(d);
 }
@@ -222,8 +185,8 @@ void ipm_constr::propagate_jacobian(func_approx_data &data) const {
     auto &d = data.as<ipm_data>();
     for (auto &j : d.jac_) {
         if (j.size() != 0) {
-            d.jac_modification_[j_idx].noalias() += d.scaled_res_.transpose() * j;
-            if (d.jac_modification_[j_idx].hasNaN()) {
+            d.lag_jac_corr_[j_idx].noalias() += d.scaled_res_.transpose() * j;
+            if (d.lag_jac_corr_[j_idx].hasNaN()) {
                 nan_found = true;
                 fmt::print("--------------------\n");
                 fmt::print("constraint name: {}\n", d.func_.name());
@@ -236,7 +199,7 @@ void ipm_constr::propagate_jacobian(func_approx_data &data) const {
                 fmt::print("multiplier: {:.3}\n", d.multiplier_.transpose());
                 fmt::print("diag_scaling: {:.3}\n", d.diag_scaling.transpose());
                 fmt::print("scaled_res: {:.3}\n", d.scaled_res_.transpose());
-                fmt::print("jac modification: {:.3}\n", d.jac_modification_[j_idx]);
+                fmt::print("lag jac corr: {:.3}\n", d.lag_jac_corr_[j_idx]);
                 fmt::print("NaN in jac modification[{}]\n", j_idx);
             }
         }
@@ -250,7 +213,7 @@ void ipm_constr::propagate_jacobian(func_approx_data &data) const {
 void ipm_constr::propagate_hessian(func_approx_data &d) const {
     // modification of hessian
     size_t outer_idx = 0;
-    for (auto &outer : d.merit_hess_) {
+    for (auto &outer : d.lag_hess_) {
         size_t inner_idx = 0;
         if (outer.size()) { // skip empty hess
             for (auto &inner : outer) {

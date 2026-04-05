@@ -14,13 +14,18 @@ class generic_dynamics : public generic_constr {
     struct approx_data : public base::approx_data {
 #define NULL_INIT_MAP(name) name(nullptr, 0, 0)
 #define NULL_INIT_VECMAP(name) name(nullptr, 0)
-        merit_data::approx_data *approx_; ///< pointer to the merit data approx of dynamics field
-        merit_data::dynamics_data *dyn_proj_; ///< pointer to the dynamics projection data
+        lag_data::approx_data *approx_;       ///< pointer to the lag data approx of dynamics field
+        lag_data::dynamics_data *dyn_proj_;   ///< pointer to the dynamics projection data
         vector_ref proj_f_res_; ///< projection of f_res
         approx_data(base::approx_data &&rhs);
     };
     using base::base;
-    virtual void compute_project_derivatives(func_approx_data &data) const = 0;
+    virtual void compute_project_jacobians(func_approx_data &data) const = 0;
+    virtual void compute_project_residual(func_approx_data &data) const = 0;
+    virtual void compute_project_derivatives(func_approx_data &data) const {
+      compute_project_jacobians(data);
+      compute_project_residual(data);
+    }
     virtual void apply_jac_y_inverse_transpose(func_approx_data &data, vector &v, vector &dst) const { dst = v; };
 };
 

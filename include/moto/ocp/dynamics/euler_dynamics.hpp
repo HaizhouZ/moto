@@ -91,17 +91,20 @@ struct stacked_euler : public generic_dynamics {
             dyn->jacobian(data); // call each dynamics jacobian
         }
     }
-    void compute_project_derivatives(func_approx_data &data) const override {
+    void compute_project_jacobians(func_approx_data &data) const override {
         auto &d = data.as<approx_data>();
         size_t idx = 0;
         for (auto &dyn : dyns_) {
             dyn->update_inv(d.dyn_data[idx++]); // call each dynamics project derivatives
         }
-        d.f_y_inv.times(d.v_, d.proj_f_res_);
         if (dt_) {
             d.proj_f_t.setZero();
             d.f_y_inv.times(d.f_t, d.proj_f_t);
         }
+    }
+    void compute_project_residual(func_approx_data &data) const override {
+        auto &d = data.as<approx_data>();
+        d.f_y_inv.times(d.v_, d.proj_f_res_);
     }
 };
 } // namespace moto

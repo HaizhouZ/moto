@@ -8,7 +8,12 @@ namespace solver {
 namespace ns_riccati {
 void ns_riccati_data::update_projected_dynamics() {
     full_data_->for_each(__dyn, [](const generic_dynamics &dyn, func_approx_data &data) {
-        dyn.compute_project_derivatives(data);
+        dyn.compute_project_jacobians(data);
+    });
+}
+void ns_riccati_data::update_projected_dynamics_residual() {
+    full_data_->for_each(__dyn, [](const generic_dynamics &dyn, func_approx_data &data) {
+        dyn.compute_project_residual(data);
     });
 }
 void ns_riccati_data::apply_jac_y_inverse_transpose(vector &v, vector &dst) {

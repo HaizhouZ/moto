@@ -11,6 +11,8 @@ else()
     FetchContent_MakeAvailable(Catch2)
 endif()
 
+find_package(Python 3.8 COMPONENTS Interpreter REQUIRED)
+
 function(add_moto_test name)
     set(test_name ${name}_test)
     set(test_file ${name}.cpp)
@@ -28,8 +30,24 @@ function(add_moto_test name)
     add_test(NAME ${test_name} COMMAND ${test_name} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endfunction()
 
+function(add_moto_python_test name script)
+    add_test(
+        NAME ${name}
+        COMMAND ${Python_EXECUTABLE} ${script}
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    )
+    set_tests_properties(
+        ${name}
+        PROPERTIES
+        ENVIRONMENT "OMP_NUM_THREADS=1"
+    )
+endfunction()
+
 
 add_moto_test(sym_test)
+add_moto_test(graph_model_compose)
+add_moto_test(equality_multiplier_init)
+add_moto_test(restoration)
 # add_moto_test(expr_ownership)
 # add_moto_test(constr_cast)
 # add_moto_test(dynamics)

@@ -33,6 +33,15 @@ auto vec_type() {
 namespace impl {
 // job_list jobs_{};
 std::mutex mutex_{};
+std::mutex func_mutex_map_mutex_{};
+std::unordered_map<std::string, std::shared_ptr<std::mutex>> func_mutexes_{};
+std::unordered_map<std::string, std::string> completed_compile_flags_{};
+
+std::shared_ptr<std::mutex> get_func_mutex(const std::string &func_name) {
+    std::lock_guard<std::mutex> lock(func_mutex_map_mutex_);
+    auto [it, inserted] = func_mutexes_.try_emplace(func_name, std::make_shared<std::mutex>());
+    return it->second;
+}
 // Generates a list of (row, col) pairs from CasADi's CCS sparsity format
 std::vector<std::pair<int, int>> ccs_index_to_ij(const cs::Sparsity &sp) {
     std::vector<std::pair<int, int>> ij_pairs;
@@ -108,7 +117,7 @@ std::string process_generated_code(
 
     std::stringstream raw_stream(raw_c_code);
     std::string line;
-    bool func_found = false, func_done = false;
+    bool func_found = false;
 
     // RE2 patterns
     RE2 simplify_cond_re("arg\\[\\d+\\]\\? ([^:;]+) : 0;");
@@ -116,12 +125,35 @@ std::string process_generated_code(
     RE2 arg_re("arg\\[(\\d+)\\]\\[(\\d+)\\]");
     RE2 res_re("res\\[(\\d+)\\]\\[(\\d+)\\]");
 
-    while (std::getline(raw_stream, line)) {
-        if (line.find("casadi_real casadi_") != std::string::npos) {
-            processed_code << line << "\n";
-        }
+    bool copying_helper = false;
+    int helper_brace_depth = 0;
+    int func_brace_depth = 0;
 
+    auto update_brace_depth = [](const std::string &s, int &depth) {
+        for (char c : s) {
+            if (c == '{')
+                depth++;
+            else if (c == '}')
+                depth--;
+        }
+    };
+
+    while (std::getline(raw_stream, line)) {
         if (!func_found) {
+            if (!copying_helper && line.find("casadi_real casadi_") != std::string::npos) {
+                copying_helper = true;
+                helper_brace_depth = 0;
+            }
+
+            if (copying_helper) {
+                processed_code << line << "\n";
+                update_brace_depth(line, helper_brace_depth);
+                if (helper_brace_depth == 0) {
+                    copying_helper = false;
+                }
+                continue;
+            }
+
             if (line.find("static int casadi_f0") != std::string::npos) {
                 processed_code << "CASADI_SYMBOL_EXPORT void " << func_name << "(\n"
                                << "  std::vector<Eigen::Ref<Eigen::" << vec_type() << ">>& inputs,\n";
@@ -135,29 +167,30 @@ std::string process_generated_code(
                     }
                 }
                 func_found = true;
+                func_brace_depth = 1;
             }
             continue;
         }
 
         if (line.find("return 0;") != std::string::npos)
             continue;
-        if (line.find("}") != std::string::npos && !func_done) {
-            processed_code << "}\n";
-            func_done = true;
-            break;
-        }
 
-        // Apply RE2 transformations
         RE2::GlobalReplace(&line, simplify_cond_re, "\\1;");
         RE2::GlobalReplace(&line, simplify_if_re, "\\1;");
 
-        // Iteratively replace arg and res patterns
         int cap1, cap2;
         while (RE2::PartialMatch(line, arg_re, &cap1, &cap2)) {
             RE2::Replace(&line, "arg\\[" + std::to_string(cap1) + "\\]\\[" + std::to_string(cap2) + "\\]", make_input_ref_access(cap1, cap2));
         }
         while (RE2::PartialMatch(line, res_re, &cap1, &cap2)) {
             RE2::Replace(&line, "res\\[" + std::to_string(cap1) + "\\]\\[" + std::to_string(cap2) + "\\]", make_output_ref_access(cap1, cap2));
+        }
+
+        update_brace_depth(line, func_brace_depth);
+
+        if (func_brace_depth == 0) {
+            processed_code << "}\n";
+            break;
         }
 
         processed_code << line << "\n";
@@ -180,6 +213,31 @@ void run(
     bool keep_generated_src,
     bool verbose,
     cs::SX aux) {
+    // Finalized clones intentionally share a stable generated symbol name.
+    // Serialize codegen per symbol to avoid concurrent writers racing on
+    // func_name_raw.c / func_name.cpp / func_name.json / libfunc_name.so.
+    auto func_mutex = get_func_mutex(func_name);
+    std::lock_guard<std::mutex> func_lock(*func_mutex);
+
+    fs::path so_file_path = fs::path(output_dir) / ("lib" + func_name + ".so");
+    fs::path so_tmp_path = so_file_path;
+    so_tmp_path += ".tmp";
+    fs::path json_path = fs::path(output_dir) / (func_name + ".json");
+    fs::path json_tmp_path = json_path;
+    json_tmp_path += ".tmp";
+    const std::string cache_key = (fs::path(output_dir) / func_name).string();
+
+    if (!force_recompile) {
+        std::lock_guard<std::mutex> lock(func_mutex_map_mutex_);
+        auto it = completed_compile_flags_.find(cache_key);
+        if (it != completed_compile_flags_.end() && it->second == compile_flag) {
+            if (std::getenv("MOTO_DEBUG_CODEGEN") != nullptr) {
+                fmt::print("[codegen] reuse {}\n", func_name);
+            }
+            return;
+        }
+    }
+
     // Step 1: Create CasADi function and filter near-zero elements
     std::vector<cs::SX> sx_inputs_cs; //(sx_inputs.begin(), sx_inputs.end());
     sx_inputs_cs.reserve(sx_inputs.size() + !aux.is_empty());
@@ -216,9 +274,10 @@ void run(
         std::ifstream raw_file(raw_c_path);
         buffer << raw_file.rdbuf();
     }
+    std::string raw_c_code = buffer.str();
 
     std::string processed_code = process_generated_code(
-        buffer.str(), func_name, sx_inputs_cs, filtered_outputs, append, !aux.is_empty());
+        raw_c_code, func_name, sx_inputs_cs, filtered_outputs, append, !aux.is_empty());
 
     // Step 4: Write new C++ file with Eigen interface
     std::string final_cpp_path = fs::path(output_dir) / (func_name + ".cpp");
@@ -230,9 +289,7 @@ void run(
         std::cout << "Generated: " << final_cpp_path << std::endl;
 
     // Step 5: Compile if necessary
-    fs::path so_file_path = fs::path(output_dir) / ("lib" + func_name + ".so");
-    fs::path json_path = fs::path(output_dir) / (func_name + ".json");
-    std::string md5_hash = compute_md5(raw_c_path) + compute_md5(final_cpp_path);
+    std::string md5_hash = compute_md5_from_bytes(raw_c_code) + compute_md5_from_bytes(processed_code);
 
     bool needs_compile = true;
     bool json_exists = fs::exists(json_path);
@@ -259,10 +316,26 @@ void run(
         }
     }
 
+    if (std::getenv("MOTO_DEBUG_CODEGEN") != nullptr) {
+        if (needs_compile) {
+            fmt::print("[codegen] compile {}\n", func_name);
+            fmt::print("  json_exists={} so_exists={} force_recompile={}\n",
+                       json_exists, so_exists, force_recompile);
+            fmt::print("  md5_current={} compile_flag_current={}\n", md5_hash, compile_flag);
+            if (json_exists && so_exists && !data.is_discarded() && !data.empty()) {
+                std::string md5_prev = data.contains("md5") ? std::string(data["md5"]) : "<missing>";
+                std::string flag_prev = data.contains("compile_flag") ? std::string(data["compile_flag"]) : "<missing>";
+                fmt::print("  md5_prev={} compile_flag_prev={}\n", md5_prev, flag_prev);
+            }
+        } else {
+            fmt::print("[codegen] reuse {}\n", func_name);
+        }
+    }
+
     if (needs_compile) {
         std::string eigen_include_path = "/usr/include/eigen3"; // Adjust if necessary
         std::string compile_command = "g++ -shared -fPIC -std=c++20 " + compile_flag +
-                                      " -o " + so_file_path.string() + " " + final_cpp_path +
+                                      " -o " + so_tmp_path.string() + " " + final_cpp_path +
                                       " -I " + eigen_include_path;
         int ret = std::system(compile_command.c_str());
         if (verbose) {
@@ -272,6 +345,13 @@ void run(
                 std::cerr << "Compilation failed for: " << func_name << std::endl;
             }
         }
+        if (ret != 0) {
+            std::error_code ec;
+            fs::remove(so_tmp_path, ec);
+            throw std::runtime_error(fmt::format("Compilation failed for {} with exit code {}", func_name, ret));
+        }
+
+        fs::rename(so_tmp_path, so_file_path);
 
         // Step 6: Create JSON metadata and cleanup
         json j; /// @todo the order here is not guaranteed
@@ -280,17 +360,24 @@ void run(
             j["inputs"][e.name()] = {e.dim(), static_cast<int>(e.field())};
         }
         for (const auto &e : filtered_outputs) {
-            j["outputs"].push_back({e.rows(), e.columns()});
+        j["outputs"].push_back({e.rows(), e.columns()});
         }
         j["md5"] = md5_hash;
         j["compile_flag"] = compile_flag;
 
-        std::ofstream o(fs::path(output_dir) / (func_name + ".json"));
+        std::ofstream o(json_tmp_path);
         o << std::setw(4) << j << std::endl;
+        o.close();
+        fs::rename(json_tmp_path, json_path);
         if (!keep_generated_src) {
             fs::remove(raw_c_path);
             fs::remove(final_cpp_path);
         }
+    }
+
+    if (!force_recompile) {
+        std::lock_guard<std::mutex> lock(func_mutex_map_mutex_);
+        completed_compile_flags_[cache_key] = compile_flag;
     }
 }
 
@@ -314,9 +401,9 @@ void task::finalize(job_list &jobs_) {
 
     // excluded = [e.name for e in exclude]
     std::set<size_t> excluded;
-    // # exclude inputs in field p
+    // exclude non-primal storage-only inputs
     for (const sym &s : sx_inputs)
-        if (s.field() == __p)
+        if (s.field() == __p || s.field() == __s)
             excluded.insert(s.uid());
     std::map<size_t, cs::SX> external_jac;
     for (auto &[in_arg, jac] : ext_jac) {

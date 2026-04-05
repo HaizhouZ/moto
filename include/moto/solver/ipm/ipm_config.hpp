@@ -19,9 +19,11 @@ class ipm_config {
         monotonic_decrease,               ///< monotonic decrease method
     };
 
-    scalar_t mu = 1e-2;                     ///< initial barrier parameter
-    adaptive_mu_t *mu_method = nullptr;     ///< adaptive mu method
+    scalar_t mu = 1e-2; ///< initial barrier parameter
+    scalar_t mu_trial = 1e-2; ///< trial barrier parameter for the affine step
+    adaptive_mu_t mu_method = mehrotra_predictor_corrector; ///< adaptive mu method
     bool ipm_conditional_corrector = false; ///< whether to use conditional corrector
+    bool disable_corrections = false; ///< skip Jacobian/Hessian correction propagation while preserving raw g/J evaluation
 
     struct MOTO_ALIGN_NO_SHARING worker {
         scalar_t kkt_inf = std::numeric_limits<scalar_t>::infinity(); ///< KKT infinity norm, used for logging and debugging
@@ -40,13 +42,13 @@ class ipm_config {
     worker worker_data;
     using worker_type = worker;
     bool is_adaptive_mu() const {
-        return *mu_method == mehrotra_predictor_corrector || *mu_method == mehrotra_probing;
+        return mu_method == mehrotra_predictor_corrector || mu_method == mehrotra_probing;
     }
     bool ipm_enable_affine_step() const {
-        return is_adaptive_mu() && (*mu_method == mehrotra_predictor_corrector || *mu_method == mehrotra_probing);
+        return is_adaptive_mu() && (mu_method == mehrotra_predictor_corrector || mu_method == mehrotra_probing);
     }
     bool ipm_enable_corrector() const {
-        return is_adaptive_mu() && *mu_method == mehrotra_predictor_corrector;
+        return is_adaptive_mu() && mu_method == mehrotra_predictor_corrector;
     }
     bool ipm_accept_corrector() const {
         return ipm_enable_corrector() && !ipm_reject_corrector;

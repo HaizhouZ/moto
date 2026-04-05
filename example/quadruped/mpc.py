@@ -211,9 +211,7 @@ class pinCasadiModel(cpin.Model):
             .set_gauss_newton(
                 moto.sym.params(f"W_kin_{self.foot_frames[i]}", 1, default_val=1e3)
             )
-            .as_terminal()
         )
-        pos_cost.name = pos_cost.name.replace("_terminal", "")
         pos_cost.enable_if_all([self.f_f[i]])
         return pos_cost
 
@@ -287,7 +285,7 @@ class pinCasadiModel(cpin.Model):
         state_args = self.pos_args + self.vel_args
         cost = moto.cost.create("c_mpc", state_args + [self.q_nom], state_cost)
         if terminal:
-            return cost.as_terminal()
+            return cost
         return cost
 
     def get_input_cost(self):
@@ -363,7 +361,7 @@ prob.add(model.get_input_cost())
 # prob.add(model.make_foot_lift_cost(lifted=True))
 
 prob_term = prob.clone()
-prob_term.add(model.get_state_cost(terminal=True))
+prob_term.add_terminal(model.get_state_cost(terminal=True))
 
 prob.print_summary()
 print("--" * 15)
@@ -378,9 +376,9 @@ gait_setting = {
 }
 sqp = moto.sqp(n_job=10)
 g = sqp.graph
-n0 = g.set_head(g.add(sqp.create_node(prob)))
-n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
-g.add_edge(n0, n1, N_horizon)
+n0 = g.add_head(sqp.create_node(prob))
+n1 = g.add_tail(sqp.create_node(prob_term))
+g.connect(n0, n1, N_horizon)
 
 sqp.settings.ipm.mu0 = 0.1
 sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
@@ -438,7 +436,7 @@ node_idx = 0
 current_time = 0.0
 sqp.apply_forward(stance_ref)
 # n0.data.value[model.k_f] = 0
-nodes = g.flatten_nodes()
+nodes = sqp.graph.flatten_nodes()
 data = go2.model.createData()
 for n in nodes[:10]:
     for f in model.f_f:
