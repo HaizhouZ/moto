@@ -9,7 +9,9 @@ void register_submodule_model(nb::module_ &m) {
         .def_prop_ro("id", &model_node::id);
 
     nb::class_<model_edge, edge_ocp>(m, "model_edge")
-        .def_prop_ro("id", &model_edge::id);
+        .def_prop_ro("id", &model_edge::id)
+        .def_prop_ro("st", &model_edge::st_node)
+        .def_prop_ro("ed", &model_edge::ed_node);
 
     nb::class_<graph_model>(m, "graph_model")
         .def(nb::init<>())
@@ -32,6 +34,11 @@ void register_submodule_model(nb::module_ &m) {
              static_cast<std::vector<model_edge_ptr_t> (graph_model::*)(const model_node_ptr_t &, const model_node_ptr_t &, size_t, const edge_ocp_ptr_t &)>(&graph_model::add_path),
              nb::arg("st"),
              nb::arg("ed"),
+             nb::arg("n_edges"),
+             nb::arg("prob") = edge_ocp::create())
+        .def("add_path",
+             static_cast<std::vector<model_edge_ptr_t> (graph_model::*)(const model_node_ptr_t &, size_t, const edge_ocp_ptr_t &)>(&graph_model::add_path),
+             nb::arg("st"),
              nb::arg("n_edges"),
              nb::arg("prob") = edge_ocp::create())
         .def("add_path",

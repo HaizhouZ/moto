@@ -120,6 +120,22 @@ class model_edge : public edge_ocp {
     size_t id() const noexcept { return id_; }
     size_t st_id() const noexcept { return st_id_; }
     size_t ed_id() const noexcept { return ed_id_; }
+
+    model_node_ptr_t st_node() const {
+        auto owner = owner_.lock();
+        if (!owner || st_id_ >= owner->nodes.size()) {
+            throw std::runtime_error("model_edge has no valid start node");
+        }
+        return owner->nodes.at(st_id_);
+    }
+
+    model_node_ptr_t ed_node() const {
+        auto owner = owner_.lock();
+        if (!owner || ed_id_ >= owner->nodes.size()) {
+            throw std::runtime_error("model_edge has no valid end node");
+        }
+        return owner->nodes.at(ed_id_);
+    }
 };
 
 class graph_model {
@@ -194,6 +210,26 @@ class graph_model {
             throw std::invalid_argument("graph_model::add_path expects n_edges >= 1");
         }
         // A path with n_edges introduces n_edges - 1 intermediate key nodes and n_edges edges.
+        reserve(state_->nodes.size() + n_edges - 1, state_->edges.size() + n_edges);
+        std::vector<model_edge_ptr_t> edges;
+        edges.reserve(n_edges);
+        auto prev = st;
+        for (size_t i = 0; i < n_edges; ++i) {
+            auto next = (i + 1 == n_edges) ? ed : create_node(prev->clone_node());
+            edges.emplace_back(connect(prev, next, base_prob));
+            prev = next;
+        }
+        return edges;
+    }
+
+    std::vector<model_edge_ptr_t> add_path(const model_node_ptr_t &st,
+                                           size_t n_edges,
+                                           const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
+        validate_node(st);
+        if (n_edges == 0) {
+            throw std::invalid_argument("graph_model::add_path expects n_edges >= 1");
+        }
+        auto ed = create_node();
         reserve(state_->nodes.size() + n_edges - 1, state_->edges.size() + n_edges);
         std::vector<model_edge_ptr_t> edges;
         edges.reserve(n_edges);

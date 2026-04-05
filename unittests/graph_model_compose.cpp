@@ -324,6 +324,38 @@ TEST_CASE("ns_sqp model_graph add_path can create key nodes from node prototypes
     REQUIRE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_path_proto_terminal"));
 }
 
+TEST_CASE("ns_sqp edge-only paths can be chained explicitly through returned endpoint nodes") {
+    using namespace moto;
+
+    auto [x, xn] = sym::states("x_edge_only_chain", 1);
+    auto u = moto::sym::inputs("u_edge_only_chain", 1);
+    const var_inarg_list dyn_args = var_list{x, xn, u};
+    auto dyn = dynamics(new dense_dynamics("dyn_edge_only_chain", dyn_args, xn - x - u, approx_order::second, __dyn));
+
+    auto stage_a = edge_ocp::create();
+    stage_a->add(*dyn);
+    stage_a->add(*cost(new generic_cost("cost_edge_only_chain_a", var_list{x}, x, approx_order::second)));
+
+    auto stage_b = edge_ocp::create();
+    stage_b->add(*dyn);
+    stage_b->add(*cost(new generic_cost("cost_edge_only_chain_b", var_list{x}, x, approx_order::second)));
+
+    ns_sqp sqp;
+    auto modeled = sqp.create_graph();
+    auto first = modeled.add_path(1, stage_a);
+    auto second = modeled.add_path(first.front()->ed_node(), 1, stage_b);
+
+    REQUIRE(first.size() == 1);
+    REQUIRE(second.size() == 1);
+    REQUIRE(modeled.num_edges() == 2);
+    REQUIRE(modeled.num_nodes() == 3);
+
+    auto &flat = sqp.graph().flatten_nodes();
+    REQUIRE(flat.size() == 2);
+    REQUIRE(contains_name(expr_names(flat.front()->problem(), __cost), "cost_edge_only_chain_a"));
+    REQUIRE(contains_name(expr_names(flat.back()->problem(), __cost), "cost_edge_only_chain_b"));
+}
+
 TEST_CASE("ns_sqp terminal u-dependent terms are ignored instead of lowered onto the final edge") {
     using namespace moto;
 
