@@ -331,6 +331,7 @@ ns_sqp::kkt_info ns_sqp::initialize() {
             cur->update_approximation(node_data::update_mode::eval_derivatives);
         });
     }
+    initialize_equality_multipliers();
     kkt_info kkt;
     {
         auto phase_profile = profile_scope(profile_phase::initialize_kkt);

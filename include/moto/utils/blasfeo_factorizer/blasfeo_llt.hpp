@@ -31,8 +31,7 @@ struct blasfeo_llt {
     template <typename rhs_type, typename res_type>
     void solve(const rhs_type &b, res_type &a, double alpha = 1.0) {
         size_t size = L_.data_.m;
-        assert(b.rows() == size && a.rows() == size);
-        assert(b.cols() == a.cols());
+        assert(b.rows() == size && a.rows() == size && b.cols() == a.cols());
         if constexpr (rhs_type::ColsAtCompileTime == 1) {
             vec_rhs_.from_eigen(b);
             vec_res_.resize(size, 1);

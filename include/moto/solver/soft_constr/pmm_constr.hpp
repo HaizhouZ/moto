@@ -15,7 +15,7 @@ namespace solver {
 /// Dual update from row 2: dlam = (J*du + h) / rho
 /// As rho -> 0: (1/rho)*J^T*J penalty dominates, forcing J*du = -h (hard constraint recovery).
 /// As rho -> inf: penalty vanishes, soft constraint has negligible effect.
-class pmm_constr final : public soft_constr {
+class pmm_constr : public soft_constr {
   private:
     using base = soft_constr;
 
@@ -32,8 +32,8 @@ class pmm_constr final : public soft_constr {
 
     using base::base;
 
-    void value_impl(func_approx_data &data) const override final;
-    void jacobian_impl(func_approx_data &data) const override final;
+    void value_impl(func_approx_data &data) const override;
+    void jacobian_impl(func_approx_data &data) const override;
 
     void propagate_jacobian(func_approx_data &d) const override;
     void propagate_hessian(func_approx_data &d) const override;

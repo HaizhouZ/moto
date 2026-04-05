@@ -978,6 +978,10 @@ resto_eq_elastic_constr::resto_eq_elastic_constr(const std::string &name,
     add_arguments(dynamic_cast<const generic_func &>(*source).in_args());
 }
 
+void resto_eq_elastic_constr::finalize_impl() {
+    soft_constr::finalize_impl();
+}
+
 void resto_eq_elastic_constr::setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const {
     soft_constr::setup_workspace_data(data, ws_data);
     auto &d = data.as<approx_data>();

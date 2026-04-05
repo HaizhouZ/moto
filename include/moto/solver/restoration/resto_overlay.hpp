@@ -161,6 +161,7 @@ class resto_eq_elastic_constr final : public soft_constr {
                                               lag_data &raw,
                                               shared_data &shared) const override;
 
+    void finalize_impl() override;
     void value_impl(func_approx_data &data) const override;
     void jacobian_impl(func_approx_data &data) const override;
     void hessian_impl(func_approx_data &data) const override;
