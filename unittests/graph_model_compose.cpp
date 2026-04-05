@@ -356,6 +356,39 @@ TEST_CASE("ns_sqp edge-only paths can be chained explicitly through returned end
     REQUIRE(contains_name(expr_names(flat.back()->problem(), __cost), "cost_edge_only_chain_b"));
 }
 
+TEST_CASE("graph_model compose lowers edge-owned pure state terms onto edge y") {
+    using namespace moto;
+    using namespace moto::model;
+
+    auto [x, xn] = sym::states("x_edge_pure_state", 1);
+    auto u = moto::sym::inputs("u_edge_pure_state", 1);
+    const var_inarg_list dyn_args = var_list{x, xn, u};
+    const var_inarg_list x_args = var_list{x};
+
+    auto dyn = dynamics(new dense_dynamics("dyn_edge_pure_state", dyn_args, xn - x - u, approx_order::second, __dyn));
+
+    auto stage = edge_ocp::create();
+    auto eq = constr(new generic_constr("eq_edge_pure_state", x_args, x, approx_order::second, __undefined));
+    auto x_cost = cost(new generic_cost("cost_edge_pure_state", x_args, x, approx_order::second));
+    stage->add(*dyn);
+    stage->add(*eq);
+    stage->add(*x_cost);
+
+    graph_model modeled;
+    auto edges = modeled.add_path(1, stage);
+    REQUIRE(edges.size() == 1);
+
+    const auto composed = modeled.compose_all();
+    REQUIRE(composed.size() == 1);
+    auto p01 = composed.front();
+
+    const auto &eq_edge = require_func_named_prefix(p01, __eq_x, "eq_edge_pure_state");
+    const auto &cost_edge = require_func_named_prefix(p01, __cost, "cost_edge_pure_state");
+
+    REQUIRE(eq_edge.in_args().front()->field() == __y);
+    REQUIRE(cost_edge.in_args().front()->field() == __y);
+}
+
 TEST_CASE("ns_sqp terminal u-dependent terms are ignored instead of lowered onto the final edge") {
     using namespace moto;
 

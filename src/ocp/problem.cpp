@@ -84,6 +84,10 @@ shared_expr lower_node_term_for_edge(const shared_expr &ex, const ocp_base &prob
     return lowered;
 }
 
+bool is_lowerable_edge_term(const shared_expr &ex) {
+    return is_path_state_term(ex) || is_pure_state_cost_term(ex);
+}
+
 void append_node_terms(const node_ocp_ptr_t &node_prob,
                        const edge_ocp_ptr_t &edge_prob,
                        bool lower_path_state_terms,
@@ -360,18 +364,30 @@ edge_ocp_ptr_t edge_ocp::compose(const node_ocp_ptr_t &st_node_prob,
                                  bool skip_st_path_state_terms) {
     auto prob = edge_prob ? edge_prob->clone_edge() : edge_ocp::create();
     prob->bind_nodes(st_node_prob, edge_prob ? edge_prob->ed_node_prob() : node_ocp_ptr_t{});
-    if (st_node_prob && edge_prob) {
+    if (edge_prob) {
         active_status_config config;
-        for (auto primal_field : primal_fields) {
-            for (const shared_expr &expr : edge_prob->exprs(primal_field)) {
-                if (!st_node_prob->contains(*expr, false) || st_node_prob->is_active(*expr, false)) {
+        for (size_t f = 0; f < field::num; ++f) {
+            for (const shared_expr &expr : edge_prob->exprs(f)) {
+                if (is_lowerable_edge_term(expr)) {
+                    config.deactivate_list.emplace_back(*expr);
                     continue;
                 }
-                config.deactivate_list.emplace_back(*expr);
+                if (st_node_prob && f < field::num_prim &&
+                    st_node_prob->contains(*expr, false) && !st_node_prob->is_active(*expr, false)) {
+                    config.deactivate_list.emplace_back(*expr);
+                }
             }
         }
         if (!config.empty()) {
             prob->update_active_status(config, false);
+        }
+        for (size_t f = 0; f < field::num; ++f) {
+            for (const shared_expr &expr : edge_prob->exprs(f)) {
+                if (!is_lowerable_edge_term(expr)) {
+                    continue;
+                }
+                prob->add(lower_node_term_for_edge(expr, *prob));
+            }
         }
     }
     append_node_terms(st_node_prob, prob, true, skip_st_path_state_terms);
