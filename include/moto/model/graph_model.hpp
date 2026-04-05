@@ -367,6 +367,11 @@ class graph_model {
                         if (!lowerable_term) {
                             continue;
                         }
+                        auto *ex_func = dynamic_cast<generic_func *>(expr.get());
+                        if (ex_func->lowered_) {
+                            composed->add(shared_expr(ex_func->lowered_));
+                            continue;
+                        }
                         auto lowered = expr.clone();
                         auto *lowered_func = dynamic_cast<generic_func *>(lowered.get());
                         if (lowered_func == nullptr) {
@@ -383,6 +388,7 @@ class graph_model {
                                 }
                             }
                         }
+                        ex_func->lowered_ = lowered;
                         composed->add(lowered);
                     }
                 }

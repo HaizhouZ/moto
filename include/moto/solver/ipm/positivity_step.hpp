@@ -48,6 +48,29 @@ inline void apply_pair_step(vector &value,
     dual.noalias() += alpha_dual * dual_step;
 }
 
+inline void update_primal_bounds(linesearch_config &cfg,
+                                 const vector &value,
+                                 const vector &value_step,
+                                 scalar_t fraction_to_boundary = scalar_t(0.995)) {
+    if (value.size() == 0) {
+        return;
+    }
+    cfg.primal.alpha_max = std::min(cfg.primal.alpha_max,
+                                    alpha_max(value, value_step, fraction_to_boundary));
+}
+
+template <typename DualValue, typename DualStep>
+inline void update_dual_bounds(linesearch_config &cfg,
+                               const DualValue &dual,
+                               const DualStep &dual_step,
+                               scalar_t fraction_to_boundary = scalar_t(0.995)) {
+    if (dual.size() == 0) {
+        return;
+    }
+    cfg.dual.alpha_max = std::min(cfg.dual.alpha_max,
+                                  alpha_max(dual, dual_step, fraction_to_boundary));
+}
+
 template <typename DualValue, typename DualStep>
 inline void update_pair_bounds(linesearch_config &cfg,
                                const vector &value,
@@ -55,13 +78,8 @@ inline void update_pair_bounds(linesearch_config &cfg,
                                const DualValue &dual,
                                const DualStep &dual_step,
                                scalar_t fraction_to_boundary = scalar_t(0.995)) {
-    if (value.size() == 0) {
-        return;
-    }
-    cfg.primal.alpha_max = std::min(cfg.primal.alpha_max,
-                                    alpha_max(value, value_step, fraction_to_boundary));
-    cfg.dual.alpha_max = std::min(cfg.dual.alpha_max,
-                                  alpha_max(dual, dual_step, fraction_to_boundary));
+    update_primal_bounds(cfg, value, value_step, fraction_to_boundary);
+    update_dual_bounds(cfg, dual, dual_step, fraction_to_boundary);
 }
 
 } // namespace moto::solver::positivity

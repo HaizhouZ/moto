@@ -23,15 +23,15 @@ void ns_sqp::finalize_ls_bound_and_set_to_max() {
         settings.ls.dual.merge_from(s.dual);
     }
     settings.ls.alpha_primal = settings.ls.primal.alpha_max;
-    settings.ls.alpha_dual   = settings.ls.dual.alpha_max;
+    settings.ls.alpha_dual = settings.ls.dual.alpha_max;
     for (solver::linesearch_config &s : setting_per_thread)
         s.copy_from(settings.ls);
 }
 
 void ns_sqp::filter_linesearch_data::update_filter(const kkt_info &current_kkt, settings_t &settings) {
     const point current_point{
-        .prim_res  = current_kkt.prim_res_l1,
-        .dual_res  = current_kkt.inf_dual_res,
+        .prim_res = current_kkt.prim_res_l1,
+        .dual_res = current_kkt.inf_dual_res,
         .objective = current_kkt.penalized_obj,
     };
     points.erase(
@@ -45,7 +45,7 @@ void ns_sqp::filter_linesearch_data::update_filter(const kkt_info &current_kkt, 
 }
 
 bool ns_sqp::filter_linesearch_data::point::in_filter(const point &e, const settings_t &s) const {
-    return prim_res  >= (1.0 - s.ls.primal_gamma) * e.prim_res and
+    return prim_res >= (1.0 - s.ls.primal_gamma) * e.prim_res and
            objective >= e.objective - s.ls.dual_gamma * e.prim_res;
 }
 
@@ -103,7 +103,7 @@ ns_sqp::filter_linesearch_data::evaluate_normal_filter_step(const std::vector<po
         }
     }
 
-    if (result.switching_condition && prim_res_k <= constr_vio_min) {
+    if (!settings.in_restoration && result.switching_condition && prim_res_k <= constr_vio_min) {
         result.accepted_by_armijo = result.armijo_cond_met;
         result.accepted_by_flat_objective =
             !result.accepted_by_armijo && result.flat_objective_eligible;
@@ -116,14 +116,22 @@ ns_sqp::filter_linesearch_data::evaluate_normal_filter_step(const std::vector<po
     result.accepted_by_flat_objective =
         !result.accepted_by_filter && result.flat_objective_eligible;
     result.accepted = result.accepted_by_filter || result.accepted_by_flat_objective;
+    if (settings.verbose) {
+        if (!result.accepted) {
+            fmt::println("  trial point rejected by current point {}, by flat objective {}",
+                         result.dominated_by_filter,
+                         result.accepted_by_flat_objective);
+        }
+    }
     return result;
 }
 
 bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt,
-                                               const kkt_info &current_kkt,
-                                               settings_t &settings) {
-    auto log = [&]<typename... Args>(fmt::format_string<Args...> fmt_str, Args&&... args) {
-        if (settings.verbose) fmt::print(fmt_str, std::forward<Args>(args)...);
+                                              const kkt_info &current_kkt,
+                                              settings_t &settings) {
+    auto log = [&]<typename... Args>(fmt::format_string<Args...> fmt_str, Args &&...args) {
+        if (settings.verbose)
+            fmt::print(fmt_str, std::forward<Args>(args)...);
     };
 
     const auto eval =
@@ -213,8 +221,8 @@ void ns_sqp::step_back_alpha(filter_linesearch_per_iter_data &ls) {
 }
 
 ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
-                                                      const kkt_info &trial_kkt,
-                                                      const kkt_info &current_kkt) {
+                                                     const kkt_info &trial_kkt,
+                                                     const kkt_info &current_kkt) {
     const filter_linesearch_data::point trial_point{
         .prim_res = trial_kkt.prim_res_l1,
         .dual_res = trial_kkt.inf_dual_res,
@@ -264,19 +272,19 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     }
 
     const scalar_t current_primal = current_kkt.prim_res_l1;
-    if (settings.ls.alpha_primal <= ls.alpha_min && current_primal > settings.prim_tol) {
-        ls.stop = true;
-        ls.failure_reason = filter_linesearch_per_iter_data::failure_reason_t::tiny_step;
-        ls.recompute_approx = false;
-        if (settings.verbose)
-            fmt::print("  line search reached min step: alpha_p {:.3e} <= alpha_min {:.3e} with prim_res {:.3e}\n",
-                       settings.ls.alpha_primal, ls.alpha_min, current_primal);
-        return line_search_action::failure;
-    }
 
     if (settings.ls.max_steps > ls.step_cnt) {
         ls.step_cnt++;
         step_back_alpha(ls);
+        if (settings.ls.alpha_primal <= ls.alpha_min && current_primal > settings.prim_tol) {
+            ls.stop = true;
+            ls.failure_reason = filter_linesearch_per_iter_data::failure_reason_t::tiny_step;
+            ls.recompute_approx = false;
+            if (settings.verbose)
+                fmt::print("  line search reached min step: alpha_p {:.3e} <= alpha_min {:.3e} with prim_res {:.3e}\n",
+                           settings.ls.alpha_primal, ls.alpha_min, current_primal);
+            return line_search_action::failure;
+        }
         if (settings.verbose)
             fmt::print("  backtrack, alpha_p: {:.3e}, alpha_d: {:.3e}\n",
                        settings.ls.alpha_primal, settings.ls.alpha_dual);
@@ -287,7 +295,8 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     ls.stop = true;
     ls.failure_reason = filter_linesearch_per_iter_data::failure_reason_t::other;
     if (settings.ls.failure_strategy == linesearch_setting::failure_backup_strategy::min_step) {
-        if (settings.verbose) fmt::print("  ls failed, use min primal step...\n");
+        if (settings.verbose)
+            fmt::print("  ls failed, use min primal step...\n");
         ls.enforce_min = true;
         settings.ls.alpha_primal = ls.initial_alpha_primal * std::min(0.01 / ls.initial_alpha_primal, 1.0);
     } else {
@@ -298,7 +307,8 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
                        ls.best_trial.alpha_primal, ls.best_trial.alpha_dual);
         }
         settings.ls.alpha_primal = ls.best_trial.alpha_primal;
-        if (settings.ls.update_alpha_dual) settings.ls.alpha_dual = ls.best_trial.alpha_dual;
+        if (settings.ls.update_alpha_dual)
+            settings.ls.alpha_dual = ls.best_trial.alpha_dual;
     }
     fmt::println(" line search failed, dec_full_pred = {:.3e}, best trial primal res: {:.3e}, objective: {:.3e}\n",
                  fullstep_dec, ls.best_trial.prim_res, ls.best_trial.objective);
@@ -307,23 +317,24 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
 }
 
 ns_sqp::line_search_action ns_sqp::merit_linesearch(filter_linesearch_data &ls,
-                                                     const kkt_info &trial_kkt,
-                                                     const kkt_info &current_kkt) {
+                                                    const kkt_info &trial_kkt,
+                                                    const kkt_info &current_kkt) {
     const auto merit = [&](scalar_t prim_l1, scalar_t dual_res) -> scalar_t {
         return prim_l1 * prim_l1 + settings.ls.merit_sigma * dual_res * dual_res;
     };
 
     const scalar_t merit_trial = merit(trial_kkt.prim_res_l1, trial_kkt.avg_dual_res);
-    const scalar_t merit_k     = merit(current_kkt.prim_res_l1, current_kkt.avg_dual_res);
+    const scalar_t merit_k = merit(current_kkt.prim_res_l1, current_kkt.avg_dual_res);
 
     // On the first (full-step) trial, record merit to estimate the directional derivative.
     // dir_deriv ≈ (M(x + 1*d) - M(x)) / 1.0  (finite-difference estimate)
-    if (ls.step_cnt == 0) ls.merit_fullstep = merit_trial;
+    if (ls.step_cnt == 0)
+        ls.merit_fullstep = merit_trial;
 
     if (merit_trial < ls.best_merit_trial.merit) {
-        ls.best_merit_trial.merit        = merit_trial;
+        ls.best_merit_trial.merit = merit_trial;
         ls.best_merit_trial.alpha_primal = settings.ls.alpha_primal;
-        ls.best_merit_trial.alpha_dual   = settings.ls.alpha_dual;
+        ls.best_merit_trial.alpha_dual = settings.ls.alpha_dual;
     }
 
     if (settings.verbose)
@@ -333,9 +344,9 @@ ns_sqp::line_search_action ns_sqp::merit_linesearch(filter_linesearch_data &ls,
 
     // Armijo sufficient decrease: M(x + alpha*d) <= M(x) + c * alpha * dir_deriv
     // dir_deriv estimated from the full step (negative when making progress).
-    const scalar_t dir_deriv     = ls.merit_fullstep - merit_k;
+    const scalar_t dir_deriv = ls.merit_fullstep - merit_k;
     const scalar_t armijo_target = merit_k + settings.ls.armijo_dec_frac * settings.ls.alpha_primal * dir_deriv;
-    const bool accept            = merit_trial <= armijo_target;
+    const bool accept = merit_trial <= armijo_target;
 
     if (accept || ls.stop) {
         ls.recompute_approx = false;
@@ -354,7 +365,8 @@ ns_sqp::line_search_action ns_sqp::merit_linesearch(filter_linesearch_data &ls,
     // Line search failed — apply fallback strategy
     ls.stop = true;
     if (settings.ls.failure_strategy == linesearch_setting::failure_backup_strategy::min_step) {
-        if (settings.verbose) fmt::print("  merit ls failed, use min primal step...\n");
+        if (settings.verbose)
+            fmt::print("  merit ls failed, use min primal step...\n");
         ls.enforce_min = true;
         settings.ls.alpha_primal = ls.initial_alpha_primal * std::min(0.01 / ls.initial_alpha_primal, 1.0);
     } else {
@@ -362,7 +374,8 @@ ns_sqp::line_search_action ns_sqp::merit_linesearch(filter_linesearch_data &ls,
             fmt::print("  merit ls failed, use best trial (merit: {:.3e}, alpha_p: {:.3e})...\n",
                        ls.best_merit_trial.merit, ls.best_merit_trial.alpha_primal);
         settings.ls.alpha_primal = ls.best_merit_trial.alpha_primal;
-        if (settings.ls.update_alpha_dual) settings.ls.alpha_dual = ls.best_merit_trial.alpha_dual;
+        if (settings.ls.update_alpha_dual)
+            settings.ls.alpha_dual = ls.best_merit_trial.alpha_dual;
     }
     fmt::println(" merit line search failed, merit_k: {:.3e}, best merit: {:.3e}\n",
                  merit_k, ls.best_merit_trial.merit);

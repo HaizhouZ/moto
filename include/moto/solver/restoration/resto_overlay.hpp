@@ -108,7 +108,7 @@ class resto_prox_cost final : public generic_cost {
         vector y_ref;
         vector sigma_u_sq;
         vector sigma_y_sq;
-
+        scalar_t *mu;
         approx_data(sym_data &primal, lag_data &raw, shared_data &shared, const generic_func &f)
             : func_approx_data(primal, raw, shared, f) {}
     };
@@ -304,23 +304,11 @@ ocp_ptr_t build_restoration_overlay_problem(const ocp_ptr_t &source_prob,
 void sync_restoration_overlay_primal(node_data &outer, node_data &resto);
 void sync_restoration_overlay_duals(node_data &outer, node_data &resto);
 void seed_restoration_overlay_refs(node_data &resto,
-                                   scalar_t prox_eps = scalar_t(1.0));
+                                   scalar_t prox_eps = scalar_t(1.0),
+                                   scalar_t *mu = nullptr);
 void commit_restoration_overlay_bound_state(node_data &outer,
-                                            node_data &resto,
-                                            scalar_t reset_threshold,
-                                            scalar_t reset_value = scalar_t(1.0));
+                                            node_data &resto);
 void restore_outer_duals(array_type<vector, constr_fields> &dual,
                          const array_type<vector, constr_fields> &backup);
-void commit_bound_state(vector_ref slack,
-                        vector_ref multiplier,
-                        const vector_const_ref &resto_slack,
-                        const vector_const_ref &resto_multiplier,
-                        scalar_t reset_threshold,
-                        scalar_t reset_value);
-
-bool should_reset_multiplier(const vector_const_ref &multiplier, scalar_t threshold);
-void maybe_reset_multiplier(vector_ref multiplier, scalar_t threshold, scalar_t reset_value);
-void reset_equality_duals(array_type<vector, constr_fields> &dual, scalar_t threshold);
-void reset_equality_duals(ns_riccati::ns_riccati_data &d, scalar_t threshold);
 
 } // namespace moto::solver::restoration

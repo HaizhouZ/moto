@@ -234,6 +234,8 @@ class generic_func : public expr {
         field_write_guard();
         substitute(arg, rhs);
     }
+
+    func lowered_;
 };
 
 } // namespace moto

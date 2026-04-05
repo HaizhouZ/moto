@@ -66,6 +66,11 @@ bool is_pure_state_cost_term(const shared_expr &ex) {
 }
 
 shared_expr lower_node_term_for_edge(const shared_expr &ex, const ocp_base &prob) {
+    auto *ex_func = dynamic_cast<generic_func *>(ex.get());
+    if (ex_func->lowered_) {
+        return ex_func->lowered_;
+    }
+
     auto lowered = ex.clone();
     auto *func = dynamic_cast<generic_func *>(lowered.get());
     if (func == nullptr) {
@@ -81,7 +86,7 @@ shared_expr lower_node_term_for_edge(const shared_expr &ex, const ocp_base &prob
             func->substitute_argument(arg, arg.next());
         }
     }
-    return lowered;
+    return ex_func->lowered_ = lowered;
 }
 
 bool is_lowerable_edge_term(const shared_expr &ex) {

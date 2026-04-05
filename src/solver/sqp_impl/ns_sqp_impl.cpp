@@ -672,6 +672,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
         refresh_problem_flags();
         settings.max_iter = n_iter;
         for (size_t i_iter = kkt_last.num_iter; i_iter < n_iter;) {
+            fmt::println("======================== Iteration: {}", i_iter + 1);
             profiler_.start_iteration(i_iter);
             timed_block_start("sqp_single_iter");
             const scalar_t inf_prim_before = kkt_last.inf_prim_res;

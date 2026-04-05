@@ -156,7 +156,7 @@ struct ns_sqp {
         scalar_t rho_ineq = 1000.0;
         scalar_t restoration_improvement_frac = 0.9;
         scalar_t alpha_min_factor = 5e-2;
-        scalar_t bound_mult_reset_threshold = 1e4;
+        scalar_t bound_mult_reset_threshold = 1e3;
         scalar_t constr_mult_reset_threshold = 0.0;
     };
 

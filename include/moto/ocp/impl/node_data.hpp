@@ -57,7 +57,7 @@ struct MOTO_ALIGN_NO_SHARING node_data {
         return *sparse_[f->field()][prob_->pos(f)];
     }
 
-    auto &data(const custom_func &f) const { return shared_->get(f->uid()); }
+    // auto &data(const custom_func &f) const { return shared_->get(f->uid()); }
 
     scalar_t cost() const { return dense_->cost_; }
 

@@ -23,7 +23,7 @@ class pinCasadiModel(cpin.Model):
         super().__init__(model)
         if name:
             model.name = name
-        else:
+        else: 
             name = model.name.replace("_description", "")
             self.name = name
         self.is_floating_based: bool = self.nv > self.njoints
@@ -160,11 +160,15 @@ class pinCasadiModel(cpin.Model):
             )
         ee_des = cpin.XYZQUATToSE3(cs.vcat([self.r_des, self.quat_des]))
         ee_pos = self.data.oMf[self.ee_id]
-        return moto.constr.create(
+        c: moto.pmm_constr = moto.constr.create(
             "arm_ee_constr",
             self.pos_args + [self.r_des, self.quat_des],
             cpin.log6(ee_pos.inverse() * ee_des).np,
         )
+        return c
+        c = c.cast_soft()
+        c.rho = 1e-8
+        return c
         res = cpin.log6(ee_des.inverse() * ee_pos).np
         # res = cs.vcat([ee_pos.translation - ee_des.translation, cpin.log3(ee_des.rotation.T @ ee_pos.rotation)])
         # return moto.constr.create("ee_constr_ineq", self.pos_args + [self.r_des, self.quat_des], cs.vcat([res, -res])).cast_ineq()
@@ -338,6 +342,11 @@ def build_sqp(display: bool, n_job: int = 4):
     sqp.settings.prim_tol = 1e-3
     sqp.settings.dual_tol = 1e-3
     sqp.settings.comp_tol = 1e-3
+    sqp.settings.restoration.rho_eq = 1e3
+    sqp.settings.restoration.rho_ineq = 1e3
+    sqp.settings.restoration.rho_u = 0.0001
+    sqp.settings.restoration.rho_y = 0.0001
+    sqp.settings.ls.update_alpha_dual = False
 
     return sqp, model, ur5, cfg, horizon
 

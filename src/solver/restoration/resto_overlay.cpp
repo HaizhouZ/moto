@@ -3,12 +3,12 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
-#include <string_view>
-#include <tuple>
 #include <moto/ocp/impl/node_data.hpp>
 #include <moto/solver/ipm/ipm_constr.hpp>
 #include <moto/solver/ipm/positivity_step.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
+#include <string_view>
+#include <tuple>
 
 namespace moto::solver::restoration {
 
@@ -122,10 +122,10 @@ elastic_init_pair resto_eq_elastic_constr::initialize_elastic_pair(scalar_t c, s
 }
 
 elastic_init_ineq_scalar resto_ineq_elastic_ipm_constr::initialize_elastic_ineq_scalar(scalar_t g,
-                                                                                        scalar_t rho,
-                                                                                        scalar_t mu_bar,
-                                                                                        scalar_t t_init,
-                                                                                        scalar_t nu_t_init) {
+                                                                                       scalar_t rho,
+                                                                                       scalar_t mu_bar,
+                                                                                       scalar_t t_init,
+                                                                                       scalar_t nu_t_init) {
     if (!(rho > 0.)) {
         throw std::runtime_error("initialize_elastic_ineq_scalar requires rho > 0");
     }
@@ -138,27 +138,29 @@ elastic_init_ineq_scalar resto_ineq_elastic_ipm_constr::initialize_elastic_ineq_
     if (!(nu_t_init > 0.)) {
         throw std::runtime_error("initialize_elastic_ineq_scalar requires nu_t_init > 0");
     }
+    const scalar_t c = g + t_init;
+    const scalar_t disc = (mu_bar - rho * c) * (mu_bar - rho * c) + scalar_t(2.) * rho * mu_bar * c;
+    const scalar_t sqrt_disc = std::sqrt(std::max(disc, scalar_t(0.)));
+    const scalar_t n = (mu_bar - rho * c + sqrt_disc) / (scalar_t(2.) * rho);
+    const scalar_t p = c + n;
 
     elastic_init_ineq_scalar out;
-    const scalar_t eps = scalar_t(1e-16);
-    out.nu_t = std::max(nu_t_init, eps);
-    out.nu_p = std::max(rho - out.nu_t, eps);
-    out.nu_n = std::max(rho + out.nu_t, eps);
-    out.p = mu_bar / out.nu_p;
-    out.n = mu_bar / out.nu_n;
+    out.p = p;
+    out.n = n;
+    out.nu_p = mu_bar / out.p;
+    out.nu_n = mu_bar / out.n;
+    out.t = t_init;
+    out.nu_t = nu_t_init;
     // Center the local inequality-elastic system exactly:
     // g + t - p + n = 0, t * nu_t = mu, p * nu_p = mu, n * nu_n = mu,
     // rho - nu_t - nu_p = 0, rho + nu_t - nu_n = 0.
-    // This avoids the large initial stationarity mismatch caused by forcing p,n
-    // to an O(1) floor when rho is large.
-    out.t = std::max(-g + out.p - out.n, eps);
     return out;
 }
 
 elastic_init_ineq_scalar resto_ineq_elastic_ipm_constr::initialize_elastic_ineq_scalar(scalar_t g,
-                                                                                        scalar_t rho,
-                                                                                        scalar_t mu_bar,
-                                                                                        scalar_t nu_t_init) {
+                                                                                       scalar_t rho,
+                                                                                       scalar_t mu_bar,
+                                                                                       scalar_t nu_t_init) {
     if (!(nu_t_init > 0.)) {
         throw std::runtime_error("initialize_elastic_ineq_scalar requires nu_t_init > 0");
     }
@@ -400,7 +402,7 @@ local_residual_summary resto_eq_elastic_constr::linearized_newton_residuals(cons
 }
 
 local_residual_summary resto_ineq_elastic_ipm_constr::linearized_newton_residuals(const vector_const_ref &delta_g,
-                                                                                   const detail::ineq_local_state &ineq) {
+                                                                                  const detail::ineq_local_state &ineq) {
     local_residual_summary out;
     vector res_d = delta_g + ineq.r_d;
     for (size_t k : range(k_triplet_slots.size())) {
@@ -507,13 +509,13 @@ void fill_sigma_tangent(const sym &arg,
     if (sigma_sq.size() == 0) {
         return;
     }
-    if (arg.tdim() == arg.dim()) {
-        sigma_sq = weight * ref.array().abs().max(eps).inverse().square().min(1.);
-        return;
-    }
-    const scalar_t scale_ref = ref.size() > 0 ? ref.cwiseAbs().maxCoeff() : scalar_t(0.);
-    const scalar_t sigma = std::min(weight / std::pow(std::max(scale_ref, eps), 2), scalar_t(1.));
-    sigma_sq.setConstant(sigma);
+    // if (arg.tdim() == arg.dim()) {
+    sigma_sq = weight * ref.array().abs().max(eps).inverse().square().min(1.);
+    return;
+    // }
+    // const scalar_t scale_ref = ref.size() > 0 ? ref.cwiseAbs().maxCoeff() : scalar_t(0.);
+    // const scalar_t sigma = std::min(weight / std::pow(std::max(scale_ref, eps), 2), scalar_t(1.));
+    // sigma_sq.setConstant(sigma);
 }
 
 vector compute_tangent_delta(const sym &arg, vector_ref x, vector_ref ref) {
@@ -533,7 +535,7 @@ void copy_dual_slice(vector_ref dst, const node_data &outer, const Overlay &over
     if (overlay.source_pos() >= exprs.size()) {
         throw std::runtime_error("restoration overlay source position out of range");
     }
-    dst = outer.problem().extract(outer.dense().dual_[source_field], exprs[overlay.source_pos()]);
+    dst = outer.problem().extract(outer.dense().dual_[source_field], overlay.source());
 }
 
 template <typename Overlay>
@@ -871,7 +873,8 @@ scalar_t search_penalty_dir_deriv_from_pairs(const ApproxData &d) {
     scalar_t sum = 0.;
     for (auto slot : active_slots<ApproxData>()) {
         sum += (d.elastic.d_value[slot].array() /
-                d.elastic.value_backup[slot].array().max(scalar_t(1e-16))).sum();
+                d.elastic.value_backup[slot].array().max(scalar_t(1e-16)))
+                   .sum();
     }
     return d.ipm_cfg->mu * sum;
 }
@@ -904,9 +907,7 @@ func_approx_data_ptr_t resto_prox_cost::create_approx_data(sym_data &primal,
 void resto_prox_cost::finalize_impl() {
     generic_cost::finalize_impl();
     for (size_t i = 0; i < in_args().size(); ++i) {
-        for (size_t j = 0; j < in_args().size(); ++j) {
-            hess_sp_[i][j] = (i == j) ? sparsity::diag : sparsity::unknown;
-        }
+        hess_sp_[i][i] = sparsity::diag;
     }
 }
 
@@ -923,7 +924,7 @@ void resto_prox_cost::value_impl(func_approx_data &data) const {
             continue;
         }
         const vector delta = compute_tangent_delta(arg, x, ref);
-        value += scalar_t(0.5) * sigma.dot(delta.cwiseProduct(delta));
+        value += scalar_t(0.5) * sigma.dot(delta.cwiseProduct(delta)) * std::sqrt(d.mu[0]);
     }
     d.v_(0) += value;
 }
@@ -942,7 +943,7 @@ void resto_prox_cost::jacobian_impl(func_approx_data &data) const {
         auto ref = d.problem()->extract(ref_field, arg);
         auto sigma = d.problem()->extract_tangent(sigma_field, arg);
         const vector delta = compute_tangent_delta(arg, d[arg], ref);
-        grad.array() += (sigma.array() * delta.array()).transpose();
+        grad.array() += 0.5 * (sigma.array() * delta.array()).transpose() * std::sqrt(d.mu[0]);
         ++arg_idx;
     }
 }
@@ -960,7 +961,7 @@ void resto_prox_cost::hessian_impl(func_approx_data &data) const {
         }
         auto &sigma_field = arg.field() == __u ? d.sigma_u_sq : d.sigma_y_sq;
         auto sigma = d.problem()->extract_tangent(sigma_field, arg);
-        block.diagonal().array() += sigma.array();
+        block += sigma * std::sqrt(d.mu[0]);
     }
 }
 
@@ -1066,6 +1067,7 @@ void resto_eq_elastic_constr::initialize(data_map_t &data) const {
     if (d.ipm_cfg == nullptr) {
         throw std::runtime_error("resto_eq_elastic_constr::initialize requires ipm_cfg");
     }
+    const vector synced_multiplier = d.multiplier_;
     resto_eq_elastic_constr::resize_local_state(d.elastic, 0, d.func_.dim());
     for (Eigen::Index i = 0; i < d.base_residual.size(); ++i) {
         const auto init =
@@ -1074,7 +1076,6 @@ void resto_eq_elastic_constr::initialize(data_map_t &data) const {
         d.elastic.value[detail::slot_n](i) = init.n;
         d.elastic.dual[detail::slot_p](i) = init.z_p;
         d.elastic.dual[detail::slot_n](i) = init.z_n;
-        d.multiplier_(i) = init.lambda;
         if (resto_init_debug_enabled()) {
             fmt::print(
                 "    [resto-init:eq:{}:node={}:{}] c={:.3e} rho={:.3e} mu={:.3e} -> "
@@ -1083,9 +1084,13 @@ void resto_eq_elastic_constr::initialize(data_map_t &data) const {
                 init.p, init.n, init.z_p, init.z_n, init.lambda);
         }
     }
-    // IPOPT-style restoration initializes the equality multiplier at zero.
+    if (synced_multiplier.size() == d.multiplier_.size()) {
+        d.multiplier_ = synced_multiplier;
+    } else {
+        d.multiplier_.setZero();
+    }
     d.multiplier_.setZero();
-    d.multiplier_backup.setZero();
+    d.multiplier_backup = d.multiplier_;
     resto_eq_elastic_constr::compute_local_model(d.elastic, d.base_residual, d.multiplier_, d.rho, d.ipm_cfg->mu);
 }
 
@@ -1349,11 +1354,11 @@ void resto_ineq_elastic_ipm_constr::initialize(data_map_t &data) const {
     const scalar_t eps = scalar_t(1e-16);
     const scalar_t nu_t_upper = scalar_t(0.5) * d.rho;
     for (Eigen::Index i = 0; i < d.base_residual.size(); ++i) {
-        const scalar_t nu_t0 = std::max(std::min(nu_t_upper, d.multiplier_(i)), eps);
-        const scalar_t t0 =
-            (d.slack_init.size() == d.base_residual.size() && d.slack_init(i) > eps)
-                ? d.slack_init(i)
-                : d.ipm_cfg->mu / nu_t0;
+        const scalar_t nu_t0 = d.multiplier_(i); // std::max(std::min(nu_t_upper, d.multiplier_(i)), eps);
+        const scalar_t t0 = d.slack_init(i);
+        // (d.slack_init.size() == d.base_residual.size() && d.slack_init(i) > eps)
+        //     ? d.slack_init(i)
+        //     : d.ipm_cfg->mu / nu_t0;
         const auto init =
             resto_ineq_elastic_ipm_constr::initialize_elastic_ineq_scalar(d.base_residual(i), d.rho, d.ipm_cfg->mu, t0, nu_t0);
         d.elastic.value[detail::slot_t](i) = init.t;
@@ -1365,7 +1370,7 @@ void resto_ineq_elastic_ipm_constr::initialize(data_map_t &data) const {
             d.elastic.value[slot](i) = pair_values[k];
             d.elastic.dual[slot](i) = pair_duals[k];
         }
-        d.multiplier_(i) = init.nu_t;
+        d.multiplier_(i) = std::min(d.rho, init.nu_t);
         if (resto_init_debug_enabled()) {
             fmt::print(
                 "    [resto-init:ineq:{}:node={}:{}] g={:.3e} rho={:.3e} mu={:.3e} "
@@ -1466,7 +1471,6 @@ ocp_ptr_t build_restoration_overlay_problem(const ocp_ptr_t &source_prob,
     }
 
     auto resto_prob = std::static_pointer_cast<ocp>(source_prob->clone_base(config));
-
     var_list u_args;
     var_list y_args;
     for (const sym &arg : resto_prob->exprs(__u)) {
@@ -1481,6 +1485,12 @@ ocp_ptr_t build_restoration_overlay_problem(const ocp_ptr_t &source_prob,
     }
 
     add_overlay_group(source_prob, resto_prob, std::array{__eq_x, __eq_xu}, [&](const constr &source, size_t source_pos) {
+        return constr(new resto_eq_elastic_constr(overlay_name(*source, "resto_eq"),
+                                                  source,
+                                                  source_pos,
+                                                  settings.rho_eq));
+    });
+    add_overlay_group(source_prob, resto_prob, std::array{__eq_x_soft, __eq_xu_soft}, [&](const constr &source, size_t source_pos) {
         return constr(new resto_eq_elastic_constr(overlay_name(*source, "resto_eq"),
                                                   source,
                                                   source_pos,
@@ -1502,7 +1512,7 @@ ocp_ptr_t build_restoration_overlay_problem(const ocp_ptr_t &source_prob,
     return resto_prob;
 }
 
-void seed_restoration_overlay_refs(node_data &resto, scalar_t prox_eps) {
+void seed_restoration_overlay_refs(node_data &resto, scalar_t prox_eps, scalar_t *mu) {
     resto.for_each(__cost, [&](const resto_prox_cost &c, resto_prox_cost::approx_data &d) {
         d.u_ref = d.primal_->value_[__u];
         d.y_ref = d.primal_->value_[__y];
@@ -1524,6 +1534,7 @@ void seed_restoration_overlay_refs(node_data &resto, scalar_t prox_eps) {
                                prox_eps,
                                c.rho_y());
         }
+        d.mu = mu;
     });
 }
 
@@ -1542,73 +1553,32 @@ void sync_restoration_overlay_duals(node_data &outer, node_data &resto) {
         resto.dense().dual_[field] = outer.dense().dual_[field];
     }
     for (auto field : std::array{__eq_x_soft, __eq_xu_soft}) {
-        for_each_overlay_match<resto_eq_elastic_constr>(resto, field, [&](const resto_eq_elastic_constr &overlay,
-                                                                          resto_eq_elastic_constr::approx_data &d) {
+        for_each_overlay_match<resto_eq_elastic_constr>(resto, field, [&](const resto_eq_elastic_constr &overlay, resto_eq_elastic_constr::approx_data &d) {
             copy_dual_slice(d.multiplier_, outer, overlay);
         });
     }
     for (auto field : std::array{__ineq_x, __ineq_xu}) {
         for_each_overlay_match<resto_ineq_elastic_ipm_constr>(
-            resto, field, [&](const resto_ineq_elastic_ipm_constr &overlay,
-                              resto_ineq_elastic_ipm_constr::approx_data &d) {
+            resto, field, [&](const resto_ineq_elastic_ipm_constr &overlay, resto_ineq_elastic_ipm_constr::approx_data &d) {
                 copy_dual_slice(d.multiplier_, outer, overlay);
                 copy_ineq_slack_slice(d.slack_init, outer, overlay);
             });
     }
 }
 
-template <typename Overlay>
-void commit_ineq_bound_slice(node_data &outer,
-                             const Overlay &overlay,
-                             const vector_const_ref &resto_slack,
-                             const vector_const_ref &resto_multiplier,
-                             scalar_t reset_threshold,
-                             scalar_t reset_value) {
-    const field_t source_field = overlay.source_field();
-    if (source_field != __ineq_x && source_field != __ineq_xu) {
-        return;
-    }
-    size_t active_pos = 0;
-    bool found = false;
-    outer.for_each(source_field, [&](const generic_constr &c, func_approx_data &ad) {
-        if (found) {
-            return;
-        }
-        if (active_pos++ != overlay.source_pos()) {
-            return;
-        }
-        auto *ipm_source = dynamic_cast<const solver::ipm_constr *>(&c);
-        if (ipm_source == nullptr) {
-            found = true;
-            return;
-        }
-        auto &outer_ipm = ad.as<solver::ipm_constr::ipm_data>();
-        commit_bound_state(outer_ipm.slack_, outer_ipm.multiplier_,
-                           resto_slack, resto_multiplier,
-                           reset_threshold, reset_value);
-        outer_ipm.slack_backup_ = outer_ipm.slack_;
-        outer_ipm.multiplier_backup_ = outer_ipm.multiplier_;
-        found = true;
-    });
-    if (!found) {
-        throw std::runtime_error("restoration overlay source position out of range");
-    }
-}
-
 void commit_restoration_overlay_bound_state(node_data &outer,
-                                            node_data &resto,
-                                            scalar_t reset_threshold,
-                                            scalar_t reset_value) {
+                                            node_data &resto) {
     for (auto field : std::array{__ineq_x, __ineq_xu}) {
         for_each_overlay_match<resto_ineq_elastic_ipm_constr>(
-            resto, field, [&](const resto_ineq_elastic_ipm_constr &overlay,
-                              resto_ineq_elastic_ipm_constr::approx_data &d) {
-                commit_ineq_bound_slice(outer,
-                                        overlay,
-                                        d.elastic.value[detail::slot_t],
-                                        d.elastic.dual[detail::slot_t],
-                                        reset_threshold,
-                                        reset_value);
+            resto, field, [&](const resto_ineq_elastic_ipm_constr &overlay, resto_ineq_elastic_ipm_constr::approx_data &overlay_data) {
+                auto &outer_ipm = outer.data(overlay.source()).as<solver::ipm_constr::ipm_data>();
+                const auto &resto_slack = overlay_data.elastic.value[detail::slot_t];
+                const scalar_t mu = overlay_data.ipm_cfg->mu;
+                outer_ipm.d_slack_ = resto_slack - outer_ipm.slack_;
+                outer_ipm.d_multiplier_ = (mu - (outer_ipm.multiplier_.cwiseProduct(outer_ipm.d_slack_)).array()) / resto_slack.array() - outer_ipm.multiplier_.array();
+                outer_ipm.slack_ = resto_slack;
+                outer_ipm.slack_backup_ = outer_ipm.slack_;
+                outer_ipm.multiplier_backup_ = outer_ipm.multiplier_;
             });
     }
 }
@@ -1616,47 +1586,6 @@ void commit_restoration_overlay_bound_state(node_data &outer,
 void restore_outer_duals(array_type<vector, constr_fields> &dual,
                          const array_type<vector, constr_fields> &backup) {
     dual = backup;
-}
-
-void commit_bound_state(vector_ref slack,
-                        vector_ref multiplier,
-                        const vector_const_ref &resto_slack,
-                        const vector_const_ref &resto_multiplier,
-                        scalar_t reset_threshold,
-                        scalar_t reset_value) {
-    slack = resto_slack;
-    multiplier = resto_multiplier;
-    maybe_reset_multiplier(multiplier, reset_threshold, reset_value);
-}
-
-bool should_reset_multiplier(const vector_const_ref &multiplier, scalar_t threshold) {
-    return threshold <= 0.0 || (multiplier.size() > 0 && multiplier.cwiseAbs().maxCoeff() > threshold);
-}
-
-void maybe_reset_multiplier(vector_ref multiplier, scalar_t threshold, scalar_t reset_value) {
-    if (should_reset_multiplier(multiplier, threshold)) {
-        multiplier.setConstant(reset_value);
-    }
-}
-
-void reset_equality_duals(array_type<vector, constr_fields> &dual, scalar_t threshold) {
-    bool reset_any = false;
-    for (auto field : std::array{__eq_x, __eq_xu, __eq_x_soft, __eq_xu_soft}) {
-        if (should_reset_multiplier(dual[field], threshold)) {
-            reset_any = true;
-            break;
-        }
-    }
-    if (!reset_any) {
-        return;
-    }
-    for (auto field : std::array{__eq_x, __eq_xu, __eq_x_soft, __eq_xu_soft}) {
-        dual[field].setZero();
-    }
-}
-
-void reset_equality_duals(ns_riccati::ns_riccati_data &d, scalar_t threshold) {
-    reset_equality_duals(d.dense_->dual_, threshold);
 }
 
 } // namespace moto::solver::restoration

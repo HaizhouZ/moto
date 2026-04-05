@@ -6,6 +6,8 @@
 
 #include <moto/ocp/impl/node_data.hpp>
 #include <moto/solver/ipm/positivity_step.hpp>
+#include <moto/solver/ineq_soft.hpp>
+#include <moto/solver/ns_sqp.hpp>
 #include <moto/solver/restoration/resto_overlay.hpp>
 
 using namespace moto;
@@ -361,6 +363,73 @@ TEST_CASE("restoration overlay problem keeps dyn and replaces non-dynamics with 
     REQUIRE(ineq_overlay->source()->name() == iq->name());
 }
 
+TEST_CASE("restoration soft-equality overlays are built and keep synced multipliers through initialization") {
+    auto prob = ocp::create();
+
+    auto x = sym::state("x_resto_soft", 1);
+    prob->add(*x);
+
+    auto soft_eq = constr(new generic_constr("soft_eq", approx_order::second, 1));
+    soft_eq->field_hint().is_eq = true;
+    soft_eq->field_hint().is_soft = true;
+    dynamic_cast<generic_func &>(*soft_eq).add_argument(x);
+    soft_eq->value = [](func_approx_data &d) { d.v_(0) = d[0](0) - scalar_t(0.25); };
+    soft_eq->jacobian = [](func_approx_data &d) { d.jac_[0](0, 0) = 1.; };
+    prob->add(*soft_eq);
+
+    prob->wait_until_ready();
+
+    const auto resto_prob = build_restoration_overlay_problem(
+        prob,
+        restoration_overlay_settings{
+            .rho_u = 1e-4,
+            .rho_y = 1e-4,
+            .rho_eq = 10.0,
+            .rho_ineq = 20.0,
+        });
+
+    REQUIRE(resto_prob->num(__eq_x_soft) == 1);
+    const auto *eq_overlay = dynamic_cast<const resto_eq_elastic_constr *>(resto_prob->exprs(__eq_x_soft).front().get());
+    REQUIRE(eq_overlay != nullptr);
+    REQUIRE(eq_overlay->source()->name() == soft_eq->name());
+    REQUIRE(eq_overlay->source_field() == __eq_x_soft);
+
+    ns_sqp::data outer(prob);
+    ns_sqp::data resto(resto_prob);
+    ns_sqp::settings_t ws;
+
+    resto.for_each_constr([&](const generic_func &c, func_approx_data &fd) {
+        c.setup_workspace_data(fd, &ws);
+    });
+
+    REQUIRE(outer.dense().dual_[__eq_x_soft].size() == 1);
+    outer.dense().dual_[__eq_x_soft](0) = scalar_t(2.5);
+
+    sync_restoration_overlay_primal(outer, resto);
+    sync_restoration_overlay_duals(outer, resto);
+    seed_restoration_overlay_refs(resto, scalar_t(1.0));
+
+    bool saw_overlay = false;
+    resto.for_each(__eq_x_soft, [&](const resto_eq_elastic_constr &overlay, resto_eq_elastic_constr::approx_data &d) {
+        saw_overlay = true;
+        REQUIRE(overlay.source()->name() == soft_eq->name());
+        REQUIRE(approx_scalar(d.multiplier_(0), scalar_t(2.5)));
+    });
+    REQUIRE(saw_overlay);
+
+    resto.update_approximation(node_data::update_mode::eval_val, true);
+    solver::ineq_soft::initialize(&resto);
+
+    saw_overlay = false;
+    resto.for_each(__eq_x_soft, [&](const resto_eq_elastic_constr &overlay, resto_eq_elastic_constr::approx_data &d) {
+        saw_overlay = true;
+        REQUIRE(overlay.source()->name() == soft_eq->name());
+        REQUIRE(approx_scalar(d.multiplier_(0), scalar_t(2.5)));
+        REQUIRE(approx_scalar(d.multiplier_backup(0), scalar_t(2.5)));
+    });
+    REQUIRE(saw_overlay);
+}
+
 TEST_CASE("box helper lowers to doubled one-sided inequality rows") {
     auto [x, _y] = sym::states("x_box", 2);
     const vector lb = (vector(2) << -1.0, 0.5).finished();
@@ -615,20 +684,6 @@ TEST_CASE("positivity helper reuses consistent alpha and backup semantics") {
     REQUIRE(approx_scalar(dual(2), 0.9));
 }
 
-TEST_CASE("restoration multiplier reset helper follows threshold policy") {
-    vector multiplier(3);
-    multiplier << 1.0, -5.0, 2.0;
-
-    REQUIRE_FALSE(should_reset_multiplier(multiplier, 10.0));
-    REQUIRE(should_reset_multiplier(multiplier, 4.0));
-    REQUIRE(should_reset_multiplier(multiplier, 0.0));
-
-    maybe_reset_multiplier(multiplier, 4.0, 1.0);
-    REQUIRE(approx_scalar(multiplier(0), 1.0));
-    REQUIRE(approx_scalar(multiplier(1), 1.0));
-    REQUIRE(approx_scalar(multiplier(2), 1.0));
-}
-
 TEST_CASE("restoration exit helper restores outer dual arrays") {
     array_type<vector, constr_fields> dual;
     array_type<vector, constr_fields> backup;
@@ -645,51 +700,6 @@ TEST_CASE("restoration exit helper restores outer dual arrays") {
     for (auto f : constr_fields) {
         REQUIRE(dual[f].isApprox(backup[f]));
     }
-}
-
-TEST_CASE("restoration exit helper copies slack and resets bound multiplier when threshold exceeded") {
-    vector slack(3), multiplier(3), resto_slack(3), resto_multiplier(3);
-    slack << 1.0, 1.0, 1.0;
-    multiplier << 2.0, 2.0, 2.0;
-    resto_slack << 0.6, 0.7, 0.8;
-    resto_multiplier << 5.0, -3.0, 2.0;
-
-    commit_bound_state(slack, multiplier, resto_slack, resto_multiplier, 4.0, 1.0);
-
-    REQUIRE(slack.isApprox(resto_slack));
-    REQUIRE(approx_scalar(multiplier(0), 1.0));
-    REQUIRE(approx_scalar(multiplier(1), 1.0));
-    REQUIRE(approx_scalar(multiplier(2), 1.0));
-}
-
-TEST_CASE("restoration exit helper preserves bound multiplier when below threshold") {
-    vector slack(2), multiplier(2), resto_slack(2), resto_multiplier(2);
-    slack << 1.0, 1.0;
-    multiplier << 2.0, 2.0;
-    resto_slack << 0.6, 0.7;
-    resto_multiplier << 3.0, -2.0;
-
-    commit_bound_state(slack, multiplier, resto_slack, resto_multiplier, 4.0, 1.0);
-
-    REQUIRE(slack.isApprox(resto_slack));
-    REQUIRE(multiplier.isApprox(resto_multiplier));
-}
-
-TEST_CASE("restoration equality dual reset helper only clears equality fields") {
-    array_type<vector, constr_fields> dual;
-    dual[__dyn] = vector::Constant(2, 7.0);
-    dual[__eq_x] = vector::Constant(2, 3.0);
-    dual[__eq_xu] = vector::Constant(1, -5.0);
-    dual[__ineq_x] = vector::Constant(2, 11.0);
-    dual[__ineq_xu] = vector::Constant(1, -13.0);
-
-    reset_equality_duals(dual, 4.0);
-
-    REQUIRE(dual[__dyn].isConstant(7.0));
-    REQUIRE(dual[__eq_x].isZero());
-    REQUIRE(dual[__eq_xu].isZero());
-    REQUIRE(dual[__ineq_x].isConstant(11.0));
-    REQUIRE(dual[__ineq_xu].isConstant(-13.0));
 }
 
 TEST_CASE("restoration elastic blocks own their penalty and barrier bookkeeping") {
