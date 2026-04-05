@@ -600,6 +600,7 @@ ns_sqp::line_search_action ns_sqp::handle_globalization_failure(filter_linesearc
                 solver::ineq_soft::restore_trial_state(d);
             }
         });
+        ctx.current = compute_kkt_info();
         return line_search_action::failure;
     }
 
