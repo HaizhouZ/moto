@@ -593,6 +593,13 @@ ns_sqp::line_search_action ns_sqp::handle_globalization_failure(filter_linesearc
     }
 
     if (ls.failure_reason == filter_linesearch_per_iter_data::failure_reason_t::tiny_step) {
+        auto &graph = solver_graph();
+        graph.for_each_parallel([this](data *d) {
+            d->restore_trial_state();
+            if (use_normal_soft_phase() || in_restoration_phase()) {
+                solver::ineq_soft::restore_trial_state(d);
+            }
+        });
         return line_search_action::failure;
     }
 
