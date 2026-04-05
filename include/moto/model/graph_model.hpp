@@ -178,6 +178,12 @@ class graph_model {
         return edge;
     }
 
+    model_edge_ptr_t create_edge(const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
+        auto st = create_node();
+        auto ed = create_node();
+        return connect(st, ed, base_prob);
+    }
+
     std::vector<model_edge_ptr_t> add_path(const model_node_ptr_t &st,
                                            const model_node_ptr_t &ed,
                                            size_t n_edges,
@@ -194,6 +200,25 @@ class graph_model {
         auto prev = st;
         for (size_t i = 0; i < n_edges; ++i) {
             auto next = (i + 1 == n_edges) ? ed : create_node(prev->clone_node());
+            edges.emplace_back(connect(prev, next, base_prob));
+            prev = next;
+        }
+        return edges;
+    }
+
+    std::vector<model_edge_ptr_t> add_path(size_t n_edges,
+                                           const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
+        if (n_edges == 0) {
+            throw std::invalid_argument("graph_model::add_path expects n_edges >= 1");
+        }
+        auto st = create_node();
+        auto ed = create_node();
+        reserve(state_->nodes.size() + n_edges - 1, state_->edges.size() + n_edges);
+        std::vector<model_edge_ptr_t> edges;
+        edges.reserve(n_edges);
+        auto prev = st;
+        for (size_t i = 0; i < n_edges; ++i) {
+            auto next = (i + 1 == n_edges) ? ed : create_node();
             edges.emplace_back(connect(prev, next, base_prob));
             prev = next;
         }
