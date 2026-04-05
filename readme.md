@@ -26,7 +26,7 @@
  make install -j 12
 ```
 
-1. To achieve the optimal performance, please use `-march=native` and `-O3` (**must be consistent with casadi/pinocchio/blasfeo**). 
+1. To achieve the optimal performance, please use `WITH_NATIVE_OPT=ON` and `-O3` (**must be consistent with casadi/pinocchio/blasfeo**) and `CMAKE_BUILD_TYPE=Release`
 2. For AMD Ryzen ZEN4 AVX512, please use `GCC >= 13.2`.
 
 ## Run

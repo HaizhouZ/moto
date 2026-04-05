@@ -414,6 +414,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         result.result = iter_result_t::restoration_failed;
     }
     if (settings.verbose) {
+        fmt::print("[resto]: primal residual: {} before {}\n", result.prim_res_l1, kkt_before.prim_res_l1);
         fmt::print("=== leave restoration: {} ===\n\n",
                    resto_accept ? "success" :
                                   (result.result == iter_result_t::infeasible_stationary ? "infeasible_stationary" :
