@@ -136,7 +136,7 @@ class graph_model {
 
     edge_ocp_ptr_t compose_interval(const model_edge_ptr_t &edge_h,
                                     const interval_compose_options &opts) const;
-                                    
+
     // Clone expr, substitute any __x args to __y (x_terminal → incoming y), cache in lowered_.
     static void lower_expr_into(const shared_expr &expr, edge_ocp &composed);
 
