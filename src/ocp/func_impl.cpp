@@ -9,6 +9,13 @@
 
 namespace moto {
 
+namespace {
+bool lowering_trace_enabled() {
+    static const bool enabled = std::getenv("MOTO_TRACE_COMPOSE") != nullptr;
+    return enabled;
+}
+} // namespace
+
 func_approx_data_ptr_t generic_func::create_approx_data(sym_data &primal, lag_data &raw, shared_data &shared) const {
     if (field() - __dyn >= field::num_func)
         throw std::runtime_error(fmt::format("create_approx_data cannot be called for func {} type {}",
@@ -77,6 +84,57 @@ void generic_func::substitute(const sym &arg, const sym &rhs) {
     *in_arg_it = rhs;
     // update the dep_ to point to the new sym
     std::replace(dep_.begin(), dep_.end(), arg, rhs);
+}
+
+bool generic_func::has_u_arg() const {
+    return std::any_of(in_args_.begin(), in_args_.end(),
+                       [](const sym &arg) { return arg.field() == __u; });
+}
+
+bool generic_func::has_pure_x_primal_args() const {
+    bool has_x = false;
+    for (const sym &arg : in_args_) {
+        if (!in_field(arg.field(), primal_fields)) {
+            continue;
+        }
+        if (arg.field() != __x) {
+            return false;
+        }
+        has_x = true;
+    }
+    return has_x;
+}
+
+void generic_func::lower_x_to_y_in_place(std::string_view context, size_t problem_uid) {
+    for (const sym &arg : in_args_) {
+        if (arg.field() != __x) {
+            continue;
+        }
+        if (lowering_trace_enabled()) {
+            if (problem_uid == static_cast<size_t>(-1)) {
+                fmt::print("lowering {}: {} -> {} (x -> y)\n",
+                           context, arg.name(), arg.next()->name());
+            } else {
+                fmt::print("lowering {} in composed ocp uid {}: {} -> {} (x -> y)\n",
+                           context, problem_uid, arg.name(), arg.next()->name());
+            }
+        }
+        substitute_argument(arg, arg.next());
+    }
+}
+
+shared_expr generic_func::lower_expr_x_to_y_cached(std::string_view context, size_t problem_uid) {
+    if (lowered_) {
+        return lowered_;
+    }
+
+    shared_expr lowered_expr(clone());
+    auto *lowered_func = dynamic_cast<generic_func *>(lowered_expr.get());
+    if (lowered_func != nullptr) {
+        lowered_func->lower_x_to_y_in_place(context, problem_uid);
+    }
+    lowered_ = lowered_expr;
+    return lowered_;
 }
 
 void generic_func::set_from_casadi(const var_inarg_list &in_args, const cs::SX &out) {

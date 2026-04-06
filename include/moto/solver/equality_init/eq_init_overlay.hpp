@@ -17,7 +17,6 @@ class eq_init_pmm_constr final : public pmm_constr {
   public:
     eq_init_pmm_constr(const std::string &name,
                        const constr &source,
-                       size_t source_pos,
                        scalar_t rho);
 
     void value_impl(func_approx_data &data) const override;
@@ -26,13 +25,11 @@ class eq_init_pmm_constr final : public pmm_constr {
 
     const constr &source() const { return source_; }
     field_t source_field() const { return source_->field(); }
-    size_t source_pos() const { return source_pos_; }
 
     DEF_DEFAULT_CLONE(eq_init_pmm_constr)
 
   private:
     constr source_;
-    size_t source_pos_ = 0;
 };
 
 ocp_ptr_t build_equality_init_overlay_problem(const ocp_ptr_t &source_prob,

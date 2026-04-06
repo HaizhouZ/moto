@@ -1,5 +1,6 @@
 #include <moto/solver/equality_init/eq_init_overlay.hpp>
 
+#include <algorithm>
 #include <moto/ocp/impl/node_data.hpp>
 #include <moto/solver/ipm/ipm_constr.hpp>
 
@@ -27,34 +28,23 @@ std::string overlay_name(const generic_func &source, std::string_view suffix) {
 
 template <typename Overlay>
 void copy_dual_slice(vector_ref dst, const node_data &outer, const Overlay &overlay) {
-    const field_t source_field = overlay.source_field();
-    const auto &exprs = outer.problem().exprs(source_field);
-    if (overlay.source_pos() >= exprs.size()) {
-        throw std::runtime_error("equality-init overlay source position out of range");
-    }
-    dst = outer.problem().extract(outer.dense().dual_[source_field], exprs[overlay.source_pos()]);
+    const auto &source_data = outer.data(overlay.source());
+    dst = const_cast<func_approx_data &>(source_data).template as<generic_constr::approx_data>().multiplier_;
 }
 
 template <typename Overlay>
 void commit_dual_slice(node_data &outer, const Overlay &overlay, const vector_const_ref &src) {
-    const field_t source_field = overlay.source_field();
-    auto &exprs = outer.problem().exprs(source_field);
-    if (overlay.source_pos() >= exprs.size()) {
-        throw std::runtime_error("equality-init overlay source position out of range");
-    }
-    auto dst = outer.problem().extract(outer.dense().dual_[source_field], exprs[overlay.source_pos()]);
-    dst = src;
+    auto &source_data = outer.data(overlay.source());
+    source_data.template as<generic_constr::approx_data>().multiplier_ = src;
 }
 
 } // namespace
 
 eq_init_pmm_constr::eq_init_pmm_constr(const std::string &name,
                                        const constr &source,
-                                       size_t source_pos,
                                        scalar_t rho)
     : pmm_constr(name, approx_order::second, source->dim()),
-      source_(source),
-      source_pos_(source_pos) {
+    source_(source) {
     this->rho = rho;
     field_hint().is_eq = true;
     field_hint().is_soft = true;
@@ -92,20 +82,16 @@ ocp_ptr_t build_equality_init_overlay_problem(const ocp_ptr_t &source_prob,
 
     auto overlay_prob = std::static_pointer_cast<ocp>(source_prob->clone_base(config));
     for (auto field : std::array{__eq_x, __eq_xu}) {
-        size_t source_pos = 0;
         for (const shared_expr &expr : source_prob->exprs(field)) {
             auto source = std::dynamic_pointer_cast<generic_constr>(expr);
             if (!source) {
-                ++source_pos;
                 continue;
             }
             auto overlay = constr(new eq_init_pmm_constr(
                 overlay_name(*source, "eq_init_pmm"),
                 source,
-                source_pos,
                 settings.rho_eq));
             overlay_prob->add(*overlay);
-            ++source_pos;
         }
     }
 

@@ -9,19 +9,15 @@ namespace moto {
 INIT_UID_(ocp_base);
 
 namespace {
-bool compose_trace_enabled() {
-    static const bool enabled = std::getenv("MOTO_TRACE_COMPOSE") != nullptr;
-    return enabled;
+bool maybe_func_field(field_t f) {
+    return in_field(f, func_fields) || f == __undefined;
 }
 
 bool is_path_state_term(const shared_expr &ex) {
-    if (!ex) {
+    if (!ex || !maybe_func_field(ex->field())) {
         return false;
     }
-    const auto *func = dynamic_cast<const generic_func *>(ex.get());
-    if (func == nullptr) {
-        return false;
-    }
+    const auto &func = ex.as<generic_func>();
     const bool is_supported_field =
         ex->field() == __eq_x ||
         ex->field() == __eq_x_soft ||
@@ -30,7 +26,7 @@ bool is_path_state_term(const shared_expr &ex) {
         return false;
     }
     bool has_x = false;
-    for (const sym &arg : func->in_args()) {
+    for (const sym &arg : func.in_args()) {
         if (arg.field() == __u || arg.field() == __y) {
             return false;
         }
@@ -45,16 +41,12 @@ bool is_pure_state_cost_term(const shared_expr &ex) {
     if (!ex || ex->field() != __cost) {
         return false;
     }
-    const auto *cost_expr = dynamic_cast<const generic_cost *>(ex.get());
-    if (cost_expr != nullptr && cost_expr->terminal_add()) {
+    if (ex.as<generic_cost>().terminal_add()) {
         return false;
     }
-    const auto *func = dynamic_cast<const generic_func *>(ex.get());
-    if (func == nullptr) {
-        return false;
-    }
+    const auto &func = ex.as<generic_func>();
     bool has_x = false;
-    for (const sym &arg : func->in_args()) {
+    for (const sym &arg : func.in_args()) {
         if (arg.field() == __u || arg.field() == __y) {
             return false;
         }
@@ -66,27 +58,9 @@ bool is_pure_state_cost_term(const shared_expr &ex) {
 }
 
 shared_expr lower_node_term_for_edge(const shared_expr &ex, const ocp_base &prob) {
-    auto *ex_func = dynamic_cast<generic_func *>(ex.get());
-    if (ex_func->lowered_) {
-        return ex_func->lowered_;
-    }
-
-    auto lowered = ex.clone();
-    auto *func = dynamic_cast<generic_func *>(lowered.get());
-    if (func == nullptr) {
-        return lowered;
-    }
-    auto args = func->in_args();
-    for (const sym &arg : args) {
-        if (arg.field() == __x) {
-            if (compose_trace_enabled()) {
-                fmt::print("lowering node term {} in composed ocp uid {} during edge compose: {} -> {} (x_k -> y_k storage)\n",
-                           ex->name(), prob.uid(), arg.name(), arg.next()->name());
-            }
-            func->substitute_argument(arg, arg.next());
-        }
-    }
-    return ex_func->lowered_ = lowered;
+    return ex.as<generic_func>().lower_expr_x_to_y_cached(
+        fmt::format("node term {} during edge compose", ex->name()),
+        prob.uid());
 }
 
 bool is_lowerable_edge_term(const shared_expr &ex) {

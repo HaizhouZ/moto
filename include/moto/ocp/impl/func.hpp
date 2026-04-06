@@ -5,6 +5,7 @@
 #include <moto/ocp/impl/func_data.hpp>
 #include <moto/utils/movable_ptr.hpp>
 #include <moto/utils/unique.hpp>
+#include <string_view>
 
 namespace moto {
 class func_codegen;
@@ -234,6 +235,13 @@ class generic_func : public expr {
         field_write_guard();
         substitute(arg, rhs);
     }
+
+    bool has_u_arg() const;
+    bool has_pure_x_primal_args() const;
+    void lower_x_to_y_in_place(std::string_view context = {},
+                               size_t problem_uid = static_cast<size_t>(-1));
+    shared_expr lower_expr_x_to_y_cached(std::string_view context = {},
+                                         size_t problem_uid = static_cast<size_t>(-1));
 
     func lowered_;
 };

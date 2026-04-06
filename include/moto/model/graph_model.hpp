@@ -3,9 +3,7 @@
 
 #include <memory>
 #include <stdexcept>
-#include <cstdlib>
 #include <functional>
-#include <typeindex>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -17,11 +15,6 @@
 #include <moto/ocp/sym.hpp>
 
 namespace moto::model {
-
-inline bool compose_trace_enabled() {
-    static const bool enabled = std::getenv("MOTO_TRACE_COMPOSE") != nullptr;
-    return enabled;
-}
 
 class graph_model;
 struct graph_model_state;
@@ -35,35 +28,25 @@ struct graph_model_state {
     std::vector<model_node_ptr_t> nodes;
     std::vector<model_edge_ptr_t> edges;
     bool dirty = true;
+    // Typed runtime slot for the realized graph (e.g. directed_graph<node_type>).
+    // Subclasses of graph_model_state may add their own typed runtime slots.
     std::shared_ptr<void> realized_runtime;
-    std::type_index realized_runtime_type = typeid(void);
+
     void reserve(size_t node_capacity, size_t edge_capacity) {
-        if (node_capacity > nodes.capacity()) {
-            nodes.reserve(node_capacity);
-        }
-        if (edge_capacity > edges.capacity()) {
-            edges.reserve(edge_capacity);
-        }
+        if (node_capacity > nodes.capacity()) nodes.reserve(node_capacity);
+        if (edge_capacity > edges.capacity()) edges.reserve(edge_capacity);
     }
-    bool has_incoming_edge(size_t node_id, size_t exclude_edge_id = static_cast<size_t>(-1)) const;
-    bool has_outgoing_edge(size_t node_id, size_t exclude_edge_id = static_cast<size_t>(-1)) const;
 
     template <typename Runtime, typename... Args>
     std::shared_ptr<Runtime> ensure_runtime(Args &&...args) {
-        if (!realized_runtime || realized_runtime_type != typeid(Runtime)) {
+        if (!realized_runtime) {
             realized_runtime = std::make_shared<Runtime>(std::forward<Args>(args)...);
-            realized_runtime_type = typeid(Runtime);
         }
         return std::static_pointer_cast<Runtime>(realized_runtime);
     }
 
-    template <typename Runtime>
-    std::shared_ptr<Runtime> runtime_as() const {
-        if (!realized_runtime || realized_runtime_type != typeid(Runtime)) {
-            return {};
-        }
-        return std::static_pointer_cast<Runtime>(realized_runtime);
-    }
+    bool has_incoming_edge(size_t node_id, size_t exclude_edge_id = static_cast<size_t>(-1)) const;
+    bool has_outgoing_edge(size_t node_id, size_t exclude_edge_id = static_cast<size_t>(-1)) const;
 
     size_t find_node_id(const node_ocp_ptr_t &prob) const {
         if (!prob) {
@@ -94,7 +77,6 @@ class model_node : public node_ocp {
     }
 
     explicit operator bool() const noexcept { return id_ != static_cast<size_t>(-1); }
-
     size_t id() const noexcept { return id_; }
 };
 
@@ -116,7 +98,6 @@ class model_edge : public edge_ocp {
     }
 
     explicit operator bool() const noexcept { return id_ != static_cast<size_t>(-1); }
-
     size_t id() const noexcept { return id_; }
     size_t st_id() const noexcept { return st_id_; }
     size_t ed_id() const noexcept { return ed_id_; }
@@ -149,22 +130,6 @@ class graph_model {
     graph_model() : state_(std::make_shared<graph_model_state>()) {}
     explicit graph_model(std::shared_ptr<graph_model_state> state) : state_(std::move(state)) {}
 
-    static var_list vars_from_prob(const ocp_base_ptr_t &prob, field_t field) {
-        if (!prob) {
-            return {};
-        }
-        var_list out;
-        out.reserve(prob->exprs(field).size());
-        for (const shared_expr &expr : prob->exprs(field)) {
-            const auto *s = dynamic_cast<const sym *>(expr.get());
-            if (s == nullptr) {
-                continue;
-            }
-            out.emplace_back(const_cast<sym &>(*s));
-        }
-        return out;
-    }
-
     void reserve(size_t node_capacity, size_t edge_capacity) {
         state_->reserve(node_capacity, edge_capacity);
     }
@@ -176,6 +141,14 @@ class graph_model {
         node->id_ = state_->nodes.size();
         state_->nodes.emplace_back(node);
         return node;
+    }
+
+    // Backward-compatible helper for bindings/examples: create a standalone edge
+    // with auto-created source and sink nodes.
+    model_edge_ptr_t create_edge(const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
+        auto st = create_node();
+        auto ed = create_node();
+        return connect(st, ed, base_prob);
     }
 
     model_edge_ptr_t connect(const model_node_ptr_t &st,
@@ -194,71 +167,41 @@ class graph_model {
         return edge;
     }
 
-    model_edge_ptr_t create_edge(const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
-        auto st = create_node();
-        auto ed = create_node();
-        return connect(st, ed, base_prob);
-    }
-
+    // Add a chain of n_edges edges from st to ed (creates n_edges-1 intermediate nodes).
+    // Overloads: omit ed to auto-create the sink; omit both to auto-create source and sink.
     std::vector<model_edge_ptr_t> add_path(const model_node_ptr_t &st,
                                            const model_node_ptr_t &ed,
                                            size_t n_edges,
                                            const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
         validate_node(st);
         validate_node(ed);
-        if (n_edges == 0) {
-            throw std::invalid_argument("graph_model::add_path expects n_edges >= 1");
-        }
-        // A path with n_edges introduces n_edges - 1 intermediate key nodes and n_edges edges.
-        reserve(state_->nodes.size() + n_edges - 1, state_->edges.size() + n_edges);
-        std::vector<model_edge_ptr_t> edges;
-        edges.reserve(n_edges);
-        auto prev = st;
-        for (size_t i = 0; i < n_edges; ++i) {
-            auto next = (i + 1 == n_edges) ? ed : create_node(prev->clone_node());
-            edges.emplace_back(connect(prev, next, base_prob));
-            prev = next;
-        }
-        return edges;
+        return add_path_impl(st, ed, n_edges, base_prob);
+    }
+
+    // Convenience overloads: create endpoint nodes from node problems, then build a path.
+    std::vector<model_edge_ptr_t> add_path(const node_ocp_ptr_t &st_prob,
+                                           const node_ocp_ptr_t &ed_prob,
+                                           size_t n_edges,
+                                           const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
+        return add_path(create_node(st_prob), create_node(ed_prob), n_edges, base_prob);
+    }
+
+    std::vector<model_edge_ptr_t> add_path(const node_ocp_ptr_t &st_prob,
+                                           size_t n_edges,
+                                           const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
+        return add_path(create_node(st_prob), create_node(), n_edges, base_prob);
     }
 
     std::vector<model_edge_ptr_t> add_path(const model_node_ptr_t &st,
                                            size_t n_edges,
                                            const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
         validate_node(st);
-        if (n_edges == 0) {
-            throw std::invalid_argument("graph_model::add_path expects n_edges >= 1");
-        }
-        auto ed = create_node();
-        reserve(state_->nodes.size() + n_edges - 1, state_->edges.size() + n_edges);
-        std::vector<model_edge_ptr_t> edges;
-        edges.reserve(n_edges);
-        auto prev = st;
-        for (size_t i = 0; i < n_edges; ++i) {
-            auto next = (i + 1 == n_edges) ? ed : create_node(prev->clone_node());
-            edges.emplace_back(connect(prev, next, base_prob));
-            prev = next;
-        }
-        return edges;
+        return add_path_impl(st, create_node(), n_edges, base_prob);
     }
 
     std::vector<model_edge_ptr_t> add_path(size_t n_edges,
                                            const edge_ocp_ptr_t &base_prob = edge_ocp::create()) {
-        if (n_edges == 0) {
-            throw std::invalid_argument("graph_model::add_path expects n_edges >= 1");
-        }
-        auto st = create_node();
-        auto ed = create_node();
-        reserve(state_->nodes.size() + n_edges - 1, state_->edges.size() + n_edges);
-        std::vector<model_edge_ptr_t> edges;
-        edges.reserve(n_edges);
-        auto prev = st;
-        for (size_t i = 0; i < n_edges; ++i) {
-            auto next = (i + 1 == n_edges) ? ed : create_node();
-            edges.emplace_back(connect(prev, next, base_prob));
-            prev = next;
-        }
-        return edges;
+        return add_path_impl(create_node(), create_node(), n_edges, base_prob);
     }
 
     const model_node_ptr_t &node(size_t id) const { return state_->nodes.at(id); }
@@ -269,23 +212,12 @@ class graph_model {
         auto composed = node_h->clone_node();
         ocp::active_status_config config;
         for (size_t f = 0; f < field::num; ++f) {
+            const auto ff = static_cast<field_t>(f);
+            if (!in_field(ff, func_fields)) continue;
             for (const shared_expr &expr : composed->exprs(f)) {
-                const auto *cost_expr = dynamic_cast<const generic_cost *>(expr.get());
-                const auto *constr_expr = dynamic_cast<const generic_constr *>(expr.get());
-                if ((cost_expr == nullptr || !cost_expr->terminal_add()) &&
-                    (constr_expr == nullptr || !constr_expr->terminal_add())) {
-                    continue;
-                }
-                const auto *func = dynamic_cast<const generic_func *>(expr.get());
-                if (func == nullptr) {
-                    continue;
-                }
-                const bool depends_on_u = std::any_of(func->in_args().begin(), func->in_args().end(), [](const sym &arg) {
-                    return arg.field() == __u;
-                });
-                if (!depends_on_u) {
-                    continue;
-                }
+                if (!is_terminal_expr(expr, ff)) continue;
+                const bool depends_on_u = expr.as<generic_func>().has_u_arg();
+                if (!depends_on_u) continue;
                 fmt::print(stderr,
                            "warning: terminal node term {} depends on u and cannot be applied on a terminal x/u node; ignoring it\n",
                            expr->name());
@@ -299,11 +231,8 @@ class graph_model {
         return composed;
     }
 
+    // Python binding entry point — compose a single edge into a formulation.
     edge_ocp_ptr_t compose(const model_edge_ptr_t &edge_h) const {
-        return compose_interval(edge_h);
-    }
-
-    edge_ocp_ptr_t compose_interval(const model_edge_ptr_t &edge_h) const {
         return compose_interval(edge_h, interval_compose_options{});
     }
 
@@ -321,77 +250,7 @@ class graph_model {
         auto composed = edge_ocp::compose(st_node_prob, edge_h, node_ocp_ptr_t{}, false);
         if (opts.materialize_sink_terms) {
             if (const auto &sink_node = edge_h->ed_node_prob()) {
-                for (size_t f = 0; f < field::num; ++f) {
-                    if (f == __dyn) {
-                        continue;
-                    }
-                    for (const shared_expr &expr : sink_node->exprs(f)) {
-                        const auto *cost_expr = dynamic_cast<const generic_cost *>(expr.get());
-                        const auto *constr_expr = dynamic_cast<const generic_constr *>(expr.get());
-                        const auto *func = dynamic_cast<const generic_func *>(expr.get());
-                        if ((cost_expr == nullptr && constr_expr == nullptr) || func == nullptr) {
-                            continue;
-                        }
-                        const bool terminal_term =
-                            (cost_expr != nullptr && cost_expr->terminal_add()) ||
-                            (constr_expr != nullptr && constr_expr->terminal_add());
-                        if (terminal_term && !opts.include_terminal_sink_terms) {
-                            continue;
-                        }
-                        bool lowerable_term = true;
-                        bool needs_lower_to_y = false;
-                        bool has_u = false;
-                        for (const sym &arg : func->in_args()) {
-                            if (arg.field() == __x) {
-                                needs_lower_to_y = true;
-                                continue;
-                            }
-                            if (arg.field() == __y || arg.field() == __p || arg.field() == __s) {
-                                continue;
-                            }
-                            if (arg.field() == __u) {
-                                has_u = true;
-                            }
-                            lowerable_term = false;
-                            break;
-                        }
-                        if (terminal_term && has_u) {
-                            fmt::print(stderr,
-                                       "warning: terminal node term {} depends on u and cannot be lowered onto the final edge; ignoring it\n",
-                                       expr->name());
-                            continue;
-                        }
-                        if (!terminal_term && f != __cost) {
-                            continue;
-                        }
-                        if (!lowerable_term) {
-                            continue;
-                        }
-                        auto *ex_func = dynamic_cast<generic_func *>(expr.get());
-                        if (ex_func->lowered_) {
-                            composed->add(shared_expr(ex_func->lowered_));
-                            continue;
-                        }
-                        auto lowered = expr.clone();
-                        auto *lowered_func = dynamic_cast<generic_func *>(lowered.get());
-                        if (lowered_func == nullptr) {
-                            continue;
-                        }
-                        if (needs_lower_to_y) {
-                            for (const sym &arg : lowered_func->in_args()) {
-                                if (arg.field() == __x) {
-                                    if (compose_trace_enabled()) {
-                                        fmt::print("materializing sink-node term {} in composed ocp uid {}: {} -> {} (x_terminal -> incoming y)\n",
-                                                   expr->name(), composed->uid(), arg.name(), arg.next()->name());
-                                    }
-                                    lowered_func->substitute_argument(arg, arg.next());
-                                }
-                            }
-                        }
-                        ex_func->lowered_ = lowered;
-                        composed->add(lowered);
-                    }
-                }
+                materialize_sink_terms(*sink_node, *composed, opts.include_terminal_sink_terms);
             }
         }
         composed->wait_until_ready();
@@ -403,14 +262,12 @@ class graph_model {
         out.reserve(state_->edges.size());
         for (const auto &edge_h : state_->edges) {
             validate_edge(edge_h);
-            const bool sink_without_outgoing = !state_->has_outgoing_edge(edge_h->ed_id_, edge_h->id_);
-            auto composed = compose_interval(edge_h,
-                                             {
-                                                 .materialize_sink_terms = sink_without_outgoing,
-                                                 .include_terminal_sink_terms = false,
-                                             });
-            // Materialize/finalize sequentially so repeated lowered clones with the same
-            // generated function name do not race in asynchronous codegen.
+            const bool sink_final = !state_->has_outgoing_edge(edge_h->ed_id_, edge_h->id_);
+            auto composed = compose_interval(edge_h, {
+                .materialize_sink_terms = sink_final,
+                .include_terminal_sink_terms = false,
+            });
+            // Finalize sequentially: lowered clones share a codegen name and must not race.
             composed->wait_until_ready();
             out.emplace_back(std::move(composed));
         }
@@ -419,98 +276,58 @@ class graph_model {
 
     template <typename Graph, typename NodeFactory>
     void realize_into(Graph &graph, NodeFactory &&node_factory) const {
-        using node_factory_result = std::invoke_result_t<NodeFactory &, ocp_ptr_t>;
-        using realized_node_type = std::remove_reference_t<decltype(graph.add(std::declval<node_factory_result>()))>;
+        using realized_node_type = std::remove_reference_t<decltype(graph.add(
+            std::declval<std::invoke_result_t<NodeFactory &, ocp_ptr_t>>()))>;
         using realized_node_ptr = realized_node_type *;
+
         graph.clear();
         const size_t num_nodes = state_->nodes.size();
         const size_t num_edges = state_->edges.size();
-        std::vector<realized_node_ptr> realized_nodes_by_edge(num_edges, nullptr);
-        std::vector<std::vector<size_t>> incoming_edge_ids(num_nodes);
-        std::vector<std::vector<size_t>> outgoing_edge_ids(num_nodes);
-        std::vector<size_t> incoming_edge_count(num_nodes, 0);
-        std::vector<size_t> outgoing_edge_count(num_nodes, 0);
-        std::vector<size_t> edge_source_node_ids(num_edges);
-        std::vector<size_t> edge_sink_node_ids(num_edges);
-        std::vector<bool> sink_without_outgoing_by_edge(num_edges, false);
 
-        for (size_t edge_id = 0; edge_id < num_edges; ++edge_id) {
-            const auto &edge_h = state_->edges.at(edge_id);
-            validate_edge(edge_h);
-            const size_t st_node_id = edge_h->st_id();
-            const size_t ed_node_id = edge_h->ed_id();
-            ++incoming_edge_count.at(ed_node_id);
-            ++outgoing_edge_count.at(st_node_id);
-            edge_source_node_ids.at(edge_id) = st_node_id;
-            edge_sink_node_ids.at(edge_id) = ed_node_id;
+        // Build per-node adjacency in one pass. Edges are valid by construction from connect().
+        std::vector<std::vector<size_t>> incoming(num_nodes), outgoing(num_nodes);
+        for (size_t eid = 0; eid < num_edges; ++eid) {
+            incoming[state_->edges[eid]->ed_id()].push_back(eid);
+            outgoing[state_->edges[eid]->st_id()].push_back(eid);
         }
 
-        for (size_t node_id = 0; node_id < num_nodes; ++node_id) {
-            incoming_edge_ids.at(node_id).reserve(incoming_edge_count.at(node_id));
-            outgoing_edge_ids.at(node_id).reserve(outgoing_edge_count.at(node_id));
+        // Compose and realize each edge into a graph node.
+        std::vector<realized_node_ptr> realized(num_edges, nullptr);
+        for (size_t eid = 0; eid < num_edges; ++eid) {
+            const bool sink_final = outgoing[state_->edges[eid]->ed_id()].empty();
+            auto formulation = compose_interval(state_->edges[eid], {
+                .materialize_sink_terms = sink_final,
+                .include_terminal_sink_terms = sink_final,
+            });
+            realized[eid] = &graph.add(std::invoke(std::forward<NodeFactory>(node_factory),
+                                                    std::static_pointer_cast<ocp>(formulation)));
         }
 
-        for (size_t edge_id = 0; edge_id < num_edges; ++edge_id) {
-            incoming_edge_ids.at(edge_sink_node_ids.at(edge_id)).push_back(edge_id);
-            outgoing_edge_ids.at(edge_source_node_ids.at(edge_id)).push_back(edge_id);
-        }
-
-        for (size_t edge_id = 0; edge_id < num_edges; ++edge_id) {
-            sink_without_outgoing_by_edge.at(edge_id) = outgoing_edge_ids.at(edge_sink_node_ids.at(edge_id)).empty();
-        }
-
-        for (size_t edge_id = 0; edge_id < num_edges; ++edge_id) {
-            const auto &edge_h = state_->edges.at(edge_id);
-            const bool sink_without_outgoing = sink_without_outgoing_by_edge.at(edge_id);
-            auto formulation = compose_interval(edge_h,
-                                               {
-                                                   .materialize_sink_terms = sink_without_outgoing,
-                                                   .include_terminal_sink_terms = sink_without_outgoing,
-                                               });
-            auto &realized_node = graph.add(std::invoke(std::forward<NodeFactory>(node_factory),
-                                                        std::static_pointer_cast<ocp>(formulation)));
-            realized_nodes_by_edge[edge_id] = &realized_node;
-        }
-
-        std::vector<realized_node_ptr> head_candidates;
-        std::vector<realized_node_ptr> tail_candidates;
-        for (size_t node_id = 0; node_id < num_nodes; ++node_id) {
-            const auto &incoming = incoming_edge_ids.at(node_id);
-            const auto &outgoing = outgoing_edge_ids.at(node_id);
-            if (incoming.empty() && outgoing.empty()) {
-                continue;
-            }
-            if (incoming.empty()) {
-                if (outgoing.size() != 1) {
-                    throw std::runtime_error("graph_model::realize_into expects a unique outgoing edge from the source model node");
-                }
-                head_candidates.push_back(realized_nodes_by_edge.at(outgoing.front()));
-                continue;
-            }
-            if (outgoing.empty()) {
-                if (incoming.size() != 1) {
-                    throw std::runtime_error("graph_model::realize_into expects a unique incoming edge for a sink model node");
-                }
-                tail_candidates.push_back(realized_nodes_by_edge.at(incoming.front()));
-                continue;
-            }
-            for (const size_t incoming_edge_id : incoming) {
-                for (const size_t outgoing_edge_id : outgoing) {
-                    graph.connect(*realized_nodes_by_edge.at(incoming_edge_id),
-                                  *realized_nodes_by_edge.at(outgoing_edge_id),
-                                  {2, true, true});
-                }
+        // Wire up the graph topology and find the unique head and tail.
+        realized_node_ptr head = nullptr, tail = nullptr;
+        for (size_t nid = 0; nid < num_nodes; ++nid) {
+            const auto &inc = incoming[nid];
+            const auto &out = outgoing[nid];
+            if (inc.empty() && out.empty()) continue;
+            if (inc.empty()) {
+                if (out.size() != 1) throw std::runtime_error("graph_model::realize_into expects a unique outgoing edge from the source model node");
+                if (head) throw std::runtime_error("graph_model::realize_into expects a single source path");
+                head = realized[out.front()];
+            } else if (out.empty()) {
+                if (inc.size() != 1) throw std::runtime_error("graph_model::realize_into expects a unique incoming edge for a sink model node");
+                if (tail) throw std::runtime_error("graph_model::realize_into expects a single sink path");
+                tail = realized[inc.front()];
+            } else {
+                for (size_t in_eid : inc)
+                    for (size_t out_eid : out)
+                        graph.connect(*realized[in_eid], *realized[out_eid], {2, true, true});
             }
         }
 
-        if (head_candidates.size() != 1) {
-            throw std::runtime_error("graph_model::realize_into expects a single source path");
-        }
-        if (tail_candidates.size() != 1) {
-            throw std::runtime_error("graph_model::realize_into expects a single sink path");
-        }
-        graph.set_head(*head_candidates.front());
-        graph.set_tail(*tail_candidates.front());
+        if (!head) throw std::runtime_error("graph_model::realize_into expects a single source path");
+        if (!tail) throw std::runtime_error("graph_model::realize_into expects a single sink path");
+        graph.set_head(*head);
+        graph.set_tail(*tail);
         state_->dirty = false;
     }
 
@@ -519,6 +336,16 @@ class graph_model {
     const std::shared_ptr<graph_model_state> &state_ptr() const noexcept { return state_; }
 
   private:
+    static bool is_terminal_expr(const shared_expr &expr, field_t f) {
+        if (f == __cost) {
+            return expr.as<generic_cost>().terminal_add();
+        }
+        if (in_field(f, constr_fields)) {
+            return expr.as<generic_constr>().terminal_add();
+        }
+        return false;
+    }
+
     void validate_node(const model_node_ptr_t &node_h) const {
         if (!node_h || node_h->owner_.lock().get() != state_.get() || node_h->id() >= state_->nodes.size()) {
             throw std::runtime_error("invalid graph_model node handle");
@@ -529,6 +356,63 @@ class graph_model {
         if (!edge_h || edge_h->owner_.lock().get() != state_.get() || edge_h->id() >= state_->edges.size()) {
             throw std::runtime_error("invalid graph_model edge handle");
         }
+    }
+
+    std::vector<model_edge_ptr_t> add_path_impl(const model_node_ptr_t &st,
+                                                 const model_node_ptr_t &ed,
+                                                 size_t n_edges,
+                                                 const edge_ocp_ptr_t &base_prob) {
+        if (n_edges == 0) {
+            throw std::invalid_argument("graph_model::add_path expects n_edges >= 1");
+        }
+        reserve(state_->nodes.size() + n_edges - 1, state_->edges.size() + n_edges);
+        std::vector<model_edge_ptr_t> edges;
+        edges.reserve(n_edges);
+        auto prev = st;
+        for (size_t i = 0; i < n_edges; ++i) {
+            auto next = (i + 1 == n_edges) ? ed : create_node(prev->clone_node());
+            edges.emplace_back(connect(prev, next, base_prob));
+            prev = next;
+        }
+        return edges;
+    }
+
+    // Lower sink-node terms onto an already-composed edge formulation.
+    // Non-terminal __cost terms are lowered unconditionally.
+    // Terminal terms (any field) are lowered only when include_terminal is true.
+    static void materialize_sink_terms(const node_ocp &sink_node,
+                                       edge_ocp &composed,
+                                       bool include_terminal) {
+        // Non-terminal running costs on the sink: always lowered onto the final edge.
+        for (const shared_expr &expr : sink_node.exprs(__cost)) {
+            if (!is_terminal_expr(expr, __cost)) {
+                lower_expr_into(expr, composed);
+            }
+        }
+
+        // Terminal-flagged terms: any field, only when include_terminal is set.
+        if (!include_terminal) return;
+        for (size_t f = 0; f < field::num; ++f) {
+            const auto ff = static_cast<field_t>(f);
+            if (ff == __dyn || !in_field(ff, func_fields)) continue;
+            for (const shared_expr &expr : sink_node.exprs(f)) {
+                if (!is_terminal_expr(expr, ff)) continue;
+                // Terminal terms that depend on u cannot be lowered to the edge.
+                if (expr.as<generic_func>().has_u_arg()) {
+                    fmt::print(stderr, "warning: terminal node term {} depends on u and cannot be lowered onto the final edge; ignoring it\n",
+                               expr->name());
+                    continue;
+                }
+                lower_expr_into(expr, composed);
+            }
+        }
+    }
+
+    // Clone expr, substitute any __x args to __y (x_terminal → incoming y), cache in lowered_.
+    static void lower_expr_into(const shared_expr &expr, edge_ocp &composed) {
+        composed.add(expr.as<generic_func>().lower_expr_x_to_y_cached(
+            fmt::format("sink-node term {} materialization", expr->name()),
+            composed.uid()));
     }
 
     std::shared_ptr<graph_model_state> state_;

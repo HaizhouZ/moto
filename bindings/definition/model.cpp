@@ -37,8 +37,19 @@ void register_submodule_model(nb::module_ &m) {
              nb::arg("n_edges"),
              nb::arg("prob") = edge_ocp::create())
         .def("add_path",
+             static_cast<std::vector<model_edge_ptr_t> (graph_model::*)(const node_ocp_ptr_t &, const node_ocp_ptr_t &, size_t, const edge_ocp_ptr_t &)>(&graph_model::add_path),
+             nb::arg("st_prob"),
+             nb::arg("ed_prob"),
+             nb::arg("n_edges"),
+             nb::arg("prob") = edge_ocp::create())
+        .def("add_path",
              static_cast<std::vector<model_edge_ptr_t> (graph_model::*)(const model_node_ptr_t &, size_t, const edge_ocp_ptr_t &)>(&graph_model::add_path),
              nb::arg("st"),
+             nb::arg("n_edges"),
+             nb::arg("prob") = edge_ocp::create())
+        .def("add_path",
+             static_cast<std::vector<model_edge_ptr_t> (graph_model::*)(const node_ocp_ptr_t &, size_t, const edge_ocp_ptr_t &)>(&graph_model::add_path),
+             nb::arg("st_prob"),
              nb::arg("n_edges"),
              nb::arg("prob") = edge_ocp::create())
         .def("add_path",

@@ -147,13 +147,9 @@ struct ns_sqp {
         scalar_t mu_monotone_factor = 0.2;              ///< factor for monotonic decrease of mu, smaller -> faster decrease
     };
 
-    struct restoration_settings {
+    struct restoration_settings : public solver::restoration::restoration_overlay_settings {
         bool enabled = true;
         size_t max_iter = 100;
-        scalar_t rho_u = 1.0;
-        scalar_t rho_y = 1.0;
-        scalar_t rho_eq = 1000.0;
-        scalar_t rho_ineq = 1000.0;
         scalar_t restoration_improvement_frac = 0.9;
         scalar_t alpha_min_factor = 5e-2;
         scalar_t bound_mult_reset_threshold = 1e3;
@@ -171,12 +167,16 @@ struct ns_sqp {
         }();
     };
 
-    struct settings_t : public workspace_data_collection<linesearch_setting, ipm_config> {
+    struct settings_t : public workspace_data_collection<linesearch_setting, ipm_config>,
+                        public restoration_settings,
+                        public equality_multiplier_init_settings {
         using base = workspace_data_collection<linesearch_setting, ipm_config>;
         using worker = typename base::worker;
 
         linesearch_setting &ls;
         ipm_config &ipm;
+        restoration_settings &restoration;
+        equality_multiplier_init_settings &eq_init;
         size_t max_iter = 100;  ///< maximum number of SQP iterations
         double prim_tol = 1e-6; ///< primal feasibility tolerance
         double dual_tol = 1e-4; ///< dual feasibility tolerance
@@ -185,13 +185,14 @@ struct ns_sqp {
 
         iterative_refinement_setting rf;
         scaling_settings scaling;
-        restoration_settings restoration;
-        equality_multiplier_init_settings eq_init;
 
         bool no_except = false;
 
         settings_t()
-            : ls(static_cast<linesearch_setting &>(*this)), ipm(static_cast<ipm_config &>(*this)) {}
+            : ls(static_cast<linesearch_setting &>(*this)),
+              ipm(static_cast<ipm_config &>(*this)),
+              restoration(static_cast<restoration_settings &>(*this)),
+              eq_init(static_cast<equality_multiplier_init_settings &>(*this)) {}
 
       private:
         friend class ns_sqp;

@@ -28,7 +28,6 @@ expr::expr(const std::string &name, size_t dim, field_t field) {
 expr::expr(const expr &rhs)
     : name_(rhs.name_), dim_(rhs.dim_), tdim_(rhs.tdim_), field_(rhs.field_),
       uid_(rhs.uid_), finalized_(false), dep_(rhs.dep_) {
-    fmt::println("warning: copying expr {} uid {} to uid {}", rhs.name(), rhs.uid(), uid_);
 } ///< copy constructor
 
 std::string format_as(const expr &e) {

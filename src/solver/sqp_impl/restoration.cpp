@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdlib>
 #include <limits>
 #include <moto/ocp/ineq_constr.hpp>
@@ -35,22 +36,6 @@ void dump_overlay_pair_order(ns_sqp::solver_graph_type &outer_graph,
     }
 }
 
-void sync_primal_state(node_data &src, node_data &dst) {
-    for (auto field : primal_fields) {
-        dst.sym_val().value_[field] = src.sym_val().value_[field];
-    }
-    dst.sym_val().value_[__p] = src.sym_val().value_[__p];
-}
-
-void sync_hard_duals(node_data &src, node_data &dst) {
-    for (auto field : hard_constr_fields) {
-        if (src.dense().dual_[field].size() == 0 || dst.dense().dual_[field].size() == 0) {
-            continue;
-        }
-        dst.dense().dual_[field] = src.dense().dual_[field];
-    }
-}
-
 bool resto_eq_debug_enabled() {
     const char *flag = std::getenv("MOTO_RESTO_EQ_DEBUG");
     return flag != nullptr && std::string_view(flag) != "0";
@@ -67,20 +52,15 @@ void dump_outer_overlay_source_values(ns_sqp::solver_graph_type &outer_graph,
         auto dump_field = [&](field_t field) {
             resto.for_each(field, [&](const solver::restoration::resto_eq_elastic_constr &overlay,
                                       solver::restoration::resto_eq_elastic_constr::approx_data &) {
-                const auto src_field = overlay.source_field();
-                const size_t src_pos = overlay.source_pos();
+                const auto src_field = overlay.source()->field();
                 const auto &outer_exprs = outer.problem().exprs(src_field);
-                if (src_pos >= outer_exprs.size()) {
-                    fmt::print("  [resto-source:{}] outer node={} field={} pos={} is out of range (size={})\n",
-                               overlay.name(), outer.problem().uid(), field::name(src_field), src_pos, outer_exprs.size());
-                    return;
-                }
+                const size_t src_pos = outer.problem().pos(overlay.source());
                 const auto &outer_expr = outer_exprs[src_pos];
-                const func outer_func = std::dynamic_pointer_cast<generic_func>(outer_expr);
+                const func outer_func = outer_expr.cast<generic_func>();
                 const auto &outer_ad = outer.data(outer_func);
                 const auto &source = overlay.source();
-                const auto &source_gf = dynamic_cast<const generic_func &>(*source);
-                const auto &outer_gf = dynamic_cast<const generic_func &>(*outer_func);
+                const auto &source_gf = source.as<generic_func>();
+                const auto &outer_gf = outer_func.as<generic_func>();
                 fmt::print("  [resto-source:{}] outer_node={} outer_prob={} src_field={} src_pos={} source_uid={} outer_uid={} same_uid={}\n",
                            overlay.name(),
                            outer.problem().uid(),
@@ -155,41 +135,40 @@ void dump_outer_entry_inequalities(ns_sqp::solver_graph_type &graph) {
     size_t worst_tq_uid = 0;
     Eigen::Index worst_tq_idx = -1;
     for (auto *n : graph.flatten_nodes()) {
-        n->for_each<ineq_constr_fields>([&](const generic_constr &c, func_approx_data &ad) {
-            const auto *ipm_c = dynamic_cast<const solver::ipm_constr *>(&c);
-            if (ipm_c == nullptr) {
-                return;
-            }
-            const auto &ipm_d = ad.as<solver::ipm_constr::ipm_data>();
-            Eigen::Index local_idx = -1;
-            const scalar_t local_worst = ad.v_.size() ? ipm_d.slack_.cwiseAbs().minCoeff(&local_idx) : 0.;
-            if (local_worst > worst_tq_v) {
-                worst_tq_v = local_worst;
-                worst_tq_uid = n->problem().uid();
-                worst_tq_idx = local_idx;
-            }
-            if (printed) {
-                return;
-            }
-            fmt::print("  [resto-entry:{}:{}] g=[", n->problem().uid(), c.name());
-            for (Eigen::Index i = 0; i < ipm_d.g_.size(); ++i) {
-                fmt::print("{}{:.6e}", i == 0 ? "" : ", ", ipm_d.g_(i));
-            }
-            fmt::print("]\n");
-            fmt::print("  [resto-entry:{}:{}] slack=[", n->problem().uid(), c.name());
-            for (Eigen::Index i = 0; i < ipm_d.slack_.size(); ++i) {
-                fmt::print("{}{:.6e}", i == 0 ? "" : ", ", ipm_d.slack_(i));
-            }
-            fmt::print("]\n");
-            fmt::print("  [resto-entry:{}:{}] v=[", n->problem().uid(), c.name());
-            for (Eigen::Index i = 0; i < ad.v_.size(); ++i) {
-                fmt::print("{}{:.6e}", i == 0 ? "" : ", ", ad.v_(i));
-            }
-            fmt::print("]\n");
-            // printed = true;
-        });
+        auto dump_field = [&](field_t field) {
+            n->for_each(field, [&](const solver::ipm_constr &c, solver::ipm_constr::ipm_data &ipm_d) {
+                Eigen::Index local_idx = -1;
+                const scalar_t local_worst = ipm_d.v_.size() ? ipm_d.slack_.cwiseAbs().minCoeff(&local_idx) : 0.;
+                if (local_worst > worst_tq_v) {
+                    worst_tq_v = local_worst;
+                    worst_tq_uid = n->problem().uid();
+                    worst_tq_idx = local_idx;
+                }
+                if (printed) {
+                    return;
+                }
+                fmt::print("  [resto-entry:{}:{}] g=[", n->problem().uid(), c.name());
+                for (Eigen::Index i = 0; i < ipm_d.g_.size(); ++i) {
+                    fmt::print("{}{:.6e}", i == 0 ? "" : ", ", ipm_d.g_(i));
+                }
+                fmt::print("]\n");
+                fmt::print("  [resto-entry:{}:{}] slack=[", n->problem().uid(), c.name());
+                for (Eigen::Index i = 0; i < ipm_d.slack_.size(); ++i) {
+                    fmt::print("{}{:.6e}", i == 0 ? "" : ", ", ipm_d.slack_(i));
+                }
+                fmt::print("]\n");
+                fmt::print("  [resto-entry:{}:{}] v=[", n->problem().uid(), c.name());
+                for (Eigen::Index i = 0; i < ipm_d.v_.size(); ++i) {
+                    fmt::print("{}{:.6e}", i == 0 ? "" : ", ", ipm_d.v_(i));
+                }
+                fmt::print("]\n");
+                // printed = true;
+            });
+        };
+        dump_field(__ineq_x);
+        dump_field(__ineq_xu);
     }
-    fmt::print("  worst slack {}", worst_tq_v);
+    fmt::print("  worst slack {} at node {} idx {}", worst_tq_v, worst_tq_uid, worst_tq_idx);
 }
 
 void dump_resto_eq_node(ns_sqp::data &d, std::string_view label) {
@@ -208,8 +187,9 @@ void dump_resto_eq_node(ns_sqp::data &d, std::string_view label) {
                               solver::restoration::resto_eq_elastic_constr::approx_data &ad) {
             const auto residuals =
                 solver::restoration::resto_eq_elastic_constr::current_local_residuals(ad.elastic);
+            const size_t src_pos = d.problem().pos(overlay.source());
             fmt::print("  {} src_pos={} |v|={:.3e} |base|={:.3e} schur_inv={:.3e} stat={:.3e} comp={:.3e}\n",
-                       overlay.name(), overlay.source_pos(),
+                       overlay.name(), src_pos,
                        ad.v_.size() ? ad.v_.cwiseAbs().maxCoeff() : 0.,
                        ad.base_residual.size() ? ad.base_residual.cwiseAbs().maxCoeff() : 0.,
                        ad.elastic.schur_inv_diag.size() ? ad.elastic.schur_inv_diag.cwiseAbs().maxCoeff() : 0.,
@@ -244,9 +224,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
 
     const auto prox_eps = scalar_t(1.0);
     for_each_overlay_pair(outer_graph, resto_graph, [&](data &outer, data &resto) {
-        solver::restoration::sync_restoration_overlay_primal(outer, resto);
-        solver::restoration::sync_restoration_overlay_duals(outer, resto);
-        solver::restoration::seed_restoration_overlay_refs(resto, prox_eps, &settings.mu);
+        solver::restoration::sync_outer_to_restoration_state(outer, resto, prox_eps, &settings.mu);
     });
     if (settings.verbose && resto_entry_debug_enabled()) {
         dump_overlay_pair_order(outer_graph, resto_graph);
@@ -303,9 +281,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
             outer_graph.for_each_parallel([](data *d) { d->backup_trial_state(); });
             // async resto graph states to the outer one for evaluation
             for_each_overlay_pair(resto_graph, outer_graph, [&](data &resto, data &outer) {
-                sync_primal_state(resto, outer);
-                sync_hard_duals(resto, outer);
-                solver::restoration::commit_restoration_overlay_bound_state(outer, resto);
+                solver::restoration::sync_restoration_to_outer_state(resto, outer);
             });
             outer_graph.for_each_parallel([](data *d) {
                 d->update_approximation(node_data::update_mode::eval_val, true);
@@ -349,9 +325,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     const auto cleanup = [&](bool success) {
         if (success) {
             for_each_overlay_pair(resto_graph, outer_graph, [&](data &resto, data &outer) {
-                sync_primal_state(resto, outer);
-                sync_hard_duals(resto, outer);
-                solver::restoration::commit_restoration_overlay_bound_state(outer, resto);
+                solver::restoration::sync_restoration_to_outer_state(resto, outer);
             });
             // recompute the inequality multipliers
             reset_ls_workers();
