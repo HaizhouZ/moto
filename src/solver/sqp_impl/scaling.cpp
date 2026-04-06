@@ -98,7 +98,7 @@ void accumulate_row_infnorms(const sparse_mat &mat, Eigen::Ref<vector> norms) {
 // ────────────────────────────────────────────────────────────────────────────
 
 void ns_sqp::reset_scaling() {
-    auto &graph = solver_graph();
+    auto &graph = active_data();
     for (data &d : graph.nodes()) {
         for (field_t cf : constr_fields)
             d.scale_c_[cf].resize(0);
@@ -109,7 +109,7 @@ void ns_sqp::reset_scaling() {
 
 void ns_sqp::compute_and_apply_scaling(const kkt_info &kkt) {
     const auto &sc = settings.scaling;
-    auto &graph = solver_graph();
+    auto &graph = active_data();
     if (sc.mode == scaling_settings::mode_t::none)
         return;
 
@@ -245,7 +245,7 @@ void ns_sqp::compute_and_apply_scaling(const kkt_info &kkt) {
 // ────────────────────────────────────────────────────────────────────────────
 
 void ns_sqp::unscale_duals() {
-    auto &graph = solver_graph();
+    auto &graph = active_data();
     graph.for_each_parallel([](data *d) {
         if (!d->scaling_applied_)
             return;

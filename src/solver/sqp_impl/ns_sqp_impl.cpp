@@ -154,7 +154,7 @@ void finalize_phase_objectives(ns_sqp::kkt_info &kkt) {
 }
 
 template <class UFn, class XYFn>
-void accumulate_w_stationarity(ns_sqp::solver_graph_type &graph,
+void accumulate_w_stationarity(ns_sqp::storage_type &graph,
                                UFn &&on_u_residual,
                                XYFn &&on_xy_residual) {
     for (auto *n : graph.flatten_nodes()) {
@@ -286,7 +286,7 @@ void ns_sqp::update_phase_problem(data *d, node_data::update_mode mode) {
 void ns_sqp::refresh_problem_flags() {
     settings.has_ineq_soft = false;
     settings.has_ipm_ineq = false;
-    for (data &n : solver_graph().nodes()) {
+    for (data &n : active_data().nodes()) {
         for (auto ct : ineq_soft_constr_fields) {
             if (n.problem().dim(ct) > 0) {
                 settings.has_ineq_soft = true;
@@ -307,7 +307,7 @@ void ns_sqp::refresh_problem_flags() {
 
 ns_sqp::kkt_info ns_sqp::initialize() {
     auto total_profile = profile_scope(profile_phase::initialize_total);
-    auto &graph = solver_graph();
+    auto &graph = active_data();
     if (settings.verbose)
         fmt::print("Initialization for SQP...\n");
     refresh_problem_flags();
@@ -348,7 +348,7 @@ ns_sqp::kkt_info ns_sqp::initialize() {
 }
 void ns_sqp::post_factorization_correction_step() {
     auto total_profile = profile_scope(profile_phase::correction_post_factorization);
-    auto &graph = solver_graph();
+    auto &graph = active_data();
     {
         auto phase_profile = profile_scope(profile_phase::correction_riccati_recursion);
         detail_timed_block_start("riccati_recursion_correction");
@@ -378,7 +378,7 @@ void ns_sqp::reset_ls_workers() {
 
 void ns_sqp::refresh_ls_bounds() {
     reset_ls_workers();
-    auto &graph = solver_graph();
+    auto &graph = active_data();
     graph.for_each_parallel([this](size_t tid, data *d) {
         if (use_normal_soft_phase() || in_restoration_phase()) {
             solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
@@ -389,7 +389,7 @@ void ns_sqp::refresh_ls_bounds() {
 
 void ns_sqp::ineq_constr_correction(iteration_context &ctx) {
     if (settings.ipm.ipm_enable_affine_step()) {
-        auto &graph = solver_graph();
+        auto &graph = active_data();
         for (auto &worker_cfg : setting_per_thread) {
             worker_cfg.as<solver::ipm_config::worker_type>() = {};
         }
@@ -423,7 +423,7 @@ void ns_sqp::ineq_constr_prediction() {
 
 void ns_sqp::solve_direction(iteration_context &ctx, bool do_scaling, bool gauss_newton) {
     auto phase_profile = profile_scope(profile_phase::solve_direction);
-    auto &graph = solver_graph();
+    auto &graph = active_data();
     if (do_scaling) {
         auto scaling_profile = profile_scope(profile_phase::scaling);
         detail_timed_block_start("scaling");
@@ -478,7 +478,7 @@ void ns_sqp::solve_direction(iteration_context &ctx, bool do_scaling, bool gauss
 
 void ns_sqp::correct_direction(iteration_context &ctx, bool do_refinement) {
     auto phase_profile = profile_scope(profile_phase::correct_direction);
-    auto &graph = solver_graph();
+    auto &graph = active_data();
     {
         auto corrector_profile = profile_scope(profile_phase::ineq_corrector_step);
         detail_timed_block_start("ineq_corrector_step");
@@ -493,7 +493,7 @@ void ns_sqp::correct_direction(iteration_context &ctx, bool do_refinement) {
 
 void ns_sqp::prepare_globalization(filter_linesearch_data &ls, iteration_context &ctx) {
     auto phase_profile = profile_scope(profile_phase::prepare_globalization);
-    auto &graph = solver_graph();
+    auto &graph = active_data();
     ls.reset_per_iter_data();
     ls.initial_alpha_primal = settings.ls.alpha_primal;
     ls.initial_alpha_dual = settings.ls.alpha_dual;
@@ -521,7 +521,7 @@ void ns_sqp::prepare_globalization(filter_linesearch_data &ls, iteration_context
 
 bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context &ctx) {
     auto phase_profile = profile_scope(profile_phase::evaluate_trial_point);
-    auto &graph = solver_graph();
+    auto &graph = active_data();
     profiler_.bump_trial_evaluation();
     {
         auto apply_profile = profile_scope(profile_phase::apply_affine_step);
@@ -560,7 +560,7 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
 
 void ns_sqp::accept_trial_point(filter_linesearch_data &ls, iteration_context &ctx) {
     auto phase_profile = profile_scope(profile_phase::accept_trial_point);
-    auto &graph = solver_graph();
+    auto &graph = active_data();
     {
         auto accepted_profile = profile_scope(profile_phase::update_approx_accepted);
         detail_timed_block_start("update_approx_accepted");
@@ -593,7 +593,7 @@ ns_sqp::line_search_action ns_sqp::handle_globalization_failure(filter_linesearc
     }
 
     if (ls.failure_reason == filter_linesearch_per_iter_data::failure_reason_t::tiny_step) {
-        auto &graph = solver_graph();
+        auto &graph = active_data();
         graph.for_each_parallel([this](data *d) {
             d->restore_trial_state();
             if (use_normal_soft_phase() || in_restoration_phase()) {
@@ -661,7 +661,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
     reset_profile();
     profiler_.start_update();
     settings.verbose = verbose;
-    auto &graph = solver_graph();
+    auto &graph = active_data();
     graph.no_except() = settings.no_except;
     settings.n_worker = graph.n_jobs();
     kkt_last = initialize();
@@ -768,7 +768,7 @@ void ns_sqp::print_dual_res_breakdown() {
     // These per-field vectors sum to r_k* exactly, so their inf-norms are a true
     // decomposition of dual_res (signed cancellation may make sum < sum-of-norms).
 
-    auto &graph = solver_graph();
+    auto &graph = active_data();
     auto nodes = graph.flatten_nodes();
 
     // ── Pass 1: find node k* that achieves max cross-stage costate residual ──
@@ -866,7 +866,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
             kkt_info kkt;
             scalar_t dual_res_l1 = 0.;
             size_t n_dual_res = 0;
-            auto &graph = solver_graph();
+            auto &graph = active_data();
 
             for (auto n : graph.flatten_nodes()) {
                 kkt.cost += n->cost();
@@ -914,7 +914,7 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
     size_t n_constr = 0;
     scalar_t dual_res_l1 = 0.;
     size_t n_dual_res = 0;
-    auto &graph = solver_graph();
+    auto &graph = active_data();
     for (auto n : graph.flatten_nodes()) {
         kkt.cost += n->cost();
         kkt.inf_prim_res = std::max(kkt.inf_prim_res, n->inf_prim_res_);
@@ -983,7 +983,7 @@ void ns_sqp::print_licq_info() {
     bool any_violated = false;
     int stage = 0;
 
-    auto &graph = solver_graph();
+    auto &graph = active_data();
     graph.apply_forward([&](node_data *cur_nd, node_data *next_nd) {
         auto *d = static_cast<data *>(cur_nd);
         auto &nsp = d->nsp_;
@@ -1141,7 +1141,7 @@ void ns_sqp::print_licq_info() {
 }
 void ns_sqp::print_scaling_info() {
     fmt::print("=== Scaling info ===\n");
-    auto &graph = solver_graph();
+    auto &graph = active_data();
     for (auto n : graph.flatten_nodes()) {
         fmt::print("  Node:\n");
         for (auto cf : constr_fields) {

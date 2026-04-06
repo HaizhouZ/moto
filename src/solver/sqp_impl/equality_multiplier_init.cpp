@@ -27,8 +27,8 @@ The outer problem must keep fixed:
 */
 
 template <typename Fn>
-void for_each_overlay_pair(ns_sqp::solver_graph_type &outer_graph,
-                           ns_sqp::solver_graph_type &overlay_graph,
+void for_each_overlay_pair(ns_sqp::storage_type &outer_graph,
+                           ns_sqp::storage_type &overlay_graph,
                            Fn &&fn) {
     auto outer_view = outer_graph.forward_view();
     auto overlay_view = overlay_graph.forward_view();
@@ -50,7 +50,7 @@ void for_each_overlay_pair(ns_sqp::solver_graph_type &outer_graph,
     }
 }
 
-bool graph_has_equality_targets(ns_sqp::solver_graph_type &graph) {
+bool graph_has_equality_targets(ns_sqp::storage_type &graph) {
     for (auto *node : graph.flatten_nodes()) {
         for (auto field : std::array{__dyn, __eq_x, __eq_xu, __eq_x_soft, __eq_xu_soft}) {
             if (node->problem().dim(field) > 0) {
@@ -91,7 +91,7 @@ void ns_sqp::initialize_equality_multipliers() {
         return;
     }
 
-    auto &outer_graph = solver_graph();
+    auto &outer_graph = active_data();
     if (!graph_has_equality_targets(outer_graph)) {
         return;
     }

@@ -10,7 +10,7 @@
 namespace moto {
 void ns_sqp::iterative_refinement() {
     auto phase_profile = profile_scope(profile_phase::iterative_refinement);
-    auto &graph = solver_graph();
+    auto &graph = active_data();
     // if (info.inf_prim_step < 1e-1 || info.inf_dual_step < 1e-1) {
     size_t iter_refine_max = settings.rf.max_iters;
     size_t iter_refine = 0;

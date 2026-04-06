@@ -13,7 +13,7 @@ This file is a maintainer-oriented map of the `moto` codebase. It is meant to he
 This guide was derived from the code itself, especially:
 
 - `CLAUDE.md`
-- `include/moto/model/graph_model.hpp`
+- `include/moto/ocp/graph_model.hpp`
 - `include/moto/solver/ns_sqp.hpp`
 - `src/solver/sqp_impl/*.cpp`
 - `src/solver/nsp_impl/*.cpp`
@@ -65,7 +65,7 @@ The main SQP iteration loop lives in:
 - [`bindings/`](/home/harper/Documents/moto/bindings): Python bindings
 - [`example/`](/home/harper/Documents/moto/example): manual examples
 - [`unittests/`](/home/harper/Documents/moto/unittests): Catch2 tests
-- [`include/moto/model/graph_model.hpp`](/home/harper/Documents/moto/include/moto/model/graph_model.hpp): graph-first modeling layer
+- [`include/moto/ocp/graph_model.hpp`](/home/harper/Documents/moto/include/moto/ocp/graph_model.hpp): graph-first modeling layer
 - [`include/moto/core/directed_graph.hpp`](/home/harper/Documents/moto/include/moto/core/directed_graph.hpp): internal expanded solver graph
 
 ## Build And Validation
@@ -251,9 +251,9 @@ The current recommended API is graph-first.
 
 Core types:
 
-- [`graph_model`](/home/harper/Documents/moto/include/moto/model/graph_model.hpp)
-- [`model_node`](/home/harper/Documents/moto/include/moto/model/graph_model.hpp)
-- [`model_edge`](/home/harper/Documents/moto/include/moto/model/graph_model.hpp)
+- [`graph_model`](/home/harper/Documents/moto/include/moto/ocp/graph_model.hpp)
+- [`model_node`](/home/harper/Documents/moto/include/moto/ocp/graph_model.hpp)
+- [`model_edge`](/home/harper/Documents/moto/include/moto/ocp/graph_model.hpp)
 
 Intended semantics:
 
@@ -280,7 +280,7 @@ Important compose rules that are now covered by unit tests:
 
 ## SQP Graph Ownership
 
-`ns_sqp` no longer owns a separate solver-graph member. The active [`graph_model_state`](/home/harper/Documents/moto/include/moto/model/graph_model.hpp) owns the realized runtime graph, and `ns_sqp` fetches it as needed through `sqp.graph`.
+`ns_sqp` no longer owns a separate solver-graph member. The active [`graph_model_state`](/home/harper/Documents/moto/include/moto/ocp/graph_model.hpp) owns the realized runtime graph, and `ns_sqp` fetches it as needed through `sqp.graph`.
 
 Current restoration detail:
 
@@ -667,7 +667,7 @@ Key members:
 
 [`ns_sqp`](/home/harper/Documents/moto/include/moto/solver/ns_sqp.hpp) owns:
 
-- active runtime graph is stored inside `graph_model_state` and accessed through `ns_sqp::graph()`
+- active runtime graph is stored inside `graph_model_state` and accessed through `ns_sqp::active_data()`
 - `mem_`: node-data memory pool
 - `riccati_solver_`: `generic_solver`
 - `settings`
@@ -1203,7 +1203,7 @@ This order is important because quadruped is too large to use as the first provi
 
 ## Todo
 
-- rename `directed graph` to `graph_storage` in the NS SQP bindings
+- rename `directed graph` to `active_data` in the NS SQP bindings
   - comment: feature only, not urgent
 - add rank-based backward degeneration test and propagation
 - add automatic inertia correction after ill-conditioning is detected

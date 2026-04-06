@@ -11,8 +11,8 @@ namespace moto {
 namespace {
 
 template <typename Fn>
-void for_each_overlay_pair(ns_sqp::solver_graph_type &outer_graph,
-                           ns_sqp::solver_graph_type &resto_graph,
+void for_each_overlay_pair(ns_sqp::storage_type &outer_graph,
+                           ns_sqp::storage_type &resto_graph,
                            Fn &&fn) {
     auto &outer_nodes = outer_graph.flatten_nodes();
     auto &resto_nodes = resto_graph.flatten_nodes();
@@ -24,8 +24,8 @@ void for_each_overlay_pair(ns_sqp::solver_graph_type &outer_graph,
     });
 }
 
-void dump_overlay_pair_order(ns_sqp::solver_graph_type &outer_graph,
-                             ns_sqp::solver_graph_type &resto_graph,
+void dump_overlay_pair_order(ns_sqp::storage_type &outer_graph,
+                             ns_sqp::storage_type &resto_graph,
                              size_t max_pairs = std::numeric_limits<size_t>::max()) {
     auto &outer_nodes = outer_graph.flatten_nodes();
     auto &resto_nodes = resto_graph.flatten_nodes();
@@ -46,8 +46,8 @@ bool resto_entry_debug_enabled() {
     return flag != nullptr && std::string_view(flag) != "0";
 }
 
-void dump_outer_overlay_source_values(ns_sqp::solver_graph_type &outer_graph,
-                                      ns_sqp::solver_graph_type &resto_graph) {
+void dump_outer_overlay_source_values(ns_sqp::storage_type &outer_graph,
+                                      ns_sqp::storage_type &resto_graph) {
     for_each_overlay_pair(outer_graph, resto_graph, [&](node_data &outer, node_data &resto) {
         auto dump_field = [&](field_t field) {
             resto.for_each(field, [&](const solver::restoration::resto_eq_elastic_constr &overlay,
@@ -110,7 +110,7 @@ void dump_outer_overlay_source_values(ns_sqp::solver_graph_type &outer_graph,
     });
 }
 
-void dump_outer_entry_equalities(ns_sqp::solver_graph_type &graph) {
+void dump_outer_entry_equalities(ns_sqp::storage_type &graph) {
     for (auto *n : graph.flatten_nodes()) {
         auto dump_field = [&](field_t field) {
             n->for_each(field, [&](const generic_constr &c, func_approx_data &ad) {
@@ -129,7 +129,7 @@ void dump_outer_entry_equalities(ns_sqp::solver_graph_type &graph) {
     }
 }
 
-void dump_outer_entry_inequalities(ns_sqp::solver_graph_type &graph) {
+void dump_outer_entry_inequalities(ns_sqp::storage_type &graph) {
     bool printed = false;
     scalar_t worst_tq_v = 0.;
     size_t worst_tq_uid = 0;
@@ -207,7 +207,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         throw std::runtime_error("restoration mode is incompatible with merit_backtracking");
     }
 
-    auto &outer_graph = solver_graph();
+    auto &outer_graph = active_data();
     auto &resto_graph = restoration_graph();
     if (settings.verbose) {
         fmt::print("\n=== enter restoration ===\n");

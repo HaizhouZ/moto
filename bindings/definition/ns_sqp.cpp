@@ -9,7 +9,7 @@
 
 #include <enum_export.hpp>
 using namespace moto;
-using graph_type = ns_sqp::solver_graph_type;
+using graph_type = ns_sqp::storage_type;
 using binary_func_type = std::function<void(ns_sqp::data *, ns_sqp::data *)>;
 using unary_func_type = std::function<void(ns_sqp::data *)>;
 using unary_list = graph_type::unary_view::base;
@@ -21,8 +21,9 @@ void register_submodule_ns_sqp(nb::module_ &m) {
 
     nb::class_<ns_sqp> sqp(m, "ns_sqp_impl");
     sqp.def(nb::init<size_t>(), "Constructor for the SQP solver with a specified number of jobs")
-        .def_prop_ro("graph", [](ns_sqp &self) -> graph_type & { return self.graph(); }, nb::rv_policy::reference_internal)
-        .def("create_graph", &ns_sqp::create_graph, nb::keep_alive<0, 1>(), "Create a graph_model builder that synchronizes staged paths into this SQP solver")
+        .def_prop_ro("active_data", [](ns_sqp &self) -> graph_type & { return self.active_data(); }, nb::rv_policy::reference_internal)
+        .def_prop_ro("graph", [](ns_sqp &self) -> graph_model & { return self.graph(); }, nb::rv_policy::reference_internal)
+        .def("create_graph", &ns_sqp::create_graph, nb::rv_policy::reference_internal, "Create a graph_model builder that synchronizes staged paths into this SQP solver")
         .def("update", [](ns_sqp &self, size_t n_iter, bool verbose) {
             nb::gil_scoped_release rel;
             return self.update(n_iter, verbose); }, nb::arg("n_iter") = 1, nb::arg("verbose") = true, "Update the SQP solver for a given number of iterations")
@@ -177,8 +178,8 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_prop_ro("addr", [](ns_sqp::data &self) { return fmt::format("{:p}", static_cast<const void *>(&self)); }, "Get the data address associated with this node")
         .def(nb::init<ocp_ptr_t>(), nb::arg("prob"), "Constructor for ns_sqp data with OCP problem");
 
-    nb::class_<graph_type> graph(sqp, "graph_type");
-    graph.def(nb::init<>())
+    nb::class_<graph_type> active_data(sqp, "storage_type");
+    active_data.def(nb::init<>())
         .def("add", &graph_type::add, nb::arg("node"), "Add a node to the graph and return a reference to it", nb::rv_policy::reference)
         .def("add_head", &graph_type::add_head, nb::arg("node"), nb::rv_policy::reference, "Add a node and set it as the head")
         .def("add_tail", &graph_type::add_tail, nb::arg("node"), nb::rv_policy::reference, "Add a node and set it as the tail")
@@ -243,11 +244,11 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def("forward_binary_view", &graph_type::forward_binary_view, nb::rv_policy::reference, nb::arg("none_on_end") = false, "Get a forward binary view of the graph, i.e., a view of all nodes in forward direction with pairs of nodes, last is none")
         .def("backward_binary_view", &graph_type::backward_binary_view, nb::rv_policy::reference, nb::arg("none_on_end") = false, "Get a backward binary view of the graph, i.e., a view of all nodes in backward direction with pairs of nodes, first is none");
 
-    nb::bind_vector<unary_list>(graph, "unary_list");
-    nb::class_<graph_type::unary_view, unary_list>(graph, "unary_view")
+    nb::bind_vector<unary_list>(active_data, "unary_list");
+    nb::class_<graph_type::unary_view, unary_list>(active_data, "unary_view")
         .def("update", &graph_type::unary_view::update, "Update the unary view and return true if there are more nodes to process");
 
-    nb::bind_vector<binary_list>(graph, "binary_list");
-    nb::class_<graph_type::binary_view, binary_list>(graph, "binary_view")
+    nb::bind_vector<binary_list>(active_data, "binary_list");
+    nb::class_<graph_type::binary_view, binary_list>(active_data, "binary_view")
         .def("update", &graph_type::binary_view::update, "Update the binary view and return true if there are more nodes to process");
 }

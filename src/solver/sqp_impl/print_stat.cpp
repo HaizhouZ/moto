@@ -101,7 +101,7 @@ void ns_sqp::print_stats(const kkt_info &info) {
     size_t idx = 0;
     if (i_iter == 0)
         return;
-    for (auto n : solver_graph().flatten_nodes()) {
+    for (auto n : active_data().flatten_nodes()) {
         // fmt::print("    value x at node {}: {:.4}\n", idx, n->trial_prim_state_bak[__x].transpose());
         // fmt::print("    delta x at node {}: {:.4}\n", idx, n->trial_prim_step[__x].transpose());
         // fmt::print("    value u at node {}: {:.4}\n", idx, n->trial_prim_state_bak[__u].transpose());

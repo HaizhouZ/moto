@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include <moto/model/graph_model.hpp>
+#include <moto/ocp/graph_model.hpp>
 #include <moto/ocp/constr.hpp>
 #include <moto/ocp/cost.hpp>
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
@@ -72,7 +72,7 @@ const moto::generic_func &require_func_named_prefix(const moto::ocp_base_ptr_t &
 
 TEST_CASE("graph_model compose lowers node-owned state terms onto outgoing edge y") {
     using namespace moto;
-    using namespace moto::model;
+    using namespace moto;
 
     auto [x, xn] = sym::states("x", 1);
     auto u = sym::inputs("u", 1);
@@ -112,7 +112,7 @@ TEST_CASE("graph_model compose lowers node-owned state terms onto outgoing edge 
 
 TEST_CASE("graph_model compose materializes sink node state cost onto incoming edge y") {
     using namespace moto;
-    using namespace moto::model;
+    using namespace moto;
 
     auto [x, xn] = sym::states("x_sink", 1);
     auto u = sym::inputs("u_sink", 1);
@@ -154,7 +154,7 @@ TEST_CASE("graph_model compose materializes sink node state cost onto incoming e
 
 TEST_CASE("graph_model compose keeps explicit terminal sink cost on terminal node") {
     using namespace moto;
-    using namespace moto::model;
+    using namespace moto;
 
     auto [x, xn] = sym::states("x_term", 1);
     auto u = sym::inputs("u_term", 1);
@@ -199,7 +199,7 @@ TEST_CASE("graph_model compose keeps explicit terminal sink cost on terminal nod
 
 TEST_CASE("graph_model composed stages can be consumed by sqp create_node") {
     using namespace moto;
-    using namespace moto::model;
+    using namespace moto;
 
     auto [x, xn] = sym::states("x_solver", 1);
     auto u = sym::inputs("u_solver", 1);
@@ -253,7 +253,7 @@ TEST_CASE("ns_sqp create_graph can synchronize model graph paths into the intern
         edge->add(*dyn);
     }
 
-    auto &flat = sqp.graph().flatten_nodes();
+    auto &flat = sqp.active_data().flatten_nodes();
     REQUIRE(flat.size() == 5);
     REQUIRE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_path_internal_terminal"));
 }
@@ -285,7 +285,7 @@ TEST_CASE("ns_sqp model_graph add_path returns one edge per requested interval")
         edge->add(*dyn);
     }
 
-    auto &flat = sqp.graph().flatten_nodes();
+    auto &flat = sqp.active_data().flatten_nodes();
     REQUIRE(flat.size() == 3);
     REQUIRE(contains_name_prefix(expr_names(flat.front()->problem(), __cost), "cost_path_topology"));
     REQUIRE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_path_topology_terminal"));
@@ -318,7 +318,7 @@ TEST_CASE("ns_sqp model_graph add_path can create key nodes from node prototypes
         edge->add(*dyn);
     }
 
-    auto &flat = sqp.graph().flatten_nodes();
+    auto &flat = sqp.active_data().flatten_nodes();
     REQUIRE(flat.size() == 2);
     REQUIRE(contains_name_prefix(expr_names(flat.front()->problem(), __cost), "cost_path_proto"));
     REQUIRE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_path_proto_terminal"));
@@ -343,14 +343,14 @@ TEST_CASE("ns_sqp edge-only paths can be chained explicitly through returned end
     ns_sqp sqp;
     auto modeled = sqp.create_graph();
     auto first = modeled.add_path(1, stage_a);
-    auto second = modeled.add_path(first.front()->ed_node(), 1, stage_b);
+    auto second = modeled.add_path(first.front()->ed_node_prob(), 1, stage_b);
 
     REQUIRE(first.size() == 1);
     REQUIRE(second.size() == 1);
     REQUIRE(modeled.num_edges() == 2);
     REQUIRE(modeled.num_nodes() == 3);
 
-    auto &flat = sqp.graph().flatten_nodes();
+    auto &flat = sqp.active_data().flatten_nodes();
     REQUIRE(flat.size() == 2);
     REQUIRE(contains_name(expr_names(flat.front()->problem(), __cost), "cost_edge_only_chain_a"));
     REQUIRE(contains_name(expr_names(flat.back()->problem(), __cost), "cost_edge_only_chain_b"));
@@ -358,7 +358,7 @@ TEST_CASE("ns_sqp edge-only paths can be chained explicitly through returned end
 
 TEST_CASE("graph_model compose lowers edge-owned pure state terms onto edge y") {
     using namespace moto;
-    using namespace moto::model;
+    using namespace moto;
 
     auto [x, xn] = sym::states("x_edge_pure_state", 1);
     auto u = moto::sym::inputs("u_edge_pure_state", 1);
@@ -415,7 +415,7 @@ TEST_CASE("ns_sqp terminal u-dependent terms are ignored instead of lowered onto
         edge->add(*dyn);
     }
 
-    auto &flat = sqp.graph().flatten_nodes();
+    auto &flat = sqp.active_data().flatten_nodes();
     REQUIRE(flat.size() == 2);
     REQUIRE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_terminal_u_guard_terminal_x"));
     REQUIRE_FALSE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_terminal_u_guard_terminal_xu"));
@@ -445,12 +445,12 @@ TEST_CASE("ns_sqp model_graph flatten_nodes reuses realized graph until graph be
         edge->add(*dyn);
     }
 
-    auto &flat_first = sqp.graph().flatten_nodes();
+    auto &flat_first = sqp.active_data().flatten_nodes();
     REQUIRE(flat_first.size() == 2);
     const auto first_head_addr = static_cast<const void *>(flat_first.front());
     const auto first_tail_addr = static_cast<const void *>(flat_first.back());
 
-    auto &flat_second = sqp.graph().flatten_nodes();
+    auto &flat_second = sqp.active_data().flatten_nodes();
     REQUIRE(flat_second.size() == flat_first.size());
     REQUIRE(static_cast<const void *>(flat_second.front()) == first_head_addr);
     REQUIRE(static_cast<const void *>(flat_second.back()) == first_tail_addr);
@@ -460,14 +460,14 @@ TEST_CASE("ns_sqp model_graph flatten_nodes reuses realized graph until graph be
     REQUIRE(extra_edges.size() == 1);
     extra_edges.front()->add(*dyn);
 
-    auto &flat_after_dirty = sqp.graph().flatten_nodes();
+    auto &flat_after_dirty = sqp.active_data().flatten_nodes();
     REQUIRE(flat_after_dirty.size() == 3);
     REQUIRE(static_cast<const void *>(flat_after_dirty.front()) != nullptr);
 }
 
 TEST_CASE("graph_model reserve supports bulk node and edge creation") {
     using namespace moto;
-    using namespace moto::model;
+    using namespace moto;
 
     auto [x, xn] = sym::states("x_graph_reserve", 1);
     auto u = sym::inputs("u_graph_reserve", 1);
@@ -523,7 +523,7 @@ TEST_CASE("ns_sqp create_graph realizes a reserved multi-segment path topology")
         edge->add(*dyn);
     }
 
-    auto &flat = sqp.graph().flatten_nodes();
+    auto &flat = sqp.active_data().flatten_nodes();
     REQUIRE(flat.size() == 2);
 }
 

@@ -1,19 +1,19 @@
 #ifndef __NS_SQP__
 #define __NS_SQP__
 
-#include <moto/model/graph_model.hpp>
+#include <array>
+#include <chrono>
+#include <functional>
+#include <moto/core/directed_graph.hpp>
+#include <moto/ocp/graph_model.hpp>
 #include <moto/ocp/constr.hpp>
 #include <moto/ocp/impl/node_data.hpp>
-#include <moto/core/directed_graph.hpp>
-#include <moto/solver/ipm/ipm_config.hpp>
 #include <moto/solver/equality_init/eq_init_overlay.hpp>
+#include <moto/solver/ipm/ipm_config.hpp>
 #include <moto/solver/linesearch_config.hpp>
 #include <moto/solver/ns_riccati/generic_solver.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
 #include <moto/solver/restoration/resto_overlay.hpp>
-#include <array>
-#include <chrono>
-#include <functional>
 #include <optional>
 #include <string>
 
@@ -199,9 +199,9 @@ struct ns_sqp {
         bool verbose = true;
         size_t n_worker = MAX_THREADS; ///< number of worker threads
         bool in_restoration = false;
-        bool has_ineq_soft = false;    ///< whether the problem has inequality constraints (used to adjust printouts and possibly other settings)
-        bool has_ipm_ineq = false;     ///< whether the problem contains true IPM inequalities (__ineq_x / __ineq_xu)
-        bool initialized = false;     ///< whether the settings have been initialized based on the problem (used to trigger one-time initialization in the first iteration, e.g. setting initial mu based on initial residuals)
+        bool has_ineq_soft = false; ///< whether the problem has inequality constraints (used to adjust printouts and possibly other settings)
+        bool has_ipm_ineq = false;  ///< whether the problem contains true IPM inequalities (__ineq_x / __ineq_xu)
+        bool initialized = false;   ///< whether the settings have been initialized based on the problem (used to trigger one-time initialization in the first iteration, e.g. setting initial mu based on initial residuals)
     } settings;
 
     using solver_type = solver::ns_riccati::generic_solver;
@@ -224,11 +224,11 @@ struct ns_sqp {
 
     enum iter_result_t : size_t {
         unknown = 0,
-        success,               ///< converged to a KKT point within tolerances
-        exceed_max_iter,       ///< reached maximum number of iterations without convergence
-        restoration_failed,    ///< restoration was triggered but failed to make sufficient progress
+        success,                      ///< converged to a KKT point within tolerances
+        exceed_max_iter,              ///< reached maximum number of iterations without convergence
+        restoration_failed,           ///< restoration was triggered but failed to make sufficient progress
         restoration_reached_max_iter, ///< restoration reached its iteration budget without satisfying the exit test
-        infeasible_stationary, ///< reached an infeasible stationary point (e.g. due to LICQ failure) and cannot make progress
+        infeasible_stationary,        ///< reached an infeasible stationary point (e.g. due to LICQ failure) and cannot make progress
     };
 
     enum class iteration_phase : uint8_t {
@@ -241,31 +241,31 @@ struct ns_sqp {
         size_t num_iter = 0; // number of iterations
         size_t ls_steps = 0; ///< line search steps
 
-        scalar_t cost = 0.;                // pure running cost (sum of __cost terms)
-        scalar_t log_slack_sum = 0.;       // sum(log(slack)) across all normal-IPM constraints, mu-free
-        scalar_t barrier_dir_deriv = 0.;   // sum(d_slack / slack_current) across all normal-IPM constraints, mu-free
-        scalar_t search_barrier_value = 0.;     // phase-search-only barrier contribution; restoration keeps its elastic barrier bookkeeping here
-        scalar_t search_barrier_dir_deriv = 0.; // phase-search-only barrier directional derivative
-        scalar_t objective = 0.;           // phase original objective summary (normal: pure cost; restoration: prox + exact penalty)
-        scalar_t penalized_obj = 0.;       // phase search objective (original objective + search penalties / barriers)
-        scalar_t obj_fullstep_dec = 0.;    // original-objective directional derivative
+        scalar_t cost = 0.;                       // pure running cost (sum of __cost terms)
+        scalar_t log_slack_sum = 0.;              // sum(log(slack)) across all normal-IPM constraints, mu-free
+        scalar_t barrier_dir_deriv = 0.;          // sum(d_slack / slack_current) across all normal-IPM constraints, mu-free
+        scalar_t search_barrier_value = 0.;       // phase-search-only barrier contribution; restoration keeps its elastic barrier bookkeeping here
+        scalar_t search_barrier_dir_deriv = 0.;   // phase-search-only barrier directional derivative
+        scalar_t objective = 0.;                  // phase original objective summary (normal: pure cost; restoration: prox + exact penalty)
+        scalar_t penalized_obj = 0.;              // phase search objective (original objective + search penalties / barriers)
+        scalar_t obj_fullstep_dec = 0.;           // original-objective directional derivative
         scalar_t penalized_obj_fullstep_dec = 0.; // directional derivative of penalized_obj
-        scalar_t inf_prim_res = 0.;        // primal residual (constraint violation), inf-norm across all nodes/constraints
-        scalar_t prim_res_l1 = 0.;         // primal residual L1 norm (sum of |v| across all nodes/constraints)
-        scalar_t inf_dual_res = 0.;        // dual residual (stationary condition)
-        scalar_t inf_comp_res = 0.;        // (inequality) complementarity residual
-        scalar_t max_diag_scaling = 0.;    // max Nesterov-Todd scaling (lambda/slack) across all IPM constraints
-        scalar_t max_eq_dual_norm = 0.;    // max inf-norm of equality (hard) dual variables across all nodes
-        scalar_t max_ineq_dual_norm = 0.;  // max inf-norm of inequality dual variables across all nodes
-        scalar_t max_dual_norm = 0.;       // max inf-norm of dual variables across all nodes and constraint fields
-        scalar_t inf_prim_step = 0.;       // infinity norm of the primal step
-        scalar_t inf_dual_step = 0.;       // infinity norm of the dual step (all constraints)
-        scalar_t inf_eq_dual_step = 0.;    // infinity norm of the dual step (equality constraints only)
-        scalar_t inf_ineq_dual_step = 0.;  // infinity norm of the dual step (inequality constraints only)
-        scalar_t inf_dyn_dual_step = 0.;   // inf-norm of dual step for __dyn
-        scalar_t inf_eq_x_dual_step = 0.;  // inf-norm of dual step for __eq_x
-        scalar_t inf_eq_xu_dual_step = 0.; // inf-norm of dual step for __eq_xu
-        scalar_t avg_dual_res = 0.;        // average dual residual: L1 norm of stationarity gradient / number of elements (unscaled)
+        scalar_t inf_prim_res = 0.;               // primal residual (constraint violation), inf-norm across all nodes/constraints
+        scalar_t prim_res_l1 = 0.;                // primal residual L1 norm (sum of |v| across all nodes/constraints)
+        scalar_t inf_dual_res = 0.;               // dual residual (stationary condition)
+        scalar_t inf_comp_res = 0.;               // (inequality) complementarity residual
+        scalar_t max_diag_scaling = 0.;           // max Nesterov-Todd scaling (lambda/slack) across all IPM constraints
+        scalar_t max_eq_dual_norm = 0.;           // max inf-norm of equality (hard) dual variables across all nodes
+        scalar_t max_ineq_dual_norm = 0.;         // max inf-norm of inequality dual variables across all nodes
+        scalar_t max_dual_norm = 0.;              // max inf-norm of dual variables across all nodes and constraint fields
+        scalar_t inf_prim_step = 0.;              // infinity norm of the primal step
+        scalar_t inf_dual_step = 0.;              // infinity norm of the dual step (all constraints)
+        scalar_t inf_eq_dual_step = 0.;           // infinity norm of the dual step (equality constraints only)
+        scalar_t inf_ineq_dual_step = 0.;         // infinity norm of the dual step (inequality constraints only)
+        scalar_t inf_dyn_dual_step = 0.;          // inf-norm of dual step for __dyn
+        scalar_t inf_eq_x_dual_step = 0.;         // inf-norm of dual step for __eq_x
+        scalar_t inf_eq_xu_dual_step = 0.;        // inf-norm of dual step for __eq_xu
+        scalar_t avg_dual_res = 0.;               // average dual residual: L1 norm of stationarity gradient / number of elements (unscaled)
     } kkt_last;
 
     kkt_info update(size_t n_iter, bool verbose = true);
@@ -275,91 +275,75 @@ struct ns_sqp {
     struct node_type final : graph_types::node_base<data, node_type> {
         using base = graph_types::node_base<data, node_type>;
         using data_type = typename base::data_type;
-
         node_type() = default;
-
         explicit node_type(const ocp_ptr_t &formulation) {
             base::data_ = new data_type(formulation);
         }
-
         node_type(const node_type &rhs) : base(rhs) {
             if (rhs.data_) {
                 base::data_ = new data_type(rhs.data_->problem_ptr());
             }
         }
-
         node_type(node_type &&rhs) noexcept = default;
-
-        static node_type bridge_clone(const node_type &, const node_type &ed) {
-            return node_type(ed);
-        }
     };
 
     ns_sqp(size_t n_jobs = MAX_THREADS);
     ns_sqp(const ns_sqp &) = delete;
     ~ns_sqp() = default;
-    using solver_graph_type = directed_graph<node_type>;
-    struct sqp_graph_state : model::graph_model_state {
-        std::shared_ptr<solver_graph_type> restoration_runtime;
-        solver::restoration::restoration_overlay_settings restoration_cfg{};
-        bool restoration_cfg_valid = false;
-        std::shared_ptr<solver_graph_type> equality_init_runtime;
-        solver::equality_init::equality_init_overlay_settings equality_init_cfg{};
-        bool equality_init_cfg_valid = false;
-    };
+    using storage_type = directed_graph<node_type>;
 
     void reset_riccati_solver(solver_type *s) {
         riccati_solver_.reset(s);
     }
 
-    model::graph_model create_graph() {
-        active_model_graph_ = std::make_shared<sqp_graph_state>();
-        active_model_graph_->template ensure_runtime<solver_graph_type>(graph_n_jobs_);
-        return model::graph_model(active_model_graph_);
+    graph_model &create_graph() {
+        active_model_graph_ = std::make_shared<graph_model>();
+        solver_runtime_ = std::make_shared<storage_type>(graph_n_jobs_);
+        restoration_runtime_.reset();
+        restoration_cfg_valid_ = false;
+        equality_init_runtime_.reset();
+        equality_init_cfg_valid_ = false;
+        return *active_model_graph_;
     }
 
-    solver_graph_type &graph() {
-        return solver_graph();
+    graph_model &graph() {
+        if (!active_model_graph_) {
+            throw std::runtime_error("ns_sqp has no active model graph; call create_graph() first");
+        }
+        return *active_model_graph_;
     }
+
+    const graph_model &graph() const {
+        if (!active_model_graph_) {
+            throw std::runtime_error("ns_sqp has no active model graph; call create_graph() first");
+        }
+        return *active_model_graph_;
+    }
+
+    storage_type &active_data();
 
   private:
     struct filter_linesearch_data;
 
-    solver_graph_type &solver_graph() {
-        if (phase_graph_override_ != nullptr) {
-            return *phase_graph_override_;
-        }
-        if (!active_model_graph_) {
-            throw std::runtime_error("ns_sqp has no active model graph; call create_graph() first");
-        }
-        return solver_graph(active_model_graph_);
-    }
-
-    solver_graph_type &solver_graph(const std::shared_ptr<model::graph_model_state> &state) {
-        if (!state) {
-            throw std::runtime_error("ns_sqp has no active model graph; call create_graph() first");
-        }
-        auto graph = state->template ensure_runtime<solver_graph_type>(graph_n_jobs_);
-        if (state->dirty) {
-            model::graph_model(state).realize_into(*graph, [this](const ocp_ptr_t &formulation) {
-                return node_type(formulation);
-            });
-        }
-        return *graph;
-    }
-
-    solver_graph_type &restoration_graph();
-    solver_graph_type &equality_init_graph();
+    storage_type &restoration_graph();
+    storage_type &equality_init_graph();
     void clear_phase_graph_override() { phase_graph_override_ = nullptr; }
-    void set_phase_graph_override(solver_graph_type &graph) { phase_graph_override_ = &graph; }
+    void set_phase_graph_override(storage_type &graph) { phase_graph_override_ = &graph; }
     bool using_restoration_overlay_graph() const {
-        return settings.in_restoration && phase_graph_override_ != nullptr && active_model_graph_ &&
-               active_model_graph_->restoration_runtime.get() == phase_graph_override_;
+        return settings.in_restoration && phase_graph_override_ != nullptr && restoration_runtime_ &&
+               restoration_runtime_.get() == phase_graph_override_;
     }
 
     std::unique_ptr<solver_type> riccati_solver_ = nullptr;
-    std::shared_ptr<sqp_graph_state> active_model_graph_;
-    solver_graph_type *phase_graph_override_ = nullptr;
+    std::shared_ptr<graph_model> active_model_graph_;
+    std::shared_ptr<storage_type> solver_runtime_;
+    std::shared_ptr<storage_type> restoration_runtime_;
+    solver::restoration::restoration_overlay_settings restoration_cfg_{};
+    bool restoration_cfg_valid_ = false;
+    std::shared_ptr<storage_type> equality_init_runtime_;
+    solver::equality_init::equality_init_overlay_settings equality_init_cfg_{};
+    bool equality_init_cfg_valid_ = false;
+    storage_type *phase_graph_override_ = nullptr;
     size_t graph_n_jobs_ = MAX_THREADS;
 
     template <typename worker_type>
@@ -563,14 +547,14 @@ struct ns_sqp {
     void refresh_ls_bounds();
     template <typename Prepare, typename Finalize>
     void run_correction_step(Prepare &&prepare, Finalize &&finalize) {
-        solver_graph().for_each_parallel(
+        active_data().for_each_parallel(
             [prepare = std::forward<Prepare>(prepare)](data *d) mutable {
                 std::invoke(prepare, d);
             });
         post_factorization_correction_step();
         {
             auto phase_profile = profile_scope(profile_phase::correction_finalize);
-            solver_graph().for_each_parallel(
+            active_data().for_each_parallel(
                 [finalize = std::forward<Finalize>(finalize)](data *d) mutable {
                     std::invoke(finalize, d);
                 });

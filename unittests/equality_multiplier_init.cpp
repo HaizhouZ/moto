@@ -91,7 +91,7 @@ constr make_ineq_xu(const std::string &name, const sym &x, const sym &u, scalar_
 }
 
 void seed_primal_state(ns_sqp &sqp, size_t n_stage_nodes) {
-    auto &flat = sqp.graph().flatten_nodes();
+    auto &flat = sqp.active_data().flatten_nodes();
     REQUIRE(flat.size() == n_stage_nodes);
 
     for (size_t i = 0; i < flat.size(); ++i) {
@@ -144,8 +144,8 @@ TEST_CASE("equality multiplier initialization leaves primals and inequalities fi
     REQUIRE_NOTHROW(without_init.update(0, false));
     REQUIRE_NOTHROW(with_init.update(0, false));
 
-    auto &flat_without = without_init.graph().flatten_nodes();
-    auto &flat_with = with_init.graph().flatten_nodes();
+    auto &flat_without = without_init.active_data().flatten_nodes();
+    auto &flat_with = with_init.active_data().flatten_nodes();
     REQUIRE(flat_without.size() == flat_with.size());
 
     bool saw_soft_dual = false;
@@ -178,8 +178,8 @@ TEST_CASE("equality multiplier initialization reduces initial hard-equality dual
     const auto kkt_without = without_init.update(0, false);
     const auto kkt_with = with_init.update(0, false);
 
-    auto &flat_without = without_init.graph().flatten_nodes();
-    auto &flat_with = with_init.graph().flatten_nodes();
+    auto &flat_without = without_init.active_data().flatten_nodes();
+    auto &flat_with = with_init.active_data().flatten_nodes();
     REQUIRE(flat_without.size() == flat_with.size());
 
     bool changed_hard_dual = false;
@@ -203,8 +203,8 @@ TEST_CASE("equality multiplier initialization updates soft equalities and leaves
     REQUIRE_NOTHROW(without_init.update(0, false));
     REQUIRE_NOTHROW(with_init.update(0, false));
 
-    auto &flat_without = without_init.graph().flatten_nodes();
-    auto &flat_with = with_init.graph().flatten_nodes();
+    auto &flat_without = without_init.active_data().flatten_nodes();
+    auto &flat_with = with_init.active_data().flatten_nodes();
     REQUIRE(flat_without.size() == flat_with.size());
 
     bool saw_soft_dual = false;
