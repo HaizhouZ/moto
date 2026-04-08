@@ -167,7 +167,7 @@ class pinCasadiModel(cpin.Model):
         )
         return c
         c = c.cast_soft()
-        c.rho = 1e-8
+        c.rho = 1e-4
         return c
         res = cpin.log6(ee_des.inverse() * ee_pos).np
         # res = cs.vcat([ee_pos.translation - ee_des.translation, cpin.log3(ee_des.rotation.T @ ee_pos.rotation)])
@@ -337,8 +337,9 @@ def build_sqp(display: bool, n_job: int = 4):
 
     sqp.apply_forward(set_initial_state)
 
-    sqp.settings.ipm.mu0 = 1
-    sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
+    sqp.settings.ipm.mu0 = 0.1
+    # sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
+    sqp.settings.ipm.mu_method = moto.sqp.monotonic_decrease
     sqp.settings.prim_tol = 1e-3
     sqp.settings.dual_tol = 1e-3
     sqp.settings.comp_tol = 1e-3

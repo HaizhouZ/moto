@@ -256,6 +256,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     kkt_info kkt_outer_trial{};
     bool resto_accept = false;
     bool resto_stalled = false;
+    bool resto_converged = false;
     bool resto_hit_max_iter = false;
     size_t stalled_iters = 0;
     const size_t max_resto_iters =
@@ -272,6 +273,8 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         if (settings.verbose) {
             print_stats(kkt_rest);
         }
+        // check convergence of the local resto problem
+        resto_converged = kkt_rest.inf_dual_res < settings.dual_tol;
 
         if (action == line_search_action::accept) {
             resto_graph.for_each_parallel([this](data *d) {
@@ -302,9 +305,12 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
             kkt_rest.num_iter = kkt_before.num_iter + i_rest + 1;
             kkt_rest.ls_steps = rls.step_cnt;
             const bool outer_accept = outer_filter_accepts(ls, kkt_outer_trial, kkt_before);
-            const bool prim_improved = kkt_outer_trial.prim_res_l1 < kkt_before.prim_res_l1;
+            const bool prim_improved = kkt_outer_trial.prim_res_l1 < 0.9 * kkt_before.prim_res_l1;
             if (outer_accept && prim_improved) {
                 resto_accept = true;
+                break;
+            }
+            if (resto_converged) {
                 break;
             }
         }
@@ -315,12 +321,12 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
                 d->update_approximation(node_data::update_mode::eval_derivatives, true);
             });
             ++stalled_iters;
+            resto_stalled = true;
+            break;
         } else {
             stalled_iters = 0;
         }
-        resto_stalled = stalled_iters >= 2;
     }
-    resto_hit_max_iter = !resto_accept && !resto_stalled;
 
     const auto cleanup = [&](bool success) {
         if (success) {
@@ -370,6 +376,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
                     d->update_approximation(node_data::update_mode::eval_derivatives, true);
                 });
             }
+            // ls.points.clear();
         } else {
             clear_phase_graph_override();
         }
@@ -388,15 +395,16 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     result.ls_steps = kkt_rest.ls_steps;
     if (resto_accept) {
         result.result = iter_result_t::unknown;
-    } else if (resto_stalled && result.inf_dual_res < settings.dual_tol && result.prim_res_l1 > settings.prim_tol) {
-        result.result = iter_result_t::infeasible_stationary;
-    } else if (resto_hit_max_iter) {
-        result.result = iter_result_t::restoration_reached_max_iter;
-    } else {
+    } else if (resto_stalled) {
         result.result = iter_result_t::restoration_failed;
+    } else if (resto_converged) {
+        result.result = iter_result_t::infeasible_stationary;
+    } else {
+        result.result = iter_result_t::restoration_reached_max_iter;
     }
     if (settings.verbose) {
-        fmt::print("[resto]: primal residual: {} before {}\n", result.prim_res_l1, kkt_before.prim_res_l1);
+        fmt::print("[resto]: primal residual(L1): {} before {}\n", kkt_outer_trial.prim_res_l1, kkt_before.prim_res_l1);
+        fmt::print("[resto]: primal residual(Linf): {} before {}\n", kkt_outer_trial.inf_prim_res, kkt_before.inf_prim_res);
         fmt::print("=== leave restoration: {} ===\n\n",
                    resto_accept ? "success" : (result.result == iter_result_t::infeasible_stationary ? "infeasible_stationary" : (result.result == iter_result_t::restoration_reached_max_iter ? "reached_max_iter" : "failed")));
     }

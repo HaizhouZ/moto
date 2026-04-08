@@ -168,7 +168,7 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt,
     }
     filter_reject_cnt = 0;
 
-    if (switching_condition && current_kkt.prim_res_l1 <= constr_vio_min) {
+    if (!settings.in_restoration && switching_condition && current_kkt.prim_res_l1 <= constr_vio_min) {
         if (eval.accepted_by_armijo) {
             last_step_was_armijo = true;
             log("  trial point accepted by Armijo condition in switching mode (primal res: {:.3e}, objective: {:.3e}), armijo target: {:.3e}\n",
@@ -276,7 +276,8 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     if (settings.ls.max_steps > ls.step_cnt) {
         ls.step_cnt++;
         step_back_alpha(ls);
-        if (settings.ls.alpha_primal <= ls.alpha_min && current_primal > settings.prim_tol) {
+        if (settings.ls.alpha_primal <= ls.alpha_min &&
+            (settings.in_restoration || current_primal > settings.prim_tol)) {
             ls.stop = true;
             ls.failure_reason = filter_linesearch_per_iter_data::failure_reason_t::tiny_step;
             ls.recompute_approx = false;
