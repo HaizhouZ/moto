@@ -222,27 +222,126 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     settings.in_restoration = true;
     set_phase_graph_override(resto_graph);
 
-    const auto prox_eps = scalar_t(1.0);
-    for_each_overlay_pair(outer_graph, resto_graph, [&](data &outer, data &resto) {
-        solver::restoration::sync_outer_to_restoration_state(outer, resto, prox_eps, &settings.mu);
-    });
-    if (settings.verbose && resto_entry_debug_enabled()) {
-        dump_overlay_pair_order(outer_graph, resto_graph);
-        dump_outer_overlay_source_values(outer_graph, resto_graph);
-    }
-    resto_graph.for_each_parallel([this](data *d) {
-        d->for_each_constr([this](const generic_func &c, func_approx_data &fd) { c.setup_workspace_data(fd, &settings); });
-        d->update_approximation(node_data::update_mode::eval_val, true);
-        solver::ineq_soft::initialize(d);
-        d->update_approximation(node_data::update_mode::eval_val, true);
-        d->update_approximation(node_data::update_mode::eval_derivatives, true);
-    });
-    if (resto_eq_debug_enabled()) {
-        auto nodes = resto_graph.flatten_nodes();
-        if (!nodes.empty()) {
-            dump_resto_eq_node(*nodes.back(), "after-derivatives");
+    const auto set_iter_meta = [&](kkt_info &info, size_t iter_offset, size_t ls_steps) {
+        info.num_iter = kkt_before.num_iter + iter_offset;
+        info.ls_steps = ls_steps;
+    };
+    const auto refresh_restoration_derivatives = [&]() {
+        resto_graph.for_each_parallel([this](data *d) {
+            d->update_approximation(node_data::update_mode::eval_derivatives, true);
+        });
+    };
+    const auto initialize_restoration_problem = [&]() {
+        const auto prox_eps = scalar_t(1.0);
+        for_each_overlay_pair(outer_graph, resto_graph, [&](data &outer, data &resto) {
+            solver::restoration::sync_outer_to_restoration_state(outer, resto, prox_eps, &settings.mu);
+        });
+        if (settings.verbose && resto_entry_debug_enabled()) {
+            dump_overlay_pair_order(outer_graph, resto_graph);
+            dump_outer_overlay_source_values(outer_graph, resto_graph);
         }
-    }
+        resto_graph.for_each_parallel([this](data *d) {
+            d->for_each_constr([this](const generic_func &c, func_approx_data &fd) {
+                c.setup_workspace_data(fd, &settings);
+            });
+            d->update_approximation(node_data::update_mode::eval_val, true);
+            solver::ineq_soft::initialize(d);
+            d->update_approximation(node_data::update_mode::eval_val, true);
+            d->update_approximation(node_data::update_mode::eval_derivatives, true);
+        });
+        if (resto_eq_debug_enabled()) {
+            auto nodes = resto_graph.flatten_nodes();
+            if (!nodes.empty()) {
+                dump_resto_eq_node(*nodes.back(), "after-derivatives");
+            }
+        }
+    };
+    const auto evaluate_outer_trial_from_restoration = [&]() {
+        // Bounce through the outer graph only long enough to evaluate the
+        // candidate in normal-phase metrics, then restore the restoration phase.
+        resto_graph.for_each_parallel([this](data *d) {
+            d->update_approximation(node_data::update_mode::eval_val, true);
+        });
+        outer_graph.for_each_parallel([](data *d) { d->backup_trial_state(); });
+        for_each_overlay_pair(resto_graph, outer_graph, [&](data &resto, data &outer) {
+            solver::restoration::sync_restoration_to_outer_state(resto, outer);
+        });
+        outer_graph.for_each_parallel([this](data *d) {
+            d->update_approximation(node_data::update_mode::eval_val, true);
+        });
+        clear_phase_graph_override();
+        const auto outer_trial = compute_kkt_info_for_phase(iteration_phase::normal, false);
+        set_phase_graph_override(resto_graph);
+        outer_graph.for_each_parallel([](data *d) { d->restore_trial_state(); });
+        refresh_restoration_derivatives();
+        return outer_trial;
+    };
+    const auto finish_restoration = [&](bool success) {
+        if (success) {
+            for_each_overlay_pair(resto_graph, outer_graph, [&](data &resto, data &outer) {
+                solver::restoration::sync_restoration_to_outer_state(resto, outer);
+            });
+
+            reset_ls_workers();
+            outer_graph.for_each_parallel([this](size_t tid, data *d) {
+                solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
+            });
+            solver::linesearch_config ls_dual_only;
+            for (solver::linesearch_config &s : setting_per_thread) {
+                ls_dual_only.dual.merge_from(s.dual);
+            }
+
+            std::vector<bool> local_exceed_bound(setting_per_thread.size(), false);
+            outer_graph.for_each_parallel([&, this](size_t tid, data *d) {
+                solver::ineq_soft::for_each(
+                    d, [&](const soft_constr &sf, soft_constr::data_map_t &sd) {
+                        if (in_field(sf.field(), ineq_constr_fields)) {
+                            sd.multiplier_ += ls_dual_only.dual.alpha_max * sd.d_multiplier_;
+                        }
+                    });
+                for (auto field : ineq_constr_fields) {
+                    local_exceed_bound[tid] =
+                        local_exceed_bound[tid] ||
+                        d->dense().dual_[field].cwiseAbs().maxCoeff() >
+                            settings.restoration.bound_mult_reset_threshold;
+                }
+            });
+
+            const bool reset_bound_multipliers =
+                std::any_of(local_exceed_bound.begin(), local_exceed_bound.end(), [](bool b) { return b; });
+            if (settings.verbose) {
+                fmt::println("[resto cleanup] reset_bound_multipliers: {}", reset_bound_multipliers);
+            }
+
+            clear_phase_graph_override();
+            outer_graph.for_each_parallel([&, this](data *d) {
+                d->update_approximation(node_data::update_mode::eval_val, true);
+                if (reset_bound_multipliers) {
+                    for (auto field : ineq_constr_fields) {
+                        d->dense().dual_[field].setConstant(1.0);
+                    }
+                }
+            });
+
+            if (settings.eq_init.enabled && settings.eq_init.rebuild_after_restoration_exit) {
+                initialize_equality_multipliers();
+            } else {
+                outer_graph.for_each_parallel([this](data *d) {
+                    d->update_approximation(node_data::update_mode::eval_derivatives, true);
+                });
+            }
+        } else {
+            clear_phase_graph_override();
+            outer_graph.for_each_parallel([this](data *d) {
+                d->update_approximation(node_data::update_mode::eval_val, true);
+                d->update_approximation(node_data::update_mode::eval_derivatives, true);
+            });
+        }
+        settings.in_restoration = false;
+    };
+
+    initialize_restoration_problem();
+
     ls.augment_filter_for_restoration_start(kkt_before, settings);
     filter_linesearch_data rls;
     // Reset the switching threshold for the restoration subproblem. Reusing the
@@ -253,66 +352,42 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         std::max(kkt_before.prim_res_l1 * settings.ls.constr_vio_min_frac, settings.prim_tol);
 
     kkt_info kkt_rest = compute_kkt_info();
+    set_iter_meta(kkt_rest, 0, 0);
+
     kkt_info kkt_outer_trial{};
     bool resto_accept = false;
     bool resto_stalled = false;
     bool resto_converged = false;
-    bool resto_hit_max_iter = false;
-    size_t stalled_iters = 0;
     const size_t max_resto_iters =
         std::min(settings.restoration.max_iter,
                  settings.max_iter > kkt_before.num_iter ? settings.max_iter - kkt_before.num_iter : size_t(0));
+    const scalar_t accepted_outer_prim_res =
+        settings.restoration.restoration_improvement_frac * kkt_before.prim_res_l1;
 
     for (size_t i_rest = 0; i_rest < max_resto_iters; ++i_rest) {
-        line_search_action action = sqp_iter(rls, kkt_rest,
-                                             /*do_scaling=*/false,
-                                             /*do_refinement=*/true,
-                                             /*gauss_newton=*/false);
-        kkt_rest.num_iter = kkt_before.num_iter + i_rest + 1;
-        kkt_rest.ls_steps = rls.step_cnt;
+        const line_search_action action = sqp_iter(rls, kkt_rest,
+                                                   /*do_scaling=*/false,
+                                                   /*do_refinement=*/true,
+                                                   /*gauss_newton=*/false);
+        set_iter_meta(kkt_rest, i_rest + 1, rls.step_cnt);
         if (settings.verbose) {
             print_stats(kkt_rest);
         }
-        // check convergence of the local resto problem
+
         resto_converged = kkt_rest.inf_dual_res < settings.dual_tol;
 
         if (action == line_search_action::accept) {
-            resto_graph.for_each_parallel([this](data *d) {
-                d->update_approximation(node_data::update_mode::eval_val, true);
-            });
-            // backup for later restore to restoration point
-            outer_graph.for_each_parallel([](data *d) { d->backup_trial_state(); });
-            // async resto graph states to the outer one for evaluation
-            for_each_overlay_pair(resto_graph, outer_graph, [&](data &resto, data &outer) {
-                solver::restoration::sync_restoration_to_outer_state(resto, outer);
-            });
-            outer_graph.for_each_parallel([](data *d) {
-                d->update_approximation(node_data::update_mode::eval_val, true);
-            });
-            clear_phase_graph_override();
-            // compute outer trial objective and constraint violation
-            kkt_outer_trial = compute_kkt_info_for_phase(iteration_phase::normal, false);
-            set_phase_graph_override(resto_graph);
-            // restore to entry state
-            outer_graph.for_each_parallel([](data *d) {
-                d->restore_trial_state();
-            });
-            // update for resto-only evaluation
-            resto_graph.for_each_parallel([this](data *d) {
-                d->update_approximation(node_data::update_mode::eval_derivatives, true);
-            });
+            kkt_outer_trial = evaluate_outer_trial_from_restoration();
             kkt_rest = compute_kkt_info();
-            kkt_rest.num_iter = kkt_before.num_iter + i_rest + 1;
-            kkt_rest.ls_steps = rls.step_cnt;
+            set_iter_meta(kkt_rest, i_rest + 1, rls.step_cnt);
+
             const bool outer_accept = outer_filter_accepts(ls, kkt_outer_trial, kkt_before);
-            const bool prim_improved = kkt_outer_trial.prim_res_l1 < 0.9 * kkt_before.prim_res_l1;
-            if (outer_accept && prim_improved) {
-                resto_accept = true;
+            const bool prim_improved = kkt_outer_trial.prim_res_l1 < accepted_outer_prim_res;
+            resto_accept = outer_accept && prim_improved;
+            if (resto_accept || resto_converged) {
                 break;
             }
-            if (resto_converged) {
-                break;
-            }
+            continue;
         }
 
         if (action == line_search_action::failure) {
@@ -320,76 +395,12 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
                 d->restore_trial_state();
                 d->update_approximation(node_data::update_mode::eval_derivatives, true);
             });
-            ++stalled_iters;
             resto_stalled = true;
             break;
-        } else {
-            stalled_iters = 0;
         }
     }
 
-    const auto cleanup = [&](bool success) {
-        if (success) {
-            for_each_overlay_pair(resto_graph, outer_graph, [&](data &resto, data &outer) {
-                solver::restoration::sync_restoration_to_outer_state(resto, outer);
-            });
-            // recompute the inequality multipliers
-            reset_ls_workers();
-            outer_graph.for_each_parallel([this](size_t tid, data *d) {
-                solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
-            });
-            solver::linesearch_config ls_dual_only;
-            for (solver::linesearch_config &s : setting_per_thread) {
-                ls_dual_only.dual.merge_from(s.dual);
-            }
-            std::vector<bool> local_exceed_bound(setting_per_thread.size(), false);
-            outer_graph.for_each_parallel([&, this](size_t tid, data *d) {
-                solver::ineq_soft::for_each(
-                    d, [&](const soft_constr &sf, soft_constr::data_map_t &sd) {
-                        if (in_field(sf.field(), ineq_constr_fields)) {
-                            sd.multiplier_ += ls_dual_only.dual.alpha_max * sd.d_multiplier_;
-                        }
-                    });
-                for (auto field : ineq_constr_fields) {
-                    local_exceed_bound[tid] = local_exceed_bound[tid] ||
-                                              d->dense().dual_[field].cwiseAbs().maxCoeff() > settings.restoration.bound_mult_reset_threshold;
-                }
-            });
-            // check if inequality multipliers exceed the threshold; reset all to 1 if yes
-            bool reset_bound_multipliers = std::any_of(local_exceed_bound.begin(), local_exceed_bound.end(), [](bool b) { return b; });
-            if (settings.verbose) {
-                fmt::println("[resto cleanup] reset_bound_multipliers: {}", reset_bound_multipliers);
-            }
-            clear_phase_graph_override();
-            outer_graph.for_each_parallel([&, this](data *d) {
-                d->update_approximation(node_data::update_mode::eval_val, true);
-                if (reset_bound_multipliers) {
-                    for (auto field : ineq_constr_fields)
-                        d->dense().dual_[field].setConstant(1.0);
-                }
-            });
-            // reset equality multipliers with lsq
-            if (settings.eq_init.enabled && settings.eq_init.rebuild_after_restoration_exit) {
-                initialize_equality_multipliers();
-            } else {
-                outer_graph.for_each_parallel([this](data *d) {
-                    d->update_approximation(node_data::update_mode::eval_derivatives, true);
-                });
-            }
-            // ls.points.clear();
-        } else {
-            clear_phase_graph_override();
-        }
-        settings.in_restoration = false;
-        if (!success) {
-            outer_graph.for_each_parallel([this](data *d) {
-                d->update_approximation(node_data::update_mode::eval_val, true);
-                d->update_approximation(node_data::update_mode::eval_derivatives, true);
-            });
-        }
-    };
-
-    cleanup(resto_accept);
+    finish_restoration(resto_accept);
     kkt_info result = resto_accept ? compute_kkt_info() : kkt_rest;
     result.num_iter = kkt_rest.num_iter;
     result.ls_steps = kkt_rest.ls_steps;
