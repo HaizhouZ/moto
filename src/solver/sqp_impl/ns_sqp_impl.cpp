@@ -541,7 +541,7 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
         });
         ctx.trial = compute_kkt_info();
     } else {
-        ctx.trial = compute_filter_trial_info();
+        ctx.trial = compute_kkt_info(false);
     }
     detail_timed_block_end("update_res_stat");
     }
@@ -1188,26 +1188,6 @@ ns_sqp::kkt_info ns_sqp::compute_kkt_info_minimal(bool update_dual_res) {
     kkt.objective = kkt.cost - settings.ipm.mu * kkt.log_slack_sum;
     kkt.penalized_obj = kkt.objective;
     kkt.penalized_obj_fullstep_dec = kkt.obj_fullstep_dec - settings.ipm.mu * kkt.barrier_dir_deriv;
-    return kkt;
-}
-
-ns_sqp::kkt_info ns_sqp::compute_filter_trial_info() {
-    kkt_info kkt;
-    auto &graph = active_data();
-    for (auto *n : graph.flatten_nodes()) {
-        kkt.cost += n->cost();
-        kkt.inf_prim_res = std::max(kkt.inf_prim_res, n->inf_prim_res_);
-        kkt.prim_res_l1 += n->prim_res_l1_;
-        n->for_each<ineq_soft_constr_fields>([&](const soft_constr &, soft_constr::data_map_t &sd) {
-            auto *id = dynamic_cast<solver::ipm_constr::approx_data *>(&sd);
-            if (id == nullptr || id->ipm_cfg == nullptr)
-                return;
-            kkt.log_slack_sum += id->slack_.array().log().sum();
-        });
-    }
-    kkt.objective = kkt.cost;
-    kkt.search_barrier_value = settings.ipm.mu * kkt.log_slack_sum;
-    finalize_phase_objectives(kkt);
     return kkt;
 }
 ns_sqp::kkt_info ns_sqp::compute_kkt_info(bool update_dual_res) {
