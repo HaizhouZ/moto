@@ -1,7 +1,9 @@
 #ifndef MOTO_CORE_PARALLEL_JOB_HPP
 #define MOTO_CORE_PARALLEL_JOB_HPP
 
+#include <cstdlib>
 #include <cstddef>
+#include <string_view>
 
 #ifdef MOTO_USE_OMP
 #include <omp.h>
@@ -11,6 +13,50 @@
 #endif
 
 namespace moto {
+enum class parallel_block_order {
+    reverse,
+    forward,
+};
+
+enum class parallel_tid_mode {
+    logical_chunk,
+    omp_thread,
+};
+
+inline parallel_block_order get_parallel_block_order() {
+    static const parallel_block_order order = [] {
+        const char *env = std::getenv("MOTO_PARALLEL_BLOCK_ORDER");
+        if (env == nullptr) {
+            // Default to chunking in the same order as the provided view.
+            // For backward recursions the view itself is already reversed by
+            // directed_graph::apply_backward(), so "forward" chunking still
+            // preserves traversal-locality.
+            return parallel_block_order::forward;
+        }
+        const std::string_view value(env);
+        if (value == "forward") {
+            return parallel_block_order::forward;
+        }
+        return parallel_block_order::reverse;
+    }();
+    return order;
+}
+
+inline parallel_tid_mode get_parallel_tid_mode() {
+    static const parallel_tid_mode mode = [] {
+        const char *env = std::getenv("MOTO_PARALLEL_TID_MODE");
+        if (env == nullptr) {
+            return parallel_tid_mode::logical_chunk;
+        }
+        const std::string_view value(env);
+        if (value == "omp") {
+            return parallel_tid_mode::omp_thread;
+        }
+        return parallel_tid_mode::logical_chunk;
+    }();
+    return mode;
+}
+
 /**
  * @brief Get the number of threads available for parallel execution
  *
@@ -27,7 +73,7 @@ inline size_t get_num_threads() {
  * @param stop stop idx
  * @param callback
  */
-template <typename callback_t, bool reverse_block = true>
+template <typename callback_t>
 inline void parallel_for(size_t start, size_t stop, callback_t &&callback,
                          size_t n_jobs = MAX_THREADS, bool no_except = false) {
 
@@ -41,7 +87,7 @@ inline void parallel_for(size_t start, size_t stop, callback_t &&callback,
 #endif
     for (size_t j = 0; j < n_threads; j++) {
         size_t begin;
-        if constexpr (reverse_block)
+        if (get_parallel_block_order() == parallel_block_order::reverse)
             begin = (n_threads - j - 1) * chunk_size;
         else
             begin = j * chunk_size;
@@ -50,8 +96,15 @@ inline void parallel_for(size_t start, size_t stop, callback_t &&callback,
             auto call = [&]() {
                 if constexpr (std::invocable<callback_t, size_t>)
                     callback(i);
-                else if constexpr (std::invocable<callback_t, size_t, size_t>)
-                    callback(j, i); // pass thread id as second argument
+                else if constexpr (std::invocable<callback_t, size_t, size_t>) {
+                    size_t tid = j;
+#ifdef MOTO_USE_OMP
+                    if (get_parallel_tid_mode() == parallel_tid_mode::omp_thread) {
+                        tid = static_cast<size_t>(omp_get_thread_num());
+                    }
+#endif
+                    callback(tid, i);
+                }
                 else
                     static_assert(false, "callback must be invocable with size_t or [size_t, size_t]");
             };

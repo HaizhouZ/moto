@@ -1,7 +1,7 @@
 #ifndef MOTO_OCP_IMPL_FUNC_DATA_HPP
 #define MOTO_OCP_IMPL_FUNC_DATA_HPP
 
-#include <moto/ocp/impl/merit_data.hpp>
+#include <moto/ocp/impl/lag_data.hpp>
 #include <moto/ocp/impl/sym_data.hpp>
 
 namespace moto {
@@ -16,7 +16,7 @@ class shared_data {
     std::unordered_map<size_t, func_arg_map_ptr_t> data_; ///< [uid (of data owner), data]
 
   public:
-    shared_data(ocp *prob, sym_data *primal, merit_data *raw = nullptr);
+    shared_data(ocp *prob, sym_data *primal, lag_data *raw = nullptr);
     shared_data(shared_data &&) = default;
 
     const ocp *prob_;
@@ -109,14 +109,12 @@ struct func_arg_map {
  * for example Q_ux is store instead of Q_ux;
  */
 struct func_approx_data : public func_arg_map {
-    merit_data *merit_data_ = nullptr; ///< reference to the merit data
+    lag_data *lag_data_ = nullptr; ///< reference to the lagrangian data
     ///////////////////////////////////////////////////
     vector_ref v_;                ///< value ref
     std::vector<matrix_ref> jac_; ///< jacobian references
-    /// jacobian for cost, index corresponds to @ref func_arg_map::in_args_
-    std::vector<row_vector_ref> merit_jac_;
     /// hessian for cost. index corresponds to @ref func_arg_map::in_args_
-    std::vector<std::vector<matrix_ref>> merit_hess_;
+    std::vector<std::vector<matrix_ref>> lag_hess_;
     /**
      * @brief Construct a new sparse approx data object
      *
@@ -125,12 +123,14 @@ struct func_approx_data : public func_arg_map {
      * @param shared shared data
      * @param f approximation
      */
-    func_approx_data(sym_data &primal, merit_data &raw, shared_data &shared, const generic_func &f);
+    func_approx_data(sym_data &primal, lag_data &raw, shared_data &shared, const generic_func &f);
     /// @brief setup hessian from raw approx storage
     void setup_hessian();
     /// @brief get the jacobian reference
     auto jac(const sym &in) const { return jac_[sym_uid_idx_.at(in.uid())]; }
     auto jac(size_t i) const { return jac_.at(i); }
+
+    virtual void reset() {}
 };
 
 def_unique_ptr(func_approx_data);

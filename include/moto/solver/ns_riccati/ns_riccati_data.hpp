@@ -2,7 +2,6 @@
 #define __NS_RICCATI_DATA__
 
 #include <moto/solver/data_base.hpp>
-
 #include <Eigen/Cholesky>
 #include <Eigen/LU>
 #include <moto/utils/blasfeo_factorizer/blasfeo_llt.hpp>
@@ -83,6 +82,7 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
     ns_riccati_data(ns_riccati_data &&rhs) = default;
 
     void update_projected_dynamics();
+    void update_projected_dynamics_residual();
     void apply_jac_y_inverse_transpose(vector &v, vector &dst);
 };
 } // namespace ns_riccati

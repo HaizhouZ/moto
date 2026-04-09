@@ -3,11 +3,12 @@
 
 #include <moto/ocp/ineq_constr.hpp>
 #include <moto/solver/ipm/ipm_config.hpp>
+#include <moto/solver/ipm/positivity_step.hpp>
 
 namespace moto {
 namespace solver {
 
-class ipm_constr final : public ineq_constr {
+class ipm_constr : public ineq_constr {
   private:
     using base = ineq_constr;
 
@@ -21,24 +22,23 @@ class ipm_constr final : public ineq_constr {
         vector g_;                     ///< constraint value
         vector r_s_;                   ///< ipm residuals g + t
         vector slack_;                 ///< slack variables for the constraints
+        vector slack_backup_;          ///< backup of slack variables for line search trials
         vector diag_scaling;           ///< Nesterov-Todd scaling T^{-1} N
-        vector diag_scaling_last_;     ///< Nesterov-Todd scaling T^{-1} N
         vector scaled_res_;            ///< residuals after NT scaling (Nr_g - r_s) T^{-1} = T{-1} N r_g + T^{-1} mu
-        vector scaled_res_last_;       ///< residuals after NT scaling (Nr_g - r_s) T^{-1} = T{-1} N r_g + T^{-1} mu
         vector d_slack_;               ///< newton step for slack variables
         vector corrector_;             ///< newton step for multipliers
         vector reg_;
         vector active_;
         vector reg_T_inv_;
-        vector multipler_backup_;
+        vector multiplier_backup_;
         approx_data(base::approx_data &&rhs);
     };
     using base::base;
     using ipm_data = data_type<ipm_constr>;
     /// update the IPM slack and residuals
-    void value_impl(func_approx_data &data) const override final;
+    void value_impl(func_approx_data &data) const override;
     /// update the IPM-modified cost jacobian and hessian
-    void jacobian_impl(func_approx_data &data) const override final;
+    void jacobian_impl(func_approx_data &data) const override;
 
     void propagate_jacobian(func_approx_data &d) const override;
     void propagate_hessian(func_approx_data &d) const override;
@@ -50,17 +50,23 @@ class ipm_constr final : public ineq_constr {
         data.as<ipm_data>().ipm_cfg = &settings->as<ipm_config>();
     }
     /// @brief initialize the IPM constraint data
-    void initialize(data_map_t &data) const override final;
+    void initialize(data_map_t &data) const override;
     /// @brief post rollout operation for the IPM constraint to compute the newton step
-    void finalize_newton_step(data_map_t &data) const override final;
+    void finalize_newton_step(data_map_t &data) const override;
     /// @brief finalize the predictor step, should be called after the rollout
-    void finalize_predictor_step(data_map_t &data, workspace_data *cfg) const override final;
+    void finalize_predictor_step(data_map_t &data, workspace_data *cfg) const override;
     /// @brief will compute the cost jacobian correction depending on the IPM settings
-    void apply_corrector_step(data_map_t &data) const override final;
+    void apply_corrector_step(data_map_t &data) const override;
     /// @brief line search step for the IPM constraint
-    void apply_affine_step(data_map_t &data, workspace_data *cfg) const override final;
+    void apply_affine_step(data_map_t &data, workspace_data *cfg) const override;
     /// @brief update the line search configuration (if necessary)
-    void update_ls_bounds(data_map_t &data, workspace_data *cfg) const override final;
+    void update_ls_bounds(data_map_t &data, workspace_data *cfg) const override;
+    /// @brief backup the current IPM trial state before a line-search attempt
+    void backup_trial_state(data_map_t &data) const override;
+    /// @brief restore the backed-up IPM trial state before the next line-search attempt
+    void restore_trial_state(data_map_t &data) const override;
+    scalar_t search_penalty(const func_approx_data &data) const override;
+    scalar_t search_penalty_dir_deriv(const func_approx_data &data) const override;
     /**
      * @brief make the sparse approximation data for the IPM
      * @param primal sym data including states inputs etc
@@ -68,10 +74,11 @@ class ipm_constr final : public ineq_constr {
      * @param shared shared data
      * @return func_approx_data_ptr_t
      */
-    func_approx_data_ptr_t create_approx_data(sym_data &primal, merit_data &raw, shared_data &shared) const override {
+    func_approx_data_ptr_t create_approx_data(sym_data &primal, lag_data &raw, shared_data &shared) const override {
         return func_approx_data_ptr_t(make_approx<ipm_constr>(primal, raw, shared));
     }
     DEF_DEFAULT_CLONE(ipm_constr)
+
 };
 } // namespace solver
 using ipm = solver::ipm_constr;

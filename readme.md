@@ -26,7 +26,7 @@
  make install -j 12
 ```
 
-1. To achieve the optimal performance, please use `-march=native` and `-O3` (**must be consistent with casadi/pinocchio/blasfeo**). 
+1. To achieve the optimal performance, please use `WITH_NATIVE_OPT=ON` and `-O3` (**must be consistent with casadi/pinocchio/blasfeo**) and `CMAKE_BUILD_TYPE=Release`
 2. For AMD Ryzen ZEN4 AVX512, please use `GCC >= 13.2`.
 
 ## Run
@@ -39,4 +39,11 @@ To run the example:
 python example/arm/run.py
 python example/quadruped/run.py
 python example/quadruped/mpc.py
+```
+
+## Notes:
+Due to the limitation of nanobind, the `var` class is not well implemented in python binding. For some libraries such as `Pinocchio`, the `casadi.SX` variables should be passed to their apis via
+```python
+q = moto.state.param('q')
+func(..., q.sx, ...) # for example, the boost binding of pinocchio does not recognize the moto.var (Derived from casadi.SX)
 ```

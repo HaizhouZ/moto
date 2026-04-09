@@ -1,11 +1,23 @@
 #ifndef __NS_SQP__
 #define __NS_SQP__
 
-#include <moto/ocp/impl/shooting_node.hpp>
+#include <array>
+#include <chrono>
+#include <functional>
+#include <limits>
+#include <memory>
+#include <moto/ocp/graph_model.hpp>
+#include <moto/ocp/constr.hpp>
+#include <moto/ocp/impl/node_data.hpp>
+#include <moto/solver/equality_init/eq_init_overlay.hpp>
 #include <moto/solver/ipm/ipm_config.hpp>
+#include <moto/solver/linear_runtime_graph.hpp>
 #include <moto/solver/linesearch_config.hpp>
 #include <moto/solver/ns_riccati/generic_solver.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
+#include <moto/solver/restoration/resto_overlay.hpp>
+#include <optional>
+#include <string>
 
 namespace moto {
 namespace solver {
@@ -14,60 +26,183 @@ struct generic_solver;
 }
 } // namespace solver
 struct ns_sqp {
+    enum class profile_phase : size_t {
+        initialize_total,
+        initialize_setup_eval,
+        initialize_kkt,
+        sqp_iter_total,
+        solve_direction,
+        scaling,
+        ns_factorization,
+        riccati_recursion,
+        post_solve,
+        fwd_linear_rollout,
+        finalize_primal_step,
+        correct_direction,
+        ineq_corrector_step,
+        iterative_refinement,
+        iterative_refinement_check_residual,
+        iterative_refinement_step,
+        correction_post_factorization,
+        correction_riccati_recursion,
+        correction_primal_sensitivity,
+        correction_fwd_rollout,
+        correction_finalize,
+        correction_refresh_ls_bounds,
+        prepare_globalization,
+        run_globalization,
+        evaluate_trial_point,
+        apply_affine_step,
+        update_res_stat,
+        accept_trial_point,
+        update_approx_accepted,
+        count,
+    };
+
+    struct profile_phase_stat {
+        std::string name;
+        double total_ms = 0.0;
+        double avg_ms = 0.0;
+        size_t calls = 0;
+        double share_of_update = 0.0;
+    };
+
+    struct profile_iteration {
+        size_t index = 0;
+        double total_ms = 0.0;
+        size_t ls_steps = 0;
+        size_t trial_evaluations = 0;
+    };
+
+    struct profile_report {
+        double total_ms = 0.0;
+        double initialize_ms = 0.0;
+        size_t sqp_iterations = 0;
+        size_t trial_evaluations = 0;
+        std::vector<profile_phase_stat> phases;
+        std::vector<profile_iteration> iterations;
+    };
+
+    struct scaling_settings {
+        enum class mode_t : size_t {
+            none,       ///< no scaling
+            gradient,   ///< row-normalise each Jacobian to unit inf-norm
+            equilibrium ///< Ruiz / Sinkhorn doubly-balanced scaling
+        } mode = mode_t::gradient;
+        size_t equilibrium_iters = 5;          ///< Ruiz iterations (equilibrium only)
+        scalar_t min_scale = 1e-6;             ///< clamp to avoid division by zero
+        scalar_t update_ratio_threshold = 10.; ///< re-scale when dual_res / prim_res >= this; below it cached scales are reused
+    };
 
     struct iterative_refinement_setting {
         bool enabled = true;           ///< whether to use iterative refinement
         size_t max_iters = 5;          ///< max refinement iterations
-        scalar_t prim_res_tol = 1e-10; ///< primal residual tolerance for refinement
-        scalar_t dual_res_tol = 1e-10; ///< dual residual tolerance for refinement
+        scalar_t prim_res_tol = 1e-5; ///< primal residual tolerance for refinement
+        scalar_t dual_res_tol = 1e-5; ///< dual residual tolerance for refinement
     };
 
-    struct linesearch_setting {
-        bool enabled = true;  ///< whether to use line search
-        size_t max_steps = 5; ///< max line search steps
+    struct linesearch_setting : public solver::linesearch_config {
+        bool enabled = true;       ///< whether to use line search
+        size_t max_steps = 5;      ///< max line search steps
+        bool enable_soc = true;    ///< whether to try a second-order correction before backtracking
+        size_t max_soc_iter = 4;   ///< max number of second-order correction retries per SQP iteration (p_max in IPOPT)
+        scalar_t kappa_soc = 0.99; ///< SOC abort threshold: abort if θ(x_soc) > kappa_soc * θ_soc_old (IPOPT eq. A-5.9)
         enum class failure_backup_strategy : size_t {
             min_step,   ///< reset to the minimum step size
             best_trial, ///< reset to the best trial so far
-        } failure_backup = failure_backup_strategy::best_trial;
-        scalar_t primal_gamma = 1e-4;   ///< 2-obj filter primal improvement requirement: higher-> stricter
-        scalar_t dual_gamma = 1e-4;     ///< 2-obj filter dual improvement requirement: higher-> stricter
-        bool enable_dual_cut = true;    ///< whether to enable the strict cut for dual residual when primal residual is small
-        scalar_t dual_cut_coeff = 0.99; ///< cut threshold for dual residual: higher -> looser
-        scalar_t eta = 1e-4;            ///< elasticity coefficient for the dual cut when primal residual is small, used to relax the dual cut as line search step increases
+        } failure_strategy = failure_backup_strategy::best_trial;
+
+        enum class backtrack_scheme_t : size_t {
+            linspace,  ///< alpha decreases by alpha_init / max_steps each step (uniform spacing)
+            geometric, ///< alpha *= backtrack_factor each step (exponential decay)
+        } backtrack_scheme = backtrack_scheme_t::linspace;
+        scalar_t backtrack_factor = 0.5; ///< geometric backtracking reduction factor (used when backtrack_scheme == geometric)
+
+        enum class search_method : size_t {
+            filter,             ///< IPOPT-style 2-objective filter line search (default)
+            merit_backtracking, ///< merit function: ||constraint violation||^2 + sigma * ||dual residual||^2
+        } method = search_method::filter;
+
+        scalar_t primal_gamma = 1e-4;        ///< 2-obj filter primal improvement requirement: higher-> stricter
+        scalar_t dual_gamma = 1e-4;          ///< IPOPT-like filter objective improvement requirement: higher-> stricter
+        scalar_t constr_vio_min_frac = 1e-4; ///< Threshold for switching condition (fraction of initial primal residual), lower than this * initial constraint violation means we are close enough to the feasible region to switch to objective decrease mode in line search
+        scalar_t armijo_dec_frac = 1e-4;     ///< Sufficient decrease tolerance (eta in Armijo condition), smaller -> more strict decrease requirement
+        scalar_t s_phi = 2.3;                ///< IPOPT switching condition exponent on objective decrease (s_phi in IPOPT paper)
+        scalar_t s_theta = 1.1;              ///< IPOPT switching condition exponent on constraint violation (s_theta in IPOPT paper)
+        scalar_t merit_sigma = 1.0;          ///< merit_backtracking weight on ||dual residual||^2 relative to ||constraint violation||^2
+
+        // Flat-objective accept: accept when the directional derivative is negligibly small,
+        // the primal residual is already low, and the step is non-trivial (so we make dual progress).
+        bool enable_flat_obj_accept = true;
+        scalar_t flat_obj_dec_tol = 1e-2;   ///< |fullstep_dec| below this is considered "flat"
+        scalar_t flat_obj_prim_tol = 1e-6;  ///< primal residual must be below this to trigger
+        scalar_t flat_obj_step_tol = 1e-12; ///< step norm must exceed this to be "non-trivial"
     };
 
-    struct ipm_setting {
+    struct ipm_config : public solver::ipm_config {
         scalar_t mu0 = 1.0;        ///< initial barrier parameter
         bool warm_start = false;   ///< whether to warm start the IPM solver
         bool globalization = true; ///< whether to use IPM globalization
 
         scalar_t mu_monotone_fraction_threshold = 10.0; ///< threshold for monotone decrease of mu, smaller -> more likely to use monotone decrease
-        
-        scalar_t mu_monotone_factor = 0.2; ///< factor for monotonic decrease of mu, smaller -> faster decrease
-
-        solver::ipm_config::adaptive_mu_t mu_method =
-            solver::ipm_config::adaptive_mu_t::mehrotra_predictor_corrector; ///< adaptive mu method
+        scalar_t mu_monotone_factor = 0.2;              ///< factor for monotonic decrease of mu, smaller -> faster decrease
     };
 
-    struct settings_t
-        : public workspace_data_collection<solver::linesearch_config,
-                                           solver::ipm_config> {
+    struct restoration_settings : public solver::restoration::restoration_overlay_settings {
+        bool enabled = true;
+        size_t max_iter = 100;
+        scalar_t restoration_improvement_frac = 0.9;
+        scalar_t alpha_min_factor = 5e-2;
+        scalar_t bound_mult_reset_threshold = 1e3;
+        scalar_t constr_mult_reset_threshold = 0.0;
+    };
+
+    struct equality_multiplier_init_settings {
+        bool enabled = true;
+        bool rebuild_after_restoration_exit = true;
+        scalar_t rho_eq = 1.0;
+        iterative_refinement_setting rf = [] {
+            iterative_refinement_setting cfg;
+            cfg.enabled = false;
+            return cfg;
+        }();
+    };
+
+    struct settings_t : public workspace_data_collection<linesearch_setting, ipm_config>,
+                        public restoration_settings,
+                        public equality_multiplier_init_settings {
+        using base = workspace_data_collection<linesearch_setting, ipm_config>;
+        using worker = typename base::worker;
+
+        linesearch_setting &ls;
+        ipm_config &ipm;
+        restoration_settings &restoration;
+        equality_multiplier_init_settings &eq_init;
+        size_t max_iter = 100;  ///< maximum number of SQP iterations
         double prim_tol = 1e-6; ///< primal feasibility tolerance
         double dual_tol = 1e-4; ///< dual feasibility tolerance
         double comp_tol = 1e-6; ///< complementarity feasibility tolerance
+        double s_max = 100.;    ///< IPOPT-style dual scaling: s_d = max(s_max, ||λ||_1 / n_constr) / s_max
 
         iterative_refinement_setting rf;
-        ipm_setting ipm;
-        linesearch_setting ls;
+        scaling_settings scaling;
 
         bool no_except = false;
 
-        settings_t();
+        settings_t()
+            : ls(static_cast<linesearch_setting &>(*this)),
+              ipm(static_cast<ipm_config &>(*this)),
+              restoration(static_cast<restoration_settings &>(*this)),
+              eq_init(static_cast<equality_multiplier_init_settings &>(*this)) {}
 
       private:
         friend class ns_sqp;
         bool verbose = true;
         size_t n_worker = MAX_THREADS; ///< number of worker threads
+        bool in_restoration = false;
+        bool has_ineq_soft = false; ///< whether the problem has inequality constraints (used to adjust printouts and possibly other settings)
+        bool has_ipm_ineq = false;  ///< whether the problem contains true IPM inequalities (__ineq_x / __ineq_xu)
+        bool initialized = false;   ///< whether the settings have been initialized based on the problem (used to trigger one-time initialization in the first iteration, e.g. setting initial mu based on initial residuals)
     } settings;
 
     using solver_type = solver::ns_riccati::generic_solver;
@@ -75,45 +210,184 @@ struct ns_sqp {
 
     struct data : public node_data, ns_riccati_data {
         data(const ocp_ptr_t &prob)
-            : node_data(prob), ns_riccati_data((node_data *)this) {}
+            : node_data(prob), ns_riccati_data((node_data *)this) {
+            bind_soft_runtime_owner(this);
+        }
         data(data &&rhs) = default;
         static void update_approx(data *d) {
             d->update_approximation();
         }
+        /// row scale applied to each constraint field (empty ⟹ scaling not yet applied)
+        array_type<vector, constr_fields> scale_c_;
+        /// scale applied to each primal field's cost gradient
+        array<scalar_t, field::num_prim> scale_p_{};
+        /// whether scaling has been applied (and therefore duals must be unscaled)
+        bool scaling_applied_ = false;
+    };
+
+    enum iter_result_t : size_t {
+        unknown = 0,
+        success,                      ///< converged to a KKT point within tolerances
+        exceed_max_iter,              ///< reached maximum number of iterations without convergence
+        restoration_failed,           ///< restoration was triggered but failed to make sufficient progress
+        restoration_reached_max_iter, ///< restoration reached its iteration budget without satisfying the exit test
+        infeasible_stationary,        ///< reached an infeasible stationary point (e.g. due to LICQ failure) and cannot make progress
+    };
+
+    enum class iteration_phase : uint8_t {
+        normal,
+        restoration,
+    };
+
+    struct iter_info {
+        iter_result_t result = iter_result_t::unknown;
+        size_t num_iter = 0;
     };
 
     struct kkt_info {
-        bool solved = false; // whether the problem is solved
-        size_t num_iter = 0; // number of iterations
-        size_t ls_steps = 0; ///< line search steps
+        struct barrier_objective_info {
+            scalar_t cost = 0.;                 // pure running cost (sum of __cost terms)
+            scalar_t barrier_value = 0.;        // phase line-search barrier contribution
+            scalar_t augmented_objective = 0.;  // cost plus phase-specific extra objective terms
+            scalar_t ls_objective = 0.;         // phase line-search objective
+        } barrier_objective;
 
-        scalar_t objective = 0.;     // objective value
-        scalar_t inf_prim_res = 0.;  // primal residual (constraint violation)
-        scalar_t inf_dual_res = 0.;  // dual residual (stationary condition)
-        scalar_t inf_comp_res = 0.;  // (inequality) complementarity residual
-        scalar_t inf_prim_step = 0.; // infinity norm of the step
-        scalar_t inf_dual_step = 0.; // infinity norm of the step
-    } kkt_last;
-    kkt_info update(size_t n_iter, bool verbose = true);
+        struct primal_info {
+            scalar_t inf_res = 0.;          // primal residual (constraint violation), inf-norm
+            scalar_t res_l1 = 0.;           // primal residual L1 norm
+            scalar_t inf_comp = 0.;         // (inequality) complementarity residual
+            scalar_t log_slack_sum = 0.;    // sum(log(slack)) across all normal-IPM constraints, mu-free
+            scalar_t max_diag_scaling = 0.; // max Nesterov-Todd scaling
+        } primal;
+
+        struct dual_info {
+            scalar_t inf_res = 0.;         // dual residual (stationary condition)
+            scalar_t max_eq_norm = 0.;     // max inf-norm of equality dual variables
+            scalar_t max_ineq_norm = 0.;   // max inf-norm of inequality dual variables
+            scalar_t max_norm = 0.;        // max inf-norm of all dual variables
+            scalar_t avg_res = 0.;         // average dual residual
+        } dual;
+
+        struct barrier_step_info {
+            scalar_t barrier_dir_deriv = 0.;
+            scalar_t search_barrier_dir_deriv = 0.;
+            scalar_t augmented_objective_fullstep_dec = 0.;
+            scalar_t ls_objective_fullstep_dec = 0.;
+        };
+
+        struct step_info {
+            scalar_t inf_prim_step = 0.;
+            scalar_t inf_dual_step = 0.;
+            scalar_t inf_eq_dual_step = 0.;
+            scalar_t inf_ineq_dual_step = 0.;
+            scalar_t inf_dyn_dual_step = 0.;
+            scalar_t inf_eq_x_dual_step = 0.;
+            scalar_t inf_eq_xu_dual_step = 0.;
+        } step;
+
+        barrier_step_info barrier_step;
+    };
+
+    struct result_type : public kkt_info {
+        iter_info iter;
+    };
+
+    enum class point_value_mask : uint8_t {
+        none = 0,
+        primal = 1 << 0,
+        barrier_objective = 1 << 1,
+    };
+
+    friend constexpr point_value_mask operator|(point_value_mask lhs, point_value_mask rhs) {
+        using mask_t = std::underlying_type_t<point_value_mask>;
+        return static_cast<point_value_mask>(static_cast<mask_t>(lhs) | static_cast<mask_t>(rhs));
+    }
+
+    kkt_info kkt_last;
+    iter_info iter_last;
+
+    result_type update(size_t n_iter, bool verbose = true);
+    const profile_report &profile() const { return profile_report_; }
+    void reset_profile();
+
+    struct node_type final {
+        using data_type = data;
+        std::unique_ptr<data_type> data_;
+        size_t storage_id_ = std::numeric_limits<size_t>::max();
+        node_type() = default;
+        explicit node_type(const ocp_ptr_t &formulation) {
+            data_ = std::make_unique<data_type>(formulation);
+        }
+        data_type *operator->() { return data_.get(); }
+        const data_type *operator->() const { return data_.get(); }
+        operator data_type &() { return *data_; }
+        operator const data_type &() const { return *data_; }
+        node_type(const node_type &rhs) {
+            if (rhs.data_) {
+                data_ = std::make_unique<data_type>(rhs.data_->problem_ptr());
+            }
+        }
+        node_type(node_type &&rhs) noexcept = default;
+    };
 
     ns_sqp(size_t n_jobs = MAX_THREADS);
     ns_sqp(const ns_sqp &) = delete;
     ~ns_sqp() = default;
-    using node_type = impl::shooting_node<data>;
+    using storage_type = linear_runtime_graph<node_type>;
 
     void reset_riccati_solver(solver_type *s) {
         riccati_solver_.reset(s);
     }
 
-    auto create_node(const ocp_ptr_t &formulation) {
-        return node_type(formulation, mem_);
+    graph_model &create_graph() {
+        active_model_graph_ = std::make_shared<graph_model>();
+        solver_runtime_ = std::make_shared<storage_type>(graph_n_jobs_);
+        restoration_runtime_.reset();
+        restoration_cfg_valid_ = false;
+        equality_init_runtime_.reset();
+        equality_init_cfg_valid_ = false;
+        return *active_model_graph_;
     }
 
-    impl::data_mgr mem_;
-    directed_graph<node_type> graph_;
+    graph_model &graph() {
+        if (!active_model_graph_) {
+            throw std::runtime_error("ns_sqp has no active model graph; call create_graph() first");
+        }
+        return *active_model_graph_;
+    }
+
+    const graph_model &graph() const {
+        if (!active_model_graph_) {
+            throw std::runtime_error("ns_sqp has no active model graph; call create_graph() first");
+        }
+        return *active_model_graph_;
+    }
+
+    storage_type &active_data();
 
   private:
+    struct filter_linesearch_data;
+
+    storage_type &restoration_graph();
+    storage_type &equality_init_graph();
+    void clear_phase_graph_override() { phase_graph_override_ = nullptr; }
+    void set_phase_graph_override(storage_type &graph) { phase_graph_override_ = &graph; }
+    bool using_restoration_overlay_graph() const {
+        return settings.in_restoration && phase_graph_override_ != nullptr && restoration_runtime_ &&
+               restoration_runtime_.get() == phase_graph_override_;
+    }
+
     std::unique_ptr<solver_type> riccati_solver_ = nullptr;
+    std::shared_ptr<graph_model> active_model_graph_;
+    std::shared_ptr<storage_type> solver_runtime_;
+    std::shared_ptr<storage_type> restoration_runtime_;
+    solver::restoration::restoration_overlay_settings restoration_cfg_{};
+    bool restoration_cfg_valid_ = false;
+    std::shared_ptr<storage_type> equality_init_runtime_;
+    solver::equality_init::equality_init_overlay_settings equality_init_cfg_{};
+    bool equality_init_cfg_valid_ = false;
+    storage_type *phase_graph_override_ = nullptr;
+    size_t graph_n_jobs_ = MAX_THREADS;
 
     template <typename worker_type>
     struct stacked_workers : public std::vector<worker_type> {
@@ -127,24 +401,172 @@ struct ns_sqp {
     };
 
     stacked_workers<settings_t::worker> setting_per_thread;
+    stacked_workers<kkt_info> kkt_per_thread;
+    stacked_workers<kkt_info> ls_per_thread;
+    struct kkt_reduce_info {
+        scalar_t dual_res_l1 = 0.;
+        scalar_t lambda_l1 = 0.;
+        size_t n_dual_res = 0;
+        size_t n_constr = 0;
+    };
+    stacked_workers<kkt_reduce_info> kkt_reduce_per_thread;
+    using profile_clock = std::chrono::high_resolution_clock;
 
+    struct profile_state {
+        std::array<double, static_cast<size_t>(profile_phase::count)> total_ms{};
+        std::array<size_t, static_cast<size_t>(profile_phase::count)> calls{};
+        std::array<double, static_cast<size_t>(profile_phase::count)> iter_ms{};
+        std::array<size_t, static_cast<size_t>(profile_phase::count)> iter_calls{};
+        profile_clock::time_point update_start{};
+        profile_clock::time_point iter_start{};
+        size_t current_trial_evaluations = 0;
+        size_t total_trial_evaluations = 0;
+        std::vector<profile_iteration> iterations;
+
+        void reset();
+        void start_update();
+        void finish_update(profile_report &report) const;
+        void start_iteration(size_t index);
+        void finish_iteration(size_t ls_steps);
+        void record(profile_phase phase, double elapsed_ms);
+        void bump_trial_evaluation();
+    } profiler_;
+
+    struct scoped_profile {
+        ns_sqp *owner = nullptr;
+        profile_phase phase = profile_phase::initialize_total;
+        profile_clock::time_point start{};
+        scoped_profile(ns_sqp *owner, profile_phase phase);
+        scoped_profile(const scoped_profile &) = delete;
+        scoped_profile &operator=(const scoped_profile &) = delete;
+        scoped_profile(scoped_profile &&rhs) noexcept;
+        scoped_profile &operator=(scoped_profile &&rhs) = delete;
+        ~scoped_profile();
+    };
+
+    scoped_profile profile_scope(profile_phase phase) { return scoped_profile(this, phase); }
+    static const char *profile_phase_name(profile_phase phase);
+    profile_report profile_report_;
+    /// print inf norms of constraint residuals and Jacobians across all nodes, to diagnose scaling
+    void print_scaling_info();
+    /// print per-field contribution to dual stationarity residual (first node only)
+    void print_dual_res_breakdown();
+    /// check LICQ at the current point: stacks all constraint Jacobians per node and reports rank via SVD
+    void print_licq_info();
     /// print statistics header
     void print_stat_header();
     /// print statistics for the current iteration
-    void print_stats(int i_iter, const kkt_info &info, bool hcast_ineq);
-    /// compute the kkt information of the current solution
-    kkt_info compute_kkt_info();
+    void print_stats(const kkt_info &info, const iter_info &iter, size_t ls_steps);
+    template <typename Summary, typename InitFn, typename AccumulateFn, typename MergeFn>
+    Summary reduce_partials(stacked_workers<Summary> &workers,
+                            const Summary &base,
+                            InitFn &&init,
+                            AccumulateFn &&accumulate,
+                            MergeFn &&merge) {
+        auto &graph = active_data();
+        Summary summary = base;
+        std::invoke(init, summary);
+        if (in_restoration_phase()) {
+            for (auto *n : graph.flatten_nodes()) {
+                std::invoke(accumulate, summary, *n);
+            }
+            return summary;
+        }
+        if (workers.size() != settings.n_worker) {
+            workers.reset(settings.n_worker);
+        }
+        for (auto &partial : workers) {
+            partial = Summary{};
+            std::invoke(init, partial);
+        }
+        graph.for_each_parallel([&](size_t tid, data *n) {
+            std::invoke(accumulate, workers[tid], *n);
+        });
+        for (const auto &partial : workers) {
+            std::invoke(merge, summary, partial);
+        }
+        return summary;
+    }
+    template <typename Summary, typename Aux, typename InitFn, typename AccumulateFn, typename MergeFn>
+    std::pair<Summary, Aux> reduce_partials_with_aux(stacked_workers<Summary> &workers,
+                                                     stacked_workers<Aux> &aux_workers,
+                                                     const Summary &base,
+                                                     InitFn &&init,
+                                                     AccumulateFn &&accumulate,
+                                                     MergeFn &&merge) {
+        auto &graph = active_data();
+        Summary summary = base;
+        Aux aux{};
+        std::invoke(init, summary, aux);
+        if (in_restoration_phase()) {
+            for (auto *n : graph.flatten_nodes()) {
+                std::invoke(accumulate, summary, aux, *n);
+            }
+            return {summary, aux};
+        }
+        if (workers.size() != settings.n_worker) {
+            workers.reset(settings.n_worker);
+        }
+        if (aux_workers.size() != settings.n_worker) {
+            aux_workers.reset(settings.n_worker);
+        }
+        for (size_t i = 0; i < workers.size(); ++i) {
+            workers[i] = Summary{};
+            aux_workers[i] = Aux{};
+            std::invoke(init, workers[i], aux_workers[i]);
+        }
+        graph.for_each_parallel([&](size_t tid, data *n) {
+            std::invoke(accumulate, workers[tid], aux_workers[tid], *n);
+        });
+        for (size_t i = 0; i < workers.size(); ++i) {
+            std::invoke(merge, summary, aux, workers[i], aux_workers[i]);
+        }
+        return {summary, aux};
+    }
+    kkt_info compute_point_primal_info(const kkt_info &base, point_value_mask mask);
+    kkt_info compute_step_info(const kkt_info &base);
+    kkt_info compute_stationarity_info(const kkt_info &base);
+    void initialize_equality_multipliers();
+    result_type restoration_update(const kkt_info &kkt_before, const iter_info &iter_before, filter_linesearch_data &ls);
+    /// perform iterative refinement to improve the solution accuracy, will modify the current solution in place
     void iterative_refinement();
+    /// update the line search bounds with the (probably updated) max value
     void finalize_ls_bound_and_set_to_max();
+    /**
+     * @brief Compute row scales from current Jacobian magnitudes (gradient or equilibrium mode)
+     *        and apply them in-place to v_, jac_ and the cost gradient.
+     *        Must be called after update_approximation(eval_derivatives).
+     * @param kkt current KKT info (used to decide whether to refresh the scale vectors)
+     */
+    void compute_and_apply_scaling(const kkt_info &info);
+    /// Reverse the row scaling on the dual variables after the QP solve.
+    void unscale_duals();
+    void unscale_duals(data *d);
+    /// Clear all stored scales (called on initialize()).
+    void reset_scaling();
+    /**
+     * @brief filter line search for the current iteration, will update the line search data and the kkt info of the current solution
+     * @note just for convenient reset
+     */
     struct filter_linesearch_per_iter_data {
+        enum class failure_reason_t : uint8_t {
+            none,
+            tiny_step,
+            other,
+        };
         bool recompute_approx = true;
-        bool stop = false;        ///< whether to stop the line search
-        bool enforce_min = false; ///< whether to enforce the minimum step size
-        size_t step_cnt = 0;      ///< current line search step
+        bool stop = false;                                                  ///< whether to stop the line search
+        bool enforce_min = false;                                           ///< whether to enforce the minimum step size
+        size_t soc_iter_cnt = 0;                                            ///< number of second-order correction attempts in the current SQP iteration
+        bool skip_soc = false;                                              ///< whether to skip second-order correction
+        scalar_t theta_soc_old = std::numeric_limits<scalar_t>::infinity(); ///< θ(x_k) at SOC entry, for κ_soc abort check (IPOPT A-5.9)
+        size_t step_cnt = 0;                                                ///< current line search step
         scalar_t initial_alpha_primal = 0.;
         scalar_t initial_alpha_dual = 0.;
-        scalar_t effective_alpha_primal = 0.;
-        scalar_t effective_alpha_dual = 0.;
+        scalar_t alpha_min = 0.;
+        bool switching_condition = false; ///< whether the switching condition for line search is met (used to decide whether to require Armijo decrease in the line search)
+        bool armijo_cond_met = false;     ///< whether the Armijo condition is met for the current trial step
+        failure_reason_t failure_reason = failure_reason_t::none;
         void reset_per_iter_data() {
             new (this) filter_linesearch_per_iter_data();
         }
@@ -154,19 +576,137 @@ struct ns_sqp {
         struct point {
             scalar_t prim_res = std::numeric_limits<scalar_t>::infinity();
             scalar_t dual_res = std::numeric_limits<scalar_t>::infinity();
+            scalar_t objective = std::numeric_limits<scalar_t>::infinity();
+            /// @check if a point is in the filter
+            bool in_filter(const point &filter_entry, const settings_t &settings) const;
+        };
+        struct normal_filter_eval_result {
+            point trial_point;
+            point current_point;
+            point dominating_filter_point;
+            bool dominated_by_filter = false;
+            bool switching_condition = false;
+            bool armijo_cond_met = false;
+            bool accepted_by_armijo = false;
+            bool accepted_by_filter = false;
+            bool accepted_by_flat_objective = false;
+            bool flat_objective_eligible = false;
+            bool accepted = false;
+            scalar_t fullstep_dec = 0.;
+            scalar_t switching_lhs = 0.;
+            scalar_t switching_rhs = 0.;
+            scalar_t armijo_target = 0.;
         };
         struct trial : public point, public solver::linesearch_config {
         } best_trial;
-        std::vector<point> points; ///< filter for accepting line search steps
-        void update_filter(scalar_t prim_new, scalar_t dual_new, settings_t &settings);
-        bool try_step(scalar_t prim_new, scalar_t dual_new, settings_t &settings, scalar_t alpha);
+        std::vector<point> points;                                           ///< filter for accepting line search steps
+        scalar_t constr_vio_min = std::numeric_limits<scalar_t>::infinity(); ///< constraint violation bound for switching condition in line search
+        bool last_step_was_armijo = false;
+        size_t filter_reject_cnt = 0; ///< number of consecutive filter rejections, used for adaptive strategies in line search
+
+        void update_filter(const kkt_info &kkt, settings_t &settings);
+        static normal_filter_eval_result evaluate_normal_filter_step(const std::vector<point> &filter_points,
+                                                                     const kkt_info &trial_kkt,
+                                                                     const kkt_info &current_kkt,
+                                                                     scalar_t constr_vio_min,
+                                                                     const settings_t &settings,
+                                                                     bool allow_flat_objective = true);
+        bool try_step(const kkt_info &trial_kkt,
+                      const kkt_info &current_kkt,
+                      settings_t &settings);
+
+        /***** merit backtracking part (used when settings.ls.method == merit_backtracking) *****/
+        scalar_t merit_fullstep = std::numeric_limits<scalar_t>::infinity(); ///< merit value at full step (alpha=1), for directional derivative estimate
+        struct merit_trial {
+            scalar_t merit = std::numeric_limits<scalar_t>::infinity();
+            scalar_t alpha_primal = 0.;
+            scalar_t alpha_dual = 0.;
+        } best_merit_trial;
+
+        void augment_filter_for_restoration_start(const kkt_info &reference_kkt, settings_t &settings) {
+            points.push_back(point{
+                .prim_res = (1.0 - settings.ls.primal_gamma) * reference_kkt.primal.res_l1,
+                .dual_res = reference_kkt.dual.inf_res,
+                .objective = reference_kkt.barrier_objective.augmented_objective - settings.ls.dual_gamma * reference_kkt.primal.res_l1,
+            });
+        }
     };
 
-    void filter_linesearch(filter_linesearch_data &ls, const kkt_info &kkt);
+    enum class line_search_action {
+        accept,
+        backtrack,
+        retry_second_order_correction,
+        failure,
+    };
+
+    struct iteration_context {
+        kkt_info current;
+        kkt_info trial;
+        iteration_phase phase = iteration_phase::normal;
+        line_search_action action = line_search_action::accept;
+        bool mu_changed = false;
+    };
+
+    void step_back_alpha(filter_linesearch_per_iter_data &ls);
+    scalar_t current_linesearch_alpha_min(const filter_linesearch_per_iter_data &ls) const;
+    line_search_action filter_linesearch(filter_linesearch_data &ls,
+                                         const kkt_info &trial_kkt,
+                                         const kkt_info &current_kkt);
+    line_search_action merit_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
+    bool outer_filter_accepts(const filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &reference_kkt);
+    bool in_restoration_phase() const { return settings.in_restoration; }
+    bool use_normal_soft_phase() const { return !settings.in_restoration; }
+
+    void second_order_correction();
+    void refresh_problem_flags();
+    void ineq_constr_correction(iteration_context &ctx);
+    void ineq_constr_prediction();
     /// initialize the solver before the first iteration or after a reset, returns the initial kkt info
     kkt_info initialize();
-    void correction_step();
+    void post_factorization_correction_step();
     void finalize_correction(data *d);
+    void reset_ls_workers();
+    void refresh_ls_bounds();
+    template <typename Prepare, typename Finalize>
+    void run_correction_step(Prepare &&prepare, Finalize &&finalize) {
+        active_data().for_each_parallel(
+            [prepare = std::forward<Prepare>(prepare)](data *d) mutable {
+                std::invoke(prepare, d);
+            });
+        post_factorization_correction_step();
+        {
+            auto phase_profile = profile_scope(profile_phase::correction_finalize);
+            active_data().for_each_parallel(
+                [finalize = std::forward<Finalize>(finalize)](data *d) mutable {
+                    std::invoke(finalize, d);
+                });
+        }
+        {
+            auto phase_profile = profile_scope(profile_phase::correction_refresh_ls_bounds);
+            refresh_ls_bounds();
+        }
+    }
+    void solve_direction(iteration_context &ctx, bool do_scaling, bool gauss_newton);
+    void correct_direction(iteration_context &ctx, bool do_refinement);
+    void prepare_globalization(filter_linesearch_data &ls, iteration_context &ctx);
+    bool evaluate_trial_point(filter_linesearch_data &ls, iteration_context &ctx);
+    void accept_trial_point(filter_linesearch_data &ls, iteration_context &ctx);
+    line_search_action select_globalization_action(filter_linesearch_data &ls, iteration_context &ctx);
+    line_search_action handle_globalization_failure(filter_linesearch_data &ls, iteration_context &ctx);
+    line_search_action run_globalization(filter_linesearch_data &ls, iteration_context &ctx);
+    /**
+     * @brief Run one QP solve + line-search iteration.
+     *
+     * @param ls             Filter line-search state (updated in-place).
+     * @param kkt_current    KKT info of the current point (updated to the accepted trial on return).
+     * @param do_scaling     Whether to apply Jacobian scaling before factorization.
+     * @param do_refinement  Whether to run iterative refinement after the corrector.
+     * @param gauss_newton   If true, calls ns_factorization with gauss_newton=true.
+     * @return               Line-search action that terminated the inner loop.
+     */
+    line_search_action sqp_iter(filter_linesearch_data &ls, kkt_info &kkt_current,
+                                bool do_scaling, bool do_refinement,
+                                bool gauss_newton = false);
     /**
      * @brief Bind a callback to the current @ref riccati_solver_ instance
      *
@@ -176,7 +716,7 @@ struct ns_sqp {
      * @note the function can have any number of additional arguments
      */
     template <typename Func>
-    decltype(auto) bind(Func f) {
+    decltype(auto) solver_call(Func f) {
         using arg_type = utils::func_traits<decltype(f)>::arg_types;
         auto make_wrapper = [this, f]<typename... Args>(std::tuple<Args...> *) {
             return [this, f](Args... args) {

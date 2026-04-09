@@ -4,6 +4,7 @@
 #include <moto/ocp/pre_comp.hpp>
 #include <moto/ocp/sym.hpp>
 #include <moto/ocp/usr_func.hpp>
+#include <moto/solver/soft_constr/pmm_constr.hpp>
 #include <type_cast.hpp>
 
 #include <nanobind/stl/function.h>
@@ -135,7 +136,7 @@ void register_submodule_functional(nb::module_ &m) {
         .def("active_tdim", &generic_func::active_tdim)
         .def("active_args", &generic_func::active_args)
         .DEF_CLONE_FUNC(generic_func)
-        .def("create_approx_data", [](generic_func &self, sym_data &primal, merit_data &raw, shared_data &shared) { return self.create_approx_data(primal, raw, shared); }, nb::arg("primal"), nb::arg("raw"), nb::arg("shared"));
+        .def("create_approx_data", [](generic_func &self, sym_data &primal, lag_data &raw, shared_data &shared) { return self.create_approx_data(primal, raw, shared); }, nb::arg("primal"), nb::arg("raw"), nb::arg("shared"));
 
     nb::class_<generic_constr, generic_func>(m, "constr")
         .def_static(
@@ -150,11 +151,32 @@ void register_submodule_functional(nb::module_ &m) {
                 return std::make_shared<generic_constr>(name, order, dim, field);
             },
             nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined)
+        .def_static(
+            "create_box",
+            [](const std::string &name,
+               const var_inarg_list &args,
+               const cs::SX &out,
+               const generic_constr::box_bound_t &lb,
+               const generic_constr::box_bound_t &ub,
+               approx_order order,
+               field_t field) {
+                return std::shared_ptr<generic_constr>(generic_constr::create_box(name, args, out, lb, ub, order, field));
+            },
+            nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("lb"), nb::arg("ub"),
+            nb::arg("order") = approx_order::first, nb::arg("field") = field_t::__undefined)
         .DEF_CLONE_FUNC(generic_constr)
         .def(
             "cast_ineq",
             [](generic_constr &self, const std::string &type_name) { return TO_SHARED_PTR(generic_constr, self.cast_ineq(type_name)); },
-            nb::arg("type_name") = "ipm");
+            nb::arg("type_name") = "ipm")
+        .def(
+            "cast_soft",
+            [](generic_constr &self, const std::string &type_name) { return TO_SHARED_PTR(generic_constr, self.cast_soft(type_name)); },
+            nb::arg("type_name") = "pmm_constr");
+
+    nb::class_<moto::pmm_constr, generic_constr>(m, "pmm_constr")
+        .def_rw("rho", &moto::pmm_constr::rho, "Dual penalty weight for the proximal multiplier method")
+        .DEF_CLONE_FUNC(moto::pmm_constr);
 
     nb::class_<generic_cost, generic_func>(m, "cost")
         .def_static(

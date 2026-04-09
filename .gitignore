@@ -8,3 +8,8 @@ perf*
 *.c
 gen/
 __pycache__
+log
+.cache
+.codex
+.codex_tmp_*
+build-*

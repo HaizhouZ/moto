@@ -53,7 +53,7 @@ set(INCLUDE_DIRS
     $<INSTALL_INTERFACE:include>
 )
 if(NOT DEFINED ENV{BLASFEO_LIB_DIR})
-    set(BLASFEO_LIB_DIR "/usr/local/lib/libblasfeo.a")
+    set(BLASFEO_LIB_DIR "/usr/local/blasfeo/lib/libblasfeo.a")
 else()
     set(BLASFEO_LIB_DIR $ENV{BLASFEO_LIB_DIR})
 endif()
@@ -73,7 +73,7 @@ list(APPEND MOTO_DEP_LIBS
 
 include(cmake/subObjectHelpers.cmake)
 
-file(GLOB_RECURSE SRC_FILES src/core/*.cpp src/ocp/*.cpp src/utils/*.cpp src/solver/*.cpp src/spmm/*.cpp)
+file(GLOB_RECURSE SRC_FILES src/core/*.cpp src/model/*.cpp src/ocp/*.cpp src/utils/*.cpp src/solver/*.cpp src/spmm/*.cpp)
 
 add_library(${PROJECT_NAME} SHARED ${SRC_FILES})
 target_add_deps(${PROJECT_NAME})

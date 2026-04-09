@@ -12,18 +12,18 @@ class sqp(ns_sqp):
 
     def for_each(self, callback: Callable[[ns_sqp.data_type], None]):
         """
-        Apply a function to each node in the graph in parallel. Does not work
+        Apply a function to each node in the active_data in parallel. Does not work
 
         Args:
             ndoes: The data nodes from graph_type.flatten_nodes.
             python concurrent: The function to apply to each node.
         """
-        for node in self.graph.flatten_nodes():
+        for node in self.active_data.flatten_nodes():
             callback(node)
 
     def __apply(self, forward: bool, callback: Callable[[Any], None], none_on_end: bool = False, early_stop: int = -1):
         """
-        Apply a function to each node in the graph in forward order.
+        Apply a function to each node in the active_data in forward order.
 
         Args:
             forward: If True, apply in forward order; otherwise, apply in backward order.
@@ -35,32 +35,36 @@ class sqp(ns_sqp):
         is_unary_with_tid = params == [int, ns_sqp.data_type]
         is_binary = params == [ns_sqp.data_type, ns_sqp.data_type]
         is_binary_with_tid = params == [int, ns_sqp.data_type, ns_sqp.data_type]
+        nodes = list(self.active_data.flatten_nodes())
+        if not forward:
+            nodes = list(reversed(nodes))
         if is_unary or is_unary_with_tid:
-            view = self.graph.forward_view() if forward else self.graph.backward_view()
-            while view.update():
-                end_idx = len(view) if early_stop == -1 else min(early_stop, len(view))
-                if is_unary:
-                    for node in view[:end_idx]:
-                        callback(node)
-                elif is_unary_with_tid:
-                    for tid, node in enumerate(view[:end_idx]):
-                        callback(tid, node)
+            end_idx = len(nodes) if early_stop == -1 else min(early_stop, len(nodes))
+            if is_unary:
+                for node in nodes[:end_idx]:
+                    callback(node)
+            elif is_unary_with_tid:
+                for tid, node in enumerate(nodes[:end_idx]):
+                    callback(tid, node)
         elif is_binary or is_binary_with_tid:
-            view = self.graph.forward_view() if forward else self.graph.backward_view()
-            while view.update():
-                end_idx = len(view) - 1 if early_stop == -1 else min(early_stop, len(view) - 1)
-                if is_binary:
-                    for i in range(end_idx):
-                        callback(view[i], view[i + 1])
-                elif is_binary_with_tid:
-                    for tid, i in enumerate(range(end_idx)):
-                        callback(tid, view[i], view[i + 1])
+            end_idx = len(nodes) if early_stop == -1 else min(early_stop + 1, len(nodes))
+            pair_count = max(0, end_idx - 1)
+            if is_binary:
+                for i in range(pair_count):
+                    callback(nodes[i], nodes[i + 1])
+                if none_on_end and end_idx > 0:
+                    callback(nodes[end_idx - 1], None)
+            elif is_binary_with_tid:
+                for tid, i in enumerate(range(pair_count)):
+                    callback(tid, nodes[i], nodes[i + 1])
+                if none_on_end and end_idx > 0:
+                    callback(pair_count, nodes[end_idx - 1], None)
         else:
             raise TypeError("Callback must be a unary or binary function. Arg: ", params)
 
     def apply_forward(self, callback: Callable[[Any], None], none_on_end: bool = False, early_stop: int = -1):
         """
-        Apply a function to each node in the graph in forward order.
+        Apply a function to each node in the active_data in forward order.
 
         Args:
             callback: The function to apply to each node.
@@ -69,7 +73,7 @@ class sqp(ns_sqp):
 
     def apply_backward(self, callback: Callable[[Any], None], none_on_end: bool = False, early_stop: int = -1):
         """
-        Apply a function to each node in the graph in backward order.
+        Apply a function to each node in the active_data in backward order.
 
         Args:
             callback: The function to apply to each node.

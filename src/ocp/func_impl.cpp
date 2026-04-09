@@ -9,7 +9,14 @@
 
 namespace moto {
 
-func_approx_data_ptr_t generic_func::create_approx_data(sym_data &primal, merit_data &raw, shared_data &shared) const {
+namespace {
+bool lowering_trace_enabled() {
+    static const bool enabled = std::getenv("MOTO_TRACE_COMPOSE") != nullptr;
+    return enabled;
+}
+} // namespace
+
+func_approx_data_ptr_t generic_func::create_approx_data(sym_data &primal, lag_data &raw, shared_data &shared) const {
     if (field() - __dyn >= field::num_func)
         throw std::runtime_error(fmt::format("create_approx_data cannot be called for func {} type {}",
                                              name(), field::name(field())));
@@ -51,7 +58,9 @@ void generic_func::hessian_impl(func_approx_data &data) const {
 }
 
 void generic_func::load_external_impl(const std::string &path) {
-    auto funcs = load_approx(name_, true, order_ >= approx_order::first, order_ >= approx_order::second);
+    const std::string func_name =
+        (gen_.task_ && !gen_.task_->func_name.empty()) ? gen_.task_->func_name : name_;
+    auto funcs = load_approx(func_name, true, order_ >= approx_order::first, order_ >= approx_order::second);
     value = [eval = std::move(funcs[0])](func_approx_data &d) {
         eval.invoke(d.in_arg_data(), d.v_);
     };
@@ -60,7 +69,7 @@ void generic_func::load_external_impl(const std::string &path) {
     };
 
     hessian = [hess = std::move(funcs[2])](func_approx_data &d) {
-        hess.invoke(d.in_arg_data(), d.merit_hess_);
+        hess.invoke(d.in_arg_data(), d.lag_hess_);
     };
 }
 
@@ -75,6 +84,57 @@ void generic_func::substitute(const sym &arg, const sym &rhs) {
     *in_arg_it = rhs;
     // update the dep_ to point to the new sym
     std::replace(dep_.begin(), dep_.end(), arg, rhs);
+}
+
+bool generic_func::has_u_arg() const {
+    return std::any_of(in_args_.begin(), in_args_.end(),
+                       [](const sym &arg) { return arg.field() == __u; });
+}
+
+bool generic_func::has_pure_x_primal_args() const {
+    bool has_x = false;
+    for (const sym &arg : in_args_) {
+        if (!in_field(arg.field(), primal_fields)) {
+            continue;
+        }
+        if (arg.field() != __x) {
+            return false;
+        }
+        has_x = true;
+    }
+    return has_x;
+}
+
+void generic_func::lower_x_to_y_in_place(std::string_view context, size_t problem_uid) {
+    for (const sym &arg : in_args_) {
+        if (arg.field() != __x) {
+            continue;
+        }
+        if (lowering_trace_enabled()) {
+            if (problem_uid == static_cast<size_t>(-1)) {
+                fmt::print("lowering {}: {} -> {} (x -> y)\n",
+                           context, arg.name(), arg.next()->name());
+            } else {
+                fmt::print("lowering {} in composed ocp uid {}: {} -> {} (x -> y)\n",
+                           context, problem_uid, arg.name(), arg.next()->name());
+            }
+        }
+        substitute_argument(arg, arg.next());
+    }
+}
+
+shared_expr generic_func::lower_expr_x_to_y_cached(std::string_view context, size_t problem_uid) {
+    if (lowered_) {
+        return lowered_;
+    }
+
+    shared_expr lowered_expr(clone());
+    auto *lowered_func = dynamic_cast<generic_func *>(lowered_expr.get());
+    if (lowered_func != nullptr) {
+        lowered_func->lower_x_to_y_in_place(context, problem_uid);
+    }
+    lowered_ = lowered_expr;
+    return lowered_;
 }
 
 void generic_func::set_from_casadi(const var_inarg_list &in_args, const cs::SX &out) {
@@ -158,6 +218,9 @@ void generic_func::finalize_impl() {
     }
     if (gen_.task_ && !gen_.task_->sx_output.is_empty()) {
         utils::cs_codegen::task &t = *gen_.task_;
+        // Function names are already modeled to be stable identifiers.
+        // Reusing the same generated symbol name lets finalized clones share
+        // the compiled artifact instead of forcing a rebuild per expr uid.
         t.func_name = name_;
         t.sx_inputs = in_args_;
         t.gen_eval = order_ >= approx_order::zero;
@@ -172,18 +235,22 @@ void generic_func::finalize_impl() {
         // constexpr std::string_view debug_compile_flag = "-g -O0 -march=native";
         // t.jac_compile_flag = debug_compile_flag;
         // t.hess_compile_flag = debug_compile_flag;
-        utils::cs_codegen::server::add_job(
-            std::move(utils::cs_codegen::generate_and_compile(t)
-                          .add_finish_callback([this]() {
-                              load_external_impl(); ///< load the generated code
-                              set_ready_status(true);
-                          })));
+        auto jobs = std::move(utils::cs_codegen::generate_and_compile(t)
+                                  .add_finish_callback([this]() {
+                                      load_external_impl(); ///< load the generated code
+                                      set_ready_status(true);
+                                  }));
+        if (std::getenv("MOTO_SYNC_CODEGEN") != nullptr) {
+            jobs.wait_until_finished();
+        } else {
+            utils::cs_codegen::server::add_job(std::move(jobs));
+        }
     } else {
         set_ready_status(true); ///< set the ready status
     }
     finalized_ = true;
 }
-bool generic_func::setup_ocpwise_info(const ocp *prob) const {
+bool generic_func::setup_ocpwise_info(const ocp_base *prob) const {
     if (ocpwise_info_map_->contains(prob->uid()))
         return false;
     auto &tmp = *ocpwise_info_map_->insert(
@@ -208,27 +275,27 @@ bool generic_func::setup_ocpwise_info(const ocp *prob) const {
     // }
     return true;
 }
-const var_list &generic_func::active_args(field_t f, const ocp *prob) const {
+const var_list &generic_func::active_args(field_t f, const ocp_base *prob) const {
     field_read_guard(f);
     setup_ocpwise_info(prob);
     return ocpwise_info_map_->at(prob->uid())->arg_by_field_[f];
 }
-size_t generic_func::active_dim(field_t f, const ocp *prob) const {
+size_t generic_func::active_dim(field_t f, const ocp_base *prob) const {
     field_read_guard(f);
     setup_ocpwise_info(prob);
     return ocpwise_info_map_->at(prob->uid())->arg_dim_[f];
 }
-size_t generic_func::active_tdim(field_t f, const ocp *prob) const {
+size_t generic_func::active_tdim(field_t f, const ocp_base *prob) const {
     field_read_guard(f);
     setup_ocpwise_info(prob);
     return ocpwise_info_map_->at(prob->uid())->arg_tdim_[f];
 }
-size_t generic_func::active_num(field_t f, const ocp *prob) const {
+size_t generic_func::active_num(field_t f, const ocp_base *prob) const {
     field_read_guard(f);
     setup_ocpwise_info(prob);
     return ocpwise_info_map_->at(prob->uid())->arg_num_[f];
 }
-const bool generic_func::check_enable(ocp *prob) const {
+const bool generic_func::check_enable(ocp_base *prob) const {
     if (disable_if_any_deps_.empty() && enable_if_all_deps_.empty() && enable_if_any_deps_.empty())
         return true;
     bool pass_check = true;

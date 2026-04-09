@@ -5,6 +5,7 @@
 #include <moto/ocp/impl/func.hpp>
 #include <moto/solver/linesearch_config.hpp>
 #include <moto/utils/optional_boolean.hpp>
+#include <variant>
 
 namespace moto {
 class generic_constr;                         ///< forward declaration
@@ -14,13 +15,14 @@ using constr = utils::shared<generic_constr>; ///< generic constr holder
  */
 class generic_constr : public generic_func {
   public:
+    using box_bound_t = std::variant<scalar_t, vector, cs::SX>;
     /**
      * @brief constraint approximation map
      * derived from func_approx_data with multipler and vjp (for cost) mapping in addition
      */
     struct approx_data : public func_approx_data {
         solver::linesearch_config *ls_cfg = nullptr; ///< line search configuration, can be nullptr
-        scalar_t *merit_;                            ///< pointer to the merit value
+        scalar_t *lag_;                              ///< pointer to the lagrangian value
         vector_ref multiplier_;                      ///< multiplier vector reference
         /**
          * @brief construct a new generic_constr data object by moving from another sparse approximation map
@@ -28,7 +30,7 @@ class generic_constr : public generic_func {
          * @param raw raw approximation storage
          * @param d sparse approximation map
          */
-        approx_data(vector_ref multiplier, merit_data &raw, func_approx_data &&d);
+        approx_data(vector_ref multiplier, lag_data &raw, func_approx_data &&d);
         /**
          * @brief construct a new generic_constr data object, will bind multiplier to the raw data
          * @param raw raw approximation storage
@@ -37,7 +39,7 @@ class generic_constr : public generic_func {
         approx_data(func_approx_data &&d);
 
       protected:
-        void map_merit_jac_from_raw(decltype(merit_data::jac_) &raw, std::vector<row_vector_ref> &jac);
+        void map_lag_jac_from_raw(decltype(lag_data::lag_jac_) &raw, std::vector<row_vector_ref> &jac);
     };
 
   protected:
@@ -46,12 +48,18 @@ class generic_constr : public generic_func {
         utils::optional_bool is_eq = true; ///< true if equality constraint, false if inequality constraint, default is true
         bool is_soft = false;              ///< true if soft constraint, false if hard constraint, default is false
     } field_hint_;                         ///< type hint for the constraint
+    bool terminal_add_ = false;
+    bool lower_x_to_y_ = false;
 
     /// @brief finalize the constraint, will be called upon added to a problem
     /// @note will set the field (if unset) based on the field hint and substitute __x to __y for pure-state constraints
     void finalize_impl() override;
 
   public:
+    void prepare_add_to_ocp(bool terminal) override { terminal_add_ = terminal; }
+    void add_to_ocp_callback(ocp_base *prob) override;
+    void set_lower_x_to_y(bool lower) { lower_x_to_y_ = lower; }
+    bool terminal_add() const noexcept { return terminal_add_; }
     void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const override {
         data.as<approx_data>().ls_cfg = &ws_data->as<solver::linesearch_config>();
     }
@@ -72,19 +80,19 @@ class generic_constr : public generic_func {
      */
     template <typename derived = generic_constr>
         requires(std::derived_from<derived, generic_constr>)
-    auto make_approx(sym_data &primal, merit_data &raw, shared_data &shared) const {
+    auto make_approx(sym_data &primal, lag_data &raw, shared_data &shared) const {
         using data_base = generic_constr::approx_data;
         using data_derived = typename derived::approx_data;
         data_base d(func_approx_data(primal, raw, shared, *this));
         return new data_derived(std::move(d));
     }
 #define OVERLOAD_CREATE_APPROX_DATA(derived)                                                                           \
-    func_approx_data_ptr_t create_approx_data(sym_data &primal, merit_data &raw, shared_data &shared) const override { \
+    func_approx_data_ptr_t create_approx_data(sym_data &primal, lag_data &raw, shared_data &shared) const override { \
         return func_approx_data_ptr_t(make_approx<derived>(primal, raw, shared));                                      \
     }
     /**
      * @brief wrapped data maker for generic_constr
-     * @details if field_ is in @ref merit_data::stored_constr_fields, it will return approx_data
+     * @details if field_ is in @ref lag_data::stored_constr_fields, it will return approx_data
      * otherwise it will call @ref make_approx to generate @ref generic_constr::constr_data_tpl (with independent storage)
      * @param primal primal data
      * @param raw approximation data
@@ -94,8 +102,18 @@ class generic_constr : public generic_func {
     OVERLOAD_CREATE_APPROX_DATA(generic_constr);
     DEF_DEFAULT_CLONE(generic_constr);
 
+    static constr create_box(const std::string &name,
+                             const var_inarg_list &args,
+                             const cs::SX &out,
+                             const box_bound_t &lb,
+                             const box_bound_t &ub,
+                             approx_order order = approx_order::first,
+                             field_t field = field_t::__undefined);
+
     // @brief make an inequality constraint from this constraint by moving
     generic_constr *cast_ineq(std::string_view type_name);
+    // @brief make a soft equality constraint from this constraint by moving
+    generic_constr *cast_soft(std::string_view type_name);
 };
 } // namespace moto
 
