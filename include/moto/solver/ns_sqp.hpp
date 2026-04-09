@@ -416,6 +416,7 @@ struct ns_sqp {
     /// compute the kkt information of the current solution
     kkt_info compute_kkt_info(bool update_dual_res = true);
     kkt_info compute_kkt_info_minimal(bool update_dual_res = true);
+    kkt_info compute_filter_trial_info();
     void initialize_equality_multipliers();
     kkt_info restoration_update(const kkt_info &kkt_before, filter_linesearch_data &ls);
     void update_phase_problem(data *d, node_data::update_mode mode);
