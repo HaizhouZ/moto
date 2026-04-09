@@ -221,6 +221,26 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     }
     settings.in_restoration = true;
     set_phase_graph_override(resto_graph);
+    const auto compute_restoration_info_from_split = [&](bool update_dual_res) {
+        kkt_info kkt;
+        kkt = compute_restoration_prim_res_info(kkt);
+        kkt = compute_restoration_ls_info(kkt);
+        if (update_dual_res) {
+            kkt = compute_restoration_dual_res_info(kkt);
+        }
+        return kkt;
+    };
+    const auto compute_normal_info_from_split = [&](bool update_dual_res, bool include_ls_info) {
+        kkt_info kkt;
+        kkt = compute_prim_res_info(kkt);
+        if (include_ls_info) {
+            kkt = compute_ls_info(kkt);
+        }
+        if (update_dual_res) {
+            kkt = compute_dual_res_info(kkt);
+        }
+        return kkt;
+    };
 
     const auto set_iter_meta = [&](kkt_info &info, size_t iter_offset, size_t ls_steps) {
         info.num_iter = kkt_before.num_iter + iter_offset;
@@ -270,7 +290,8 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
             d->update_approximation(node_data::update_mode::eval_val, true);
         });
         clear_phase_graph_override();
-        const auto outer_trial = compute_kkt_info_for_phase(iteration_phase::normal, false);
+        kkt_info outer_trial;
+        outer_trial = compute_prim_res_info(outer_trial);
         set_phase_graph_override(resto_graph);
         outer_graph.for_each_parallel([](data *d) { d->restore_trial_state(); });
         refresh_restoration_derivatives();
@@ -351,7 +372,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     rls.constr_vio_min =
         std::max(kkt_before.prim_res_l1 * settings.ls.constr_vio_min_frac, settings.prim_tol);
 
-    kkt_info kkt_rest = compute_kkt_info();
+    kkt_info kkt_rest = compute_restoration_info_from_split(true);
     set_iter_meta(kkt_rest, 0, 0);
 
     kkt_info kkt_outer_trial{};
@@ -378,7 +399,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
 
         if (action == line_search_action::accept) {
             kkt_outer_trial = evaluate_outer_trial_from_restoration();
-            kkt_rest = compute_kkt_info();
+            kkt_rest = compute_restoration_info_from_split(true);
             set_iter_meta(kkt_rest, i_rest + 1, rls.step_cnt);
 
             const bool outer_accept = outer_filter_accepts(ls, kkt_outer_trial, kkt_before);
@@ -401,7 +422,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     }
 
     finish_restoration(resto_accept);
-    kkt_info result = resto_accept ? compute_kkt_info() : kkt_rest;
+    kkt_info result = resto_accept ? compute_normal_info_from_split(true, false) : kkt_rest;
     result.num_iter = kkt_rest.num_iter;
     result.ls_steps = kkt_rest.ls_steps;
     if (resto_accept) {

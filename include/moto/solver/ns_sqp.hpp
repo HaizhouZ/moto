@@ -365,6 +365,14 @@ struct ns_sqp {
     };
 
     stacked_workers<settings_t::worker> setting_per_thread;
+    stacked_workers<kkt_info> kkt_per_thread;
+    struct kkt_reduce_info {
+        scalar_t dual_res_l1 = 0.;
+        scalar_t lambda_l1 = 0.;
+        size_t n_dual_res = 0;
+        size_t n_constr = 0;
+    };
+    stacked_workers<kkt_reduce_info> kkt_reduce_per_thread;
     using profile_clock = std::chrono::high_resolution_clock;
 
     struct profile_state {
@@ -412,8 +420,12 @@ struct ns_sqp {
     void print_stat_header();
     /// print statistics for the current iteration
     void print_stats(const kkt_info &info);
-    /// compute the kkt information of the current solution
-    kkt_info compute_kkt_info(bool update_dual_res = true);
+    kkt_info compute_ls_info(const kkt_info &base);
+    kkt_info compute_prim_res_info(const kkt_info &base);
+    kkt_info compute_dual_res_info(const kkt_info &base);
+    kkt_info compute_restoration_ls_info(const kkt_info &base);
+    kkt_info compute_restoration_prim_res_info(const kkt_info &base);
+    kkt_info compute_restoration_dual_res_info(const kkt_info &base);
     void initialize_equality_multipliers();
     kkt_info restoration_update(const kkt_info &kkt_before, filter_linesearch_data &ls);
     /// perform iterative refinement to improve the solution accuracy, will modify the current solution in place
@@ -538,7 +550,6 @@ struct ns_sqp {
     line_search_action filter_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
     line_search_action merit_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
     bool outer_filter_accepts(const filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &reference_kkt);
-    kkt_info compute_kkt_info_for_phase(iteration_phase phase, bool update_dual_res = true);
     bool in_restoration_phase() const { return settings.in_restoration; }
     bool use_normal_soft_phase() const { return !settings.in_restoration; }
 

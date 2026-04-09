@@ -111,7 +111,10 @@ void ns_sqp::initialize_equality_multipliers() {
             d->update_approximation(node_data::update_mode::eval_derivatives, true);
         });
 
-        kkt_info kkt_overlay = compute_kkt_info();
+        kkt_info kkt_overlay;
+        kkt_overlay = compute_prim_res_info(kkt_overlay);
+        kkt_overlay = compute_ls_info(kkt_overlay);
+        kkt_overlay = compute_dual_res_info(kkt_overlay);
         filter_linesearch_data ls;
         ls.constr_vio_min = std::max(kkt_overlay.prim_res_l1 * settings.ls.constr_vio_min_frac, settings.prim_tol);
         sqp_iter(ls, kkt_overlay, /*do_scaling=*/false, /*do_refinement=*/settings.rf.enabled);
