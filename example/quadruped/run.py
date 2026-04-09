@@ -356,7 +356,13 @@ class pinCasadiModel(cpin.Model):
 # dt = moto.sym.inputs("dt", 1, default_val=0.02)
 dt_nom = moto.sym.params("dt_nom", 1, default_val=0.02)
 dt = 0.02
-display = True
+display_env = os.getenv("MOTO_DISPLAY")
+display = display_env != "0" if display_env is not None else True
+if display_env is None and (
+    os.getenv("MOTO_SQP_BENCH_RUNS") is not None or
+    os.getenv("MOTO_PROFILE_SQP") is not None
+):
+    display = False
 try:
     go2 = load("go2", display=display, verbose=True)
 except Exception as exc:
@@ -497,7 +503,7 @@ sqp.settings.ipm_conditional_corrector = True
 sqp.settings.prim_tol = 1e-3
 sqp.settings.dual_tol = 1e-3
 sqp.settings.comp_tol = 1e-3
-sqp.settings.rf.max_iters = 4
+sqp.settings.rf.max_iters = 2
 sqp.settings.ls.update_alpha_dual = False
 sqp.settings.restoration.enabled = True
 sqp.settings.restoration.max_iter = 10
@@ -508,6 +514,7 @@ sqp.settings.ls.method = moto.ns_sqp.search_method_filter
 
 max_update_iter = int(os.getenv("MOTO_SQP_MAX_ITER", "2"))
 bench_runs = int(os.getenv("MOTO_SQP_BENCH_RUNS", "1"))
+bench_show_last = os.getenv("MOTO_SQP_BENCH_SHOW_LAST", "1") != "0"
 print(f"SQP update iters: {max_update_iter}")
 print(f"SQP benchmark runs: {bench_runs}")
 
@@ -576,7 +583,9 @@ iters = 0
 start = time.perf_counter()
 res = None
 for i in range(bench_runs):
-    bench_verbose = os.getenv("MOTO_SQP_BENCH_VERBOSE") is not None or i + 1 == bench_runs
+    bench_verbose = os.getenv("MOTO_SQP_BENCH_VERBOSE") is not None or (
+        bench_show_last and i + 1 == bench_runs
+    )
     res = sqp.update(max_update_iter, verbose=bench_verbose)
     sqp.settings.ipm.warm_start = True
     cnt += 1

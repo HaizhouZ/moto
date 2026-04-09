@@ -130,11 +130,9 @@ void node_data::update_approximation(update_mode config, bool include_original_c
         return;
     }
 
-    if (config != update_mode::eval_val && include_original_cost) {
-        for (auto field : primal_fields) {
+    if (config != update_mode::eval_val && include_original_cost)
+        for (auto field : primal_fields)
             dense_->lag_jac_[field] = dense_->cost_jac_[field];
-        }
-    }
 
     for (auto f : lag_data::stored_constr_fields) {
         if (prob_->dim(f) == 0)

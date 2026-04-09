@@ -35,26 +35,30 @@ class sqp(ns_sqp):
         is_unary_with_tid = params == [int, ns_sqp.data_type]
         is_binary = params == [ns_sqp.data_type, ns_sqp.data_type]
         is_binary_with_tid = params == [int, ns_sqp.data_type, ns_sqp.data_type]
+        nodes = list(self.active_data.flatten_nodes())
+        if not forward:
+            nodes = list(reversed(nodes))
         if is_unary or is_unary_with_tid:
-            view = self.active_data.forward_view() if forward else self.active_data.backward_view()
-            while view.update():
-                end_idx = len(view) if early_stop == -1 else min(early_stop, len(view))
-                if is_unary:
-                    for node in view[:end_idx]:
-                        callback(node)
-                elif is_unary_with_tid:
-                    for tid, node in enumerate(view[:end_idx]):
-                        callback(tid, node)
+            end_idx = len(nodes) if early_stop == -1 else min(early_stop, len(nodes))
+            if is_unary:
+                for node in nodes[:end_idx]:
+                    callback(node)
+            elif is_unary_with_tid:
+                for tid, node in enumerate(nodes[:end_idx]):
+                    callback(tid, node)
         elif is_binary or is_binary_with_tid:
-            view = self.active_data.forward_view() if forward else self.active_data.backward_view()
-            while view.update():
-                end_idx = len(view) - 1 if early_stop == -1 else min(early_stop, len(view) - 1)
-                if is_binary:
-                    for i in range(end_idx):
-                        callback(view[i], view[i + 1])
-                elif is_binary_with_tid:
-                    for tid, i in enumerate(range(end_idx)):
-                        callback(tid, view[i], view[i + 1])
+            end_idx = len(nodes) if early_stop == -1 else min(early_stop + 1, len(nodes))
+            pair_count = max(0, end_idx - 1)
+            if is_binary:
+                for i in range(pair_count):
+                    callback(nodes[i], nodes[i + 1])
+                if none_on_end and end_idx > 0:
+                    callback(nodes[end_idx - 1], None)
+            elif is_binary_with_tid:
+                for tid, i in enumerate(range(pair_count)):
+                    callback(tid, nodes[i], nodes[i + 1])
+                if none_on_end and end_idx > 0:
+                    callback(pair_count, nodes[end_idx - 1], None)
         else:
             raise TypeError("Callback must be a unary or binary function. Arg: ", params)
 

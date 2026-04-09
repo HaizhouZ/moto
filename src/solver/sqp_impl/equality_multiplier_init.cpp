@@ -30,23 +30,13 @@ template <typename Fn>
 void for_each_overlay_pair(ns_sqp::storage_type &outer_graph,
                            ns_sqp::storage_type &overlay_graph,
                            Fn &&fn) {
-    auto outer_view = outer_graph.forward_view();
-    auto overlay_view = overlay_graph.forward_view();
-    while (true) {
-        const bool outer_ok = outer_view.update();
-        const bool overlay_ok = overlay_view.update();
-        if (outer_ok != overlay_ok) {
-            throw std::runtime_error("equality-init overlay graph/view mismatch");
-        }
-        if (!outer_ok) {
-            break;
-        }
-        if (outer_view.size() != overlay_view.size()) {
-            throw std::runtime_error("equality-init overlay graph/node mismatch");
-        }
-        for (size_t i = 0; i < outer_view.size(); ++i) {
-            fn(*outer_view[i], *overlay_view[i]);
-        }
+    auto &outer_nodes = outer_graph.flatten_nodes();
+    auto &overlay_nodes = overlay_graph.flatten_nodes();
+    if (outer_nodes.size() != overlay_nodes.size()) {
+        throw std::runtime_error("equality-init overlay graph/node mismatch");
+    }
+    for (size_t i = 0; i < outer_nodes.size(); ++i) {
+        fn(*outer_nodes[i], *overlay_nodes[i]);
     }
 }
 

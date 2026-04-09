@@ -4,12 +4,14 @@
 #include <array>
 #include <chrono>
 #include <functional>
-#include <moto/core/directed_graph.hpp>
+#include <limits>
+#include <memory>
 #include <moto/ocp/graph_model.hpp>
 #include <moto/ocp/constr.hpp>
 #include <moto/ocp/impl/node_data.hpp>
 #include <moto/solver/equality_init/eq_init_overlay.hpp>
 #include <moto/solver/ipm/ipm_config.hpp>
+#include <moto/solver/linear_runtime_graph.hpp>
 #include <moto/solver/linesearch_config.hpp>
 #include <moto/solver/ns_riccati/generic_solver.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
@@ -269,19 +271,25 @@ struct ns_sqp {
     } kkt_last;
 
     kkt_info update(size_t n_iter, bool verbose = true);
+    kkt_info update_minimal(size_t n_iter, bool verbose = true);
     const profile_report &profile() const { return profile_report_; }
     void reset_profile();
 
-    struct node_type final : graph_types::node_base<data, node_type> {
-        using base = graph_types::node_base<data, node_type>;
-        using data_type = typename base::data_type;
+    struct node_type final {
+        using data_type = data;
+        std::unique_ptr<data_type> data_;
+        size_t storage_id_ = std::numeric_limits<size_t>::max();
         node_type() = default;
         explicit node_type(const ocp_ptr_t &formulation) {
-            base::data_ = new data_type(formulation);
+            data_ = std::make_unique<data_type>(formulation);
         }
-        node_type(const node_type &rhs) : base(rhs) {
+        data_type *operator->() { return data_.get(); }
+        const data_type *operator->() const { return data_.get(); }
+        operator data_type &() { return *data_; }
+        operator const data_type &() const { return *data_; }
+        node_type(const node_type &rhs) {
             if (rhs.data_) {
-                base::data_ = new data_type(rhs.data_->problem_ptr());
+                data_ = std::make_unique<data_type>(rhs.data_->problem_ptr());
             }
         }
         node_type(node_type &&rhs) noexcept = default;
@@ -290,7 +298,7 @@ struct ns_sqp {
     ns_sqp(size_t n_jobs = MAX_THREADS);
     ns_sqp(const ns_sqp &) = delete;
     ~ns_sqp() = default;
-    using storage_type = directed_graph<node_type>;
+    using storage_type = linear_runtime_graph<node_type>;
 
     void reset_riccati_solver(solver_type *s) {
         riccati_solver_.reset(s);
@@ -407,6 +415,7 @@ struct ns_sqp {
     void print_stats(const kkt_info &info);
     /// compute the kkt information of the current solution
     kkt_info compute_kkt_info(bool update_dual_res = true);
+    kkt_info compute_kkt_info_minimal(bool update_dual_res = true);
     void initialize_equality_multipliers();
     kkt_info restoration_update(const kkt_info &kkt_before, filter_linesearch_data &ls);
     void update_phase_problem(data *d, node_data::update_mode mode);
