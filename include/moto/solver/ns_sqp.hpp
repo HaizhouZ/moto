@@ -271,7 +271,6 @@ struct ns_sqp {
     } kkt_last;
 
     kkt_info update(size_t n_iter, bool verbose = true);
-    kkt_info update_minimal(size_t n_iter, bool verbose = true);
     const profile_report &profile() const { return profile_report_; }
     void reset_profile();
 
@@ -415,7 +414,6 @@ struct ns_sqp {
     void print_stats(const kkt_info &info);
     /// compute the kkt information of the current solution
     kkt_info compute_kkt_info(bool update_dual_res = true);
-    kkt_info compute_kkt_info_minimal(bool update_dual_res = true);
     void initialize_equality_multipliers();
     kkt_info restoration_update(const kkt_info &kkt_before, filter_linesearch_data &ls);
     /// perform iterative refinement to improve the solution accuracy, will modify the current solution in place

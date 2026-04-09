@@ -23,9 +23,6 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def("update", [](ns_sqp &self, size_t n_iter, bool verbose) {
             nb::gil_scoped_release rel;
             return self.update(n_iter, verbose); }, nb::arg("n_iter") = 1, nb::arg("verbose") = true, "Update the SQP solver for a given number of iterations")
-        .def("update_minimal", [](ns_sqp &self, size_t n_iter, bool verbose) {
-            nb::gil_scoped_release rel;
-            return self.update_minimal(n_iter, verbose); }, nb::arg("n_iter") = 1, nb::arg("verbose") = true, "Run a minimal baseline-like SQP loop that skips newer solver orchestration overhead")
         .def("reset_profile", &ns_sqp::reset_profile, "Clear the last SQP profile report")
         .def("get_profile_report", &ns_sqp::profile, "Get the latest SQP wall-clock profile report")
         .def_prop_ro("profile_report", &ns_sqp::profile, "Get the latest SQP wall-clock profile report")
