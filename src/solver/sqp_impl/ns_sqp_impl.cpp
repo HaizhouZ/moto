@@ -495,9 +495,7 @@ void ns_sqp::prepare_globalization(filter_linesearch_data &ls, iteration_context
 
     graph.for_each_parallel([this](size_t tid, data *d) {
         riccati_solver_->finalize_dual_newton_step(d);
-    });
-    unscale_duals();
-    graph.for_each_parallel([this](data *d) {
+        unscale_duals(d);
         d->backup_trial_state();
         if (use_normal_soft_phase() || in_restoration_phase()) {
             solver::ineq_soft::backup_trial_state(d);

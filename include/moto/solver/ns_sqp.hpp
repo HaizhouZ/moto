@@ -429,6 +429,7 @@ struct ns_sqp {
     void compute_and_apply_scaling(const kkt_info &kkt);
     /// Reverse the row scaling on the dual variables after the QP solve.
     void unscale_duals();
+    void unscale_duals(data *d);
     /// Clear all stored scales (called on initialize()).
     void reset_scaling();
     /**

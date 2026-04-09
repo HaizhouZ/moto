@@ -246,41 +246,43 @@ void ns_sqp::compute_and_apply_scaling(const kkt_info &kkt) {
 
 void ns_sqp::unscale_duals() {
     auto &graph = active_data();
-    graph.for_each_parallel([](data *d) {
-        if (!d->scaling_applied_)
-            return;
-        // Only __eq_x / __eq_xu were scaled — reverse those only.
-        // __dyn excluded: approx_[__dyn].jac_[__y] aliases f_y_ used in LU.
-        // dense_->dual_[__ineq_*] aliases ipm_constr::multiplier_ (IPM-managed).
-        // approx_[__ineq_*].jac_[] aliases ipm_constr::jac_[] (IPM barrier gradient).
-        for (field_t cf : hard_constr_fields_non_dyn) {
-            const auto &s = d->scale_c_[cf];
-            if (s.size() == 0)
-                continue;
-            auto &approx = d->dense().approx_[cf];
-            // Reverse constraint residual scaling: v_scaled = s * v_orig → v_orig = v_scaled / s
-            if (approx.v_.size() > 0)
-                approx.v_.array() /= s.array();
-            // Reverse constraint Jacobian row scaling
-            for (field_t pf : primal_fields)
-                if (!approx.jac_[pf].is_empty())
-                    row_scale_inplace(approx.jac_[pf], s.cwiseInverse());
-        }
-        // Unscale the dual *step* for __eq_x / __eq_xu only.
-        // trial_dual_step[cf] is computed in the scaled system:
-        //   (s·J)^T λ_scaled = -∇f  →  λ_orig_step = s · λ_scaled_step.
-        // The current dual dual_[cf] was set in original units in a previous iteration
-        // and must NOT be re-scaled here.
-        for (field_t cf : hard_constr_fields_non_dyn) {
-            const auto &s = d->scale_c_[cf];
-            if (s.size() == 0)
-                continue;
-            auto &dlam = d->trial_dual_step[cf];
-            if (dlam.size() > 0)
-                dlam.array() *= s.array();
-        }
-        d->scaling_applied_ = false;
-    });
+    graph.for_each_parallel([this](data *d) { unscale_duals(d); });
+}
+
+void ns_sqp::unscale_duals(data *d) {
+    if (!d->scaling_applied_)
+        return;
+    // Only __eq_x / __eq_xu were scaled — reverse those only.
+    // __dyn excluded: approx_[__dyn].jac_[__y] aliases f_y_ used in LU.
+    // dense_->dual_[__ineq_*] aliases ipm_constr::multiplier_ (IPM-managed).
+    // approx_[__ineq_*].jac_[] aliases ipm_constr::jac_[] (IPM barrier gradient).
+    for (field_t cf : hard_constr_fields_non_dyn) {
+        const auto &s = d->scale_c_[cf];
+        if (s.size() == 0)
+            continue;
+        auto &approx = d->dense().approx_[cf];
+        // Reverse constraint residual scaling: v_scaled = s * v_orig → v_orig = v_scaled / s
+        if (approx.v_.size() > 0)
+            approx.v_.array() /= s.array();
+        // Reverse constraint Jacobian row scaling
+        for (field_t pf : primal_fields)
+            if (!approx.jac_[pf].is_empty())
+                row_scale_inplace(approx.jac_[pf], s.cwiseInverse());
+    }
+    // Unscale the dual *step* for __eq_x / __eq_xu only.
+    // trial_dual_step[cf] is computed in the scaled system:
+    //   (s·J)^T λ_scaled = -∇f  →  λ_orig_step = s · λ_scaled_step.
+    // The current dual dual_[cf] was set in original units in a previous iteration
+    // and must NOT be re-scaled here.
+    for (field_t cf : hard_constr_fields_non_dyn) {
+        const auto &s = d->scale_c_[cf];
+        if (s.size() == 0)
+            continue;
+        auto &dlam = d->trial_dual_step[cf];
+        if (dlam.size() > 0)
+            dlam.array() *= s.array();
+    }
+    d->scaling_applied_ = false;
 }
 
 } // namespace moto
