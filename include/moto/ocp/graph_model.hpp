@@ -29,6 +29,9 @@ class graph_model {
         // Reset any previously realized runtime graph state.
         virtual void clear() = 0;
 
+        // Reserve runtime storage before realization to keep returned stage handles stable.
+        virtual void reserve(size_t node_capacity, size_t edge_capacity) = 0;
+
         // Add one realized stage node and return a stable runtime handle id.
         // The handle id is later used by connect/set_head/set_tail.
         virtual size_t add_stage(const ocp_ptr_t &stage_ocp) = 0;

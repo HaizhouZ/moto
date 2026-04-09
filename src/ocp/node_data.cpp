@@ -69,6 +69,7 @@ void node_data::update_approximation(update_mode config, bool include_original_c
     // call to precompute
     const bool raw_derivatives = config == update_mode::eval_raw_derivatives;
     bool update_cost = config == update_mode::eval_val || config == update_mode::eval_all;
+    const bool reset_lag_jac = config != update_mode::eval_val && (!include_original_cost || raw_derivatives);
     if (update_cost) {
         dense_->cost_ = 0.;
         dense_->lag_ = 0.;
@@ -76,7 +77,8 @@ void node_data::update_approximation(update_mode config, bool include_original_c
     // set lagrangian gradient to zero
     if (config != update_mode::eval_val) {
         for (auto field : primal_fields) {
-            dense_->lag_jac_[field].setZero();
+            if (reset_lag_jac)
+                dense_->lag_jac_[field].setZero();
             dense_->lag_jac_corr_[field].setZero();
             dense_->cost_jac_[field].setZero();
         }

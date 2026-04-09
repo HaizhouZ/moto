@@ -29,6 +29,12 @@ class solver_graph_storage_interface final : public graph_model::storage_interfa
         node_refs_.clear();
     }
 
+    void reserve(size_t node_capacity, size_t edge_capacity) override {
+        (void)edge_capacity;
+        graph_.reserve(node_capacity);
+        node_refs_.reserve(node_capacity);
+    }
+
     size_t add_stage(const ocp_ptr_t &stage_ocp) override {
         node_refs_.emplace_back(&graph_.add(stage_node_builder_(stage_ocp)));
         return node_refs_.size() - 1;

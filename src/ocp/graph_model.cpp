@@ -260,6 +260,7 @@ void graph_model::realize_into(storage_interface &graph,
     graph.clear();
     const size_t num_nodes = state_->nodes.size();
     const size_t num_edges = state_->edges.size();
+    graph.reserve(num_edges, num_edges);
 
     std::vector<std::vector<size_t>> incoming(num_nodes), outgoing(num_nodes);
     for (size_t eid = 0; eid < num_edges; ++eid) {
