@@ -420,7 +420,6 @@ struct ns_sqp {
     kkt_info compute_filter_accepted_info();
     void initialize_equality_multipliers();
     kkt_info restoration_update(const kkt_info &kkt_before, filter_linesearch_data &ls);
-    void update_phase_problem(data *d, node_data::update_mode mode);
     /// perform iterative refinement to improve the solution accuracy, will modify the current solution in place
     void iterative_refinement();
     /// update the line search bounds with the (probably updated) max value

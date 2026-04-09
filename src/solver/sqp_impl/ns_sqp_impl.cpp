@@ -275,14 +275,6 @@ void ns_sqp::reset_profile() {
     profile_report_ = {};
 }
 
-void ns_sqp::update_phase_problem(data *d, node_data::update_mode mode) {
-    if (using_restoration_overlay_graph() || !in_restoration_phase()) {
-        d->update_approximation(mode, true);
-        return;
-    }
-    d->update_approximation(mode, true);
-}
-
 void ns_sqp::refresh_problem_flags() {
     settings.has_ineq_soft = false;
     settings.has_ipm_ineq = false;
@@ -532,7 +524,7 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
             if (use_normal_soft_phase() || in_restoration_phase()) {
                 solver::ineq_soft::apply_affine_step(d, &settings);
             }
-            update_phase_problem(d, node_data::update_mode::eval_val);
+            d->update_approximation(node_data::update_mode::eval_val, true);
         });
     detail_timed_block_end("apply_affine_step");
     }
@@ -543,8 +535,9 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
     if (settings.ls.method == linesearch_setting::search_method::merit_backtracking ||
         in_restoration_phase()) {
         graph.for_each_parallel([this](data *d) {
-            update_phase_problem(d, in_restoration_phase() ? node_data::update_mode::eval_raw_derivatives
-                                                           : node_data::update_mode::eval_derivatives);
+            d->update_approximation(in_restoration_phase() ? node_data::update_mode::eval_raw_derivatives
+                                                           : node_data::update_mode::eval_derivatives,
+                                    true);
         });
         ctx.trial = compute_kkt_info();
     } else {
@@ -563,8 +556,9 @@ void ns_sqp::accept_trial_point(filter_linesearch_data &ls, iteration_context &c
         detail_timed_block_start("update_approx_accepted");
         if (settings.ls.method != linesearch_setting::search_method::merit_backtracking) {
             graph.for_each_parallel([this](data *d) {
-                update_phase_problem(d, in_restoration_phase() ? node_data::update_mode::eval_raw_derivatives
-                                                               : node_data::update_mode::eval_derivatives);
+                d->update_approximation(in_restoration_phase() ? node_data::update_mode::eval_raw_derivatives
+                                                               : node_data::update_mode::eval_derivatives,
+                                        true);
             });
             if (!settings.verbose && !in_restoration_phase()) {
                 ctx.trial = compute_filter_accepted_info();
@@ -600,8 +594,9 @@ ns_sqp::line_search_action ns_sqp::handle_globalization_failure(filter_linesearc
             if (use_normal_soft_phase() || in_restoration_phase()) {
                 solver::ineq_soft::restore_trial_state(d);
             }
-            update_phase_problem(d, in_restoration_phase() ? node_data::update_mode::eval_raw_derivatives
-                                                           : node_data::update_mode::eval_derivatives);
+            d->update_approximation(in_restoration_phase() ? node_data::update_mode::eval_raw_derivatives
+                                                           : node_data::update_mode::eval_derivatives,
+                                    true);
         });
         ctx.current = compute_kkt_info();
         return line_search_action::failure;
