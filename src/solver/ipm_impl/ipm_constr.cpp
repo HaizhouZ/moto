@@ -31,7 +31,7 @@ void ipm_constr::initialize(ipm::data_map_t &data) const {
     auto &d = data.as<ipm_data>();
     // dont do d.g_ = d.v_; cuz already set in value_impl
     d.slack_ = (-d.g_).cwiseMax(1); // clip
-    d.v_ = d.g_ + d.slack_;         // r_g = g_ + slack
+    d.v_ = d.g_ + d.slack_;            // r_g = g_ + slack
     d.multiplier_.array() = d.ipm_cfg->mu / d.slack_.array();
     // d.multiplier_ = d.multiplier_.cwiseMin(1); // clip
     d.multiplier_.setConstant(1.0);
@@ -61,6 +61,7 @@ void ipm_constr::finalize_newton_step(ipm::data_map_t &data) const {
     //     d.d_multiplier_.array() = -d.multiplier_.array() - d.diag_scaling.array() * d.d_slack_.array();
     else {
         d.d_multiplier_.array() = -(d.r_s_.array() - d.ipm_cfg->mu + d.multiplier_.array() * d.d_slack_.array()) / d.reg_T_inv_.array();
+
     }
     d.d_slack_.array() += d.reg_.array() * d.d_multiplier_.array();
     d.d_slack_.array() *= d.active_.array();      // apply the active set

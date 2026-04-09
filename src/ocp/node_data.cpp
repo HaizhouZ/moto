@@ -3,8 +3,6 @@
 #include <moto/ocp/problem.hpp>
 #include <moto/ocp/soft_constr.hpp>
 #include <moto/solver/data_base.hpp>
-#define SHOW_DETAIL_TIMING
-#include <moto/utils/timed_block.hpp>
 
 namespace moto {
 sym_data::sym_data(ocp *prob) : prob_(prob) {
@@ -73,7 +71,6 @@ void node_data::update_approximation(update_mode config, bool include_original_c
     // call to precompute
     bool update_cost = config == update_mode::eval_val || config == update_mode::eval_all;
     const bool reset_lag_jac = config != update_mode::eval_val && !include_original_cost;
-    detail_timed_block_start("node_update_reset");
     if (update_cost) {
         dense_->cost_ = 0.;
         dense_->lag_ = 0.;
@@ -101,13 +98,9 @@ void node_data::update_approximation(update_mode config, bool include_original_c
             }
         }
     }
-    detail_timed_block_end("node_update_reset");
-
-    detail_timed_block_start("node_update_pre");
     for (const generic_custom_func &f : prob_->exprs(__pre_comp)) {
         f.custom_call((*shared_)[f]); ///< @todo pass update mode
     }
-    detail_timed_block_end("node_update_pre");
     bool no_eval = config != update_mode::eval_val && config != update_mode::eval_all;
     bool no_jac = config != update_mode::eval_jac &&
                   config != update_mode::eval_derivatives &&
@@ -115,29 +108,19 @@ void node_data::update_approximation(update_mode config, bool include_original_c
     bool no_hess = config != update_mode::eval_hess &&
                    config != update_mode::eval_derivatives &&
                    config != update_mode::eval_all;
-    const bool do_eval = !no_eval;
-    const bool do_jac = !no_jac;
-    const bool do_hess = !no_hess;
-    detail_timed_block_start("node_update_funcs");
-    for_each<std::array{__dyn, __eq_x, __eq_xu, __ineq_x, __ineq_xu, __eq_x_soft, __eq_xu_soft, __cost}>(
-        [&](const generic_func &_f, func_approx_data &data) {
+    for_each<func_fields>([=, this](const generic_func &_f, func_approx_data &data) {
         _f.compute_approx(data,
-                          do_eval && _f.order() >= approx_order::zero,
-                          do_jac && _f.order() >= approx_order::first,
-                          do_hess && _f.order() >= approx_order::second);
+                          !no_eval && _f.order() >= approx_order::zero,
+                          !no_jac && _f.order() >= approx_order::first,
+                          !no_hess && _f.order() >= approx_order::second);
     });
-    detail_timed_block_end("node_update_funcs");
-
-    detail_timed_block_start("node_update_post");
     for (const generic_custom_func &f : prob_->exprs(__post_comp)) {
         f.custom_call((*shared_)[f]); ///< @todo pass update mode
     }
-    detail_timed_block_end("node_update_post");
     if (config != update_mode::eval_val && include_original_cost)
         for (auto field : primal_fields)
             dense_->lag_jac_[field] = dense_->cost_jac_[field];
 
-    detail_timed_block_start("node_update_merge");
     for (auto f : lag_data::stored_constr_fields) {
         if (prob_->dim(f) == 0)
             continue; // skip empty jacobian
@@ -149,9 +132,7 @@ void node_data::update_approximation(update_mode config, bool include_original_c
                 dense_->approx_[f].jac_[p].right_T_times(dense_->dual_[f], dense_->lag_jac_[p]);
             }
     }
-    detail_timed_block_end("node_update_merge");
     if (update_cost) {
-        detail_timed_block_start("node_update_residuals");
         inf_prim_res_ = 0.;
         prim_res_l1_ = 0.;
         for (const auto &field_data : dense_->approx_) {
@@ -167,7 +148,6 @@ void node_data::update_approximation(update_mode config, bool include_original_c
             inf_comp_res_ = std::max(comp.cwiseAbs().maxCoeff(), inf_comp_res_);
         }
         dense_->lag_ += dense_->cost_;
-        detail_timed_block_end("node_update_residuals");
     }
 }
 

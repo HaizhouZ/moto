@@ -96,20 +96,17 @@ void ns_sqp::initialize_equality_multipliers() {
             solver::equality_init::sync_equality_init_overlay_primal(outer, overlay);
         });
 
-        const bool prev_reinitialize = settings.reinitialize_ineq_soft;
-        settings.reinitialize_ineq_soft = true;
         overlay_graph.for_each_parallel([this](data *d) {
             d->for_each_constr([this](const generic_func &c, func_approx_data &fd) { c.setup_workspace_data(fd, &settings); });
-            solver::ineq_soft::bind_runtime(d);
+            solver::ineq_soft::bind_and_invalidate(d);
             d->update_approximation(node_data::update_mode::eval_val, true);
         });
-        settings.reinitialize_ineq_soft = prev_reinitialize;
 
         for_each_overlay_pair(outer_graph, overlay_graph, [&](data &outer, data &overlay) {
             solver::equality_init::sync_equality_init_overlay_duals(outer, overlay);
         });
 
-        overlay_graph.for_each_parallel([this](data *d) {
+        overlay_graph.for_each_parallel([](data *d) {
             d->update_approximation(node_data::update_mode::eval_all, true);
         });
 

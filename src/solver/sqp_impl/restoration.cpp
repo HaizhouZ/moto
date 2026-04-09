@@ -221,7 +221,16 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     }
     settings.in_restoration = true;
     set_phase_graph_override(resto_graph);
-    const auto compute_phase_info_from_split = [&](bool update_dual_res, bool include_ls_info) {
+    const auto compute_restoration_info_from_split = [&](bool update_dual_res) {
+        kkt_info kkt;
+        kkt = compute_prim_res_info(kkt);
+        kkt = compute_ls_info(kkt);
+        if (update_dual_res) {
+            kkt = compute_dual_res_info(kkt);
+        }
+        return kkt;
+    };
+    const auto compute_normal_info_from_split = [&](bool update_dual_res, bool include_ls_info) {
         kkt_info kkt;
         kkt = compute_prim_res_info(kkt);
         if (include_ls_info) {
@@ -251,17 +260,16 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
             dump_overlay_pair_order(outer_graph, resto_graph);
             dump_outer_overlay_source_values(outer_graph, resto_graph);
         }
-        const bool prev_reinitialize = settings.reinitialize_ineq_soft;
-        settings.reinitialize_ineq_soft = true;
         resto_graph.for_each_parallel([this](data *d) {
             d->for_each_constr([this](const generic_func &c, func_approx_data &fd) {
                 c.setup_workspace_data(fd, &settings);
             });
-            solver::ineq_soft::bind_runtime(d);
+            solver::ineq_soft::bind_and_invalidate(d);
             d->update_approximation(node_data::update_mode::eval_val, true);
+        });
+        resto_graph.for_each_parallel([](data *d) {
             d->update_approximation(node_data::update_mode::eval_all, true);
         });
-        settings.reinitialize_ineq_soft = prev_reinitialize;
         if (resto_eq_debug_enabled()) {
             auto nodes = resto_graph.flatten_nodes();
             if (!nodes.empty()) {
@@ -364,14 +372,13 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     rls.constr_vio_min =
         std::max(kkt_before.prim_res_l1 * settings.ls.constr_vio_min_frac, settings.prim_tol);
 
-    kkt_info kkt_rest = compute_phase_info_from_split(true, true);
+    kkt_info kkt_rest = compute_restoration_info_from_split(true);
     set_iter_meta(kkt_rest, 0, 0);
 
     kkt_info kkt_outer_trial{};
     bool resto_accept = false;
     bool resto_stalled = false;
     bool resto_converged = false;
-    restoration_local_info resto_local{};
     const size_t max_resto_iters =
         std::min(settings.restoration.max_iter,
                  settings.max_iter > kkt_before.num_iter ? settings.max_iter - kkt_before.num_iter : size_t(0));
@@ -388,15 +395,11 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
             print_stats(kkt_rest);
         }
 
-        resto_local = compute_restoration_local_residual_info();
-        resto_converged =
-            kkt_rest.inf_dual_res < settings.dual_tol &&
-            resto_local.inf_stat_res < settings.dual_tol &&
-            resto_local.inf_comp_res < settings.comp_tol;
+        resto_converged = kkt_rest.inf_dual_res < settings.dual_tol;
 
         if (action == line_search_action::accept) {
             kkt_outer_trial = evaluate_outer_trial_from_restoration();
-            kkt_rest = compute_phase_info_from_split(true, true);
+            kkt_rest = compute_restoration_info_from_split(true);
             set_iter_meta(kkt_rest, i_rest + 1, rls.step_cnt);
 
             const bool outer_accept = outer_filter_accepts(ls, kkt_outer_trial, kkt_before);
@@ -419,7 +422,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     }
 
     finish_restoration(resto_accept);
-    kkt_info result = resto_accept ? compute_phase_info_from_split(true, false) : kkt_rest;
+    kkt_info result = resto_accept ? compute_normal_info_from_split(true, false) : kkt_rest;
     result.num_iter = kkt_rest.num_iter;
     result.ls_steps = kkt_rest.ls_steps;
     if (resto_accept) {

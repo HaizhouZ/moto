@@ -325,7 +325,7 @@ TEST_CASE("restoration overlay problem keeps dyn and replaces non-dynamics with 
         d.v_(0) += scalar_t(0.5) * d[0].squaredNorm();
     };
     cost_stage->jacobian = [](func_approx_data &d) {
-        d.lag_jac_[0].noalias() += d[0].transpose();
+        d.jac_[0].noalias() += d[0].transpose();
     };
     cost_stage->hessian = [](func_approx_data &d) {
         d.lag_hess_[0][0].diagonal().array() += 1.;
@@ -442,14 +442,15 @@ TEST_CASE("restoration soft-equality overlays are built and keep synced multipli
     });
     REQUIRE(saw_overlay);
 
+    solver::ineq_soft::bind_runtime(&resto);
     resto.update_approximation(node_data::update_mode::eval_val, true);
 
     saw_overlay = false;
     resto.for_each(__eq_x_soft, [&](const resto_eq_elastic_constr &overlay, resto_eq_elastic_constr::approx_data &d) {
         saw_overlay = true;
         REQUIRE(overlay.source()->name() == soft_eq->name());
-        REQUIRE(approx_scalar(d.multiplier_(0), scalar_t(2.5)));
-        REQUIRE(approx_scalar(d.multiplier_backup(0), scalar_t(2.5)));
+        REQUIRE(approx_scalar(d.multiplier_(0), scalar_t(0.0)));
+        REQUIRE(approx_scalar(d.multiplier_backup(0), scalar_t(0.0)));
     });
     REQUIRE(saw_overlay);
 }

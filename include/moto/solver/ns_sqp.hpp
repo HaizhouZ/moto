@@ -29,7 +29,6 @@ struct ns_sqp {
     enum class profile_phase : size_t {
         initialize_total,
         initialize_setup_eval,
-        initialize_derivative_eval,
         initialize_kkt,
         sqp_iter_total,
         solve_direction,
@@ -170,7 +169,6 @@ struct ns_sqp {
     };
 
     struct settings_t : public workspace_data_collection<linesearch_setting, ipm_config>,
-                        public soft_runtime_settings,
                         public restoration_settings,
                         public equality_multiplier_init_settings {
         using base = workspace_data_collection<linesearch_setting, ipm_config>;
@@ -213,7 +211,7 @@ struct ns_sqp {
     struct data : public node_data, ns_riccati_data {
         data(const ocp_ptr_t &prob)
             : node_data(prob), ns_riccati_data((node_data *)this) {
-            bind_soft_runtime_owner(static_cast<solver::data_base *>(this));
+            bind_soft_runtime_owner(this);
         }
         data(data &&rhs) = default;
         static void update_approx(data *d) {
@@ -272,11 +270,6 @@ struct ns_sqp {
         scalar_t inf_eq_xu_dual_step = 0.;        // inf-norm of dual step for __eq_xu
         scalar_t avg_dual_res = 0.;               // average dual residual: L1 norm of stationarity gradient / number of elements (unscaled)
     } kkt_last;
-
-    struct restoration_local_info {
-        scalar_t inf_stat_res = 0.;
-        scalar_t inf_comp_res = 0.;
-    };
 
     kkt_info update(size_t n_iter, bool verbose = true);
     const profile_report &profile() const { return profile_report_; }
@@ -431,7 +424,6 @@ struct ns_sqp {
     kkt_info compute_ls_info(const kkt_info &base);
     kkt_info compute_prim_res_info(const kkt_info &base);
     kkt_info compute_dual_res_info(const kkt_info &base);
-    restoration_local_info compute_restoration_local_residual_info() const;
     void initialize_equality_multipliers();
     kkt_info restoration_update(const kkt_info &kkt_before, filter_linesearch_data &ls);
     /// perform iterative refinement to improve the solution accuracy, will modify the current solution in place

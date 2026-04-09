@@ -34,28 +34,20 @@ func_approx_data::func_approx_data(sym_data &primal,
                                    const generic_func &f)
     : func_arg_map(primal, shared, f), v_(get_value_ref(f, raw)), lag_data_(&raw) {
     auto &in_args = f.in_args();
-    size_t f_st = raw.prob_->get_expr_start(f);
-    // for non-cost
     if (f.order() >= approx_order::first) {
-        lag_jac_.reserve(in_args_.size());
+        jac_.reserve(in_args_.size());
         for (size_t i : range(in_args_.size())) {
             if (in_args[i]->field() < field::num_prim && raw.prob_->is_active(in_args[i])) {
-                auto &jac_store = (f.field() == __cost)
-                                      ? raw.cost_jac_[in_args[i]->field()]
-                                      : raw.lag_jac_[in_args[i]->field()];
-                lag_jac_.push_back(raw.prob_->extract_tangent(jac_store, in_args[i]));
-            } else { // useless
-                static row_vector empty;
-                lag_jac_.push_back(empty);
+                if (f.field() == __cost) {
+                    jac_.push_back(raw.prob_->extract_row_tangent(raw.cost_jac_[in_args[i]->field()], in_args[i]));
+                } else {
+                    static matrix empty;
+                    jac_.push_back(empty);
+                }
+            } else {
+                static matrix empty;
+                jac_.push_back(empty);
             }
-        }
-        // bind approx jacobian
-        if (f.field() != __cost) {
-            static matrix empty;
-            jac_.assign(in_args_.size(), empty);
-        } else {
-            jac_.reserve(lag_jac_.size());
-            jac_.assign(lag_jac_.begin(), lag_jac_.end());
         }
     }
     setup_hessian();

@@ -113,8 +113,6 @@ struct func_approx_data : public func_arg_map {
     ///////////////////////////////////////////////////
     vector_ref v_;                ///< value ref
     std::vector<matrix_ref> jac_; ///< jacobian references
-    /// jacobian for cost, index corresponds to @ref func_arg_map::in_args_
-    std::vector<row_vector_ref> lag_jac_;
     /// hessian for cost. index corresponds to @ref func_arg_map::in_args_
     std::vector<std::vector<matrix_ref>> lag_hess_;
     /**

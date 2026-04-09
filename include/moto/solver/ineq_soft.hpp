@@ -31,6 +31,9 @@ inline void for_each(auto *data, auto &&callback) {
 }
 void bind_runtime(const soft_constr &sf, soft_constr_data_t &sd);
 void bind_runtime(node_data *data);
+void invalidate_initialized(const soft_constr &sf, soft_constr_data_t &sd);
+void invalidate_initialized(node_data *data);
+void bind_and_invalidate(node_data *data);
 void ensure_initialized(const soft_constr &sf, soft_constr_data_t &sd);
 /**
  * @brief finalize the newton step for the soft constraints

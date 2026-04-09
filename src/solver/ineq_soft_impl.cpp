@@ -33,9 +33,23 @@ void bind_runtime(node_data *cur) {
     });
 }
 
+void invalidate_initialized(const soft_constr &, soft_constr_data_t &sd) {
+    sd.initialized_ = false;
+}
+
+void invalidate_initialized(node_data *cur) {
+    for_each(cur, [](auto &&sf, auto &&sd) {
+        invalidate_initialized(sf, sd);
+    });
+}
+
+void bind_and_invalidate(node_data *cur) {
+    bind_runtime(cur);
+    invalidate_initialized(cur);
+}
+
 void ensure_initialized(const soft_constr &sf, soft_constr_data_t &sd) {
-    const bool force_reinitialize = sd.runtime_cfg_ != nullptr && sd.runtime_cfg_->reinitialize_ineq_soft;
-    if (!sd.initialized_ || force_reinitialize) {
+    if (!sd.initialized_) {
         sf.initialize(sd);
         sd.initialized_ = true;
     }

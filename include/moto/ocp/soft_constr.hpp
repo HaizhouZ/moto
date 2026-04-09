@@ -4,10 +4,6 @@
 #include <moto/ocp/constr.hpp>
 
 namespace moto {
-struct soft_runtime_settings {
-    bool reinitialize_ineq_soft = false;
-};
-
 namespace solver {
 struct data_base;
 }
@@ -31,7 +27,6 @@ class soft_constr : public generic_constr {
         std::vector<row_vector_ref> lag_jac_corr_; ///< lagrangian gradient correction
         mapped_vector d_multiplier_;                          ///< newton step for multipliers
         workspace_data *ws_data_ = nullptr;
-        soft_runtime_settings *runtime_cfg_ = nullptr;
         solver::data_base *solver_data_ = nullptr;
         bool runtime_bound_ = false;
         bool initialized_ = false;
@@ -53,7 +48,7 @@ class soft_constr : public generic_constr {
     /// @brief finalize the soft constraint, will be called upon added to a problem
     void finalize_impl() override;
 
-  public:
+    public:
     using base::base; ///< inherit constructors
     soft_constr(generic_constr &&rhs) : base(std::move(rhs)) {
         field_hint().is_soft = true; ///< set the field hint to soft
@@ -62,7 +57,6 @@ class soft_constr : public generic_constr {
         base::setup_workspace_data(data, ws_data);
         auto &sd = data.as<data_map_t>();
         sd.ws_data_ = ws_data;
-        sd.runtime_cfg_ = dynamic_cast<soft_runtime_settings *>(ws_data);
     }
     /// initialize the soft constraint data
     virtual void initialize(data_map_t &data) const = 0;

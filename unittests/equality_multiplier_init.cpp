@@ -23,8 +23,8 @@ cost make_stage_cost(const std::string &name, const sym &x, const sym &u) {
         d.v_(0) += scalar_t(0.5) * (scalar_t(2.0) * d[0].squaredNorm() + scalar_t(3.0) * d[1].squaredNorm());
     };
     c->jacobian = [](func_approx_data &d) {
-        d.lag_jac_[0].noalias() += scalar_t(2.0) * d[0].transpose();
-        d.lag_jac_[1].noalias() += scalar_t(3.0) * d[1].transpose();
+        d.jac_[0].noalias() += scalar_t(2.0) * d[0].transpose();
+        d.jac_[1].noalias() += scalar_t(3.0) * d[1].transpose();
     };
     c->hessian = [](func_approx_data &d) {
         d.lag_hess_[0][0].diagonal().array() += scalar_t(2.0);
