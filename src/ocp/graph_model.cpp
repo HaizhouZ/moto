@@ -4,6 +4,42 @@
 
 namespace moto {
 
+namespace {
+bool is_terminal_node_term(const shared_expr &expr) {
+    if (!expr) {
+        return false;
+    }
+    if (expr->field() == __cost) {
+        return expr.as<generic_cost>().terminal_add();
+    }
+    if (in_field(expr->field(), constr_fields)) {
+        return expr.as<generic_constr>().terminal_add();
+    }
+    return false;
+}
+
+bool is_pure_state_node_term(const shared_expr &expr, bool include_terminal = false) {
+    if (!expr || expr->field() == __dyn || !in_field(expr->field(), func_fields)) {
+        return false;
+    }
+    if (!include_terminal && is_terminal_node_term(expr)) {
+        return false;
+    }
+    const auto &func = expr.as<generic_func>();
+    bool has_x = false;
+    for (const sym &arg : func.in_args()) {
+        if (arg.field() == __u || arg.field() == __y) {
+            return false;
+        }
+        if (arg.field() == __x) {
+            has_x = true;
+        }
+    }
+    return has_x;
+}
+
+} // namespace
+
 struct graph_model::impl {
     std::vector<model_node_ptr_t> nodes;
     std::vector<model_edge_ptr_t> edges;
@@ -38,7 +74,7 @@ struct graph_model::impl {
     }
 
     bool has_incoming_edge(size_t node_id, size_t exclude_edge_id) const {
-        const auto uid = nodes.at(node_id)->uid();
+        const size_t uid = nodes.at(node_id)->uid();
         for (size_t i = 0; i < edges.size(); ++i) {
             if (i == exclude_edge_id) continue;
             const auto &ed = edges[i] ? edges[i]->ed_node_prob() : node_ocp_ptr_t{};
@@ -48,7 +84,7 @@ struct graph_model::impl {
     }
 
     bool has_outgoing_edge(size_t node_id, size_t exclude_edge_id) const {
-        const auto uid = nodes.at(node_id)->uid();
+        const size_t uid = nodes.at(node_id)->uid();
         for (size_t i = 0; i < edges.size(); ++i) {
             if (i == exclude_edge_id) continue;
             const auto &st = edges[i] ? edges[i]->st_node_prob() : node_ocp_ptr_t{};
@@ -145,17 +181,52 @@ edge_ocp_ptr_t graph_model::compose_interval(const model_edge_ptr_t &edge_h,
                                              const interval_compose_options &opts) const {
     validate_edge(edge_h);
     edge_h->wait_until_ready();
-    auto st_node_prob = edge_h->st_node_prob();
-    if (st_node_prob) {
-        st_node_prob->wait_until_ready();
+    auto start_node_prob = edge_h->st_node_prob();
+    auto end_node_prob = edge_h->ed_node_prob();
+    if (start_node_prob) {
+        start_node_prob->wait_until_ready();
+    }
+    if (end_node_prob) {
+        end_node_prob->wait_until_ready();
     }
     if (!opts.source_config.empty()) {
-        st_node_prob = st_node_prob ? st_node_prob->clone_node(opts.source_config) : node_ocp_ptr_t{};
+        start_node_prob = start_node_prob ? start_node_prob->clone_node(opts.source_config) : node_ocp_ptr_t{};
     }
-    auto composed = edge_ocp::compose(st_node_prob, edge_h, node_ocp_ptr_t{}, false);
-    if (opts.materialize_sink_terms) {
-        if (const auto &sink_node = edge_h->ed_node_prob()) {
-            materialize_sink_terms(*sink_node, *composed, opts.include_terminal_sink_terms);
+
+    if (start_node_prob) {
+        ocp::active_status_config config;
+        for (size_t f = 0; f < field::num; ++f) {
+            for (const shared_expr &expr : start_node_prob->exprs(f)) {
+                if (is_pure_state_node_term(expr, true)) {
+                    config.deactivate_list.emplace_back(*expr);
+                }
+            }
+        }
+        if (!config.empty()) {
+            start_node_prob = start_node_prob->clone_node(config);
+        }
+    }
+
+    auto composed = edge_ocp::compose(start_node_prob, edge_h, node_ocp_ptr_t{}, false);
+    composed->bind_nodes(start_node_prob, end_node_prob);
+    if (end_node_prob) {
+        for (size_t f = 0; f < field::num; ++f) {
+            const auto ff = static_cast<field_t>(f);
+            if (ff == __dyn || !in_field(ff, func_fields)) continue;
+            for (const shared_expr &expr : end_node_prob->exprs(f)) {
+                const bool is_terminal = is_terminal_node_term(expr);
+                if (is_terminal && !opts.include_terminal_sink_terms) continue;
+                if (!is_pure_state_node_term(expr, opts.include_terminal_sink_terms)) continue;
+                if (is_terminal && expr.as<generic_func>().has_u_arg()) {
+                    fmt::print(stderr,
+                               "warning: terminal node term {} depends on u and cannot be lowered onto the final edge; ignoring it\n",
+                               expr->name());
+                    continue;
+                }
+                composed->add(expr.as<generic_func>().lower_expr_x_to_y_cached(
+                    fmt::format("sink-node term {} materialization", expr->name()),
+                    composed->uid()));
+            }
         }
     }
     composed->wait_until_ready();
@@ -310,37 +381,6 @@ std::vector<model_edge_ptr_t> graph_model::add_path_impl(const model_node_ptr_t 
         prev = next;
     }
     return edges;
-}
-
-void graph_model::materialize_sink_terms(const node_ocp &sink_node,
-                                         edge_ocp &composed,
-                                         bool include_terminal) {
-    for (const shared_expr &expr : sink_node.exprs(__cost)) {
-        if (!is_terminal_expr(expr, __cost)) {
-            lower_expr_into(expr, composed);
-        }
-    }
-
-    if (!include_terminal) return;
-    for (size_t f = 0; f < field::num; ++f) {
-        const auto ff = static_cast<field_t>(f);
-        if (ff == __dyn || !in_field(ff, func_fields)) continue;
-        for (const shared_expr &expr : sink_node.exprs(f)) {
-            if (!is_terminal_expr(expr, ff)) continue;
-            if (expr.as<generic_func>().has_u_arg()) {
-                fmt::print(stderr, "warning: terminal node term {} depends on u and cannot be lowered onto the final edge; ignoring it\n",
-                           expr->name());
-                continue;
-            }
-            lower_expr_into(expr, composed);
-        }
-    }
-}
-
-void graph_model::lower_expr_into(const shared_expr &expr, edge_ocp &composed) {
-    composed.add(expr.as<generic_func>().lower_expr_x_to_y_cached(
-        fmt::format("sink-node term {} materialization", expr->name()),
-        composed.uid()));
 }
 
 } // namespace moto

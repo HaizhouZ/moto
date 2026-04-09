@@ -46,6 +46,8 @@ class graph_model {
 
     struct interval_compose_options {
         ocp::active_status_config source_config;
+        // End-node pure-x terms participate in every interval compose.
+        // This flag is retained only for compatibility with older call sites.
         bool materialize_sink_terms = false;
         bool include_terminal_sink_terms = false;
     };
@@ -127,18 +129,8 @@ class graph_model {
                                                 size_t n_edges,
                                                 const edge_ocp_ptr_t &base_prob);
 
-    // Lower sink-node terms onto an already-composed edge formulation.
-    // Non-terminal __cost terms are lowered unconditionally.
-    // Terminal terms (any field) are lowered only when include_terminal is true.
-    static void materialize_sink_terms(const node_ocp &sink_node,
-                                       edge_ocp &composed,
-                                       bool include_terminal);
-
     edge_ocp_ptr_t compose_interval(const model_edge_ptr_t &edge_h,
                                     const interval_compose_options &opts) const;
-
-    // Clone expr, substitute any __x args to __y (x_terminal → incoming y), cache in lowered_.
-    static void lower_expr_into(const shared_expr &expr, edge_ocp &composed);
 
     std::shared_ptr<impl> state_;
 };

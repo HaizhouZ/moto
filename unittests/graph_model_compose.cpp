@@ -68,10 +68,26 @@ const moto::generic_func &require_func_named_prefix(const moto::ocp_base_ptr_t &
     REQUIRE(func != nullptr);
     return *func;
 }
+
+const moto::generic_func &require_func_named_prefix_any_field(const moto::ocp_base_ptr_t &prob,
+                                                              const std::initializer_list<moto::field_t> &fields,
+                                                              const std::string &prefix) {
+    for (moto::field_t field : fields) {
+        auto it = std::find_if(prob->exprs(field).begin(), prob->exprs(field).end(), [&](const moto::shared_expr &expr) {
+            return expr->name().rfind(prefix, 0) == 0;
+        });
+        if (it != prob->exprs(field).end()) {
+            const auto *func = dynamic_cast<const moto::generic_func *>((*it).get());
+            REQUIRE(func != nullptr);
+            return *func;
+        }
+    }
+    FAIL("required func prefix not found in any requested field");
+    throw std::runtime_error("unreachable");
+}
 } // namespace
 
-TEST_CASE("graph_model compose lowers node-owned state terms onto outgoing edge y") {
-    using namespace moto;
+TEST_CASE("graph_model compose uses start-node non-pure terms and end-node pure x terms") {
     using namespace moto;
 
     auto [x, xn] = sym::states("x", 1);
@@ -82,17 +98,19 @@ TEST_CASE("graph_model compose lowers node-owned state terms onto outgoing edge 
 
     auto dyn = dynamics(new dense_dynamics("dyn", dyn_args, xn - x - u, approx_order::second, __dyn));
 
-    auto node_prob = node_ocp::create();
-    auto eq = constr(new generic_constr("eq_node", x_args, x, approx_order::second, __undefined));
-    auto x_cost = cost(new generic_cost("cost_node", x_args, x, approx_order::second));
-    auto u_cost = cost(new generic_cost("cost_u_node", u_args, u, approx_order::second));
-    node_prob->add(*eq);
-    node_prob->add(*x_cost);
-    node_prob->add(*u_cost);
+    auto st_prob = node_ocp::create();
+    st_prob->add(*cost(new generic_cost("cost_source_x", x_args, x, approx_order::second)));
+    st_prob->add(*cost(new generic_cost("cost_source_u", u_args, u, approx_order::second)));
+
+    auto ed_prob = node_ocp::create();
+    ed_prob->add(*constr(new generic_constr("eq_node", x_args, x, approx_order::second, __undefined)));
+    ed_prob->add(*constr(new generic_constr("ineq_node", x_args, x, approx_order::second, __ineq_x)));
+    ed_prob->add(*cost(new generic_cost("cost_node", x_args, x, approx_order::second)));
+    ed_prob->add(*cost(new generic_cost("cost_u_node", u_args, u, approx_order::second)));
 
     graph_model modeled;
-    auto n0 = modeled.create_node(node_prob);
-    auto n1 = modeled.create_node();
+    auto n0 = modeled.create_node(st_prob);
+    auto n1 = modeled.create_node(ed_prob);
 
     auto e01 = modeled.connect(n0, n1);
     e01->add(*dyn);
@@ -101,17 +119,119 @@ TEST_CASE("graph_model compose lowers node-owned state terms onto outgoing edge 
     REQUIRE(composed.size() == 1);
     auto p01 = composed.front();
 
-    const auto &eq_node = require_func_named_prefix(p01, __eq_x, "eq_node");
+    const auto &eq_node = require_func_named_prefix_any_field(p01, {__eq_x, __undefined}, "eq_node");
+    const auto &ineq_node = require_func_named_prefix(p01, __ineq_x, "ineq_node");
     const auto &cost_node = require_func_named_prefix(p01, __cost, "cost_node");
-    const auto &cost_u_node = require_func_named(p01, __cost, "cost_u_node");
+    const auto &cost_source_u = require_func_named(p01, __cost, "cost_source_u");
 
     REQUIRE(eq_node.in_args().front()->field() == __y);
+    REQUIRE(ineq_node.in_args().front()->field() == __y);
     REQUIRE(cost_node.in_args().front()->field() == __y);
-    REQUIRE(cost_u_node.in_args().front()->field() == __u);
+    REQUIRE(cost_source_u.in_args().front()->field() == __u);
+    REQUIRE_FALSE(contains_name_prefix(expr_names(p01, __cost), "cost_source_x"));
+    REQUIRE_FALSE(contains_name_prefix(expr_names(p01, __cost), "cost_u_node"));
+}
+
+TEST_CASE("graph_model compose materializes sink node state inequalities onto incoming edge y") {
+    using namespace moto;
+
+    auto [x, xn] = sym::states("x_sink_ineq", 1);
+    auto u = sym::inputs("u_sink_ineq", 1);
+    const var_inarg_list dyn_args = var_list{x, xn, u};
+    const var_inarg_list x_args = var_list{x};
+
+    auto dyn = dynamics(new dense_dynamics("dyn_sink_ineq", dyn_args, xn - x - u, approx_order::second, __dyn));
+
+    auto st_prob = node_ocp::create();
+    auto sink_prob = node_ocp::create();
+    auto ineq = constr(new generic_constr("ineq_sink", x_args, x, approx_order::second, __ineq_x));
+    sink_prob->add(*ineq);
+
+    graph_model modeled;
+    auto n0 = modeled.create_node(st_prob);
+    auto n1 = modeled.create_node(sink_prob);
+
+    auto e01 = modeled.connect(n0, n1);
+    e01->add(*dyn);
+
+    const auto composed = modeled.compose_all();
+    REQUIRE(composed.size() == 1);
+    auto p01 = composed.front();
+
+    const auto &ineq_node = require_func_named_prefix(p01, __ineq_x, "ineq_sink");
+    REQUIRE(ineq_node.in_args().front()->field() == __y);
+}
+
+TEST_CASE("graph_model compose applies start-node active status to current edge primal vars") {
+    using namespace moto;
+
+    auto [x, xn] = sym::states("x_end_prune", 1);
+    auto ua = sym::inputs("u_end_keep", 1);
+    auto ub = sym::inputs("u_end_drop", 1);
+    const var_inarg_list dyn_args = var_list{x, xn, ua, ub};
+    const var_inarg_list u_args = var_list{ua, ub};
+
+    auto dyn = dynamics(new dense_dynamics("dyn_end_prune", dyn_args, xn - x - ua - ub, approx_order::second, __dyn));
+
+    auto st_prob = node_ocp::create();
+    st_prob->add(*cost(new generic_cost("cost_start_u", u_args, ua * ua + ub * ub, approx_order::second)));
+    auto ed_prob = node_ocp::create();
+    ed_prob->add(*cost(new generic_cost("cost_end_u", u_args, ua * ua + ub * ub, approx_order::second)));
+
+    graph_model modeled;
+    auto n0 = modeled.create_node(st_prob->clone_node(ocp::active_status_config{{ub}, {}}));
+    auto n1 = modeled.create_node(ed_prob);
+    auto e01 = modeled.connect(n0, n1);
+    e01->add(*dyn);
+
+    const auto composed = modeled.compose_all();
+    REQUIRE(composed.size() == 1);
+    auto p01 = composed.front();
+
+    REQUIRE(p01->dim(__u) == 1);
+    REQUIRE(expr_names(p01, __u) == std::vector<std::string>{"u_end_keep"});
+    REQUIRE(contains_name_prefix(expr_names(p01, __cost), "cost_start_u"));
+    REQUIRE_FALSE(contains_name_prefix(expr_names(p01, __cost), "cost_end_u"));
+}
+
+TEST_CASE("graph_model compose lowers a middle node pure x terms only onto its incoming edge") {
+    using namespace moto;
+
+    auto [x, xn] = sym::states("x_graph_mid_node", 1);
+    auto u = sym::inputs("u_graph_mid_node", 1);
+    const var_inarg_list dyn_args = var_list{x, xn, u};
+    const var_inarg_list x_args = var_list{x};
+
+    auto dyn = dynamics(new dense_dynamics("dyn_graph_mid_node", dyn_args, xn - x - u, approx_order::second, __dyn));
+
+    auto source_prob = node_ocp::create();
+    auto mid_prob = node_ocp::create();
+    mid_prob->add(*cost(new generic_cost("cost_x_graph_mid_node", x_args, x, approx_order::second)));
+    mid_prob->add(*constr(new generic_constr("ineq_graph_mid_node", x_args, x, approx_order::second, __ineq_x)));
+    auto sink_prob = node_ocp::create();
+
+    graph_model modeled;
+    auto n0 = modeled.create_node(source_prob);
+    auto n1 = modeled.create_node(mid_prob);
+    auto n2 = modeled.create_node(sink_prob);
+    auto e01 = modeled.connect(n0, n1);
+    auto e12 = modeled.connect(n1, n2);
+    e01->add(*dyn);
+    e12->add(*dyn);
+
+    const auto composed = modeled.compose_all();
+    REQUIRE(composed.size() == 2);
+
+    const auto &mid_cost = require_func_named_prefix(composed[0], __cost, "cost_x_graph_mid_node");
+    const auto &mid_ineq = require_func_named_prefix(composed[0], __ineq_x, "ineq_graph_mid_node");
+    REQUIRE(mid_cost.in_args().front()->field() == __y);
+    REQUIRE(mid_ineq.in_args().front()->field() == __y);
+
+    REQUIRE_FALSE(contains_name_prefix(expr_names(composed[1], __cost), "cost_x_graph_mid_node"));
+    REQUIRE_FALSE(contains_name_prefix(expr_names(composed[1], __ineq_x), "ineq_graph_mid_node"));
 }
 
 TEST_CASE("graph_model compose materializes sink node state cost onto incoming edge y") {
-    using namespace moto;
     using namespace moto;
 
     auto [x, xn] = sym::states("x_sink", 1);
@@ -122,8 +242,6 @@ TEST_CASE("graph_model compose materializes sink node state cost onto incoming e
     auto dyn = dynamics(new dense_dynamics("dyn_sink", dyn_args, xn - x - u, approx_order::second, __dyn));
 
     auto st_prob = node_ocp::create();
-    auto st_cost = cost(new generic_cost("cost_A_sink", x_args, x, approx_order::second));
-    st_prob->add(*st_cost);
 
     auto sink_prob = node_ocp::create();
     auto sink_cost = cost(new generic_cost("cost_B_sink", x_args, x, approx_order::second));
@@ -140,20 +258,15 @@ TEST_CASE("graph_model compose materializes sink node state cost onto incoming e
     auto p01 = composed.front();
 
     const auto cost01 = expr_names(p01, __cost);
-    REQUIRE(contains_name_prefix(cost01, "cost_A_sink"));
     REQUIRE(contains_name_prefix(cost01, "cost_B_sink"));
 
-    const auto &costA = require_func_named_prefix(p01, __cost, "cost_A_sink");
     const auto &costB = require_func_named_prefix(p01, __cost, "cost_B_sink");
 
-    REQUIRE(costA.in_args().size() == 1);
     REQUIRE(costB.in_args().size() == 1);
-    REQUIRE(costA.in_args().front()->field() == __y);
     REQUIRE(costB.in_args().front()->field() == __y);
 }
 
 TEST_CASE("graph_model compose keeps explicit terminal sink cost on terminal node") {
-    using namespace moto;
     using namespace moto;
 
     auto [x, xn] = sym::states("x_term", 1);
@@ -164,11 +277,11 @@ TEST_CASE("graph_model compose keeps explicit terminal sink cost on terminal nod
     auto dyn = dynamics(new dense_dynamics("dyn_term", dyn_args, xn - x - u, approx_order::second, __dyn));
 
     auto st_prob = node_ocp::create();
-    auto st_cost = cost(new generic_cost("cost_graph_terminal_stage_unique", x_args, x, approx_order::second));
-    st_prob->add(*st_cost);
 
     auto sink_prob = node_ocp::create();
+    auto sink_stage_cost = cost(new generic_cost("cost_graph_terminal_stage_unique", x_args, x, approx_order::second));
     auto sink_cost = cost(new generic_cost("cost_graph_terminal_sink_unique", x_args, x, approx_order::second));
+    sink_prob->add(*sink_stage_cost);
     sink_prob->add_terminal(*sink_cost);
 
     graph_model modeled;
@@ -245,16 +358,17 @@ TEST_CASE("ns_sqp create_graph can synchronize model graph paths into the intern
 
     ns_sqp sqp;
     auto modeled = sqp.create_graph();
-    auto n0 = modeled.create_node(stage_prob);
-    auto nt = modeled.create_node(terminal_prob);
-    auto stage_edges = modeled.add_path(n0, nt, 5);
-    REQUIRE(stage_edges.size() == 5);
+    auto stage_node = modeled.create_node(stage_prob);
+    auto terminal_node = modeled.create_node(terminal_prob);
+    auto stage_edges = modeled.add_path(stage_node, terminal_node, 4);
+    REQUIRE(stage_edges.size() == 4);
     for (const auto &edge : stage_edges) {
         edge->add(*dyn);
     }
 
     auto &flat = sqp.active_data().flatten_nodes();
-    REQUIRE(flat.size() == 5);
+    REQUIRE(flat.size() == 4);
+    REQUIRE(contains_name_prefix(expr_names(flat.front()->problem(), __cost), "cost_path_internal_stage"));
     REQUIRE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_path_internal_terminal"));
 }
 
@@ -275,18 +389,18 @@ TEST_CASE("ns_sqp model_graph add_path returns one edge per requested interval")
 
     ns_sqp sqp;
     auto modeled = sqp.create_graph();
-    auto n0 = modeled.create_node(stage_prob);
-    auto nt = modeled.create_node(terminal_prob);
-    auto stage_edges = modeled.add_path(n0, nt, 3);
-    REQUIRE(stage_edges.size() == 3);
-    REQUIRE(modeled.num_edges() == 3);
-    REQUIRE(modeled.num_nodes() == 4);
+    auto stage_node = modeled.create_node(stage_prob);
+    auto terminal_node = modeled.create_node(terminal_prob);
+    auto stage_edges = modeled.add_path(stage_node, terminal_node, 2);
+    REQUIRE(stage_edges.size() == 2);
+    REQUIRE(modeled.num_edges() == 2);
+    REQUIRE(modeled.num_nodes() == 3);
     for (const auto &edge : stage_edges) {
         edge->add(*dyn);
     }
 
     auto &flat = sqp.active_data().flatten_nodes();
-    REQUIRE(flat.size() == 3);
+    REQUIRE(flat.size() == 2);
     REQUIRE(contains_name_prefix(expr_names(flat.front()->problem(), __cost), "cost_path_topology"));
     REQUIRE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_path_topology_terminal"));
 }
@@ -308,15 +422,18 @@ TEST_CASE("ns_sqp model_graph add_path can create key nodes from node prototypes
 
     ns_sqp sqp;
     auto modeled = sqp.create_graph();
-    auto n0 = modeled.create_node(stage_prob);
-    auto nt = modeled.create_node(terminal_prob);
-    auto stage_edges = modeled.add_path(n0, nt, 2);
-    REQUIRE(stage_edges.size() == 2);
+    auto anchor = modeled.create_node(node_ocp::create());
+    auto stage_node = modeled.create_node(stage_prob);
+    auto terminal_node = modeled.create_node(terminal_prob);
+    auto stage_edges = modeled.add_path(anchor, stage_node, 1);
+    auto terminal_edge = modeled.connect(stage_node, terminal_node);
+    REQUIRE(stage_edges.size() == 1);
     REQUIRE(modeled.num_edges() == 2);
     REQUIRE(modeled.num_nodes() == 3);
     for (const auto &edge : stage_edges) {
         edge->add(*dyn);
     }
+    terminal_edge->add(*dyn);
 
     auto &flat = sqp.active_data().flatten_nodes();
     REQUIRE(flat.size() == 2);
@@ -408,12 +525,15 @@ TEST_CASE("ns_sqp terminal u-dependent terms are ignored instead of lowered onto
 
     ns_sqp sqp;
     auto modeled = sqp.create_graph();
-    auto n0 = modeled.create_node(stage_prob);
-    auto nt = modeled.create_node(terminal_prob);
-    auto edges = modeled.add_path(n0, nt, 2);
-    for (const auto &edge : edges) {
+    auto anchor = modeled.create_node(node_ocp::create());
+    auto stage_node = modeled.create_node(stage_prob);
+    auto terminal_node = modeled.create_node(terminal_prob);
+    auto stage_edges = modeled.add_path(anchor, stage_node, 1);
+    auto terminal_edge = modeled.connect(stage_node, terminal_node);
+    for (const auto &edge : stage_edges) {
         edge->add(*dyn);
     }
+    terminal_edge->add(*dyn);
 
     auto &flat = sqp.active_data().flatten_nodes();
     REQUIRE(flat.size() == 2);
@@ -438,12 +558,15 @@ TEST_CASE("ns_sqp model_graph flatten_nodes reuses realized graph until graph be
 
     ns_sqp sqp;
     auto modeled = sqp.create_graph();
-    auto n0 = modeled.create_node(stage_prob);
-    auto nt = modeled.create_node(terminal_prob);
-    auto stage_edges = modeled.add_path(n0, nt, 2);
+    auto anchor = modeled.create_node(node_ocp::create());
+    auto stage_node = modeled.create_node(stage_prob);
+    auto terminal_node = modeled.create_node(terminal_prob);
+    auto stage_edges = modeled.add_path(anchor, stage_node, 1);
+    auto terminal_edge = modeled.connect(stage_node, terminal_node);
     for (const auto &edge : stage_edges) {
         edge->add(*dyn);
     }
+    terminal_edge->add(*dyn);
 
     auto &flat_first = sqp.active_data().flatten_nodes();
     REQUIRE(flat_first.size() == 2);
@@ -456,7 +579,7 @@ TEST_CASE("ns_sqp model_graph flatten_nodes reuses realized graph until graph be
     REQUIRE(static_cast<const void *>(flat_second.back()) == first_tail_addr);
 
     auto extra_terminal = modeled.create_node(terminal_prob->clone_node());
-    auto extra_edges = modeled.add_path(nt, extra_terminal, 1);
+    auto extra_edges = modeled.add_path(terminal_node, extra_terminal, 1);
     REQUIRE(extra_edges.size() == 1);
     extra_edges.front()->add(*dyn);
 

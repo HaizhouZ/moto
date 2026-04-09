@@ -381,12 +381,14 @@ model = pinCasadiModel(
 
 def build_stage_node_prob(robot: pinCasadiModel):
     stage_node_prob = moto.node_ocp.create()
-    # if full:
-    #     stage_node_prob.add(robot.fric)
+    if full:
+        stage_node_prob.add(robot.fric)
     stage_node_prob.add(robot.kin_constr)
     if not full:
         stage_node_prob.add(robot.kin_cost)
     robot.add_dt_constr_and_cost(stage_node_prob, dt_nom)
+    stage_node_prob.add(robot.make_joint_limit_constr())
+    stage_node_prob.add(robot.make_tq_limit_constr())
     stage_node_prob.add(robot.get_state_cost())
     stage_node_prob.add(robot.get_input_cost())
     # stage_node_prob.add(robot.make_foot_lift_cost(lifted=True))
@@ -405,8 +407,8 @@ total_gait_steps = steps * nodes_per_step
 stance_length = int((N_horizon - total_gait_steps) / 2)
 print(f"stance_length: {stance_length}, nodes_per_step: {nodes_per_step}")
 
-# gait = "trot"
-gait = "hopping"
+gait = "trot"
+# gait = "hopping"
 gait_setting = {
     "trot": [1, 1, 0, 0],
     "hopping": [0, 0, 0, 0],
@@ -427,7 +429,6 @@ def create_phase_config(step):
     return moto.ocp.active_status_config(deactivate_list=constr_to_disable)
 
 
-stage_node = modeled.create_node(stage_node_proto)
 segment_lengths = [stance_length]
 segment_lengths.extend([nodes_per_step] * steps)
 segment_lengths.append(stance_length)
@@ -441,11 +442,12 @@ def add_segment(start, end_prob, n_edges):
     return end_node
 
 
-current_node = stage_node
-for step, n_edges in enumerate(segment_lengths[:-2], start=1):
-    current_node = add_segment(current_node, stage_node_proto.clone(create_phase_config(step)), n_edges)
-current_node = add_segment(current_node, stage_node_proto.clone(), segment_lengths[-2])
-add_segment(current_node, terminal_node_proto, segment_lengths[-1])
+current_node = modeled.create_node(stage_node_proto.clone())
+segment_end_nodes = [stage_node_proto.clone(create_phase_config(step)) for step in range(1, steps + 1)]
+segment_end_nodes.append(stage_node_proto.clone())
+segment_end_nodes.append(terminal_node_proto)
+for end_prob, n_edges in zip(segment_end_nodes, segment_lengths):
+    current_node = add_segment(current_node, end_prob, n_edges)
 
 if os.getenv("MOTO_DEBUG_SOLVER_PROBS"):
     flat_nodes = sqp.graph.flatten_nodes()
@@ -495,13 +497,14 @@ sqp.settings.ipm_conditional_corrector = True
 sqp.settings.prim_tol = 1e-3
 sqp.settings.dual_tol = 1e-3
 sqp.settings.comp_tol = 1e-3
-sqp.settings.rf.max_iters = 2
+sqp.settings.rf.max_iters = 4
 sqp.settings.ls.update_alpha_dual = False
+sqp.settings.restoration.enabled = True
+sqp.settings.restoration.max_iter = 10
+sqp.settings.restoration.rho_eq = 1e-6
 # sqp.settings.scaling.scaling_mode = moto.sqp.scaling_settings.mode_gradient
 sqp.settings.ls.primal_gamma = 1e-4
 sqp.settings.ls.method = moto.ns_sqp.search_method_filter
-sqp.settings.ls.merit_sigma = 100
-sqp.settings.ls.max_steps = 100
 
 max_update_iter = int(os.getenv("MOTO_SQP_MAX_ITER", "2"))
 bench_runs = int(os.getenv("MOTO_SQP_BENCH_RUNS", "1"))
@@ -533,10 +536,10 @@ node_idx = 0
 print("")
 def gait_setup(data: moto.sqp.data_type):
     global step, node_idx
-    if node_idx >= stance_length and node_idx + stance_length < N_horizon:
-        switch_step = (node_idx - stance_length) % nodes_per_step == 0
-        if switch_step:
-            step += 1
+    ref_node_idx = min(node_idx + 1, N_horizon)
+    switch_step = False
+    if ref_node_idx >= stance_length and ref_node_idx + stance_length < N_horizon:
+        switch_step = (ref_node_idx - stance_length) % nodes_per_step == 0
         for idx, f in enumerate([0, 3, 1, 2]):
             if step % 2 == 0:
                 if gait == "hopping":
@@ -545,18 +548,22 @@ def gait_setup(data: moto.sqp.data_type):
                 ...
     else:
         ...
-    if step >= 1 and step <= 2:
-        data.value[model.q_nom][0] = node_idx / N_horizon * cfg[0][0]
-        data.value[model.q_nom][1] = node_idx / N_horizon * cfg[0][1]
-    elif step > 2:
-        data.value[model.q_nom][0] = cfg[0][0] + node_idx / N_horizon * (
+    ref_step = step + 1 if switch_step else step
+    node_progress = ref_node_idx / N_horizon
+    if ref_step >= 1 and ref_step <= 2:
+        data.value[model.q_nom][0] = node_progress * cfg[0][0]
+        data.value[model.q_nom][1] = node_progress * cfg[0][1]
+    elif ref_step > 2:
+        data.value[model.q_nom][0] = cfg[0][0] + node_progress * (
             cfg[1][0] - cfg[0][0]
         )
-        data.value[model.q_nom][1] = cfg[0][1] + node_idx / N_horizon * (
+        data.value[model.q_nom][1] = cfg[0][1] + node_progress * (
             cfg[1][1] - cfg[0][1]
         )
     # data.value[model.q] = data.value[model.qn] = data.value[model.q_nom]
 
+    if switch_step:
+        step += 1
     node_idx += 1
 
 

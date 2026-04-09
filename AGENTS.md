@@ -187,8 +187,9 @@ Why this is easy to trip over:
 - a user may write a stage-local constraint `g(x_k)` and expect it to remain attached to the current `x`
 - any hidden remap changes formulation, so it must be explicit in logs and scoped by graph topology
 - the intended semantics are edge-centric:
-  - if a node has no predecessor edge, its pure state equality terms stay on that node
-  - if a node has a predecessor edge, selected pure state equality terms may be lowered onto that predecessor edge as `y_{k-1}`-anchored solver storage
+  - `node_k` is the authoring surface for state-local terms at graph point `k`
+  - `edge_k = (node_k -> node_{k+1})` takes its `u`-dependent and other non-pure-`x` node semantics from `node_k`
+  - pure `x` terms authored on `node_{k+1}` lower onto `edge_k` as `y_k`-anchored solver storage
 - this decision cannot be made correctly by a local `finalize()` on a standalone expression or a standalone problem
 
 Useful field groups used throughout the solver:
@@ -259,14 +260,17 @@ Intended semantics:
 
 - `model_node` holds node-local prototype terms
 - `model_edge` holds edge-local terms such as dynamics
-- pure `x` node terms may be lowered during compose onto edge `y` storage if the solver backend wants that
+- current compose is strict and edge-centric:
+  - start-node non-pure terms belong to the current edge
+  - end-node pure-`x` terms lower onto the current edge `y`
 - explicit terminal terms added with `add_terminal(...)` must stay explicit and not be silently materialized onto regular edges
 
 Important compose rules that are now covered by unit tests:
 
-- intermediate node `__eq_x` lowers onto the predecessor edge `y`
-- sink non-terminal pure-`x` costs may materialize onto the incoming edge `y`
-- terminal sink `x`-only terms are now merged into the final real edge problem
+- start-node `u` activity prunes the current edge's primal `u`
+- end-node pure-`x` costs and constraints lower onto the current edge `y`
+- intermediate node pure-`x` terms affect only their incoming edge
+- terminal sink `x`-only terms are merged into the final real edge problem
 - terminal sink terms depending on `u` are invalid for the final `x/u` terminal node semantics; they emit a warning and are ignored
 - codegen finalization of lowered/materialized clones must be serialized or uniquely named to avoid `.so` races
 - current implementation chooses serialization plus reuse:
@@ -307,6 +311,7 @@ Important current path semantics:
 
 - `graph_model.add_path(start, end, N)` means exactly `N` graph edges
 - there is no hidden terminal tail edge anymore
+- intermediate nodes created by `add_path(...)` clone the `start` prototype, so a path segment inherits outgoing-edge semantics from its start node
 - if `end` carries terminal `x`-only terms, they are materialized onto the final edge/node realization
 - users should not compensate with `N - 1` just because the sink is terminal
 
@@ -389,16 +394,16 @@ This matters for lowering:
 
 - lowering is not fundamentally "move a term from one node to another node"
 - it is "assign a node-authored term to the correct solver edge storage"
-- in particular, the intended legacy-compatible interpretation is:
-  - authored `g(x_k)` may lower to predecessor-edge `y_{k-1}` storage
-  - not to `x_{k-1}`
-  - and not merely to the current edge's local `y_k` by a blind argument substitution
+- in the current strict interpretation:
+  - authored non-pure terms on `node_k` stay with outgoing `edge_k`
+  - authored pure-`x` terms on `node_{k+1}` lower to `edge_k` storage as `y_k`
+  - there is no generic predecessor-edge remap beyond this end-node-to-current-edge lowering
 
 Because of that, graph-aware compose should be centered on edges:
 
 - node remains the authoring surface for local costs and constraints
-- edge is the unit that receives solver-local dynamics and lowered path equalities
-- "first point does not lower, subsequent repeated points do lower" must be decided from actual predecessor-edge structure
+- edge is the unit that receives solver-local dynamics, start-node non-pure terms, and end-node pure-`x` terms
+- ownership of `u` should stay with the outgoing edge, not with an incoming-edge compatibility convention
 
 Practical implication for future work:
 
@@ -407,8 +412,9 @@ Practical implication for future work:
 - do not reintroduce finalize-time silent substitution
 - prefer a graph-level lowering/composition pass that:
   - sees the whole modeled graph
-  - assigns eligible node-local `__eq_x` terms onto predecessor edges
-  - leaves costs, inequalities, and terminal terms untouched unless explicitly requested
+  - strips pure-`x` terms from the start-node contribution to the current edge
+  - lowers eligible end-node pure-`x` terms onto the current edge `y`
+  - leaves terminal terms explicit unless final-edge materialization is requested
   - then materializes solver problems in a form compatible with `directed_graph`
 
 Current status of the refactor:
@@ -1182,24 +1188,23 @@ What is already true:
 
 - [`include/moto/ocp/problem.hpp`](/home/harper/Documents/moto/include/moto/ocp/problem.hpp) now documents the intended role split between these types
 - clone logic was deduplicated into `ocp_base::refresh_after_clone(...)`
-- quadruped still matches the historical baseline after the refactor:
+- the quadruped example now uses the graph-model construction path directly:
   - build with `cmake -E env CCACHE_DISABLE=1 cmake --build build -j4`
   - run with `python example/quadruped/run.py`
-  - expected result is convergence in `46` iterations with objective about `3.060e+02`
+  - current strict-semantics result is convergence in `22` iterations with objective about `1.144e+02`
 
 What is not true yet:
 
-- the quadruped example is not yet using the new modeling layer as its primary construction path
-- the presence of `x -> y` substitution warnings in quadruped output confirms that it still goes through the legacy stage formulation path
-- `node_ocp / edge_ocp` are still intentionally thin wrappers; they do not yet replace the legacy lowering path end-to-end
+- graph semantics are still evolving and old notes about predecessor-edge lowering are stale
+- `node_ocp / edge_ocp` are still intentionally thin wrappers around the stricter graph-aware compose policy
 
 Recommended next step from here:
 
-1. Validate the new node/edge modeling path on a small example first
-2. Confirm that the small example does not rely on legacy pure-`x -> y` substitution
-3. Only then migrate [`example/quadruped/run.py`](/home/harper/Documents/moto/example/quadruped/run.py) to the new modeling path
+1. Keep adding focused compose tests that separate start-node `u/non-pure-x` ownership from end-node pure-`x` lowering
+2. Add debug tooling or golden tests for node/stage initialization so future path-authoring changes can be validated quickly
+3. If incoming-edge authoring is ever needed again, expose it as an explicit modeling helper rather than relying on implicit compose behavior
 
-This order is important because quadruped is too large to use as the first proving ground for new node/edge semantics.
+This order helps keep future graph-semantics changes explicit and testable instead of rediscovering them through quadruped regressions.
 
 ## Todo
 
