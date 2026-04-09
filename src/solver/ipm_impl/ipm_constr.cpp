@@ -11,10 +11,6 @@ ipm_constr::approx_data::approx_data(base::approx_data &&rhs)
     slack_backup_.setConstant(1e-6);
     diag_scaling.resize(func_.dim());
     diag_scaling.setZero();
-    scaled_res_last_.resize(func_.dim());
-    scaled_res_last_.setZero();
-    diag_scaling_last_.resize(func_.dim());
-    diag_scaling_last_.setZero();
     scaled_res_.resize(func_.dim());
     scaled_res_.setZero();
     reg_.resize(func_.dim());

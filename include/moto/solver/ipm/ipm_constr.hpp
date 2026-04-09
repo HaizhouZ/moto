@@ -24,9 +24,7 @@ class ipm_constr : public ineq_constr {
         vector slack_;                 ///< slack variables for the constraints
         vector slack_backup_;          ///< backup of slack variables for line search trials
         vector diag_scaling;           ///< Nesterov-Todd scaling T^{-1} N
-        vector diag_scaling_last_;     ///< Nesterov-Todd scaling T^{-1} N
         vector scaled_res_;            ///< residuals after NT scaling (Nr_g - r_s) T^{-1} = T{-1} N r_g + T^{-1} mu
-        vector scaled_res_last_;       ///< residuals after NT scaling (Nr_g - r_s) T^{-1} = T{-1} N r_g + T^{-1} mu
         vector d_slack_;               ///< newton step for slack variables
         vector corrector_;             ///< newton step for multipliers
         vector reg_;
