@@ -503,6 +503,9 @@ void ns_sqp::prepare_globalization(filter_linesearch_data &ls, iteration_context
             solver::ineq_soft::backup_trial_state(d);
         }
     });
+    // Refresh direction-dependent KKT diagnostics for the Newton step that was
+    // just assembled. Line search reads these values from ctx.current.
+    ctx.current = compute_kkt_info();
     if (ctx.mu_changed) {
         ls.points.clear(); // the QP objective changed, so old filter points are no longer comparable
     }
