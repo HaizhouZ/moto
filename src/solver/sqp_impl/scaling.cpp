@@ -107,7 +107,7 @@ void ns_sqp::reset_scaling() {
     }
 }
 
-void ns_sqp::compute_and_apply_scaling(const kkt_info &kkt) {
+void ns_sqp::compute_and_apply_scaling(const kkt_info &info) {
     const auto &sc = settings.scaling;
     auto &graph = active_data();
     if (sc.mode == scaling_settings::mode_t::none)
@@ -119,7 +119,7 @@ void ns_sqp::compute_and_apply_scaling(const kkt_info &kkt) {
     // changed significantly.  Near convergence (small steps) the cached scales
     // remain valid and recomputing is wasteful.
     // Force recompute on the first call (scale_c_ still empty for some nodes).
-    bool needs_recompute = (kkt.inf_prim_step >= 1. / sc.update_ratio_threshold);
+    bool needs_recompute = (info.step.inf_prim_step >= 1. / sc.update_ratio_threshold);
     // Also recompute if no cached scales exist yet (first call after reset)
     if (!needs_recompute) {
         for (const data &d : graph.nodes()) {

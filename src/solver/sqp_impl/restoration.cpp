@@ -211,9 +211,9 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
     auto &resto_graph = restoration_graph();
     if (settings.verbose) {
         fmt::print("\n=== enter restoration ===\n");
-        fmt::print("  entry iter={}  outer objective={:.3e}  outer search_obj={:.3e}  prim={:.3e}  dual={:.3e}  comp={:.3e}\n",
-                   iter_before.num_iter, kkt_before.objective, kkt_before.penalized_obj,
-                   kkt_before.prim_res_l1, kkt_before.inf_dual_res, kkt_before.inf_comp_res);
+        fmt::print("  entry iter={}  outer aug_obj={:.3e}  outer ls_obj={:.3e}  prim={:.3e}  dual={:.3e}  comp={:.3e}\n",
+                   iter_before.num_iter, kkt_before.barrier_objective.augmented_objective, kkt_before.barrier_objective.ls_objective,
+                   kkt_before.primal.res_l1, kkt_before.dual.inf_res, kkt_before.primal.inf_comp);
         if (resto_entry_debug_enabled()) {
             dump_outer_entry_equalities(outer_graph);
             dump_outer_entry_inequalities(outer_graph);
@@ -221,26 +221,6 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
     }
     settings.in_restoration = true;
     set_phase_graph_override(resto_graph);
-    const auto compute_restoration_info_from_split = [&](bool update_dual_res) {
-        kkt_info kkt;
-        kkt = compute_prim_res_info(kkt);
-        kkt = compute_ls_info(kkt);
-        if (update_dual_res) {
-            kkt = compute_dual_res_info(kkt);
-        }
-        return kkt;
-    };
-    const auto compute_normal_info_from_split = [&](bool update_dual_res, bool include_ls_info) {
-        kkt_info kkt;
-        kkt = compute_prim_res_info(kkt);
-        if (include_ls_info) {
-            kkt = compute_ls_info(kkt);
-        }
-        if (update_dual_res) {
-            kkt = compute_dual_res_info(kkt);
-        }
-        return kkt;
-    };
 
     const auto refresh_restoration_derivatives = [&]() {
         resto_graph.for_each_parallel([this](data *d) {
@@ -288,7 +268,7 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
         });
         clear_phase_graph_override();
         kkt_info outer_trial;
-        outer_trial = compute_prim_res_info(outer_trial);
+        outer_trial = compute_point_primal_info(outer_trial, point_value_mask::primal | point_value_mask::barrier_objective);
         set_phase_graph_override(resto_graph);
         outer_graph.for_each_parallel([](data *d) { d->restore_trial_state(); });
         refresh_restoration_derivatives();
@@ -366,14 +346,14 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
     // on the very first outer residual, which can be orders of magnitude looser
     // than the residual at restoration entry.
     rls.constr_vio_min =
-        std::max(kkt_before.prim_res_l1 * settings.ls.constr_vio_min_frac, settings.prim_tol);
+        std::max(kkt_before.primal.res_l1 * settings.ls.constr_vio_min_frac, settings.prim_tol);
 
     result_type rest_state;
-    static_cast<kkt_info &>(rest_state) = compute_restoration_info_from_split(true);
+    static_cast<kkt_info &>(rest_state) =
+        compute_stationarity_info(compute_point_primal_info(kkt_info{}, point_value_mask::primal | point_value_mask::barrier_objective));
     rest_state.iter = iter_info{
         .num_iter = iter_before.num_iter,
     };
-
     kkt_info kkt_outer_trial{};
     bool resto_accept = false;
     bool resto_stalled = false;
@@ -382,10 +362,10 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
         std::min(settings.restoration.max_iter,
                  settings.max_iter > iter_before.num_iter ? settings.max_iter - iter_before.num_iter : size_t(0));
     const scalar_t accepted_outer_prim_res =
-        settings.restoration.restoration_improvement_frac * kkt_before.prim_res_l1;
+        settings.restoration.restoration_improvement_frac * kkt_before.primal.res_l1;
 
     for (size_t i_rest = 0; i_rest < max_resto_iters; ++i_rest) {
-        const line_search_action action = sqp_iter(rls, rest_state,
+        const line_search_action action = sqp_iter(rls, static_cast<kkt_info &>(rest_state),
                                                    /*do_scaling=*/false,
                                                    /*do_refinement=*/true,
                                                    /*gauss_newton=*/false);
@@ -396,17 +376,20 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
             print_stats(rest_state, rest_state.iter, rls.step_cnt);
         }
 
-        resto_converged = rest_state.inf_dual_res < settings.dual_tol;
+        resto_converged = rest_state.dual.inf_res < settings.dual_tol;
 
         if (action == line_search_action::accept) {
             kkt_outer_trial = evaluate_outer_trial_from_restoration();
-            static_cast<kkt_info &>(rest_state) = compute_restoration_info_from_split(true);
+            static_cast<kkt_info &>(rest_state) =
+                compute_stationarity_info(compute_point_primal_info(kkt_info{}, point_value_mask::primal | point_value_mask::barrier_objective));
             rest_state.iter = iter_info{
                 .num_iter = iter_before.num_iter + i_rest + 1,
             };
+            new (&rest_state.barrier_step) kkt_info::barrier_step_info{};
+            new (&rest_state.step) kkt_info::step_info{};
 
             const bool outer_accept = outer_filter_accepts(ls, kkt_outer_trial, kkt_before);
-            const bool prim_improved = kkt_outer_trial.prim_res_l1 < accepted_outer_prim_res;
+            const bool prim_improved = kkt_outer_trial.primal.res_l1 < accepted_outer_prim_res;
             resto_accept = outer_accept && prim_improved;
             if (resto_accept || resto_converged) {
                 break;
@@ -426,8 +409,9 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
 
     finish_restoration(resto_accept);
     result_type result;
-    static_cast<kkt_info &>(result) = resto_accept ? compute_normal_info_from_split(true, false)
-                                                   : static_cast<const kkt_info &>(rest_state);
+    static_cast<kkt_info &>(result) = resto_accept
+                                          ? compute_stationarity_info(compute_point_primal_info(kkt_info{}, point_value_mask::primal | point_value_mask::barrier_objective))
+                                          : static_cast<const kkt_info &>(rest_state);
     result.iter = rest_state.iter;
     if (resto_accept) {
         result.iter.result = iter_result_t::unknown;
@@ -439,8 +423,8 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
         result.iter.result = iter_result_t::restoration_reached_max_iter;
     }
     if (settings.verbose) {
-        fmt::print("[resto]: primal residual(L1): {} before {}\n", kkt_outer_trial.prim_res_l1, kkt_before.prim_res_l1);
-        fmt::print("[resto]: primal residual(Linf): {} before {}\n", kkt_outer_trial.inf_prim_res, kkt_before.inf_prim_res);
+        fmt::print("[resto]: primal residual(L1): {} before {}\n", kkt_outer_trial.primal.res_l1, kkt_before.primal.res_l1);
+        fmt::print("[resto]: primal residual(Linf): {} before {}\n", kkt_outer_trial.primal.inf_res, kkt_before.primal.inf_res);
         fmt::print("=== leave restoration: {} ===\n\n",
                    resto_accept ? "success" : (result.iter.result == iter_result_t::infeasible_stationary ? "infeasible_stationary" : (result.iter.result == iter_result_t::restoration_reached_max_iter ? "reached_max_iter" : "failed")));
     }

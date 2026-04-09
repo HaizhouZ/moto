@@ -30,9 +30,9 @@ void ns_sqp::finalize_ls_bound_and_set_to_max() {
 
 void ns_sqp::filter_linesearch_data::update_filter(const kkt_info &current_kkt, settings_t &settings) {
     const point current_point{
-        .prim_res = current_kkt.prim_res_l1,
-        .dual_res = current_kkt.inf_dual_res,
-        .objective = current_kkt.penalized_obj,
+        .prim_res = current_kkt.primal.res_l1,
+        .dual_res = current_kkt.dual.inf_res,
+        .objective = current_kkt.barrier_objective.ls_objective,
     };
     points.erase(
         std::remove_if(points.begin(), points.end(),
@@ -59,20 +59,20 @@ ns_sqp::filter_linesearch_data::evaluate_normal_filter_step(const std::vector<po
     normal_filter_eval_result result{
         .trial_point =
             {
-                .prim_res = trial_kkt.prim_res_l1,
-                .dual_res = trial_kkt.inf_dual_res,
-                .objective = trial_kkt.penalized_obj,
+                .prim_res = trial_kkt.primal.res_l1,
+                .dual_res = trial_kkt.dual.inf_res,
+                .objective = trial_kkt.barrier_objective.ls_objective,
             },
         .current_point =
             {
-                .prim_res = current_kkt.prim_res_l1,
-                .dual_res = current_kkt.inf_dual_res,
-                .objective = current_kkt.penalized_obj,
+                .prim_res = current_kkt.primal.res_l1,
+                .dual_res = current_kkt.dual.inf_res,
+                .objective = current_kkt.barrier_objective.ls_objective,
             },
     };
-    const scalar_t prim_res_k = current_kkt.prim_res_l1;
-    const scalar_t obj_k = current_kkt.penalized_obj;
-    result.fullstep_dec = current_kkt.penalized_obj_fullstep_dec;
+    const scalar_t prim_res_k = current_kkt.primal.res_l1;
+    const scalar_t obj_k = current_kkt.barrier_objective.ls_objective;
+    result.fullstep_dec = current_kkt.barrier_step.ls_objective_fullstep_dec;
     result.switching_lhs =
         result.fullstep_dec < 0.0
             ? settings.ls.alpha_primal * std::pow(-result.fullstep_dec, settings.ls.s_phi)
@@ -82,15 +82,15 @@ ns_sqp::filter_linesearch_data::evaluate_normal_filter_step(const std::vector<po
         result.fullstep_dec < 0.0 && result.switching_lhs >= result.switching_rhs;
     result.armijo_target =
         obj_k + settings.ls.armijo_dec_frac * settings.ls.alpha_primal * result.fullstep_dec;
-    result.armijo_cond_met = trial_kkt.penalized_obj <= result.armijo_target;
+    result.armijo_cond_met = trial_kkt.barrier_objective.ls_objective <= result.armijo_target;
     result.flat_objective_eligible =
         allow_flat_objective &&
         settings.ls.enable_flat_obj_accept &&
         std::abs(result.fullstep_dec) <=
             settings.ls.flat_obj_dec_tol * (1 + std::abs(obj_k)) &&
         prim_res_k < settings.ls.flat_obj_prim_tol &&
-        current_kkt.inf_comp_res < settings.comp_tol &&
-        current_kkt.inf_dual_step >
+        current_kkt.primal.inf_comp < settings.comp_tol &&
+        current_kkt.step.inf_dual_step >
             std::max(settings.ls.flat_obj_step_tol, settings.dual_tol);
 
     for (const auto &p : filter_points) {
@@ -142,18 +142,18 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt,
     log("  switching condition: {}, armijo condition: {}\n",
         switching_condition ? "met" : "not met", armijo_cond_met ? "met" : "not met");
     log("  cost step dec: {:.3e}, full step decrease: {:.3e}, switching lhs: {:.3e}, switching rhs: {:.3e}\n",
-        current_kkt.obj_fullstep_dec, eval.fullstep_dec, eval.switching_lhs, eval.switching_rhs);
+        current_kkt.barrier_step.augmented_objective_fullstep_dec, eval.fullstep_dec, eval.switching_lhs, eval.switching_rhs);
 
     auto log_flat_obj = [&]() -> bool {
         if (eval.accepted_by_flat_objective) {
             last_step_was_armijo = false;
             log("  trial point accepted by flat-objective condition (fullstep_dec={:.3e}, prim_res={:.3e}, comp_res={:.3e}, step_norm={:.3e})\n",
-                eval.fullstep_dec, current_kkt.prim_res_l1, current_kkt.inf_comp_res,
-                current_kkt.inf_dual_step);
+                eval.fullstep_dec, current_kkt.primal.res_l1, current_kkt.primal.inf_comp,
+                current_kkt.step.inf_dual_step);
         } else {
             log("  flat-objective accept condition not met (fullstep_dec={:.3e}, prim_res={:.3e}, comp_res={:.3e}, step_norm={:.3e})\n",
-                eval.fullstep_dec, current_kkt.prim_res_l1, current_kkt.inf_comp_res,
-                current_kkt.inf_dual_step);
+                eval.fullstep_dec, current_kkt.primal.res_l1, current_kkt.primal.inf_comp,
+                current_kkt.step.inf_dual_step);
         }
         return eval.accepted_by_flat_objective;
     };
@@ -168,7 +168,7 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt,
     }
     filter_reject_cnt = 0;
 
-    if (!settings.in_restoration && switching_condition && current_kkt.prim_res_l1 <= constr_vio_min) {
+    if (!settings.in_restoration && switching_condition && current_kkt.primal.res_l1 <= constr_vio_min) {
         if (eval.accepted_by_armijo) {
             last_step_was_armijo = true;
             log("  trial point accepted by Armijo condition in switching mode (primal res: {:.3e}, objective: {:.3e}), armijo target: {:.3e}\n",
@@ -224,15 +224,15 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
                                                      const kkt_info &trial_kkt,
                                                      const kkt_info &current_kkt) {
     const filter_linesearch_data::point trial_point{
-        .prim_res = trial_kkt.prim_res_l1,
-        .dual_res = trial_kkt.inf_dual_res,
-        .objective = trial_kkt.penalized_obj,
+        .prim_res = trial_kkt.primal.res_l1,
+        .dual_res = trial_kkt.dual.inf_res,
+        .objective = trial_kkt.barrier_objective.ls_objective,
     };
 
-    if (ls.step_cnt == 0 && trial_kkt.prim_res_l1 < current_kkt.prim_res_l1)
+    if (ls.step_cnt == 0 && trial_kkt.primal.res_l1 < current_kkt.primal.res_l1)
         ls.skip_soc = true;
 
-    const scalar_t fullstep_dec = current_kkt.penalized_obj_fullstep_dec;
+    const scalar_t fullstep_dec = current_kkt.barrier_step.ls_objective_fullstep_dec;
     ls.alpha_min = current_linesearch_alpha_min(ls);
 
     // Update best trial
@@ -271,7 +271,7 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
         ls.soc_iter_cnt < settings.ls.max_soc_iter && !ls.switching_condition) {
     }
 
-    const scalar_t current_primal = current_kkt.prim_res_l1;
+    const scalar_t current_primal = current_kkt.primal.res_l1;
 
     if (settings.ls.max_steps > ls.step_cnt) {
         ls.step_cnt++;
@@ -324,8 +324,8 @@ ns_sqp::line_search_action ns_sqp::merit_linesearch(filter_linesearch_data &ls,
         return prim_l1 * prim_l1 + settings.ls.merit_sigma * dual_res * dual_res;
     };
 
-    const scalar_t merit_trial = merit(trial_kkt.prim_res_l1, trial_kkt.avg_dual_res);
-    const scalar_t merit_k = merit(current_kkt.prim_res_l1, current_kkt.avg_dual_res);
+    const scalar_t merit_trial = merit(trial_kkt.primal.res_l1, trial_kkt.dual.avg_res);
+    const scalar_t merit_k = merit(current_kkt.primal.res_l1, current_kkt.dual.avg_res);
 
     // On the first (full-step) trial, record merit to estimate the directional derivative.
     // dir_deriv ≈ (M(x + 1*d) - M(x)) / 1.0  (finite-difference estimate)
@@ -340,8 +340,8 @@ ns_sqp::line_search_action ns_sqp::merit_linesearch(filter_linesearch_data &ls,
 
     if (settings.verbose)
         fmt::print("[merit ls] step {}, merit: {:.3e} (prim: {:.3e}, avg_dual: {:.3e}), alpha_p: {:.3e}, merit_k: {:.3e} (prim: {:.3e}, avg_dual: {:.3e})\n",
-                   ls.step_cnt, merit_trial, trial_kkt.prim_res_l1, trial_kkt.avg_dual_res,
-                   settings.ls.alpha_primal, merit_k, current_kkt.prim_res_l1, current_kkt.avg_dual_res);
+                   ls.step_cnt, merit_trial, trial_kkt.primal.res_l1, trial_kkt.dual.avg_res,
+                   settings.ls.alpha_primal, merit_k, current_kkt.primal.res_l1, current_kkt.dual.avg_res);
 
     // Armijo sufficient decrease: M(x + alpha*d) <= M(x) + c * alpha * dir_deriv
     // dir_deriv estimated from the full step (negative when making progress).

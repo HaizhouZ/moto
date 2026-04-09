@@ -150,21 +150,53 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_prop_ro("solved", [](const ns_sqp::iter_info &self) { return self.result == ns_sqp::iter_result_t::success; }, "Whether the problem is solved")
         .def_rw("num_iter", &ns_sqp::iter_info::num_iter, "Number of iterations");
 
-    nb::class_<ns_sqp::result_type>(sqp, "result_type")
+    nb::class_<ns_sqp::kkt_info::barrier_objective_info>(sqp, "barrier_objective_info")
+        .def_ro("cost", &ns_sqp::kkt_info::barrier_objective_info::cost)
+        .def_ro("barrier_value", &ns_sqp::kkt_info::barrier_objective_info::barrier_value)
+        .def_ro("augmented_objective", &ns_sqp::kkt_info::barrier_objective_info::augmented_objective)
+        .def_ro("ls_objective", &ns_sqp::kkt_info::barrier_objective_info::ls_objective);
+
+    nb::class_<ns_sqp::kkt_info::primal_info>(sqp, "primal_info")
+        .def_ro("inf_res", &ns_sqp::kkt_info::primal_info::inf_res)
+        .def_ro("res_l1", &ns_sqp::kkt_info::primal_info::res_l1)
+        .def_ro("inf_comp", &ns_sqp::kkt_info::primal_info::inf_comp)
+        .def_ro("log_slack_sum", &ns_sqp::kkt_info::primal_info::log_slack_sum)
+        .def_ro("max_diag_scaling", &ns_sqp::kkt_info::primal_info::max_diag_scaling);
+
+    nb::class_<ns_sqp::kkt_info::dual_info>(sqp, "dual_info")
+        .def_ro("inf_res", &ns_sqp::kkt_info::dual_info::inf_res)
+        .def_ro("max_eq_norm", &ns_sqp::kkt_info::dual_info::max_eq_norm)
+        .def_ro("max_ineq_norm", &ns_sqp::kkt_info::dual_info::max_ineq_norm)
+        .def_ro("max_norm", &ns_sqp::kkt_info::dual_info::max_norm)
+        .def_ro("avg_res", &ns_sqp::kkt_info::dual_info::avg_res);
+
+    nb::class_<ns_sqp::kkt_info::barrier_step_info>(sqp, "barrier_step_info")
+        .def_ro("barrier_dir_deriv", &ns_sqp::kkt_info::barrier_step_info::barrier_dir_deriv)
+        .def_ro("search_barrier_dir_deriv", &ns_sqp::kkt_info::barrier_step_info::search_barrier_dir_deriv)
+        .def_ro("augmented_objective_fullstep_dec", &ns_sqp::kkt_info::barrier_step_info::augmented_objective_fullstep_dec)
+        .def_ro("ls_objective_fullstep_dec", &ns_sqp::kkt_info::barrier_step_info::ls_objective_fullstep_dec);
+
+    nb::class_<ns_sqp::kkt_info::step_info>(sqp, "step_info")
+        .def_ro("inf_prim_step", &ns_sqp::kkt_info::step_info::inf_prim_step)
+        .def_ro("inf_dual_step", &ns_sqp::kkt_info::step_info::inf_dual_step)
+        .def_ro("inf_eq_dual_step", &ns_sqp::kkt_info::step_info::inf_eq_dual_step)
+        .def_ro("inf_ineq_dual_step", &ns_sqp::kkt_info::step_info::inf_ineq_dual_step)
+        .def_ro("inf_dyn_dual_step", &ns_sqp::kkt_info::step_info::inf_dyn_dual_step)
+        .def_ro("inf_eq_x_dual_step", &ns_sqp::kkt_info::step_info::inf_eq_x_dual_step)
+        .def_ro("inf_eq_xu_dual_step", &ns_sqp::kkt_info::step_info::inf_eq_xu_dual_step);
+
+    nb::class_<ns_sqp::kkt_info>(sqp, "kkt_info")
+        .def_ro("barrier_objective", &ns_sqp::kkt_info::barrier_objective)
+        .def_ro("primal", &ns_sqp::kkt_info::primal)
+        .def_ro("dual", &ns_sqp::kkt_info::dual)
+        .def_ro("barrier_step", &ns_sqp::kkt_info::barrier_step)
+        .def_ro("step", &ns_sqp::kkt_info::step);
+
+    nb::class_<ns_sqp::result_type, ns_sqp::kkt_info>(sqp, "result_type")
         .def_ro("iter", &ns_sqp::result_type::iter, "Iteration metadata")
-        .def_prop_ro("kkt", [](const ns_sqp::result_type &self) -> const ns_sqp::kkt_info & { return self; }, "KKT summary values")
         .def_prop_ro("result", [](const ns_sqp::result_type &self) { return self.iter.result; }, "Result of the SQP iteration")
         .def_prop_ro("solved", [](const ns_sqp::result_type &self) { return self.iter.result == ns_sqp::iter_result_t::success; }, "Whether the problem is solved")
-        .def_prop_ro("num_iter", [](const ns_sqp::result_type &self) { return self.iter.num_iter; }, "Number of iterations")
-        .def_prop_ro("objective", [](const ns_sqp::result_type &self) { return self.objective; }, "Objective value")
-        .def_prop_ro("cost", [](const ns_sqp::result_type &self) { return self.cost; }, "Pure running cost (sum of __cost terms, no barrier)")
-        .def_prop_ro("search_barrier_value", [](const ns_sqp::result_type &self) { return self.search_barrier_value; }, "Search-only barrier contribution for the active phase")
-        .def_prop_ro("search_barrier_dir_deriv", [](const ns_sqp::result_type &self) { return self.search_barrier_dir_deriv; }, "Directional derivative of the search-only barrier contribution")
-        .def_prop_ro("inf_prim_res", [](const ns_sqp::result_type &self) { return self.inf_prim_res; }, "Primal residual (constraint violation)")
-        .def_prop_ro("inf_dual_res", [](const ns_sqp::result_type &self) { return self.inf_dual_res; }, "Dual residual (stationary condition)")
-        .def_prop_ro("inf_comp_res", [](const ns_sqp::result_type &self) { return self.inf_comp_res; }, "Inequality complementarity residual")
-        .def_prop_ro("inf_prim_step", [](const ns_sqp::result_type &self) { return self.inf_prim_step; }, "Infinity norm of the primal step")
-        .def_prop_ro("inf_dual_step", [](const ns_sqp::result_type &self) { return self.inf_dual_step; }, "Infinity norm of the dual step");
+        .def_prop_ro("num_iter", [](const ns_sqp::result_type &self) { return self.iter.num_iter; }, "Number of iterations");
 
     // Iterate over all enum values provided by magic_enum
     for (auto [value, name] : magic_enum::enum_entries<moto::solver::ipm_config::adaptive_mu_t>()) {

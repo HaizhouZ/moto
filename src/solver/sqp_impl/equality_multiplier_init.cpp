@@ -111,11 +111,9 @@ void ns_sqp::initialize_equality_multipliers() {
         });
 
         kkt_info kkt_overlay;
-        kkt_overlay = compute_prim_res_info(kkt_overlay);
-        kkt_overlay = compute_ls_info(kkt_overlay);
-        kkt_overlay = compute_dual_res_info(kkt_overlay);
+        kkt_overlay = compute_stationarity_info(compute_point_primal_info(kkt_overlay, point_value_mask::primal | point_value_mask::barrier_objective));
         filter_linesearch_data ls;
-        ls.constr_vio_min = std::max(kkt_overlay.prim_res_l1 * settings.ls.constr_vio_min_frac, settings.prim_tol);
+        ls.constr_vio_min = std::max(kkt_overlay.primal.res_l1 * settings.ls.constr_vio_min_frac, settings.prim_tol);
         sqp_iter(ls, kkt_overlay, /*do_scaling=*/false, /*do_refinement=*/settings.rf.enabled);
 
         for_each_overlay_pair(outer_graph, overlay_graph, [&](data &outer, data &overlay) {

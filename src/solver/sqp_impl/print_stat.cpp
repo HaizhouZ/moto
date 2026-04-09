@@ -51,7 +51,7 @@ void ns_sqp::print_stat_header() {
 void ns_sqp::print_stats(const kkt_info &info, const iter_info &iter, size_t ls_steps) {
     const bool restoration_active = in_restoration_phase();
     auto mu_info = current_phase_mu(restoration_active, settings.has_ipm_ineq, settings.ipm.mu);
-    scalar_t stats_value[] = {0., info.objective, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res, info.inf_prim_step, info.inf_eq_dual_step, info.inf_ineq_dual_step,
+    scalar_t stats_value[] = {0., info.barrier_objective.augmented_objective, info.primal.inf_res, info.dual.inf_res, info.primal.inf_comp, info.step.inf_prim_step, info.step.inf_eq_dual_step, info.step.inf_ineq_dual_step,
                               settings.ls.alpha_primal, settings.ls.alpha_dual, 0., mu_info.display};
     std::string_view ipm_flags;
     if (!restoration_active && settings.has_ipm_ineq && settings.ipm.ipm_enable_corrector()) {
@@ -87,16 +87,18 @@ void ns_sqp::print_stats(const kkt_info &info, const iter_info &iter, size_t ls_
     }
     fmt::print("\n");
     if (restoration_active) {
-        fmt::print("    phase=restoration  objective={:.3e}  search_obj={:.3e}  barrier={:.3e}\n",
-                   info.objective, info.penalized_obj, info.search_barrier_value);
-    } else if (std::abs(info.penalized_obj - info.objective) > scalar_t(1e-12) * (scalar_t(1.0) + std::abs(info.objective))) {
-        fmt::print("    phase=normal  objective={:.3e}  search_obj={:.3e}  penalty={:.3e}\n",
-                   info.objective, info.penalized_obj, info.penalized_obj - info.objective);
+        fmt::print("    phase=restoration  aug_obj={:.3e}  ls_obj={:.3e}  barrier={:.3e}\n",
+                   info.barrier_objective.augmented_objective, info.barrier_objective.ls_objective, info.barrier_objective.barrier_value);
+    } else if (std::abs(info.barrier_objective.ls_objective - info.barrier_objective.augmented_objective) >
+               scalar_t(1e-12) * (scalar_t(1.0) + std::abs(info.barrier_objective.augmented_objective))) {
+        fmt::print("    phase=normal  aug_obj={:.3e}  ls_obj={:.3e}  barrier={:.3e}\n",
+                   info.barrier_objective.augmented_objective, info.barrier_objective.ls_objective,
+                   info.barrier_objective.ls_objective - info.barrier_objective.augmented_objective);
     }
     fmt::print("    ||lam_eq||={:.3e}  ||lam_ineq||={:.3e}  diag_scl={:.3e}  ||lam||={:.3e}\n",
-               info.max_eq_dual_norm, info.max_ineq_dual_norm, info.max_diag_scaling, info.max_dual_norm);
+               info.dual.max_eq_norm, info.dual.max_ineq_norm, info.primal.max_diag_scaling, info.dual.max_norm);
     fmt::print("    d_eq: dyn={:.3e}  eq_x={:.3e}  eq_xu={:.3e}\n",
-               info.inf_dyn_dual_step, info.inf_eq_x_dual_step, info.inf_eq_xu_dual_step);
+               info.step.inf_dyn_dual_step, info.step.inf_eq_x_dual_step, info.step.inf_eq_xu_dual_step);
     std::vector<vector> dual_dyn;
     size_t idx = 0;
     if (i_iter == 0)

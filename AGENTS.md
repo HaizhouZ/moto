@@ -564,7 +564,7 @@ Important gradient distinction:
 - `cost_jac_` is pure cost only
 - `lag_jac_` is the persistent base stage gradient `cost_jac_ + J^T lambda`
 - `lag_jac_corr_` is solver-owned scratch for pending corrections from IPM, PMM, or refinement
-- line search uses `cost_jac_` for `obj_fullstep_dec`
+- line search uses `cost_jac_` for `augmented_objective_fullstep_dec`
 - dual residual / stationarity checks use `lag_jac_`
 
 ## `update_approximation()` Data Flow
@@ -907,35 +907,35 @@ In normal constrained mode:
 
 The old monolithic `compute_kkt_info(...)` path has been split. The current main entry points are:
 
-- `compute_prim_res_info(...)`
-- `compute_ls_info(...)`
-- `compute_dual_res_info(...)`
+- `compute_point_primal_info(...)`
+- `compute_step_info(...)`
+- `compute_stationarity_info(...)`
 
 Current division of responsibility:
 
-- `compute_prim_res_info(...)`
+- `compute_point_primal_info(...)`
   - `cost`
-  - `objective`
-  - `search_barrier_value`
-  - `penalized_obj`
-  - `inf_prim_res`
-  - `prim_res_l1`
-  - `inf_comp_res`
+  - `augmented_objective`
+  - `barrier_value`
+  - `ls_objective`
+  - `inf_res`
+  - `res_l1`
+  - `inf_comp`
   - `max_diag_scaling`
-- `compute_ls_info(...)`
+- `compute_step_info(...)`
   - line-search directional data such as:
-  - `obj_fullstep_dec`
-  - `penalized_obj_fullstep_dec`
+  - `augmented_objective_fullstep_dec`
+  - `ls_objective_fullstep_dec`
   - primal/dual step norms
-- `compute_dual_res_info(...)`
-  - `inf_dual_res`
-  - `avg_dual_res`
+- `compute_stationarity_info(...)`
+  - `dual.inf_res`
+  - `dual.avg_res`
   - max dual norms
   - restoration-local dual/complementarity residual aggregation when restoration is active
 
 Important dual-residual detail:
 
-- `inf_dual_res` is not a raw stationarity norm
+- `dual.inf_res` is not a raw stationarity norm
 - it is IPOPT-style scaled by
   `s_d = max(s_max, ||lambda||_1 / n_constr) / s_max`
 
@@ -966,9 +966,9 @@ Trial acceptance uses:
 
 Key details:
 
-- stored filter points contain primal residual, dual residual, and barrier objective
-- barrier objective is recomputed with current `mu`
-- `fullstep_dec = obj_fullstep_dec - mu * barrier_dir_deriv`
+- stored filter points contain primal residual, dual residual, and line-search objective
+- barrier value is recomputed with current `mu`
+- `ls_objective_fullstep_dec = augmented_objective_fullstep_dec - search_barrier_dir_deriv`
 - `fullstep_dec < 0` must be checked before `pow(...)` to avoid NaNs
 - backtracking can be linear or geometric
 - failure fallback is either minimum step or best trial

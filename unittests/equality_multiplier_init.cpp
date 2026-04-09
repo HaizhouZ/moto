@@ -191,7 +191,7 @@ TEST_CASE("equality multiplier initialization reduces initial hard-equality dual
     }
 
     REQUIRE(changed_hard_dual);
-    REQUIRE(kkt_with.inf_dual_res < kkt_without.inf_dual_res);
+    REQUIRE(kkt_with.dual.inf_res < kkt_without.dual.inf_res);
 }
 
 TEST_CASE("equality multiplier initialization updates soft equalities and leaves inequality state unchanged") {

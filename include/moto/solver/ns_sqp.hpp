@@ -245,36 +245,63 @@ struct ns_sqp {
     };
 
     struct kkt_info {
-        scalar_t cost = 0.;                       // pure running cost (sum of __cost terms)
-        scalar_t log_slack_sum = 0.;              // sum(log(slack)) across all normal-IPM constraints, mu-free
-        scalar_t barrier_dir_deriv = 0.;          // sum(d_slack / slack_current) across all normal-IPM constraints, mu-free
-        scalar_t search_barrier_value = 0.;       // phase-search-only barrier contribution; restoration keeps its elastic barrier bookkeeping here
-        scalar_t search_barrier_dir_deriv = 0.;   // phase-search-only barrier directional derivative
-        scalar_t objective = 0.;                  // phase original objective summary (normal: pure cost; restoration: prox + exact penalty)
-        scalar_t penalized_obj = 0.;              // phase search objective (original objective + search penalties / barriers)
-        scalar_t obj_fullstep_dec = 0.;           // original-objective directional derivative
-        scalar_t penalized_obj_fullstep_dec = 0.; // directional derivative of penalized_obj
-        scalar_t inf_prim_res = 0.;               // primal residual (constraint violation), inf-norm across all nodes/constraints
-        scalar_t prim_res_l1 = 0.;                // primal residual L1 norm (sum of |v| across all nodes/constraints)
-        scalar_t inf_dual_res = 0.;               // dual residual (stationary condition)
-        scalar_t inf_comp_res = 0.;               // (inequality) complementarity residual
-        scalar_t max_diag_scaling = 0.;           // max Nesterov-Todd scaling (lambda/slack) across all IPM constraints
-        scalar_t max_eq_dual_norm = 0.;           // max inf-norm of equality (hard) dual variables across all nodes
-        scalar_t max_ineq_dual_norm = 0.;         // max inf-norm of inequality dual variables across all nodes
-        scalar_t max_dual_norm = 0.;              // max inf-norm of dual variables across all nodes and constraint fields
-        scalar_t inf_prim_step = 0.;              // infinity norm of the primal step
-        scalar_t inf_dual_step = 0.;              // infinity norm of the dual step (all constraints)
-        scalar_t inf_eq_dual_step = 0.;           // infinity norm of the dual step (equality constraints only)
-        scalar_t inf_ineq_dual_step = 0.;         // infinity norm of the dual step (inequality constraints only)
-        scalar_t inf_dyn_dual_step = 0.;          // inf-norm of dual step for __dyn
-        scalar_t inf_eq_x_dual_step = 0.;         // inf-norm of dual step for __eq_x
-        scalar_t inf_eq_xu_dual_step = 0.;        // inf-norm of dual step for __eq_xu
-        scalar_t avg_dual_res = 0.;               // average dual residual: L1 norm of stationarity gradient / number of elements (unscaled)
+        struct barrier_objective_info {
+            scalar_t cost = 0.;                 // pure running cost (sum of __cost terms)
+            scalar_t barrier_value = 0.;        // phase line-search barrier contribution
+            scalar_t augmented_objective = 0.;  // cost plus phase-specific extra objective terms
+            scalar_t ls_objective = 0.;         // phase line-search objective
+        } barrier_objective;
+
+        struct primal_info {
+            scalar_t inf_res = 0.;          // primal residual (constraint violation), inf-norm
+            scalar_t res_l1 = 0.;           // primal residual L1 norm
+            scalar_t inf_comp = 0.;         // (inequality) complementarity residual
+            scalar_t log_slack_sum = 0.;    // sum(log(slack)) across all normal-IPM constraints, mu-free
+            scalar_t max_diag_scaling = 0.; // max Nesterov-Todd scaling
+        } primal;
+
+        struct dual_info {
+            scalar_t inf_res = 0.;         // dual residual (stationary condition)
+            scalar_t max_eq_norm = 0.;     // max inf-norm of equality dual variables
+            scalar_t max_ineq_norm = 0.;   // max inf-norm of inequality dual variables
+            scalar_t max_norm = 0.;        // max inf-norm of all dual variables
+            scalar_t avg_res = 0.;         // average dual residual
+        } dual;
+
+        struct barrier_step_info {
+            scalar_t barrier_dir_deriv = 0.;
+            scalar_t search_barrier_dir_deriv = 0.;
+            scalar_t augmented_objective_fullstep_dec = 0.;
+            scalar_t ls_objective_fullstep_dec = 0.;
+        };
+
+        struct step_info {
+            scalar_t inf_prim_step = 0.;
+            scalar_t inf_dual_step = 0.;
+            scalar_t inf_eq_dual_step = 0.;
+            scalar_t inf_ineq_dual_step = 0.;
+            scalar_t inf_dyn_dual_step = 0.;
+            scalar_t inf_eq_x_dual_step = 0.;
+            scalar_t inf_eq_xu_dual_step = 0.;
+        } step;
+
+        barrier_step_info barrier_step;
     };
 
     struct result_type : public kkt_info {
         iter_info iter;
     };
+
+    enum class point_value_mask : uint8_t {
+        none = 0,
+        primal = 1 << 0,
+        barrier_objective = 1 << 1,
+    };
+
+    friend constexpr point_value_mask operator|(point_value_mask lhs, point_value_mask rhs) {
+        using mask_t = std::underlying_type_t<point_value_mask>;
+        return static_cast<point_value_mask>(static_cast<mask_t>(lhs) | static_cast<mask_t>(rhs));
+    }
 
     kkt_info kkt_last;
     iter_info iter_last;
@@ -375,6 +402,7 @@ struct ns_sqp {
 
     stacked_workers<settings_t::worker> setting_per_thread;
     stacked_workers<kkt_info> kkt_per_thread;
+    stacked_workers<kkt_info> ls_per_thread;
     struct kkt_reduce_info {
         scalar_t dual_res_l1 = 0.;
         scalar_t lambda_l1 = 0.;
@@ -429,9 +457,75 @@ struct ns_sqp {
     void print_stat_header();
     /// print statistics for the current iteration
     void print_stats(const kkt_info &info, const iter_info &iter, size_t ls_steps);
-    kkt_info compute_ls_info(const kkt_info &base);
-    kkt_info compute_prim_res_info(const kkt_info &base);
-    kkt_info compute_dual_res_info(const kkt_info &base);
+    template <typename Summary, typename InitFn, typename AccumulateFn, typename MergeFn>
+    Summary reduce_partials(stacked_workers<Summary> &workers,
+                            const Summary &base,
+                            InitFn &&init,
+                            AccumulateFn &&accumulate,
+                            MergeFn &&merge) {
+        auto &graph = active_data();
+        Summary summary = base;
+        std::invoke(init, summary);
+        if (in_restoration_phase()) {
+            for (auto *n : graph.flatten_nodes()) {
+                std::invoke(accumulate, summary, *n);
+            }
+            return summary;
+        }
+        if (workers.size() != settings.n_worker) {
+            workers.reset(settings.n_worker);
+        }
+        for (auto &partial : workers) {
+            partial = Summary{};
+            std::invoke(init, partial);
+        }
+        graph.for_each_parallel([&](size_t tid, data *n) {
+            std::invoke(accumulate, workers[tid], *n);
+        });
+        for (const auto &partial : workers) {
+            std::invoke(merge, summary, partial);
+        }
+        return summary;
+    }
+    template <typename Summary, typename Aux, typename InitFn, typename AccumulateFn, typename MergeFn>
+    std::pair<Summary, Aux> reduce_partials_with_aux(stacked_workers<Summary> &workers,
+                                                     stacked_workers<Aux> &aux_workers,
+                                                     const Summary &base,
+                                                     InitFn &&init,
+                                                     AccumulateFn &&accumulate,
+                                                     MergeFn &&merge) {
+        auto &graph = active_data();
+        Summary summary = base;
+        Aux aux{};
+        std::invoke(init, summary, aux);
+        if (in_restoration_phase()) {
+            for (auto *n : graph.flatten_nodes()) {
+                std::invoke(accumulate, summary, aux, *n);
+            }
+            return {summary, aux};
+        }
+        if (workers.size() != settings.n_worker) {
+            workers.reset(settings.n_worker);
+        }
+        if (aux_workers.size() != settings.n_worker) {
+            aux_workers.reset(settings.n_worker);
+        }
+        for (size_t i = 0; i < workers.size(); ++i) {
+            workers[i] = Summary{};
+            aux_workers[i] = Aux{};
+            std::invoke(init, workers[i], aux_workers[i]);
+        }
+        graph.for_each_parallel([&](size_t tid, data *n) {
+            std::invoke(accumulate, workers[tid], aux_workers[tid], *n);
+        });
+        for (size_t i = 0; i < workers.size(); ++i) {
+            std::invoke(merge, summary, aux, workers[i], aux_workers[i]);
+        }
+        return {summary, aux};
+    }
+    kkt_info compute_point_primal_info(const kkt_info &base, point_value_mask mask);
+    kkt_info compute_step_info(const kkt_info &base);
+    kkt_info compute_stationarity_info(const kkt_info &base);
     void initialize_equality_multipliers();
     result_type restoration_update(const kkt_info &kkt_before, const iter_info &iter_before, filter_linesearch_data &ls);
     /// perform iterative refinement to improve the solution accuracy, will modify the current solution in place
@@ -444,7 +538,7 @@ struct ns_sqp {
      *        Must be called after update_approximation(eval_derivatives).
      * @param kkt current KKT info (used to decide whether to refresh the scale vectors)
      */
-    void compute_and_apply_scaling(const kkt_info &kkt);
+    void compute_and_apply_scaling(const kkt_info &info);
     /// Reverse the row scaling on the dual variables after the QP solve.
     void unscale_duals();
     void unscale_duals(data *d);
@@ -517,7 +611,9 @@ struct ns_sqp {
                                                                      scalar_t constr_vio_min,
                                                                      const settings_t &settings,
                                                                      bool allow_flat_objective = true);
-        bool try_step(const kkt_info &trial_kkt, const kkt_info &current_kkt, settings_t &settings);
+        bool try_step(const kkt_info &trial_kkt,
+                      const kkt_info &current_kkt,
+                      settings_t &settings);
 
         /***** merit backtracking part (used when settings.ls.method == merit_backtracking) *****/
         scalar_t merit_fullstep = std::numeric_limits<scalar_t>::infinity(); ///< merit value at full step (alpha=1), for directional derivative estimate
@@ -529,9 +625,9 @@ struct ns_sqp {
 
         void augment_filter_for_restoration_start(const kkt_info &reference_kkt, settings_t &settings) {
             points.push_back(point{
-                .prim_res = (1.0 - settings.ls.primal_gamma) * reference_kkt.prim_res_l1,
-                .dual_res = reference_kkt.inf_dual_res,
-                .objective = reference_kkt.objective - settings.ls.dual_gamma * reference_kkt.prim_res_l1,
+                .prim_res = (1.0 - settings.ls.primal_gamma) * reference_kkt.primal.res_l1,
+                .dual_res = reference_kkt.dual.inf_res,
+                .objective = reference_kkt.barrier_objective.augmented_objective - settings.ls.dual_gamma * reference_kkt.primal.res_l1,
             });
         }
     };
@@ -553,7 +649,9 @@ struct ns_sqp {
 
     void step_back_alpha(filter_linesearch_per_iter_data &ls);
     scalar_t current_linesearch_alpha_min(const filter_linesearch_per_iter_data &ls) const;
-    line_search_action filter_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
+    line_search_action filter_linesearch(filter_linesearch_data &ls,
+                                         const kkt_info &trial_kkt,
+                                         const kkt_info &current_kkt);
     line_search_action merit_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
     bool outer_filter_accepts(const filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &reference_kkt);
     bool in_restoration_phase() const { return settings.in_restoration; }

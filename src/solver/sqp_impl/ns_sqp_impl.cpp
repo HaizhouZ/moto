@@ -14,6 +14,17 @@
 namespace moto {
 namespace {
 
+template <typename T>
+void reset_part(T &part) {
+    part.~T();
+    new (&part) T{};
+}
+
+constexpr bool has_flag(ns_sqp::point_value_mask mask, ns_sqp::point_value_mask flag) {
+    using mask_t = std::underlying_type_t<ns_sqp::point_value_mask>;
+    return (static_cast<mask_t>(mask) & static_cast<mask_t>(flag)) != 0;
+}
+
 scalar_t max_abs_or_zero(const vector &v) {
     return v.size() > 0 ? v.cwiseAbs().maxCoeff() : scalar_t(0.);
 }
@@ -22,85 +33,62 @@ scalar_t max_abs_or_zero(const row_vector &v) {
     return v.size() > 0 ? v.cwiseAbs().maxCoeff() : scalar_t(0.);
 }
 
-void accumulate_constraint_objective_terms(ns_sqp::kkt_info &kkt,
-                                           node_data &node,
-                                           bool track_diag_scaling = false,
-                                           bool include_local_residuals = true) {
+void accumulate_search_value_terms(ns_sqp::kkt_info &kkt, node_data &node) {
     node.for_each<soft_constr_fields>([&](const soft_constr &c, soft_constr::data_map_t &sd) {
-        kkt.objective += c.objective_penalty(sd);
-        kkt.search_barrier_value += c.search_penalty(sd);
-        kkt.obj_fullstep_dec += c.objective_penalty_dir_deriv(sd);
-        kkt.search_barrier_dir_deriv += c.search_penalty_dir_deriv(sd);
-        if (include_local_residuals) {
-            kkt.inf_dual_res = std::max(kkt.inf_dual_res, c.local_stat_residual_inf(sd));
-            kkt.inf_comp_res = std::max(kkt.inf_comp_res, c.local_comp_residual_inf(sd));
-        }
+        kkt.barrier_objective.augmented_objective += c.objective_penalty(sd);
+        kkt.barrier_objective.barrier_value += c.search_penalty(sd);
     });
     node.for_each<ineq_constr_fields>([&](const ineq_constr &c, ineq_constr::data_map_t &id) {
-        kkt.objective += c.objective_penalty(id);
-        kkt.search_barrier_value += c.search_penalty(id);
-        kkt.obj_fullstep_dec += c.objective_penalty_dir_deriv(id);
-        kkt.search_barrier_dir_deriv += c.search_penalty_dir_deriv(id);
-        if (include_local_residuals) {
-            kkt.inf_dual_res = std::max(kkt.inf_dual_res, c.local_stat_residual_inf(id));
-            kkt.inf_comp_res = std::max(kkt.inf_comp_res, c.local_comp_residual_inf(id));
-        }
-        if (track_diag_scaling) {
-            auto *ipm = dynamic_cast<solver::ipm_constr::approx_data *>(&id);
-            if (ipm != nullptr && ipm->diag_scaling.size() > 0) {
-                kkt.max_diag_scaling = std::max(kkt.max_diag_scaling, ipm->diag_scaling.cwiseAbs().maxCoeff());
-                kkt.log_slack_sum += ipm->slack_.array().log().sum();
-                if (ipm->d_slack_.size() > 0) {
-                    kkt.barrier_dir_deriv += (ipm->d_slack_.array() / ipm->slack_backup_.array()).sum();
-                }
-            }
-        }
-    });
-}
-
-void accumulate_trial_value_terms(ns_sqp::kkt_info &kkt, node_data &node, bool track_diag_scaling = false) {
-    node.for_each<soft_constr_fields>([&](const soft_constr &c, soft_constr::data_map_t &sd) {
-        kkt.objective += c.objective_penalty(sd);
-        kkt.search_barrier_value += c.search_penalty(sd);
-    });
-    node.for_each<ineq_constr_fields>([&](const ineq_constr &c, ineq_constr::data_map_t &id) {
-        kkt.objective += c.objective_penalty(id);
-        kkt.search_barrier_value += c.search_penalty(id);
+        kkt.barrier_objective.augmented_objective += c.objective_penalty(id);
+        kkt.barrier_objective.barrier_value += c.search_penalty(id);
         auto *ipm = dynamic_cast<solver::ipm_constr::approx_data *>(&id);
         if (ipm == nullptr || ipm->slack_.size() == 0) {
             return;
         }
-        kkt.log_slack_sum += ipm->slack_.array().log().sum();
-        if (track_diag_scaling && ipm->diag_scaling.size() > 0) {
-            kkt.max_diag_scaling = std::max(kkt.max_diag_scaling, ipm->diag_scaling.cwiseAbs().maxCoeff());
+        kkt.primal.log_slack_sum += ipm->slack_.array().log().sum();
+    });
+}
+
+void accumulate_primal_res_terms(ns_sqp::kkt_info &kkt, node_data &node, bool track_diag_scaling) {
+    kkt.barrier_objective.cost += node.cost();
+    kkt.primal.inf_res = std::max(kkt.primal.inf_res, node.inf_prim_res_);
+    kkt.primal.res_l1 += node.prim_res_l1_;
+    kkt.primal.inf_comp = std::max(kkt.primal.inf_comp, node.inf_comp_res_);
+    if (!track_diag_scaling) {
+        return;
+    }
+    node.for_each<ineq_constr_fields>([&](const ineq_constr &, ineq_constr::data_map_t &id) {
+        auto *ipm = dynamic_cast<solver::ipm_constr::approx_data *>(&id);
+        if (ipm != nullptr && ipm->diag_scaling.size() > 0) {
+            kkt.primal.max_diag_scaling = std::max(kkt.primal.max_diag_scaling, ipm->diag_scaling.cwiseAbs().maxCoeff());
         }
     });
 }
 
 void accumulate_trial_direction_terms(ns_sqp::kkt_info &kkt, node_data &node) {
     node.for_each<soft_constr_fields>([&](const soft_constr &c, soft_constr::data_map_t &sd) {
-        kkt.obj_fullstep_dec += c.objective_penalty_dir_deriv(sd);
-        kkt.search_barrier_dir_deriv += c.search_penalty_dir_deriv(sd);
+        kkt.barrier_step.augmented_objective_fullstep_dec += c.objective_penalty_dir_deriv(sd);
+        kkt.barrier_step.search_barrier_dir_deriv += c.search_penalty_dir_deriv(sd);
     });
     node.for_each<ineq_constr_fields>([&](const ineq_constr &c, ineq_constr::data_map_t &id) {
-        kkt.obj_fullstep_dec += c.objective_penalty_dir_deriv(id);
-        kkt.search_barrier_dir_deriv += c.search_penalty_dir_deriv(id);
+        kkt.barrier_step.augmented_objective_fullstep_dec += c.objective_penalty_dir_deriv(id);
+        kkt.barrier_step.search_barrier_dir_deriv += c.search_penalty_dir_deriv(id);
         auto *ipm = dynamic_cast<solver::ipm_constr::approx_data *>(&id);
         if (ipm == nullptr || ipm->slack_.size() == 0 || ipm->d_slack_.size() == 0) {
             return;
         }
-        kkt.barrier_dir_deriv += (ipm->d_slack_.array() / ipm->slack_backup_.array()).sum();
+        kkt.barrier_step.barrier_dir_deriv += (ipm->d_slack_.array() / ipm->slack_backup_.array()).sum();
     });
 }
 
 void accumulate_local_dual_comp_residuals(ns_sqp::kkt_info &kkt, node_data &node) {
     node.for_each<soft_constr_fields>([&](const soft_constr &c, soft_constr::data_map_t &sd) {
-        kkt.inf_dual_res = std::max(kkt.inf_dual_res, c.local_stat_residual_inf(sd));
-        kkt.inf_comp_res = std::max(kkt.inf_comp_res, c.local_comp_residual_inf(sd));
+        kkt.dual.inf_res = std::max(kkt.dual.inf_res, c.local_stat_residual_inf(sd));
+        kkt.primal.inf_comp = std::max(kkt.primal.inf_comp, c.local_comp_residual_inf(sd));
     });
     node.for_each<ineq_constr_fields>([&](const ineq_constr &c, ineq_constr::data_map_t &id) {
-        kkt.inf_dual_res = std::max(kkt.inf_dual_res, c.local_stat_residual_inf(id));
-        kkt.inf_comp_res = std::max(kkt.inf_comp_res, c.local_comp_residual_inf(id));
+        kkt.dual.inf_res = std::max(kkt.dual.inf_res, c.local_stat_residual_inf(id));
+        kkt.primal.inf_comp = std::max(kkt.primal.inf_comp, c.local_comp_residual_inf(id));
     });
 }
 
@@ -113,12 +101,12 @@ void accumulate_dual_norms(ns_sqp::kkt_info &kkt,
             continue;
         }
         const scalar_t lam_inf = lam.cwiseAbs().maxCoeff();
-        kkt.max_dual_norm = std::max(kkt.max_dual_norm, lam_inf);
+        kkt.dual.max_norm = std::max(kkt.dual.max_norm, lam_inf);
         if (cf == __dyn || cf == __eq_x || cf == __eq_xu ||
             (include_soft_eq_in_eq_norm && (cf == __eq_x_soft || cf == __eq_xu_soft))) {
-            kkt.max_eq_dual_norm = std::max(kkt.max_eq_dual_norm, lam_inf);
+            kkt.dual.max_eq_norm = std::max(kkt.dual.max_eq_norm, lam_inf);
         } else if (cf == __ineq_x || cf == __ineq_xu) {
-            kkt.max_ineq_dual_norm = std::max(kkt.max_ineq_dual_norm, lam_inf);
+            kkt.dual.max_ineq_norm = std::max(kkt.dual.max_ineq_norm, lam_inf);
         }
     }
 }
@@ -135,11 +123,11 @@ void accumulate_dual_norms_and_l1(ns_sqp::kkt_info &kkt,
         lambda_l1 += lam.lpNorm<1>();
         n_constr += static_cast<size_t>(lam.size());
         const scalar_t lam_inf = lam.cwiseAbs().maxCoeff();
-        kkt.max_dual_norm = std::max(kkt.max_dual_norm, lam_inf);
+        kkt.dual.max_norm = std::max(kkt.dual.max_norm, lam_inf);
         if (cf == __dyn || cf == __eq_x || cf == __eq_xu) {
-            kkt.max_eq_dual_norm = std::max(kkt.max_eq_dual_norm, lam_inf);
+            kkt.dual.max_eq_norm = std::max(kkt.dual.max_eq_norm, lam_inf);
         } else if (cf == __ineq_x || cf == __ineq_xu) {
-            kkt.max_ineq_dual_norm = std::max(kkt.max_ineq_dual_norm, lam_inf);
+            kkt.dual.max_ineq_norm = std::max(kkt.dual.max_ineq_norm, lam_inf);
         }
     }
 }
@@ -152,7 +140,7 @@ void accumulate_primal_step_and_obj_dec(ns_sqp::kkt_info &kkt,
             continue;
         }
         const scalar_t step_inf = node.trial_prim_step[f].cwiseAbs().maxCoeff();
-        kkt.inf_prim_step = std::max(kkt.inf_prim_step, step_inf);
+        kkt.step.inf_prim_step = std::max(kkt.step.inf_prim_step, step_inf);
         if (check_cost_size && node.dense().cost_jac_[f].size() != node.trial_prim_step[f].size()) {
             throw std::runtime_error(fmt::format(
                 "cost/trial step size mismatch on field {}: cost_jac size {}, trial_prim_step size {}, lag_jac size {}, problem uid {}",
@@ -162,25 +150,25 @@ void accumulate_primal_step_and_obj_dec(ns_sqp::kkt_info &kkt,
                 node.dense().lag_jac_[f].size(),
                 node.problem().uid()));
         }
-        kkt.obj_fullstep_dec += node.dense().cost_jac_[f].dot(node.trial_prim_step[f]);
+        kkt.barrier_step.augmented_objective_fullstep_dec += node.dense().cost_jac_[f].dot(node.trial_prim_step[f]);
     }
 }
 
-void accumulate_dual_step_info(ns_sqp::kkt_info &kkt,
+void accumulate_dual_step_info(ns_sqp::kkt_info::step_info &step_info,
                                const array_type<vector, constr_fields> &trial_dual_step) {
     for (auto f : constr_fields) {
         if (trial_dual_step[f].size() == 0) {
             continue;
         }
         const scalar_t step = trial_dual_step[f].cwiseAbs().maxCoeff();
-        kkt.inf_dual_step = std::max(kkt.inf_dual_step, step);
+        step_info.inf_dual_step = std::max(step_info.inf_dual_step, step);
         if (in_field(f, ineq_constr_fields)) {
-            kkt.inf_ineq_dual_step = std::max(kkt.inf_ineq_dual_step, step);
+            step_info.inf_ineq_dual_step = std::max(step_info.inf_ineq_dual_step, step);
         } else {
-            kkt.inf_eq_dual_step = std::max(kkt.inf_eq_dual_step, step);
-            if (f == __dyn) kkt.inf_dyn_dual_step = std::max(kkt.inf_dyn_dual_step, step);
-            if (f == __eq_x) kkt.inf_eq_x_dual_step = std::max(kkt.inf_eq_x_dual_step, step);
-            if (f == __eq_xu) kkt.inf_eq_xu_dual_step = std::max(kkt.inf_eq_xu_dual_step, step);
+            step_info.inf_eq_dual_step = std::max(step_info.inf_eq_dual_step, step);
+            if (f == __dyn) step_info.inf_dyn_dual_step = std::max(step_info.inf_dyn_dual_step, step);
+            if (f == __eq_x) step_info.inf_eq_x_dual_step = std::max(step_info.inf_eq_x_dual_step, step);
+            if (f == __eq_xu) step_info.inf_eq_xu_dual_step = std::max(step_info.inf_eq_xu_dual_step, step);
         }
     }
 }
@@ -189,14 +177,19 @@ void accumulate_u_stationarity(const row_vector &r,
                                ns_sqp::kkt_info &kkt,
                                scalar_t &dual_res_l1,
                                size_t &n_dual_res) {
-    kkt.inf_dual_res = std::max(kkt.inf_dual_res, max_abs_or_zero(r));
+    kkt.dual.inf_res = std::max(kkt.dual.inf_res, max_abs_or_zero(r));
     dual_res_l1 += r.cwiseAbs().sum();
     n_dual_res += static_cast<size_t>(r.size());
 }
 
 void finalize_phase_objectives(ns_sqp::kkt_info &kkt) {
-    kkt.penalized_obj = kkt.objective - kkt.search_barrier_value;
-    kkt.penalized_obj_fullstep_dec = kkt.obj_fullstep_dec - kkt.search_barrier_dir_deriv;
+    kkt.barrier_objective.ls_objective = kkt.barrier_objective.augmented_objective - kkt.barrier_objective.barrier_value;
+}
+
+void finalize_step_info(ns_sqp::kkt_info &kkt, scalar_t mu) {
+    kkt.barrier_step.search_barrier_dir_deriv = mu * kkt.barrier_step.barrier_dir_deriv;
+    kkt.barrier_step.ls_objective_fullstep_dec =
+        kkt.barrier_step.augmented_objective_fullstep_dec - kkt.barrier_step.search_barrier_dir_deriv;
 }
 
 template <class UFn, class XYFn>
@@ -365,9 +358,7 @@ ns_sqp::kkt_info ns_sqp::initialize() {
     kkt_info kkt;
     {
         auto phase_profile = profile_scope(profile_phase::initialize_kkt);
-        kkt = compute_prim_res_info(kkt);
-        kkt = compute_ls_info(kkt);
-        kkt = compute_dual_res_info(kkt);
+        kkt = compute_stationarity_info(compute_point_primal_info(kkt, point_value_mask::primal | point_value_mask::barrier_objective));
     }
     reset_scaling(); // clear scale vectors; will be recomputed on first iteration
     // print statistics header
@@ -548,7 +539,7 @@ void ns_sqp::prepare_globalization(filter_linesearch_data &ls, iteration_context
     }
     // Current accepted iterate already has residual information; only refresh
     // line-search quantities for the new Newton direction.
-    ctx.current = compute_ls_info(ctx.current);
+    ctx.current = compute_step_info(ctx.current);
 }
 
 bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context &ctx) {
@@ -581,12 +572,10 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
             d->update_approximation(node_data::update_mode::eval_derivatives, true);
         });
         kkt_info kkt;
-        kkt = compute_prim_res_info(kkt);
-        kkt = compute_ls_info(kkt);
-        kkt = compute_dual_res_info(kkt);
+        kkt = compute_stationarity_info(compute_point_primal_info(kkt, point_value_mask::primal | point_value_mask::barrier_objective));
         ctx.trial = kkt;
     } else {
-        ctx.trial = compute_prim_res_info(ctx.current);
+        ctx.trial = compute_point_primal_info(ctx.current, point_value_mask::primal | point_value_mask::barrier_objective);
     }
     detail_timed_block_end("update_res_stat");
     }
@@ -603,7 +592,7 @@ void ns_sqp::accept_trial_point(filter_linesearch_data &ls, iteration_context &c
             graph.for_each_parallel([this](data *d) {
                 d->update_approximation(node_data::update_mode::eval_derivatives, true);
             });
-            ctx.trial = compute_dual_res_info(ctx.trial);
+            ctx.trial = compute_stationarity_info(ctx.trial);
         }
         detail_timed_block_end("update_approx_accepted");
     }
@@ -636,11 +625,14 @@ ns_sqp::line_search_action ns_sqp::handle_globalization_failure(filter_linesearc
             d->update_approximation(node_data::update_mode::eval_derivatives, true);
         });
         kkt_info kkt;
-        kkt = compute_prim_res_info(kkt);
+        kkt = compute_point_primal_info(kkt, point_value_mask::primal | point_value_mask::barrier_objective);
         if (!in_restoration_phase()) {
-            kkt = compute_ls_info(kkt);
+            ctx.current = compute_step_info(ctx.current);
+        } else {
+            reset_part(ctx.current.barrier_step);
+            reset_part(ctx.current.step);
         }
-        kkt = compute_dual_res_info(kkt);
+        kkt = compute_stationarity_info(kkt);
         ctx.current = kkt;
         return line_search_action::failure;
     }
@@ -696,219 +688,126 @@ ns_sqp::line_search_action ns_sqp::sqp_iter(filter_linesearch_data &ls, kkt_info
     return action;
 }
 
-ns_sqp::kkt_info ns_sqp::compute_ls_info(const kkt_info &base) {
-    auto &graph = active_data();
-    if (in_restoration_phase()) {
-        kkt_info kkt = base;
-        kkt.obj_fullstep_dec = 0.;
-        kkt.barrier_dir_deriv = 0.;
-        kkt.search_barrier_dir_deriv = 0.;
-        kkt.penalized_obj_fullstep_dec = 0.;
-        kkt.inf_prim_step = 0.;
-        kkt.inf_dual_step = 0.;
-        kkt.inf_eq_dual_step = 0.;
-        kkt.inf_ineq_dual_step = 0.;
-        kkt.inf_dyn_dual_step = 0.;
-        kkt.inf_eq_x_dual_step = 0.;
-        kkt.inf_eq_xu_dual_step = 0.;
-
-        for (auto *n : graph.flatten_nodes()) {
-            accumulate_primal_step_and_obj_dec(kkt, *n, false);
-            accumulate_trial_direction_terms(kkt, *n);
-            accumulate_dual_step_info(kkt, n->trial_dual_step);
-        }
-        finalize_phase_objectives(kkt);
-        return kkt;
-    }
-    if (kkt_per_thread.size() != settings.n_worker) {
-        kkt_per_thread.reset(settings.n_worker);
-    }
-    for (auto &partial : kkt_per_thread) {
-        partial = {};
-    }
-    graph.for_each_parallel([&](size_t tid, data *n) {
-        auto &kkt = kkt_per_thread[tid];
-        accumulate_primal_step_and_obj_dec(kkt, *n, true);
-        accumulate_trial_direction_terms(kkt, *n);
-        accumulate_dual_step_info(kkt, n->trial_dual_step);
-    });
-
-    kkt_info kkt = base;
-    kkt.search_barrier_value = settings.ipm.mu * kkt.log_slack_sum;
-    kkt.penalized_obj = kkt.objective - kkt.search_barrier_value;
-    kkt.obj_fullstep_dec = 0.;
-    kkt.barrier_dir_deriv = 0.;
-    kkt.search_barrier_dir_deriv = 0.;
-    kkt.penalized_obj_fullstep_dec = 0.;
-    kkt.inf_prim_step = 0.;
-    kkt.inf_dual_step = 0.;
-    kkt.inf_eq_dual_step = 0.;
-    kkt.inf_ineq_dual_step = 0.;
-    kkt.inf_dyn_dual_step = 0.;
-    kkt.inf_eq_x_dual_step = 0.;
-    kkt.inf_eq_xu_dual_step = 0.;
-    for (const auto &partial : kkt_per_thread) {
-        kkt.obj_fullstep_dec += partial.obj_fullstep_dec;
-        kkt.barrier_dir_deriv += partial.barrier_dir_deriv;
-        kkt.inf_prim_step = std::max(kkt.inf_prim_step, partial.inf_prim_step);
-        kkt.inf_dual_step = std::max(kkt.inf_dual_step, partial.inf_dual_step);
-        kkt.inf_eq_dual_step = std::max(kkt.inf_eq_dual_step, partial.inf_eq_dual_step);
-        kkt.inf_ineq_dual_step = std::max(kkt.inf_ineq_dual_step, partial.inf_ineq_dual_step);
-        kkt.inf_dyn_dual_step = std::max(kkt.inf_dyn_dual_step, partial.inf_dyn_dual_step);
-        kkt.inf_eq_x_dual_step = std::max(kkt.inf_eq_x_dual_step, partial.inf_eq_x_dual_step);
-        kkt.inf_eq_xu_dual_step = std::max(kkt.inf_eq_xu_dual_step, partial.inf_eq_xu_dual_step);
-    }
-    kkt.search_barrier_dir_deriv = settings.ipm.mu * kkt.barrier_dir_deriv;
-    kkt.penalized_obj_fullstep_dec = kkt.obj_fullstep_dec - kkt.search_barrier_dir_deriv;
+ns_sqp::kkt_info ns_sqp::compute_step_info(const kkt_info &base) {
+    auto init = [](kkt_info &kkt) {
+        reset_part(kkt.barrier_step);
+        reset_part(kkt.step);
+    };
+    auto accumulate = [&](kkt_info &kkt, data &n) {
+        accumulate_primal_step_and_obj_dec(kkt, n, !in_restoration_phase());
+        accumulate_trial_direction_terms(kkt, n);
+        accumulate_dual_step_info(kkt.step, n.trial_dual_step);
+    };
+    auto merge = [&](kkt_info &kkt, const kkt_info &partial) {
+        kkt.barrier_step.augmented_objective_fullstep_dec += partial.barrier_step.augmented_objective_fullstep_dec;
+        kkt.barrier_step.barrier_dir_deriv += partial.barrier_step.barrier_dir_deriv;
+        kkt.step.inf_prim_step = std::max(kkt.step.inf_prim_step, partial.step.inf_prim_step);
+        kkt.step.inf_dual_step = std::max(kkt.step.inf_dual_step, partial.step.inf_dual_step);
+        kkt.step.inf_eq_dual_step = std::max(kkt.step.inf_eq_dual_step, partial.step.inf_eq_dual_step);
+        kkt.step.inf_ineq_dual_step = std::max(kkt.step.inf_ineq_dual_step, partial.step.inf_ineq_dual_step);
+        kkt.step.inf_dyn_dual_step = std::max(kkt.step.inf_dyn_dual_step, partial.step.inf_dyn_dual_step);
+        kkt.step.inf_eq_x_dual_step = std::max(kkt.step.inf_eq_x_dual_step, partial.step.inf_eq_x_dual_step);
+        kkt.step.inf_eq_xu_dual_step = std::max(kkt.step.inf_eq_xu_dual_step, partial.step.inf_eq_xu_dual_step);
+    };
+    kkt_info kkt = reduce_partials(ls_per_thread, base, init, accumulate, merge);
+    finalize_step_info(kkt, settings.ipm.mu);
     return kkt;
 }
 
-ns_sqp::kkt_info ns_sqp::compute_prim_res_info(const kkt_info &base) {
-    auto &graph = active_data();
-    if (in_restoration_phase()) {
-        kkt_info kkt = base;
-        kkt.cost = 0.;
-        kkt.objective = 0.;
-        kkt.log_slack_sum = 0.;
-        kkt.search_barrier_value = 0.;
-        kkt.penalized_obj = 0.;
-        kkt.inf_prim_res = 0.;
-        kkt.prim_res_l1 = 0.;
-
-        for (auto *n : graph.flatten_nodes()) {
-            kkt.cost += n->cost();
-            kkt.objective += n->cost();
-            kkt.inf_prim_res = std::max(kkt.inf_prim_res, n->inf_prim_res_);
-            kkt.prim_res_l1 += n->prim_res_l1_;
-            accumulate_trial_value_terms(kkt, *n, false);
+ns_sqp::kkt_info ns_sqp::compute_point_primal_info(const kkt_info &base, point_value_mask mask) {
+    const bool include_primal = has_flag(mask, point_value_mask::primal);
+    const bool include_barrier_objective = has_flag(mask, point_value_mask::barrier_objective);
+    auto init = [&](kkt_info &kkt) {
+        const scalar_t base_cost = kkt.barrier_objective.cost;
+        if (include_primal) {
+            reset_part(kkt.primal);
+            kkt.barrier_objective.cost = 0.;
         }
-        finalize_phase_objectives(kkt);
-        return kkt;
-    }
-    if (kkt_per_thread.size() != settings.n_worker) {
-        kkt_per_thread.reset(settings.n_worker);
-    }
-    for (auto &partial : kkt_per_thread) {
-        partial = {};
-    }
-    graph.for_each_parallel([&](size_t tid, data *n) {
-        auto &kkt = kkt_per_thread[tid];
-        kkt.cost += n->cost();
-        kkt.inf_prim_res = std::max(kkt.inf_prim_res, n->inf_prim_res_);
-        kkt.prim_res_l1 += n->prim_res_l1_;
-        kkt.inf_comp_res = std::max(kkt.inf_comp_res, n->inf_comp_res_);
-        accumulate_trial_value_terms(kkt, *n, true);
-    });
-
-    kkt_info kkt = base;
-    kkt.cost = 0.;
-    kkt.objective = 0.;
-    kkt.log_slack_sum = 0.;
-    kkt.search_barrier_value = 0.;
-    kkt.penalized_obj = 0.;
-    kkt.inf_prim_res = 0.;
-    kkt.prim_res_l1 = 0.;
-    kkt.inf_comp_res = 0.;
-    kkt.max_diag_scaling = 0.;
-    for (const auto &partial : kkt_per_thread) {
-        kkt.cost += partial.cost;
-        kkt.log_slack_sum += partial.log_slack_sum;
-        kkt.inf_prim_res = std::max(kkt.inf_prim_res, partial.inf_prim_res);
-        kkt.prim_res_l1 += partial.prim_res_l1;
-        kkt.inf_comp_res = std::max(kkt.inf_comp_res, partial.inf_comp_res);
-        kkt.max_diag_scaling = std::max(kkt.max_diag_scaling, partial.max_diag_scaling);
-    }
-    kkt.objective = kkt.cost;
-    kkt.search_barrier_value = settings.ipm.mu * kkt.log_slack_sum;
-    kkt.penalized_obj = kkt.objective - kkt.search_barrier_value;
-    return kkt;
-}
-
-ns_sqp::kkt_info ns_sqp::compute_dual_res_info(const kkt_info &base) {
-    auto &graph = active_data();
-    if (in_restoration_phase()) {
-        kkt_info kkt = base;
-        scalar_t dual_res_l1 = 0.;
-        size_t n_dual_res = 0;
-        kkt.inf_dual_res = 0.;
-        kkt.max_eq_dual_norm = 0.;
-        kkt.max_ineq_dual_norm = 0.;
-        kkt.max_dual_norm = 0.;
-        kkt.avg_dual_res = 0.;
-        kkt.inf_comp_res = 0.;
-
-        for (auto *n : graph.flatten_nodes()) {
-            if (n->dense().lag_jac_[__u].size() > 0) {
-                accumulate_u_stationarity(n->dense().lag_jac_[__u], kkt, dual_res_l1, n_dual_res);
+        if (include_barrier_objective) {
+            reset_part(kkt.barrier_objective);
+            kkt.primal.log_slack_sum = 0.;
+            if (!include_primal) {
+                kkt.barrier_objective.cost = base_cost;
             }
-            accumulate_dual_norms(kkt, n->dense().dual_, true);
-            accumulate_local_dual_comp_residuals(kkt, *n);
         }
+    };
+    auto accumulate = [&](kkt_info &kkt, data &n) {
+        if (include_primal) {
+            accumulate_primal_res_terms(kkt, n, !in_restoration_phase());
+        }
+        if (include_barrier_objective) {
+            accumulate_search_value_terms(kkt, n);
+        }
+    };
+    auto merge = [&](kkt_info &kkt, const kkt_info &partial) {
+        if (include_primal) {
+            kkt.barrier_objective.cost += partial.barrier_objective.cost;
+            kkt.primal.inf_res = std::max(kkt.primal.inf_res, partial.primal.inf_res);
+            kkt.primal.res_l1 += partial.primal.res_l1;
+            kkt.primal.inf_comp = std::max(kkt.primal.inf_comp, partial.primal.inf_comp);
+            kkt.primal.max_diag_scaling = std::max(kkt.primal.max_diag_scaling, partial.primal.max_diag_scaling);
+        }
+        if (include_barrier_objective) {
+            kkt.barrier_objective.augmented_objective += partial.barrier_objective.augmented_objective;
+            kkt.primal.log_slack_sum += partial.primal.log_slack_sum;
+            kkt.barrier_objective.barrier_value += partial.barrier_objective.barrier_value;
+        }
+    };
+    kkt_info kkt = reduce_partials(kkt_per_thread, base, init, accumulate, merge);
+    if (include_barrier_objective) {
+        kkt.barrier_objective.augmented_objective += kkt.barrier_objective.cost;
+        finalize_phase_objectives(kkt);
+    }
+    return kkt;
+}
 
-        accumulate_w_stationarity(
-            graph,
-            [&](const row_vector &r) { accumulate_u_stationarity(r, kkt, dual_res_l1, n_dual_res); },
-            [&](const row_vector &r) { accumulate_u_stationarity(r, kkt, dual_res_l1, n_dual_res); });
-        if (n_dual_res > 0) {
-            kkt.avg_dual_res = dual_res_l1 / static_cast<scalar_t>(n_dual_res);
+ns_sqp::kkt_info ns_sqp::compute_stationarity_info(const kkt_info &base) {
+    auto &graph = active_data();
+    auto init = [&](kkt_info &kkt, kkt_reduce_info &reduce) {
+        reset_part(kkt.dual);
+        if (in_restoration_phase()) {
+            kkt.primal.inf_comp = 0.;
         }
-        return kkt;
-    }
-    if (kkt_per_thread.size() != settings.n_worker) {
-        kkt_per_thread.reset(settings.n_worker);
-    }
-    if (kkt_reduce_per_thread.size() != settings.n_worker) {
-        kkt_reduce_per_thread.reset(settings.n_worker);
-    }
-    for (auto &partial : kkt_per_thread) {
-        partial = {};
-    }
-    for (auto &reduce : kkt_reduce_per_thread) {
         reduce = {};
-    }
-    graph.for_each_parallel([&](size_t tid, data *n) {
-        auto &kkt = kkt_per_thread[tid];
-        auto &reduce = kkt_reduce_per_thread[tid];
-        if (n->dense().lag_jac_[__u].size() > 0) {
-            accumulate_u_stationarity(n->dense().lag_jac_[__u], kkt, reduce.dual_res_l1, reduce.n_dual_res);
+    };
+    auto accumulate = [&](kkt_info &kkt, kkt_reduce_info &reduce, data &n) {
+        if (n.dense().lag_jac_[__u].size() > 0) {
+            accumulate_u_stationarity(n.dense().lag_jac_[__u], kkt, reduce.dual_res_l1, reduce.n_dual_res);
         }
-        accumulate_dual_norms_and_l1(kkt, n->dense().dual_, reduce.lambda_l1, reduce.n_constr);
-        accumulate_local_dual_comp_residuals(kkt, *n);
-    });
-
-    kkt_info kkt = base;
-    kkt.inf_dual_res = 0.;
-    kkt.max_eq_dual_norm = 0.;
-    kkt.max_ineq_dual_norm = 0.;
-    kkt.max_dual_norm = 0.;
-    kkt.avg_dual_res = 0.;
-
-    kkt_reduce_info reduce_total{};
-    for (size_t i = 0; i < kkt_per_thread.size(); ++i) {
-        const auto &partial = kkt_per_thread[i];
-        const auto &reduce = kkt_reduce_per_thread[i];
-        kkt.inf_dual_res = std::max(kkt.inf_dual_res, partial.inf_dual_res);
-        kkt.max_eq_dual_norm = std::max(kkt.max_eq_dual_norm, partial.max_eq_dual_norm);
-        kkt.max_ineq_dual_norm = std::max(kkt.max_ineq_dual_norm, partial.max_ineq_dual_norm);
-        kkt.max_dual_norm = std::max(kkt.max_dual_norm, partial.max_dual_norm);
+        if (in_restoration_phase()) {
+            accumulate_dual_norms(kkt, n.dense().dual_, true);
+        } else {
+            accumulate_dual_norms_and_l1(kkt, n.dense().dual_, reduce.lambda_l1, reduce.n_constr);
+        }
+        accumulate_local_dual_comp_residuals(kkt, n);
+    };
+    auto merge = [&](kkt_info &kkt, kkt_reduce_info &reduce_total, const kkt_info &partial, const kkt_reduce_info &reduce) {
+        kkt.dual.inf_res = std::max(kkt.dual.inf_res, partial.dual.inf_res);
+        kkt.dual.max_eq_norm = std::max(kkt.dual.max_eq_norm, partial.dual.max_eq_norm);
+        kkt.dual.max_ineq_norm = std::max(kkt.dual.max_ineq_norm, partial.dual.max_ineq_norm);
+        kkt.dual.max_norm = std::max(kkt.dual.max_norm, partial.dual.max_norm);
         reduce_total.dual_res_l1 += reduce.dual_res_l1;
         reduce_total.lambda_l1 += reduce.lambda_l1;
         reduce_total.n_dual_res += reduce.n_dual_res;
         reduce_total.n_constr += reduce.n_constr;
-    }
+        if (in_restoration_phase()) {
+            kkt.primal.inf_comp = std::max(kkt.primal.inf_comp, partial.primal.inf_comp);
+        }
+    };
+    auto [kkt, reduce_total] = reduce_partials_with_aux(kkt_per_thread, kkt_reduce_per_thread, base, init, accumulate, merge);
 
     accumulate_w_stationarity(
         graph,
         [&](const row_vector &r) { accumulate_u_stationarity(r, kkt, reduce_total.dual_res_l1, reduce_total.n_dual_res); },
         [&](const row_vector &r) { accumulate_u_stationarity(r, kkt, reduce_total.dual_res_l1, reduce_total.n_dual_res); });
-    if (reduce_total.n_constr > 0) {
+    if (!in_restoration_phase() && reduce_total.n_constr > 0) {
         scalar_t s_d = std::max(settings.s_max,
                                 reduce_total.lambda_l1 / static_cast<scalar_t>(reduce_total.n_constr)) /
                        settings.s_max;
-        kkt.inf_dual_res /= s_d;
+        kkt.dual.inf_res /= s_d;
     }
     if (reduce_total.n_dual_res > 0) {
-        kkt.avg_dual_res = reduce_total.dual_res_l1 / static_cast<scalar_t>(reduce_total.n_dual_res);
+        kkt.dual.avg_res = reduce_total.dual_res_l1 / static_cast<scalar_t>(reduce_total.n_dual_res);
     }
     return kkt;
 }
@@ -924,15 +823,15 @@ ns_sqp::result_type ns_sqp::update(size_t n_iter, bool verbose) {
     kkt_last = initialize();
     try {
         filter_linesearch_data ls;
-        ls.constr_vio_min = std::max(kkt_last.prim_res_l1 * settings.ls.constr_vio_min_frac, settings.prim_tol);
-        // ls.constr_vio_min = kkt_last.prim_res_l1 * settings.ls.constr_vio_min_frac;
+        ls.constr_vio_min = std::max(kkt_last.primal.res_l1 * settings.ls.constr_vio_min_frac, settings.prim_tol);
+        // ls.constr_vio_min = kkt_last.primal.res_l1 * settings.ls.constr_vio_min_frac;
         refresh_problem_flags();
         settings.max_iter = n_iter;
         for (size_t i_iter = iter_last.num_iter; i_iter < n_iter;) {
             fmt::println("======================== Iteration: {}", i_iter + 1);
             profiler_.start_iteration(i_iter);
             timed_block_start("sqp_single_iter");
-            const scalar_t inf_prim_before = kkt_last.inf_prim_res;
+            const scalar_t inf_prim_before = kkt_last.primal.inf_res;
             line_search_action action = sqp_iter(ls, kkt_last,
                                                  /*do_scaling=*/true, /*do_refinement=*/true);
             timed_block_end("sqp_single_iter");
@@ -948,13 +847,15 @@ ns_sqp::result_type ns_sqp::update(size_t n_iter, bool verbose) {
                 action == line_search_action::failure &&
                 ls.failure_reason == filter_linesearch_per_iter_data::failure_reason_t::tiny_step &&
                 settings.restoration.enabled &&
-                kkt_last.inf_prim_res > settings.prim_tol &&
+                kkt_last.primal.inf_res > settings.prim_tol &&
                 settings.ls.alpha_primal <= current_linesearch_alpha_min(ls);
 
             if (tiny_step_trigger) {
                 auto resto = restoration_update(kkt_last, iter_last, ls);
                 kkt_last = resto;
                 iter_last = resto.iter;
+                reset_part(kkt_last.barrier_step);
+                reset_part(kkt_last.step);
                 ls.reset_per_iter_data();
                 if (iter_last.result == iter_result_t::restoration_failed ||
                     iter_last.result == iter_result_t::restoration_reached_max_iter ||
@@ -965,9 +866,9 @@ ns_sqp::result_type ns_sqp::update(size_t n_iter, bool verbose) {
                 continue;
             }
 
-            if (kkt_last.inf_dual_res < settings.dual_tol &&
-                kkt_last.inf_prim_res < settings.prim_tol &&
-                kkt_last.inf_comp_res < settings.comp_tol) {
+            if (kkt_last.dual.inf_res < settings.dual_tol &&
+                kkt_last.primal.inf_res < settings.prim_tol &&
+                kkt_last.primal.inf_comp < settings.comp_tol) {
                 if (verbose)
                     fmt::print("Converged!\n");
                 iter_last.result = iter_result_t::success;
@@ -976,9 +877,9 @@ ns_sqp::result_type ns_sqp::update(size_t n_iter, bool verbose) {
 
             if (settings.has_ipm_ineq && settings.ipm.mu_method == solver::ipm_config::monotonic_decrease) {
                 bool mu_changed = false;
-                while (kkt_last.inf_prim_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold &&
-                       kkt_last.inf_dual_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold &&
-                       kkt_last.inf_comp_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold) {
+                while (kkt_last.primal.inf_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold &&
+                       kkt_last.dual.inf_res < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold &&
+                       kkt_last.primal.inf_comp < settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold) {
                     settings.ipm.mu *= settings.ipm.mu_monotone_factor;
                     if (verbose)
                         fmt::print("Monotone decrease of mu: new mu = {:.3e}\n", settings.ipm.mu);
@@ -986,9 +887,9 @@ ns_sqp::result_type ns_sqp::update(size_t n_iter, bool verbose) {
                     mu_changed = true;
                 }
                 if (!mu_changed) {
-                    bool prim_fail = kkt_last.inf_prim_res >= settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold;
-                    bool dual_fail = kkt_last.inf_dual_res >= settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold;
-                    bool comp_fail = kkt_last.inf_comp_res >= settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold;
+                    bool prim_fail = kkt_last.primal.inf_res >= settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold;
+                    bool dual_fail = kkt_last.dual.inf_res >= settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold;
+                    bool comp_fail = kkt_last.primal.inf_comp >= settings.ipm.mu * settings.ipm.mu_monotone_fraction_threshold;
                     if (verbose)
                         fmt::print("Not using monotone decrease of mu: primal res {} threshold, dual res {} threshold, comp res {} threshold\n",
                                    prim_fail ? "exceeds" : "within",
@@ -999,7 +900,7 @@ ns_sqp::result_type ns_sqp::update(size_t n_iter, bool verbose) {
                 if (mu_changed) {
                     // kkt_last carries accepted primal/dual residuals from the previous iterate,
                     // but its barrier-weighted objective summaries are now stale under the new mu.
-                    kkt_last = compute_prim_res_info(kkt_last);
+                    kkt_last = compute_point_primal_info(kkt_last, point_value_mask::barrier_objective);
                 }
                 settings.ipm.mu = std::max(settings.ipm.mu, 1e-11);
             }
