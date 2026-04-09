@@ -561,7 +561,7 @@ void ns_sqp::accept_trial_point(filter_linesearch_data &ls, iteration_context &c
                                         true);
             });
             if (!settings.verbose && !in_restoration_phase()) {
-                ctx.trial = compute_filter_accepted_info(ctx.trial);
+                ctx.trial = compute_filter_accepted_info();
             } else {
                 ctx.trial = compute_kkt_info();
             }
@@ -1215,36 +1215,18 @@ ns_sqp::kkt_info ns_sqp::compute_filter_trial_info() {
     return kkt;
 }
 
-ns_sqp::kkt_info ns_sqp::compute_filter_accepted_info(const kkt_info &trial_info) {
-    kkt_info kkt = trial_info;
+ns_sqp::kkt_info ns_sqp::compute_filter_accepted_info() {
+    kkt_info kkt;
     scalar_t lambda_l1 = 0.;
     size_t n_constr = 0;
     scalar_t dual_res_l1 = 0.;
     size_t n_dual_res = 0;
     auto &graph = active_data();
 
-    kkt.objective = kkt.cost;
-    kkt.search_barrier_value = 0.;
-    kkt.barrier_dir_deriv = 0.;
-    kkt.obj_fullstep_dec = 0.;
-    kkt.penalized_obj = 0.;
-    kkt.penalized_obj_fullstep_dec = 0.;
-    kkt.inf_dual_res = 0.;
-    kkt.inf_comp_res = 0.;
-    kkt.max_diag_scaling = 0.;
-    kkt.max_eq_dual_norm = 0.;
-    kkt.max_ineq_dual_norm = 0.;
-    kkt.max_dual_norm = 0.;
-    kkt.inf_prim_step = 0.;
-    kkt.inf_dual_step = 0.;
-    kkt.inf_eq_dual_step = 0.;
-    kkt.inf_ineq_dual_step = 0.;
-    kkt.inf_dyn_dual_step = 0.;
-    kkt.inf_eq_x_dual_step = 0.;
-    kkt.inf_eq_xu_dual_step = 0.;
-    kkt.avg_dual_res = 0.;
-
     for (auto *n : graph.flatten_nodes()) {
+        kkt.cost += n->cost();
+        kkt.inf_prim_res = std::max(kkt.inf_prim_res, n->inf_prim_res_);
+        kkt.prim_res_l1 += n->prim_res_l1_;
         kkt.inf_comp_res = std::max(kkt.inf_comp_res, n->inf_comp_res_);
 
         accumulate_constraint_objective_terms(kkt, *n, false, true);
