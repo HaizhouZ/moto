@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <moto/ocp/impl/node_data.hpp>
 #include <moto/solver/ipm/ipm_constr.hpp>
+#include <moto/solver/ineq_soft.hpp>
 
 namespace moto::solver::equality_init {
 namespace {
@@ -55,6 +56,7 @@ eq_init_pmm_constr::eq_init_pmm_constr(const std::string &name,
 void eq_init_pmm_constr::value_impl(func_approx_data &data) const {
     forward_source_value(source_, data);
     auto &d = data.as<pmm_constr::approx_data>();
+    solver::ineq_soft::ensure_initialized(*this, d);
     d.g_ = d.v_ - d.rho_ * d.multiplier_;
 }
 

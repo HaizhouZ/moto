@@ -29,7 +29,9 @@ auto get_for_each(Callback &&callback) {
 inline void for_each(auto *data, auto &&callback) {
     get_for_each(std::forward<decltype(callback)>(callback))(data);
 }
-void initialize(node_data *data);
+void bind_runtime(const soft_constr &sf, soft_constr_data_t &sd);
+void bind_runtime(node_data *data);
+void ensure_initialized(const soft_constr &sf, soft_constr_data_t &sd);
 /**
  * @brief finalize the newton step for the soft constraints
  * @details it will call finalize_newton_step on each soft constraint

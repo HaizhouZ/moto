@@ -1,4 +1,5 @@
 #include <moto/ocp/problem.hpp>
+#include <moto/solver/ineq_soft.hpp>
 #include <moto/solver/ipm/ipm_constr.hpp>
 namespace moto {
 namespace solver {
@@ -30,7 +31,7 @@ void ipm_constr::initialize(ipm::data_map_t &data) const {
     auto &d = data.as<ipm_data>();
     // dont do d.g_ = d.v_; cuz already set in value_impl
     d.slack_ = (-d.g_).cwiseMax(1); // clip
-    d.v_ = d.g_ + d.slack_;            // r_g = g_ + slack
+    d.v_ = d.g_ + d.slack_;         // r_g = g_ + slack
     d.multiplier_.array() = d.ipm_cfg->mu / d.slack_.array();
     // d.multiplier_ = d.multiplier_.cwiseMin(1); // clip
     d.multiplier_.setConstant(1.0);
@@ -60,7 +61,6 @@ void ipm_constr::finalize_newton_step(ipm::data_map_t &data) const {
     //     d.d_multiplier_.array() = -d.multiplier_.array() - d.diag_scaling.array() * d.d_slack_.array();
     else {
         d.d_multiplier_.array() = -(d.r_s_.array() - d.ipm_cfg->mu + d.multiplier_.array() * d.d_slack_.array()) / d.reg_T_inv_.array();
-
     }
     d.d_slack_.array() += d.reg_.array() * d.d_multiplier_.array();
     d.d_slack_.array() *= d.active_.array();      // apply the active set
@@ -150,6 +150,7 @@ void ipm_constr::value_impl(func_approx_data &data) const {
     base::value_impl(data);
     auto &d = data.as<ipm_data>();
     d.g_ = d.v_;            //.cwiseMin(-d.reg_);
+    solver::ineq_soft::ensure_initialized(*this, d);
     d.v_ = d.g_ + d.slack_; // r_g = g_ + slack
     if (d.v_.hasNaN()) {
         fmt::print("g: {}\n", d.g_.transpose());

@@ -4,6 +4,13 @@
 #include <moto/ocp/constr.hpp>
 
 namespace moto {
+struct soft_runtime_settings {
+    bool reinitialize_ineq_soft = false;
+};
+
+namespace solver {
+struct data_base;
+}
 /**
  * @brief soft constraint interface class
  * @warning lagrangian gradient correction should be added to @ approx_data::lag_jac_corr_
@@ -23,6 +30,11 @@ class soft_constr : public generic_constr {
         std::vector<vector_ref> prim_step_;            // to be set
         std::vector<row_vector_ref> lag_jac_corr_; ///< lagrangian gradient correction
         mapped_vector d_multiplier_;                          ///< newton step for multipliers
+        workspace_data *ws_data_ = nullptr;
+        soft_runtime_settings *runtime_cfg_ = nullptr;
+        solver::data_base *solver_data_ = nullptr;
+        bool runtime_bound_ = false;
+        bool initialized_ = false;
 
         using data_base = base::approx_data;
         approx_data(data_base &&rhs) : data_base(std::move(rhs)), d_multiplier_(nullptr, 0) {
@@ -46,6 +58,12 @@ class soft_constr : public generic_constr {
     soft_constr(generic_constr &&rhs) : base(std::move(rhs)) {
         field_hint().is_soft = true; ///< set the field hint to soft
     } ///< move constructor from generic_constr
+    void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const override {
+        base::setup_workspace_data(data, ws_data);
+        auto &sd = data.as<data_map_t>();
+        sd.ws_data_ = ws_data;
+        sd.runtime_cfg_ = dynamic_cast<soft_runtime_settings *>(ws_data);
+    }
     /// initialize the soft constraint data
     virtual void initialize(data_map_t &data) const = 0;
     /// post rollout operation for the soft constraint to compute the newton step

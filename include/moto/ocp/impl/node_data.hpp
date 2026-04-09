@@ -8,6 +8,9 @@
 namespace moto {
 struct node_data;
 def_unique_ptr(node_data);
+namespace solver {
+struct data_base;
+}
 /**
  * @brief node data class
  * stores the shooting node data including symbolics, raw approximation and its sparse mapping
@@ -66,7 +69,6 @@ struct MOTO_ALIGN_NO_SHARING node_data {
         eval_jac,         ///< evaluate jacobian
         eval_hess,        ///< evaluate hessian
         eval_derivatives, ///< evaluate derivatives (jacobian, hessian)
-        eval_raw_derivatives, ///< evaluate derivatives but do not assemble lag/lag_jac/lag_hess
         eval_all,         ///< evaluate all (value, jacobian, hessian)
     };
     /**
@@ -107,6 +109,7 @@ struct MOTO_ALIGN_NO_SHARING node_data {
 
     void clear_lag_jac();
     void clear_lag_hessian();
+    void bind_soft_runtime_owner(solver::data_base *owner);
 
     void print_residuals() const;
 };

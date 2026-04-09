@@ -443,7 +443,6 @@ TEST_CASE("restoration soft-equality overlays are built and keep synced multipli
     REQUIRE(saw_overlay);
 
     resto.update_approximation(node_data::update_mode::eval_val, true);
-    solver::ineq_soft::initialize(&resto);
 
     saw_overlay = false;
     resto.for_each(__eq_x_soft, [&](const resto_eq_elastic_constr &overlay, resto_eq_elastic_constr::approx_data &d) {

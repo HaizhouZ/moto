@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <moto/ocp/impl/node_data.hpp>
+#include <moto/solver/ineq_soft.hpp>
 #include <moto/solver/ipm/ipm_constr.hpp>
 #include <moto/solver/ipm/positivity_step.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
@@ -613,12 +614,7 @@ void resto_eq_elastic_constr::value_impl(func_approx_data &data) const {
     dynamic_cast<const generic_func &>(*source_).value(data);
     auto &d = data.as<approx_data>();
     d.base_residual = d.v_;
-    if (local_state_dim(d.elastic) == 0) {
-        // The restoration entry path does one value-only evaluation before the
-        // soft-constraint initializer sizes and seeds the local elastic state.
-        d.v_ = d.base_residual;
-        return;
-    }
+    solver::ineq_soft::ensure_initialized(*this, d);
     require_local_state_initialized(d.elastic, d.func_.dim(), "resto_eq_elastic_constr::value_impl");
     d.v_ = d.base_residual;
     for (size_t k : range(k_pair_slots.size())) {
@@ -716,7 +712,6 @@ void resto_eq_elastic_constr::initialize(data_map_t &data) const {
     } else {
         d.multiplier_.setZero();
     }
-    d.multiplier_.setZero();
     d.multiplier_backup = d.multiplier_;
     resto_eq_elastic_constr::compute_local_model(d.elastic, d.base_residual, d.multiplier_, rho, mu_bar);
 }
@@ -880,12 +875,7 @@ void resto_ineq_elastic_ipm_constr::value_impl(func_approx_data &data) const {
     // current local model. Keep lag_data::comp_ neutral so public stage comp
     // statistics are not polluted by restoration-only bookkeeping.
     d.comp_.setZero();
-    if (local_state_dim(d.elastic) == 0) {
-        // The restoration entry path does one value-only evaluation before the
-        // soft-constraint initializer sizes and seeds the local elastic state.
-        d.v_ = d.base_residual;
-        return;
-    }
+    solver::ineq_soft::ensure_initialized(*this, d);
     require_local_state_initialized(d.elastic, d.func_.dim(), "resto_ineq_elastic_ipm_constr::value_impl");
     d.v_ = d.base_residual;
     for (size_t k : range(k_triplet_slots.size())) {
