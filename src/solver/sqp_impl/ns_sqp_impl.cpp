@@ -1240,7 +1240,14 @@ ns_sqp::kkt_info ns_sqp::compute_filter_accepted_info() {
         if (n->dense().lag_jac_[__u].size() > 0) {
             accumulate_u_stationarity(n->dense().lag_jac_[__u], kkt, dual_res_l1, n_dual_res);
         }
-        accumulate_dual_norms_and_l1(kkt, n->dense().dual_, lambda_l1, n_constr);
+        for (auto cf : constr_fields) {
+            const auto &lam = n->dense().dual_[cf];
+            if (lam.size() == 0) {
+                continue;
+            }
+            lambda_l1 += lam.lpNorm<1>();
+            n_constr += static_cast<size_t>(lam.size());
+        }
 
         for (auto f : constr_fields) {
             if (n->trial_dual_step[f].size() > 0) {
