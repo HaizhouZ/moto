@@ -48,7 +48,7 @@ void ns_sqp::print_stat_header() {
     putc('\n', stdout);
 }
 
-void ns_sqp::print_stats(const kkt_info &info) {
+void ns_sqp::print_stats(const kkt_info &info, const iter_info &iter, size_t ls_steps) {
     const bool restoration_active = in_restoration_phase();
     auto mu_info = current_phase_mu(restoration_active, settings.has_ipm_ineq, settings.ipm.mu);
     scalar_t stats_value[] = {0., info.objective, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res, info.inf_prim_step, info.inf_eq_dual_step, info.inf_ineq_dual_step,
@@ -62,14 +62,14 @@ void ns_sqp::print_stats(const kkt_info &info) {
         }
     }
     size_t idx_stat = 0;
-    size_t i_iter = static_cast<size_t>(info.num_iter);
+    size_t i_iter = static_cast<size_t>(iter.num_iter);
     const std::string iter_label =
         i_iter == 0 ? "--" : restoration_active ? fmt::format("{}r", i_iter) : std::to_string(i_iter);
     for (auto &item : stats) {
         if (item.name == "no.") {
             fmt::print("| {:<{}} |", iter_label, item.width);
         } else if (item.name == "ls") {
-            fmt::print("| {:<{}} |", info.ls_steps < 0 ? "--" : std::to_string(info.ls_steps), item.width);
+            fmt::print("| {:<{}} |", std::to_string(ls_steps), item.width);
         } else if (item.name == "mu(max)") {
             if (!mu_info.valid) {
                 fmt::print("| {:<{}} |", "---------", item.width);

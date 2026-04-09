@@ -202,7 +202,7 @@ void dump_resto_eq_node(ns_sqp::data &d, std::string_view label) {
 
 } // namespace
 
-ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_linesearch_data &ls) {
+ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const iter_info &iter_before, filter_linesearch_data &ls) {
     if (settings.ls.method == linesearch_setting::search_method::merit_backtracking) {
         throw std::runtime_error("restoration mode is incompatible with merit_backtracking");
     }
@@ -212,7 +212,7 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     if (settings.verbose) {
         fmt::print("\n=== enter restoration ===\n");
         fmt::print("  entry iter={}  outer objective={:.3e}  outer search_obj={:.3e}  prim={:.3e}  dual={:.3e}  comp={:.3e}\n",
-                   kkt_before.num_iter, kkt_before.objective, kkt_before.penalized_obj,
+                   iter_before.num_iter, kkt_before.objective, kkt_before.penalized_obj,
                    kkt_before.prim_res_l1, kkt_before.inf_dual_res, kkt_before.inf_comp_res);
         if (resto_entry_debug_enabled()) {
             dump_outer_entry_equalities(outer_graph);
@@ -242,10 +242,6 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
         return kkt;
     };
 
-    const auto set_iter_meta = [&](kkt_info &info, size_t iter_offset, size_t ls_steps) {
-        info.num_iter = kkt_before.num_iter + iter_offset;
-        info.ls_steps = ls_steps;
-    };
     const auto refresh_restoration_derivatives = [&]() {
         resto_graph.for_each_parallel([this](data *d) {
             d->update_approximation(node_data::update_mode::eval_derivatives, true);
@@ -372,8 +368,11 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     rls.constr_vio_min =
         std::max(kkt_before.prim_res_l1 * settings.ls.constr_vio_min_frac, settings.prim_tol);
 
-    kkt_info kkt_rest = compute_restoration_info_from_split(true);
-    set_iter_meta(kkt_rest, 0, 0);
+    result_type rest_state;
+    static_cast<kkt_info &>(rest_state) = compute_restoration_info_from_split(true);
+    rest_state.iter = iter_info{
+        .num_iter = iter_before.num_iter,
+    };
 
     kkt_info kkt_outer_trial{};
     bool resto_accept = false;
@@ -381,26 +380,30 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     bool resto_converged = false;
     const size_t max_resto_iters =
         std::min(settings.restoration.max_iter,
-                 settings.max_iter > kkt_before.num_iter ? settings.max_iter - kkt_before.num_iter : size_t(0));
+                 settings.max_iter > iter_before.num_iter ? settings.max_iter - iter_before.num_iter : size_t(0));
     const scalar_t accepted_outer_prim_res =
         settings.restoration.restoration_improvement_frac * kkt_before.prim_res_l1;
 
     for (size_t i_rest = 0; i_rest < max_resto_iters; ++i_rest) {
-        const line_search_action action = sqp_iter(rls, kkt_rest,
+        const line_search_action action = sqp_iter(rls, rest_state,
                                                    /*do_scaling=*/false,
                                                    /*do_refinement=*/true,
                                                    /*gauss_newton=*/false);
-        set_iter_meta(kkt_rest, i_rest + 1, rls.step_cnt);
+        rest_state.iter = iter_info{
+            .num_iter = iter_before.num_iter + i_rest + 1,
+        };
         if (settings.verbose) {
-            print_stats(kkt_rest);
+            print_stats(rest_state, rest_state.iter, rls.step_cnt);
         }
 
-        resto_converged = kkt_rest.inf_dual_res < settings.dual_tol;
+        resto_converged = rest_state.inf_dual_res < settings.dual_tol;
 
         if (action == line_search_action::accept) {
             kkt_outer_trial = evaluate_outer_trial_from_restoration();
-            kkt_rest = compute_restoration_info_from_split(true);
-            set_iter_meta(kkt_rest, i_rest + 1, rls.step_cnt);
+            static_cast<kkt_info &>(rest_state) = compute_restoration_info_from_split(true);
+            rest_state.iter = iter_info{
+                .num_iter = iter_before.num_iter + i_rest + 1,
+            };
 
             const bool outer_accept = outer_filter_accepts(ls, kkt_outer_trial, kkt_before);
             const bool prim_improved = kkt_outer_trial.prim_res_l1 < accepted_outer_prim_res;
@@ -422,23 +425,24 @@ ns_sqp::kkt_info ns_sqp::restoration_update(const kkt_info &kkt_before, filter_l
     }
 
     finish_restoration(resto_accept);
-    kkt_info result = resto_accept ? compute_normal_info_from_split(true, false) : kkt_rest;
-    result.num_iter = kkt_rest.num_iter;
-    result.ls_steps = kkt_rest.ls_steps;
+    result_type result;
+    static_cast<kkt_info &>(result) = resto_accept ? compute_normal_info_from_split(true, false)
+                                                   : static_cast<const kkt_info &>(rest_state);
+    result.iter = rest_state.iter;
     if (resto_accept) {
-        result.result = iter_result_t::unknown;
+        result.iter.result = iter_result_t::unknown;
     } else if (resto_stalled) {
-        result.result = iter_result_t::restoration_failed;
+        result.iter.result = iter_result_t::restoration_failed;
     } else if (resto_converged) {
-        result.result = iter_result_t::infeasible_stationary;
+        result.iter.result = iter_result_t::infeasible_stationary;
     } else {
-        result.result = iter_result_t::restoration_reached_max_iter;
+        result.iter.result = iter_result_t::restoration_reached_max_iter;
     }
     if (settings.verbose) {
         fmt::print("[resto]: primal residual(L1): {} before {}\n", kkt_outer_trial.prim_res_l1, kkt_before.prim_res_l1);
         fmt::print("[resto]: primal residual(Linf): {} before {}\n", kkt_outer_trial.inf_prim_res, kkt_before.inf_prim_res);
         fmt::print("=== leave restoration: {} ===\n\n",
-                   resto_accept ? "success" : (result.result == iter_result_t::infeasible_stationary ? "infeasible_stationary" : (result.result == iter_result_t::restoration_reached_max_iter ? "reached_max_iter" : "failed")));
+                   resto_accept ? "success" : (result.iter.result == iter_result_t::infeasible_stationary ? "infeasible_stationary" : (result.iter.result == iter_result_t::restoration_reached_max_iter ? "reached_max_iter" : "failed")));
     }
     return result;
 }

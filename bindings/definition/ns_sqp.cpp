@@ -145,20 +145,26 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_ro("trial_evaluations", &ns_sqp::profile_report::trial_evaluations)
         .def_ro("phases", &ns_sqp::profile_report::phases)
         .def_ro("iterations", &ns_sqp::profile_report::iterations);
-    nb::class_<ns_sqp::kkt_info>(sqp, "kkt_info")
-        .def_ro("result", &ns_sqp::kkt_info::result, "Result of the SQP iteration")
-        .def_prop_ro("solved", [](const ns_sqp::kkt_info &self) { return self.result == ns_sqp::iter_result_t::success; }, "Whether the problem is solved")
-        .def_rw("num_iter", &ns_sqp::kkt_info::num_iter, "Number of iterations")
-        .def_rw("ls_steps", &ns_sqp::kkt_info::ls_steps, "Line-search trial count used in this SQP iteration")
-        .def_rw("objective", &ns_sqp::kkt_info::objective, "Objective value")
-        .def_ro("cost", &ns_sqp::kkt_info::cost, "Pure running cost (sum of __cost terms, no barrier)")
-        .def_ro("search_barrier_value", &ns_sqp::kkt_info::search_barrier_value, "Search-only barrier contribution for the active phase")
-        .def_ro("search_barrier_dir_deriv", &ns_sqp::kkt_info::search_barrier_dir_deriv, "Directional derivative of the search-only barrier contribution")
-        .def_rw("inf_prim_res", &ns_sqp::kkt_info::inf_prim_res, "Primal residual (constraint violation)")
-        .def_rw("inf_dual_res", &ns_sqp::kkt_info::inf_dual_res, "Dual residual (stationary condition)")
-        .def_rw("inf_comp_res", &ns_sqp::kkt_info::inf_comp_res, "Inequality complementarity residual")
-        .def_rw("inf_prim_step", &ns_sqp::kkt_info::inf_prim_step, "Infinity norm of the primal step")
-        .def_rw("inf_dual_step", &ns_sqp::kkt_info::inf_dual_step, "Infinity norm of the dual step");
+    nb::class_<ns_sqp::iter_info>(sqp, "iter_info")
+        .def_ro("result", &ns_sqp::iter_info::result, "Result of the SQP iteration")
+        .def_prop_ro("solved", [](const ns_sqp::iter_info &self) { return self.result == ns_sqp::iter_result_t::success; }, "Whether the problem is solved")
+        .def_rw("num_iter", &ns_sqp::iter_info::num_iter, "Number of iterations");
+
+    nb::class_<ns_sqp::result_type>(sqp, "result_type")
+        .def_ro("iter", &ns_sqp::result_type::iter, "Iteration metadata")
+        .def_prop_ro("kkt", [](const ns_sqp::result_type &self) -> const ns_sqp::kkt_info & { return self; }, "KKT summary values")
+        .def_prop_ro("result", [](const ns_sqp::result_type &self) { return self.iter.result; }, "Result of the SQP iteration")
+        .def_prop_ro("solved", [](const ns_sqp::result_type &self) { return self.iter.result == ns_sqp::iter_result_t::success; }, "Whether the problem is solved")
+        .def_prop_ro("num_iter", [](const ns_sqp::result_type &self) { return self.iter.num_iter; }, "Number of iterations")
+        .def_prop_ro("objective", [](const ns_sqp::result_type &self) { return self.objective; }, "Objective value")
+        .def_prop_ro("cost", [](const ns_sqp::result_type &self) { return self.cost; }, "Pure running cost (sum of __cost terms, no barrier)")
+        .def_prop_ro("search_barrier_value", [](const ns_sqp::result_type &self) { return self.search_barrier_value; }, "Search-only barrier contribution for the active phase")
+        .def_prop_ro("search_barrier_dir_deriv", [](const ns_sqp::result_type &self) { return self.search_barrier_dir_deriv; }, "Directional derivative of the search-only barrier contribution")
+        .def_prop_ro("inf_prim_res", [](const ns_sqp::result_type &self) { return self.inf_prim_res; }, "Primal residual (constraint violation)")
+        .def_prop_ro("inf_dual_res", [](const ns_sqp::result_type &self) { return self.inf_dual_res; }, "Dual residual (stationary condition)")
+        .def_prop_ro("inf_comp_res", [](const ns_sqp::result_type &self) { return self.inf_comp_res; }, "Inequality complementarity residual")
+        .def_prop_ro("inf_prim_step", [](const ns_sqp::result_type &self) { return self.inf_prim_step; }, "Infinity norm of the primal step")
+        .def_prop_ro("inf_dual_step", [](const ns_sqp::result_type &self) { return self.inf_dual_step; }, "Infinity norm of the dual step");
 
     // Iterate over all enum values provided by magic_enum
     for (auto [value, name] : magic_enum::enum_entries<moto::solver::ipm_config::adaptive_mu_t>()) {

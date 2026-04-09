@@ -530,10 +530,15 @@ It exposes:
 
 - `v_`: function value view
 - `jac_`: per-argument Jacobian views
-- `lag_jac_`: views into the stage’s dense cost/Lagrangian gradient blocks
 - `lag_hess_`: views into the stage’s dense Hessian blocks
 
 This is the bridge from function-local derivatives to the global per-stage QP data structures.
+
+Important current convention:
+
+- callbacks should write function-local first-order data through `jac_`
+- `func_approx_data` no longer carries a direct alias into assembled `lag_jac_`
+- assembled stage gradients remain owned by [`lag_data`](/home/harper/Documents/moto/include/moto/ocp/impl/lag_data.hpp) and are formed during stage assembly
 
 ## Dense Merged Derivative Storage
 
@@ -678,6 +683,13 @@ Key members:
 - `riccati_solver_`: `generic_solver`
 - `settings`
 - `kkt_last`
+- `iter_last`
+
+Public update return value:
+
+- `ns_sqp::result_type`
+  - inherits the latest `kkt_info` summary
+  - carries iteration metadata separately in `iter`
 
 `ns_sqp::data` combines:
 
@@ -716,15 +728,17 @@ Important invariants:
 2. refresh `settings.has_ineq_soft` and `settings.has_ipm_ineq` from the active graph
 3. for every node:
    call `setup_workspace_data(...)` on each constraint
-   evaluate values with `update_approximation(eval_val)`
-   initialize inequality / soft constraints via `solver::ineq_soft::initialize`
-4. for every node:
-   evaluate derivatives with `update_approximation(eval_derivatives)`
+   bind soft-constraint runtime views with `solver::ineq_soft::bind_runtime(...)`
+   evaluate values and derivatives with `update_approximation(eval_all)`
 5. compute initial `kkt_info`
 6. reset scaling caches
 7. print stats header and iteration-0 stats if verbose
 
-`solver::ineq_soft::initialize(...)` wires each soft constraint’s `prim_step_` views into `trial_prim_step[...]`, binds its `d_multiplier_` into `trial_dual_step[...]`, and calls the specific soft-constraint initializer.
+Current soft-constraint lifecycle:
+
+- `solver::ineq_soft::bind_runtime(node_data*)` binds runtime views such as `prim_step_` and `d_multiplier_`
+- individual soft constraints lazily initialize themselves from `value_impl()` via `solver::ineq_soft::ensure_initialized(...)`
+- when restoration / equality-init rebuilds require a fresh soft state, callers explicitly use `solver::ineq_soft::bind_and_invalidate(...)` inside the existing per-node parallel loop
 
 ## SQP Iteration Flow
 
@@ -891,19 +905,33 @@ In normal constrained mode:
 
 ## KKT Information And Residual Accounting
 
-[`compute_kkt_info(...)`](/home/harper/Documents/moto/src/solver/sqp_impl/ns_sqp_impl.cpp) aggregates across all nodes:
+The old monolithic `compute_kkt_info(...)` path has been split. The current main entry points are:
 
-- `cost`
-- `objective = cost - mu * log_slack_sum`
-- `obj_fullstep_dec`
-- `inf_prim_res`
-- `prim_res_l1`
-- `inf_dual_res`
-- `avg_dual_res`
-- `inf_comp_res`
-- primal/dual step norms
-- max dual norms
-- IPM diagnostics like `max_diag_scaling`
+- `compute_prim_res_info(...)`
+- `compute_ls_info(...)`
+- `compute_dual_res_info(...)`
+
+Current division of responsibility:
+
+- `compute_prim_res_info(...)`
+  - `cost`
+  - `objective`
+  - `search_barrier_value`
+  - `penalized_obj`
+  - `inf_prim_res`
+  - `prim_res_l1`
+  - `inf_comp_res`
+  - `max_diag_scaling`
+- `compute_ls_info(...)`
+  - line-search directional data such as:
+  - `obj_fullstep_dec`
+  - `penalized_obj_fullstep_dec`
+  - primal/dual step norms
+- `compute_dual_res_info(...)`
+  - `inf_dual_res`
+  - `avg_dual_res`
+  - max dual norms
+  - restoration-local dual/complementarity residual aggregation when restoration is active
 
 Important dual-residual detail:
 

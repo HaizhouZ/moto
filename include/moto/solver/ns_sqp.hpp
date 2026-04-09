@@ -97,8 +97,8 @@ struct ns_sqp {
     struct iterative_refinement_setting {
         bool enabled = true;           ///< whether to use iterative refinement
         size_t max_iters = 5;          ///< max refinement iterations
-        scalar_t prim_res_tol = 1e-10; ///< primal residual tolerance for refinement
-        scalar_t dual_res_tol = 1e-10; ///< dual residual tolerance for refinement
+        scalar_t prim_res_tol = 1e-5; ///< primal residual tolerance for refinement
+        scalar_t dual_res_tol = 1e-5; ///< dual residual tolerance for refinement
     };
 
     struct linesearch_setting : public solver::linesearch_config {
@@ -239,11 +239,12 @@ struct ns_sqp {
         restoration,
     };
 
-    struct kkt_info {
+    struct iter_info {
         iter_result_t result = iter_result_t::unknown;
-        size_t num_iter = 0; // number of iterations
-        size_t ls_steps = 0; ///< line search steps
+        size_t num_iter = 0;
+    };
 
+    struct kkt_info {
         scalar_t cost = 0.;                       // pure running cost (sum of __cost terms)
         scalar_t log_slack_sum = 0.;              // sum(log(slack)) across all normal-IPM constraints, mu-free
         scalar_t barrier_dir_deriv = 0.;          // sum(d_slack / slack_current) across all normal-IPM constraints, mu-free
@@ -269,9 +270,16 @@ struct ns_sqp {
         scalar_t inf_eq_x_dual_step = 0.;         // inf-norm of dual step for __eq_x
         scalar_t inf_eq_xu_dual_step = 0.;        // inf-norm of dual step for __eq_xu
         scalar_t avg_dual_res = 0.;               // average dual residual: L1 norm of stationarity gradient / number of elements (unscaled)
-    } kkt_last;
+    };
 
-    kkt_info update(size_t n_iter, bool verbose = true);
+    struct result_type : public kkt_info {
+        iter_info iter;
+    };
+
+    kkt_info kkt_last;
+    iter_info iter_last;
+
+    result_type update(size_t n_iter, bool verbose = true);
     const profile_report &profile() const { return profile_report_; }
     void reset_profile();
 
@@ -420,12 +428,12 @@ struct ns_sqp {
     /// print statistics header
     void print_stat_header();
     /// print statistics for the current iteration
-    void print_stats(const kkt_info &info);
+    void print_stats(const kkt_info &info, const iter_info &iter, size_t ls_steps);
     kkt_info compute_ls_info(const kkt_info &base);
     kkt_info compute_prim_res_info(const kkt_info &base);
     kkt_info compute_dual_res_info(const kkt_info &base);
     void initialize_equality_multipliers();
-    kkt_info restoration_update(const kkt_info &kkt_before, filter_linesearch_data &ls);
+    result_type restoration_update(const kkt_info &kkt_before, const iter_info &iter_before, filter_linesearch_data &ls);
     /// perform iterative refinement to improve the solution accuracy, will modify the current solution in place
     void iterative_refinement();
     /// update the line search bounds with the (probably updated) max value

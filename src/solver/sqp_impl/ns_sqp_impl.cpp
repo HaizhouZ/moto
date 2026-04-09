@@ -374,7 +374,7 @@ ns_sqp::kkt_info ns_sqp::initialize() {
     if (settings.verbose) {
         // print_scaling_info();
         print_stat_header();
-        print_stats(kkt); // print initial stats
+        print_stats(kkt, iter_info{}, 0); // print initial stats
     }
     return kkt;
 }
@@ -913,13 +913,14 @@ ns_sqp::kkt_info ns_sqp::compute_dual_res_info(const kkt_info &base) {
     return kkt;
 }
 
-ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
+ns_sqp::result_type ns_sqp::update(size_t n_iter, bool verbose) {
     reset_profile();
     profiler_.start_update();
     settings.verbose = verbose;
     auto &graph = active_data();
     graph.no_except() = settings.no_except;
     settings.n_worker = graph.n_jobs();
+    iter_last = {};
     kkt_last = initialize();
     try {
         filter_linesearch_data ls;
@@ -927,7 +928,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
         // ls.constr_vio_min = kkt_last.prim_res_l1 * settings.ls.constr_vio_min_frac;
         refresh_problem_flags();
         settings.max_iter = n_iter;
-        for (size_t i_iter = kkt_last.num_iter; i_iter < n_iter;) {
+        for (size_t i_iter = iter_last.num_iter; i_iter < n_iter;) {
             fmt::println("======================== Iteration: {}", i_iter + 1);
             profiler_.start_iteration(i_iter);
             timed_block_start("sqp_single_iter");
@@ -936,12 +937,11 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                                                  /*do_scaling=*/true, /*do_refinement=*/true);
             timed_block_end("sqp_single_iter");
 
-            kkt_last.num_iter = i_iter + 1;
-            kkt_last.ls_steps = ls.step_cnt;
+            iter_last.num_iter = i_iter + 1;
             profiler_.finish_iteration(ls.step_cnt);
 
             if (verbose) {
-                print_stats(kkt_last);
+                print_stats(kkt_last, iter_last, ls.step_cnt);
             }
 
             const bool tiny_step_trigger =
@@ -952,14 +952,16 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                 settings.ls.alpha_primal <= current_linesearch_alpha_min(ls);
 
             if (tiny_step_trigger) {
-                kkt_last = restoration_update(kkt_last, ls);
+                auto resto = restoration_update(kkt_last, iter_last, ls);
+                kkt_last = resto;
+                iter_last = resto.iter;
                 ls.reset_per_iter_data();
-                if (kkt_last.result == iter_result_t::restoration_failed ||
-                    kkt_last.result == iter_result_t::restoration_reached_max_iter ||
-                    kkt_last.result == iter_result_t::infeasible_stationary) {
+                if (iter_last.result == iter_result_t::restoration_failed ||
+                    iter_last.result == iter_result_t::restoration_reached_max_iter ||
+                    iter_last.result == iter_result_t::infeasible_stationary) {
                     break;
                 }
-                i_iter = kkt_last.num_iter;
+                i_iter = iter_last.num_iter;
                 continue;
             }
 
@@ -968,7 +970,7 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
                 kkt_last.inf_comp_res < settings.comp_tol) {
                 if (verbose)
                     fmt::print("Converged!\n");
-                kkt_last.result = iter_result_t::success;
+                iter_last.result = iter_result_t::success;
                 break;
             }
 
@@ -1003,8 +1005,8 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
             }
             ++i_iter;
         }
-        if (kkt_last.result == iter_result_t::unknown) {
-            kkt_last.result = iter_result_t::exceed_max_iter;
+        if (iter_last.result == iter_result_t::unknown) {
+            iter_last.result = iter_result_t::exceed_max_iter;
         }
     } catch (...) {
         if (settings.no_except) {
@@ -1015,7 +1017,10 @@ ns_sqp::kkt_info ns_sqp::update(size_t n_iter, bool verbose) {
         }
     }
     profiler_.finish_update(profile_report_);
-    return kkt_last;
+    result_type result;
+    static_cast<kkt_info &>(result) = kkt_last;
+    result.iter = iter_last;
+    return result;
 }
 
 void ns_sqp::print_dual_res_breakdown() {
