@@ -503,9 +503,10 @@ void ns_sqp::prepare_globalization(filter_linesearch_data &ls, iteration_context
             solver::ineq_soft::backup_trial_state(d);
         }
     });
-    // Refresh direction-dependent KKT diagnostics for the Newton step that was
-    // just assembled. Line search reads these values from ctx.current.
-    ctx.current = compute_kkt_info();
+    // For filter line search, the current point already has a valid full KKT
+    // summary from the previous accepted iterate. Before probing trials we only
+    // need the current-point search summary for the new Newton step.
+    ctx.current = compute_kkt_info(false);
     if (ctx.mu_changed) {
         ls.points.clear(); // the QP objective changed, so old filter points are no longer comparable
     }
