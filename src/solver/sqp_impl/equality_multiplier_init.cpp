@@ -1,6 +1,6 @@
-#include <moto/solver/ns_sqp.hpp>
 #include <moto/solver/equality_init/eq_init_overlay.hpp>
 #include <moto/solver/ineq_soft.hpp>
+#include <moto/solver/ns_sqp.hpp>
 
 namespace moto {
 namespace {
@@ -53,24 +53,23 @@ bool graph_has_equality_targets(ns_sqp::storage_type &graph) {
 
 struct scoped_eq_init_settings {
     ns_sqp::settings_t &settings;
-    bool ls_enabled;
-    bool restoration_enabled;
-    ns_sqp::iterative_refinement_setting rf;
+    struct backup_t {
+        bool ls_enabled;
+        bool restoration_enabled;
+        ns_sqp::iterative_refinement_setting rf;
+    } backup;
 
     explicit scoped_eq_init_settings(ns_sqp::settings_t &s)
-        : settings(s),
-          ls_enabled(s.ls.enabled),
-          restoration_enabled(s.restoration.enabled),
-          rf(s.rf) {
+        : settings(s), backup{s.ls.enabled, s.restoration.enabled, s.rf} {
         settings.ls.enabled = false;
         settings.restoration.enabled = false;
         settings.rf = settings.eq_init.rf;
     }
 
     ~scoped_eq_init_settings() {
-        settings.ls.enabled = ls_enabled;
-        settings.restoration.enabled = restoration_enabled;
-        settings.rf = rf;
+        settings.ls.enabled = backup.ls_enabled;
+        settings.restoration.enabled = backup.restoration_enabled;
+        settings.rf = backup.rf;
     }
 };
 
@@ -111,7 +110,7 @@ void ns_sqp::initialize_equality_multipliers() {
         });
 
         kkt_info kkt_overlay;
-        kkt_overlay = compute_stationarity_info(compute_point_primal_info(kkt_overlay, point_value_mask::primal | point_value_mask::barrier_objective));
+        update_primal_info(kkt_overlay, point_value_mask::primal);
         filter_linesearch_data ls;
         ls.constr_vio_min = std::max(kkt_overlay.primal.res_l1 * settings.ls.constr_vio_min_frac, settings.prim_tol);
         sqp_iter(ls, kkt_overlay, /*do_scaling=*/false, /*do_refinement=*/settings.rf.enabled);

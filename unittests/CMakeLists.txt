@@ -21,6 +21,9 @@ function(add_moto_test name)
     target_include_directories(${test_name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(${test_name} PRIVATE moto)
     target_link_libraries(${test_name} PRIVATE Catch2::Catch2WithMain)
+    set_target_properties(${test_name} PROPERTIES
+        BUILD_RPATH "\$ORIGIN/.."
+    )
 
     # set_source_files_properties(${test_file} PROPERTIES
     #     COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O3>"
@@ -28,6 +31,11 @@ function(add_moto_test name)
     # )
     
     add_test(NAME ${test_name} COMMAND ${test_name} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(
+        ${test_name}
+        PROPERTIES
+        ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}:$ENV{LD_LIBRARY_PATH}"
+    )
 endfunction()
 
 function(add_moto_python_test name script)
@@ -39,12 +47,13 @@ function(add_moto_python_test name script)
     set_tests_properties(
         ${name}
         PROPERTIES
-        ENVIRONMENT "OMP_NUM_THREADS=1"
+        ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}:$ENV{LD_LIBRARY_PATH};OMP_NUM_THREADS=1"
     )
 endfunction()
 
 
 add_moto_test(sym_test)
+add_moto_test(ineq_jac_sparsity)
 add_moto_test(graph_model_compose)
 add_moto_test(equality_multiplier_init)
 add_moto_test(restoration)

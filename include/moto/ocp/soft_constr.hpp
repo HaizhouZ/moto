@@ -26,17 +26,16 @@ class soft_constr : public generic_constr {
         std::vector<vector_ref> prim_step_;            // to be set
         std::vector<row_vector_ref> lag_jac_corr_; ///< lagrangian gradient correction
         mapped_vector d_multiplier_;                          ///< newton step for multipliers
+        const vector *jacobian_row_scaling_ = nullptr;
+        const vector *hessian_diag_scaling_ = nullptr;
         workspace_data *ws_data_ = nullptr;
         solver::data_base *solver_data_ = nullptr;
         bool runtime_bound_ = false;
         bool initialized_ = false;
 
         using data_base = base::approx_data;
-        approx_data(data_base &&rhs) : data_base(std::move(rhs)), d_multiplier_(nullptr, 0) {
-            map_lag_jac_from_raw(lag_data_->lag_jac_corr_, lag_jac_corr_);
-            // d_multiplier_.resize(func_.dim());
-            // d_multiplier_.setZero();
-        }
+        approx_data(data_base &&rhs);
+
     };
 
     /// public type alias for @ref approx_data to ensure common interface of all soft constraints
@@ -95,10 +94,6 @@ class soft_constr : public generic_constr {
     virtual scalar_t local_stat_residual_inf(const func_approx_data &data) const { return 0.; }
     /// @brief optional local complementarity summary owned by the constraint
     virtual scalar_t local_comp_residual_inf(const func_approx_data &data) const { return 0.; }
-
-    virtual void propagate_jacobian(func_approx_data &data) const = 0;
-    virtual void propagate_hessian(func_approx_data &data) const = 0;
-    virtual void propagate_res_stats(func_approx_data &data) const = 0;
 
     // soft_constr(base &&rhs) : base(std::move(rhs)) { field_hint().is_soft = true; } ///< move constructor from generic_constr
     /***

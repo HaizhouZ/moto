@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 
-import math
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 import casadi as cs
 import moto
@@ -12,7 +17,7 @@ def main():
     p_lb = moto.sym.params("p_lb", 4)
     p_ub = moto.sym.params("p_ub", 4)
 
-    box_numeric = moto.constr.create_box(
+    box_numeric = moto.ineq.create(
         "x_box_numeric",
         [x],
         x.sx,
@@ -20,16 +25,16 @@ def main():
         np.array([2.0, 3.0, 4.0, 5.0]),
     )
 
-    box_mixed = moto.constr.create_box(
+    box_mixed = moto.ineq.create(
         "x_box_mixed",
         [x],
         x.sx,
-        np.array([-math.inf, 0.5, -1.0, -math.inf]),
-        np.array([2.0, math.inf, 3.0, 4.0]),
+        np.array([-np.inf, 0.5, -1.0, -np.inf]),
+        np.array([2.0, np.inf, 3.0, 4.0]),
     )
 
     g = cs.vertcat(x.sx[0] + x.sx[1], cs.sin(x.sx[2]))
-    box_nonlinear = moto.constr.create_box(
+    box_nonlinear = moto.ineq.create(
         "g_box",
         [x],
         g,
@@ -37,7 +42,7 @@ def main():
         np.array([1.0, 0.8]),
     )
 
-    box_symbolic = moto.constr.create_box(
+    box_symbolic = moto.ineq.create(
         "x_box_symbolic",
         [x, p_lb, p_ub],
         x.sx,
@@ -46,7 +51,7 @@ def main():
     )
 
     sel = cs.vertcat(x.sx[0], x.sx[3])
-    box_linear_slice = moto.constr.create_box(
+    box_linear_slice = moto.ineq.create(
         "x_box_linear_slice",
         [x],
         sel,
@@ -59,10 +64,6 @@ def main():
     print("box_nonlinear.dim    =", box_nonlinear.dim)
     print("box_symbolic.dim     =", box_symbolic.dim)
     print("box_linear_slice.dim =", box_linear_slice.dim)
-
-    print("cast_ineq names:")
-    print(" ", box_numeric.cast_ineq().name)
-    print(" ", box_symbolic.cast_ineq().name)
 
 
 if __name__ == "__main__":

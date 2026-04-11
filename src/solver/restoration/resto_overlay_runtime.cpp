@@ -16,7 +16,6 @@ namespace {
 constexpr std::array k_pair_slots{detail::slot_p, detail::slot_n};
 constexpr std::array<scalar_t, 2> k_pair_signs{scalar_t(-1.), scalar_t(1.)};
 constexpr std::array k_triplet_slots{detail::slot_t, detail::slot_p, detail::slot_n};
-constexpr std::array<scalar_t, 3> k_triplet_signs{scalar_t(1.), scalar_t(-1.), scalar_t(1.)};
 
 template <typename ApproxData>
 constexpr auto active_slots() {
@@ -25,6 +24,10 @@ constexpr auto active_slots() {
     } else {
         return k_triplet_slots;
     }
+}
+
+constexpr scalar_t side_jac_sign(box_side::side_t side) {
+    return side == box_side::ub ? scalar_t(1.) : scalar_t(-1.);
 }
 
 size_t local_state_dim(const detail::eq_local_state &state) {
@@ -69,6 +72,14 @@ void for_each_source_constr(const ocp_ptr_t &prob, field_t field, Fn &&fn) {
         if (auto source = std::dynamic_pointer_cast<generic_constr>(expr)) {
             fn(constr(std::move(source)));
         }
+    }
+}
+
+void copy_source_jac_sparsity(generic_func &dst, const generic_func &src) {
+    const auto &src_args = src.in_args();
+    const auto &src_sp = src.jac_sparsity();
+    for (size_t i = 0; i < src_args.size() && i < src_sp.size(); ++i) {
+        dst.set_jac_sparsity(src_args[i], src_sp[i]);
     }
 }
 
@@ -121,14 +132,62 @@ void copy_dual_slice(vector_ref dst, const node_data &outer, const Overlay &over
 }
 
 template <typename Overlay>
-void copy_ineq_slack_slice(vector &dst, const node_data &outer, const Overlay &overlay) {
+void copy_ineq_side_init(ineq_constr::box_side_array<vector> &slack_dst,
+                         ineq_constr::box_side_array<vector> &dual_dst,
+                         const node_data &outer,
+                         const Overlay &overlay) {
     const auto *ipm_source = dynamic_cast<const solver::ipm_constr *>(overlay.source().get());
     if (ipm_source == nullptr) {
-        dst.resize(0);
-        return;
+        throw std::runtime_error("restoration inequality overlay requires boxed ipm source");
     }
     const auto &source_data = outer.data(overlay.source());
-    dst = const_cast<func_approx_data &>(source_data).template as<solver::ipm_constr::ipm_data>().slack_;
+    const auto &ipm = const_cast<func_approx_data &>(source_data).template as<solver::ipm_constr::ipm_data>();
+    const auto *box = ipm_source->box_info();
+    if (box == nullptr) {
+        throw std::runtime_error("boxed ipm missing box_info in copy_ineq_side_init");
+    }
+    const auto n = static_cast<Eigen::Index>(box->base_dim);
+    for (auto side : box_sides) {
+        slack_dst[side].resize(n);
+        dual_dst[side].resize(n);
+        slack_dst[side] = ipm.box_side_[side]->slack;
+        dual_dst[side] = ipm.box_side_[side]->multiplier;
+    }
+}
+
+void update_ineq_side_residuals(resto_ineq_elastic_ipm_constr::approx_data &d) {
+    const auto &box = d.require_box_spec("update_ineq_side_residuals");
+    d.elastic.present_mask = box.present_mask;
+    ineq_constr::box_side_array<vector> bound_eval;
+    for (auto side : box_sides) {
+        if (box.bound_source[side] == ineq_constr::box_bound_source::constant) {
+            bound_eval[side] = d.box_const_[side];
+        } else if (box.bound_source[side] == ineq_constr::box_bound_source::in_arg) {
+            bound_eval[side] = d[static_cast<const sym &>(box.bound_var[side])];
+        } else {
+            bound_eval[side].setZero(d.base_residual.size());
+        }
+        d.elastic.side[side].residual =
+            box.present_mask[side]
+                .select(side_jac_sign(side) * (d.base_residual.array() - bound_eval[side].array()), scalar_t(0))
+                .matrix();
+    }
+}
+
+void sync_ineq_overlay_views(resto_ineq_elastic_ipm_constr::approx_data &d) {
+    const auto &box = d.require_box_spec("sync_ineq_overlay_views");
+    d.v_ = d.elastic.primal_view;
+    d.multiplier_.setZero();
+    d.d_multiplier_.setZero();
+    d.comp_.setZero();
+    for (auto side : box_sides) {
+        const auto &side_state = d.elastic.side[side];
+        const scalar_t dual_sign = side == box_side::ub ? scalar_t(1) : scalar_t(-1);
+        d.multiplier_.array() +=
+            dual_sign * box.present_mask[side].select(side_state.dual[detail::slot_t].array(), scalar_t(0));
+        d.d_multiplier_.array() +=
+            dual_sign * box.present_mask[side].select(side_state.d_dual[detail::slot_t].array(), scalar_t(0));
+    }
 }
 
 template <typename ApproxData>
@@ -173,47 +232,20 @@ void apply_corrector_pairs_like_ipm(ApproxData &d) {
 }
 
 template <typename ApproxData>
-void propagate_pair_jacobian(ApproxData &d, const vector &minv_b) {
-    size_t arg_idx = 0;
-    for (auto &jac : d.jac_) {
-        if (jac.size() != 0) {
-            d.lag_jac_corr_[arg_idx].noalias() += minv_b.transpose() * jac;
-        }
-        ++arg_idx;
-    }
-}
-
-template <typename ApproxData>
-void propagate_pair_hessian(ApproxData &d) {
-    size_t outer_idx = 0;
-    for (auto &outer : d.lag_hess_) {
-        size_t inner_idx = 0;
-        for (auto &inner : outer) {
-            if (inner.size() != 0 && d.jac_[outer_idx].size() != 0 && d.jac_[inner_idx].size() != 0) {
-                inner.noalias() +=
-                    d.jac_[outer_idx].transpose() * d.elastic.schur_inv_diag.asDiagonal() * d.jac_[inner_idx];
-            }
-            ++inner_idx;
-        }
-        ++outer_idx;
-    }
-}
-
-template <typename ApproxData>
 void finalize_pair_newton_step(ApproxData &d) {
     require_local_state_initialized(d.elastic, d.func_.dim(), "finalize_pair_newton_step");
-    vector delta(d.func_.dim());
-    delta.setZero();
+    d.jac_step.setZero(d.func_.dim());
     size_t arg_idx = 0;
     for (const sym &arg : d.func_.in_args()) {
-        if (arg.field() < field::num_prim) {
-            delta.noalias() += d.jac_[arg_idx] * d.prim_step_[arg_idx];
+        if (arg.field() < field::num_prim && d.has_jacobian_block(arg_idx)) {
+            d.jac_step_tmp.noalias() = d.jac_[arg_idx] * d.prim_step_[arg_idx];
+            d.jac_step.noalias() += d.jac_step_tmp;
         }
         ++arg_idx;
     }
     if constexpr (std::is_same_v<ApproxData, resto_eq_elastic_constr::approx_data>) {
         const scalar_t eps = 1e-16;
-        d.elastic.d_multiplier = d.elastic.schur_inv_diag.array() * (delta.array() + d.elastic.condensed_rhs.array());
+        d.elastic.d_multiplier = d.elastic.schur_inv_diag.array() * (d.jac_step.array() + d.elastic.condensed_rhs.array());
         for (size_t k : range(k_pair_slots.size())) {
             const auto slot = k_pair_slots[k];
             const scalar_t sign = k_pair_signs[k];
@@ -222,7 +254,7 @@ void finalize_pair_newton_step(ApproxData &d) {
             d.elastic.d_dual[slot] = d.elastic.r_stat[slot].array() + sign * d.elastic.d_multiplier.array();
         }
     } else {
-        d.elastic.d_dual[detail::slot_t] = d.elastic.schur_inv_diag.array() * (delta.array() + d.elastic.condensed_rhs.array());
+        d.elastic.d_dual[detail::slot_t] = d.elastic.schur_inv_diag.array() * (d.jac_step.array() + d.elastic.condensed_rhs.array());
         d.elastic.d_value[detail::slot_t] =
             -(d.elastic.value[detail::slot_t].array() / d.elastic.dual[detail::slot_t].array()) *
                 d.elastic.d_dual[detail::slot_t].array() -
@@ -426,11 +458,11 @@ void resto_prox_cost::jacobian_impl(func_approx_data &data) const {
     auto &d = data.as<approx_data>();
     size_t arg_idx = 0;
     for (const sym &arg : in_args()) {
-        auto &grad = d.jac_[arg_idx];
-        if (grad.size() == 0) {
+        if (!d.has_jacobian_block(arg_idx)) {
             ++arg_idx;
             continue;
         }
+        auto grad = d.jac(arg_idx);
         auto &ref_field = arg.field() == __u ? d.u_ref : d.y_ref;
         auto &sigma_field = arg.field() == __u ? d.sigma_u_sq : d.sigma_y_sq;
         auto ref = d.problem()->extract(ref_field, arg);
@@ -465,7 +497,9 @@ resto_eq_elastic_constr::resto_eq_elastic_constr(const std::string &name,
     field_hint().is_eq = true;
     field_hint().is_soft = true;
     set_default_hess_sparsity(sparsity::dense);
-    add_arguments(dynamic_cast<const generic_func &>(*source).in_args());
+    const auto &src_func = dynamic_cast<const generic_func &>(*source);
+    add_arguments(src_func.in_args());
+    copy_source_jac_sparsity(*this, src_func);
 }
 
 void resto_eq_elastic_constr::finalize_impl() {
@@ -520,35 +554,31 @@ void resto_eq_elastic_constr::jacobian_impl(func_approx_data &data) const {
     }
     const scalar_t target_mu = d.ipm_cfg->ipm_enable_affine_step() ? scalar_t(0.) : d.ipm_cfg->mu;
     resto_eq_elastic_constr::compute_local_model(d.elastic, d.base_residual, d.multiplier_, rho_value(d, "resto_eq_elastic_constr::jacobian_impl"), target_mu);
-    propagate_jacobian(d);
+    for (size_t arg_idx = 0; arg_idx < d.lag_jac_corr_.size(); ++arg_idx) {
+        if (d.has_jacobian_block(arg_idx)) {
+            d.lag_jac_corr_[arg_idx].noalias() += d.elastic.schur_rhs.transpose() * d.jac_[arg_idx];
+        }
+    }
+    size_t outer_idx = 0;
+    for (auto &outer : d.lag_hess_) {
+        size_t inner_idx = 0;
+        if (outer.size()) {
+            for (auto &inner : outer) {
+                if (inner.size() != 0) {
+                    inner.noalias() += d.jac_[outer_idx].transpose() * d.elastic.schur_inv_diag.asDiagonal() * d.jac_[inner_idx];
+                }
+                ++inner_idx;
+            }
+        }
+        ++outer_idx;
+    }
 }
 
 void resto_eq_elastic_constr::hessian_impl(func_approx_data &data) const {
     if (source_->order() >= approx_order::second) {
         dynamic_cast<const generic_func &>(*source_).hessian(data);
     }
-    auto &d = data.as<approx_data>();
-    if (d.ipm_cfg == nullptr) {
-        throw std::runtime_error("resto_eq_elastic_constr::hessian_impl requires ipm_cfg");
-    }
-    require_local_state_initialized(d.elastic, d.func_.dim(), "resto_eq_elastic_constr::hessian_impl");
-    if (d.ipm_cfg->disable_corrections) {
-        return;
-    }
-    const scalar_t target_mu = d.ipm_cfg->ipm_enable_affine_step() ? scalar_t(0.) : d.ipm_cfg->mu;
-    resto_eq_elastic_constr::compute_local_model(d.elastic, d.base_residual, d.multiplier_, rho_value(d, "resto_eq_elastic_constr::hessian_impl"), target_mu);
-    propagate_hessian(d);
 }
-
-void resto_eq_elastic_constr::propagate_jacobian(func_approx_data &data) const {
-    propagate_pair_jacobian(data.as<approx_data>(), data.as<approx_data>().elastic.schur_rhs);
-}
-
-void resto_eq_elastic_constr::propagate_hessian(func_approx_data &data) const {
-    propagate_pair_hessian(data.as<approx_data>());
-}
-
-void resto_eq_elastic_constr::propagate_res_stats(func_approx_data &) const {}
 
 void resto_eq_elastic_constr::initialize(data_map_t &data) const {
     auto &d = data.as<approx_data>();
@@ -563,7 +593,6 @@ void resto_eq_elastic_constr::initialize(data_map_t &data) const {
     if (!(mu_bar > 0.)) {
         throw std::runtime_error("resto_eq_elastic_constr::initialize requires mu > 0");
     }
-    const vector synced_multiplier = d.multiplier_;
     resto_eq_elastic_constr::resize_local_state(d.elastic, 0, d.func_.dim());
     for (Eigen::Index i = 0; i < d.base_residual.size(); ++i) {
         const scalar_t c = d.base_residual(i);
@@ -581,11 +610,6 @@ void resto_eq_elastic_constr::initialize(data_map_t &data) const {
         d.elastic.value[detail::slot_n](i) = n_clamped;
         d.elastic.dual[detail::slot_p](i) = z_p;
         d.elastic.dual[detail::slot_n](i) = z_n;
-    }
-    if (synced_multiplier.size() == d.multiplier_.size()) {
-        d.multiplier_ = synced_multiplier;
-    } else {
-        d.multiplier_.setZero();
     }
     d.multiplier_.setZero();
     d.multiplier_backup = d.multiplier_;
@@ -614,7 +638,11 @@ void resto_eq_elastic_constr::apply_corrector_step(data_map_t &data) const {
                                                  rho_value(d, "resto_eq_elastic_constr::apply_corrector_step"),
                                                  d.ipm_cfg->mu,
                                                  corrector);
-    propagate_jacobian(d);
+    for (size_t arg_idx = 0; arg_idx < d.lag_jac_corr_.size(); ++arg_idx) {
+        if (d.has_jacobian_block(arg_idx)) {
+            d.lag_jac_corr_[arg_idx].noalias() += d.elastic.schur_rhs.transpose() * d.jac_[arg_idx];
+        }
+    }
 }
 
 void resto_eq_elastic_constr::apply_affine_step(data_map_t &data, workspace_data *cfg) const {
@@ -672,7 +700,18 @@ resto_ineq_elastic_ipm_constr::resto_ineq_elastic_ipm_constr(const std::string &
             source_(source) {
     field_hint().is_eq = false;
     set_default_hess_sparsity(sparsity::dense);
-    add_arguments(dynamic_cast<const generic_func &>(*source).in_args());
+    const auto &src_func = dynamic_cast<const generic_func &>(*source);
+    add_arguments(src_func.in_args());
+    copy_source_jac_sparsity(*this, src_func);
+    if (const auto *src_ineq = dynamic_cast<const ineq_constr *>(source.get())) {
+        if (const auto *box = src_ineq->box_info(); box != nullptr) {
+            set_box_info(std::make_shared<box_spec>(*box));
+        } else {
+            synthesize_upper_half_box_info_if_missing();
+        }
+    } else {
+        synthesize_upper_half_box_info_if_missing();
+    }
 }
 
 void resto_ineq_elastic_ipm_constr::setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const {
@@ -710,15 +749,16 @@ void resto_ineq_elastic_ipm_constr::value_impl(func_approx_data &data) const {
         return;
     }
     require_local_state_initialized(d.elastic, d.func_.dim(), "resto_ineq_elastic_ipm_constr::value_impl");
-    d.v_ = d.base_residual;
-    for (size_t k : range(k_triplet_slots.size())) {
-        d.v_.array() += k_triplet_signs[k] * d.elastic.value[k_triplet_slots[k]].array();
-    }
     if (d.ipm_cfg == nullptr) {
         throw std::runtime_error("resto_ineq_elastic_ipm_constr::value_impl requires ipm_cfg");
     }
-    resto_ineq_elastic_ipm_constr::compute_local_model(d.elastic, d.base_residual, rho_value(d, "resto_ineq_elastic_ipm_constr::value_impl"), d.ipm_cfg->mu);
-    d.multiplier_ = d.elastic.dual[detail::slot_t];
+    update_ineq_side_residuals(d);
+    resto_ineq_elastic_ipm_constr::compute_local_model(
+        d.elastic,
+        d.require_box_spec("resto_ineq_elastic_ipm_constr::value_impl"),
+        rho_value(d, "resto_ineq_elastic_ipm_constr::value_impl"),
+        d.ipm_cfg->mu);
+    sync_ineq_overlay_views(d);
 }
 
 void resto_ineq_elastic_ipm_constr::jacobian_impl(func_approx_data &data) const {
@@ -732,38 +772,39 @@ void resto_ineq_elastic_ipm_constr::jacobian_impl(func_approx_data &data) const 
         return;
     }
     const scalar_t target_mu = d.ipm_cfg->ipm_enable_affine_step() ? scalar_t(0.) : d.ipm_cfg->mu;
-    resto_ineq_elastic_ipm_constr::compute_local_model(d.elastic, d.base_residual, rho_value(d, "resto_ineq_elastic_ipm_constr::jacobian_impl"), target_mu);
-    d.multiplier_ = d.elastic.dual[detail::slot_t];
-    propagate_jacobian(d);
+    update_ineq_side_residuals(d);
+    resto_ineq_elastic_ipm_constr::compute_local_model(
+        d.elastic,
+        d.require_box_spec("resto_ineq_elastic_ipm_constr::jacobian_impl"),
+        rho_value(d, "resto_ineq_elastic_ipm_constr::jacobian_impl"),
+        target_mu);
+    sync_ineq_overlay_views(d);
+    for (size_t arg_idx = 0; arg_idx < d.lag_jac_corr_.size(); ++arg_idx) {
+        if (d.has_jacobian_block(arg_idx)) {
+            d.lag_jac_corr_[arg_idx].noalias() += d.elastic.schur_rhs_net.transpose() * d.jac_[arg_idx];
+        }
+    }
+    size_t outer_idx = 0;
+    for (auto &outer : d.lag_hess_) {
+        size_t inner_idx = 0;
+        if (outer.size()) {
+            for (auto &inner : outer) {
+                if (inner.size() != 0) {
+                    inner.noalias() +=
+                        d.jac_[outer_idx].transpose() * d.elastic.schur_inv_diag_sum.asDiagonal() * d.jac_[inner_idx];
+                }
+                ++inner_idx;
+            }
+        }
+        ++outer_idx;
+    }
 }
 
 void resto_ineq_elastic_ipm_constr::hessian_impl(func_approx_data &data) const {
     if (source_->order() >= approx_order::second) {
         dynamic_cast<const generic_func &>(*source_).hessian(data);
     }
-    auto &d = data.as<approx_data>();
-    if (d.ipm_cfg == nullptr) {
-        throw std::runtime_error("resto_ineq_elastic_ipm_constr::hessian_impl requires ipm_cfg");
-    }
-    require_local_state_initialized(d.elastic, d.func_.dim(), "resto_ineq_elastic_ipm_constr::hessian_impl");
-    if (d.ipm_cfg->disable_corrections) {
-        return;
-    }
-    const scalar_t target_mu = d.ipm_cfg->ipm_enable_affine_step() ? scalar_t(0.) : d.ipm_cfg->mu;
-    resto_ineq_elastic_ipm_constr::compute_local_model(d.elastic, d.base_residual, rho_value(d, "resto_ineq_elastic_ipm_constr::hessian_impl"), target_mu);
-    d.multiplier_ = d.elastic.dual[detail::slot_t];
-    propagate_hessian(d);
 }
-
-void resto_ineq_elastic_ipm_constr::propagate_jacobian(func_approx_data &data) const {
-    propagate_pair_jacobian(data.as<approx_data>(), data.as<approx_data>().elastic.schur_rhs);
-}
-
-void resto_ineq_elastic_ipm_constr::propagate_hessian(func_approx_data &data) const {
-    propagate_pair_hessian(data.as<approx_data>());
-}
-
-void resto_ineq_elastic_ipm_constr::propagate_res_stats(func_approx_data &) const {}
 
 void resto_ineq_elastic_ipm_constr::initialize(data_map_t &data) const {
     auto &d = data.as<approx_data>();
@@ -771,59 +812,109 @@ void resto_ineq_elastic_ipm_constr::initialize(data_map_t &data) const {
         throw std::runtime_error("resto_ineq_elastic_ipm_constr::initialize requires ipm_cfg");
     }
     resto_ineq_elastic_ipm_constr::resize_local_state(d.elastic, d.func_.dim(), 0);
-    for (Eigen::Index i = 0; i < d.base_residual.size(); ++i) {
-        const scalar_t nu_t0 = d.multiplier_(i);
-        const scalar_t t0 = d.slack_init(i);
-        // (d.slack_init.size() == d.base_residual.size() && d.slack_init(i) > eps)
-        //     ? d.slack_init(i)
-        //     : d.ipm_cfg->mu / nu_t0;
-        const scalar_t rho = rho_value(d, "resto_ineq_elastic_ipm_constr::initialize");
-        const scalar_t mu_bar = d.ipm_cfg->mu;
-        if (!(rho > 0.)) {
-            throw std::runtime_error("resto_ineq_elastic_ipm_constr::initialize requires rho > 0");
-        }
-        if (!(mu_bar > 0.)) {
-            throw std::runtime_error("resto_ineq_elastic_ipm_constr::initialize requires mu > 0");
-        }
-        if (!(t0 > 0.)) {
-            throw std::runtime_error("resto_ineq_elastic_ipm_constr::initialize requires t0 > 0");
-        }
-        if (!(nu_t0 > 0.)) {
-            throw std::runtime_error("resto_ineq_elastic_ipm_constr::initialize requires nu_t0 > 0");
-        }
-        const scalar_t c = d.base_residual(i) + t0;
-        const scalar_t disc = (mu_bar - rho * c) * (mu_bar - rho * c) + scalar_t(2.) * rho * mu_bar * c;
-        const scalar_t sqrt_disc = std::sqrt(std::max(disc, scalar_t(0.)));
-        const scalar_t n = (mu_bar - rho * c + sqrt_disc) / (scalar_t(2.) * rho);
-        const scalar_t p = c + n;
-        const scalar_t nu_p = mu_bar / p;
-        const scalar_t nu_n = mu_bar / n;
-        d.elastic.value[detail::slot_t](i) = t0;
-        d.elastic.dual[detail::slot_t](i) = nu_t0;
-        const std::array pair_values{p, n};
-        const std::array pair_duals{nu_p, nu_n};
-        for (size_t k : range(k_pair_slots.size())) {
-            const auto slot = k_pair_slots[k];
-            d.elastic.value[slot](i) = pair_values[k];
-            d.elastic.dual[slot](i) = pair_duals[k];
-        }
-        d.multiplier_(i) = std::min(rho, nu_t0);
-    }
-    d.multiplier_backup = d.multiplier_;
+    const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::initialize");
     const scalar_t rho = rho_value(d, "resto_ineq_elastic_ipm_constr::initialize");
     const scalar_t mu_bar = d.ipm_cfg->mu;
-    resto_ineq_elastic_ipm_constr::compute_local_model(d.elastic, d.base_residual, rho, mu_bar);
-    d.multiplier_ = d.elastic.dual[detail::slot_t];
+    if (!(rho > 0.)) {
+        throw std::runtime_error("resto_ineq_elastic_ipm_constr::initialize requires rho > 0");
+    }
+    if (!(mu_bar > 0.)) {
+        throw std::runtime_error("resto_ineq_elastic_ipm_constr::initialize requires mu > 0");
+    }
+    update_ineq_side_residuals(d);
+    for (auto side : box_sides) {
+        auto &side_state = d.elastic.side[side];
+        for (Eigen::Index i = 0; i < d.base_residual.size(); ++i) {
+            if (!box.present_mask[side](i)) {
+                continue;
+            }
+            const scalar_t t0 = d.slack_init[side](i);
+            const scalar_t nu_t0 = d.multiplier_init[side](i);
+            if (!(t0 > 0.)) {
+                throw std::runtime_error("resto_ineq_elastic_ipm_constr::initialize requires t0 > 0");
+            }
+            if (!(nu_t0 > 0.)) {
+                throw std::runtime_error("resto_ineq_elastic_ipm_constr::initialize requires nu_t0 > 0");
+            }
+            const scalar_t c = side_state.residual(i) + t0;
+            const scalar_t disc = (mu_bar - rho * c) * (mu_bar - rho * c) + scalar_t(2.) * rho * mu_bar * c;
+            const scalar_t sqrt_disc = std::sqrt(std::max(disc, scalar_t(0.)));
+            const scalar_t n = std::max((mu_bar - rho * c + sqrt_disc) / (scalar_t(2.) * rho), scalar_t(1e-16));
+            const scalar_t p = std::max(c + n, scalar_t(1e-16));
+            side_state.value[detail::slot_t](i) = t0;
+            side_state.dual[detail::slot_t](i) = nu_t0;
+            side_state.value[detail::slot_p](i) = p;
+            side_state.value[detail::slot_n](i) = n;
+            side_state.dual[detail::slot_p](i) = mu_bar / p;
+            side_state.dual[detail::slot_n](i) = mu_bar / n;
+        }
+    }
+    d.multiplier_backup = d.multiplier_;
+    resto_ineq_elastic_ipm_constr::compute_local_model(d.elastic, box, rho, mu_bar);
+    sync_ineq_overlay_views(d);
+    d.multiplier_backup = d.multiplier_;
 }
 
 void resto_ineq_elastic_ipm_constr::finalize_newton_step(data_map_t &data) const {
     auto &d = data.as<approx_data>();
-    finalize_pair_newton_step(d);
+    require_local_state_initialized(d.elastic, d.func_.dim(), "resto_ineq_elastic_ipm_constr::finalize_newton_step");
+    d.d_multiplier_.setZero();
+    size_t arg_idx = 0;
+    for (const sym &arg : d.func_.in_args()) {
+        if (arg.field() < field::num_prim) {
+            d.jac_step.noalias() = d.jac_[arg_idx] * d.prim_step_[arg_idx];
+            d.d_multiplier_.noalias() += d.jac_step;
+        }
+        ++arg_idx;
+    }
+    const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::finalize_newton_step");
+    for (auto side : box_sides) {
+        auto &side_state = d.elastic.side[side];
+        const auto masked_delta =
+            box.present_mask[side].select(side_jac_sign(side) * d.d_multiplier_.array(), scalar_t(0)).matrix();
+        side_state.d_dual[detail::slot_t] =
+            side_state.schur_inv_diag.array() * (masked_delta.array() + side_state.condensed_rhs.array());
+        side_state.d_value[detail::slot_t] =
+            -(side_state.value[detail::slot_t].array() / side_state.dual[detail::slot_t].array()) *
+                side_state.d_dual[detail::slot_t].array() -
+            side_state.backsub_rhs[detail::slot_t].array();
+        for (size_t k : range(k_pair_slots.size())) {
+            const auto slot = k_pair_slots[k];
+            const scalar_t sign = k_pair_signs[k];
+            side_state.d_value[slot] =
+                -sign * (side_state.value[slot].array() / side_state.dual[slot].array()) *
+                    side_state.d_dual[detail::slot_t].array() -
+                side_state.backsub_rhs[slot].array();
+            side_state.d_dual[slot] = side_state.r_stat[slot].array() + sign * side_state.d_dual[detail::slot_t].array();
+        }
+    }
+    sync_ineq_overlay_views(d);
 }
 
 void resto_ineq_elastic_ipm_constr::finalize_predictor_step(data_map_t &data, workspace_data *cfg) const {
     auto &d = data.as<approx_data>();
-    finalize_predictor_pairs_like_ipm(d, cfg);
+    auto &worker = cfg->as<solver::ipm_config::worker_type>();
+    auto &ls = cfg->as<linesearch_config>();
+    const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::finalize_predictor_step");
+    assert(d.ipm_cfg != nullptr);
+    assert(d.ipm_cfg->ipm_computing_affine_step() &&
+           "ipm affine step computation not started but affine step is requested");
+    for (auto side : box_sides) {
+        auto &side_state = d.elastic.side[side];
+        for (auto slot : k_triplet_slots) {
+            worker.n_ipm_cstr += static_cast<size_t>(box.present_mask[side].count());
+            worker.prev_aff_comp +=
+                box.present_mask[side].select(side_state.dual[slot].array() * side_state.value[slot].array(), scalar_t(0)).sum();
+            side_state.corrector[slot].array() =
+                ls.alpha_dual * side_state.d_dual[slot].array() * ls.alpha_primal * side_state.d_value[slot].array();
+            worker.post_aff_comp +=
+                box.present_mask[side]
+                    .select((side_state.dual[slot] + ls.alpha_dual * side_state.d_dual[slot]).array() *
+                                (side_state.value[slot] + ls.alpha_primal * side_state.d_value[slot]).array(),
+                            scalar_t(0))
+                    .sum();
+        }
+    }
 }
 
 void resto_ineq_elastic_ipm_constr::apply_corrector_step(data_map_t &data) const {
@@ -831,50 +922,153 @@ void resto_ineq_elastic_ipm_constr::apply_corrector_step(data_map_t &data) const
     if (d.ipm_cfg == nullptr) {
         throw std::runtime_error("resto_ineq_elastic_ipm_constr::apply_corrector_step requires ipm_cfg");
     }
-    apply_corrector_pairs_like_ipm(d);
-    const auto *corrector = d.ipm_cfg->ipm_accept_corrector() ? &d.elastic.corrector : nullptr;
-    resto_ineq_elastic_ipm_constr::compute_local_model(d.elastic,
-                                                       d.base_residual,
-                                                       rho_value(d, "resto_ineq_elastic_ipm_constr::apply_corrector_step"),
-                                                       d.ipm_cfg->mu,
-                                                       corrector);
-    d.multiplier_ = d.elastic.dual[detail::slot_t];
-    propagate_jacobian(d);
+    if (!d.ipm_cfg->ipm_accept_corrector()) {
+        for (auto side : box_sides) {
+            auto &side_state = d.elastic.side[side];
+            for (auto slot : k_triplet_slots) {
+                side_state.corrector[slot].setZero();
+            }
+        }
+    }
+    update_ineq_side_residuals(d);
+    detail::elastic_side_array<detail::elastic_triplet_array<vector>> corrector;
+    const auto *corrector_ptr = d.ipm_cfg->ipm_accept_corrector() ? &corrector : nullptr;
+    if (corrector_ptr != nullptr) {
+        for (auto side : box_sides) {
+            corrector[side] = d.elastic.side[side].corrector;
+        }
+    }
+    resto_ineq_elastic_ipm_constr::compute_local_model(
+        d.elastic,
+        d.require_box_spec("resto_ineq_elastic_ipm_constr::apply_corrector_step"),
+        rho_value(d, "resto_ineq_elastic_ipm_constr::apply_corrector_step"),
+        d.ipm_cfg->mu,
+        corrector_ptr);
+    sync_ineq_overlay_views(d);
+    for (size_t arg_idx = 0; arg_idx < d.lag_jac_corr_.size(); ++arg_idx) {
+        if (d.has_jacobian_block(arg_idx)) {
+            d.lag_jac_corr_[arg_idx].noalias() += d.elastic.schur_rhs_net.transpose() * d.jac_[arg_idx];
+        }
+    }
 }
 
 void resto_ineq_elastic_ipm_constr::apply_affine_step(data_map_t &data, workspace_data *cfg) const {
     auto &d = data.as<approx_data>();
-    const scalar_t alpha_dual = cfg->as<linesearch_config>().dual_alpha_for_ineq();
-    apply_affine_pairs_like_ipm(d, cfg, alpha_dual, alpha_dual);
+    auto &ls = cfg->as<linesearch_config>();
+    const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::apply_affine_step");
+    for (auto side : box_sides) {
+        auto &side_state = d.elastic.side[side];
+        for (auto slot : k_triplet_slots) {
+            positivity::apply_pair_step(side_state.value[slot], side_state.d_value[slot], ls.alpha_primal,
+                                        side_state.dual[slot], side_state.d_dual[slot], ls.dual_alpha_for_ineq());
+            side_state.value[slot] =
+                box.present_mask[side].select(side_state.value[slot].array().max(1e-20), scalar_t(0)).matrix();
+            side_state.dual[slot] =
+                box.present_mask[side].select(side_state.dual[slot].array().max(1e-20), scalar_t(0)).matrix();
+        }
+    }
+    update_ineq_side_residuals(d);
+    resto_ineq_elastic_ipm_constr::compute_local_model(
+        d.elastic,
+        box,
+        rho_value(d, "resto_ineq_elastic_ipm_constr::apply_affine_step"),
+        d.ipm_cfg != nullptr ? d.ipm_cfg->mu : scalar_t(0));
+    sync_ineq_overlay_views(d);
 }
 
 void resto_ineq_elastic_ipm_constr::update_ls_bounds(data_map_t &data, workspace_data *cfg) const {
     auto &d = data.as<approx_data>();
-    update_pair_ls_bounds_like_ipm(d, cfg, "ineq", name());
+    auto &ls = cfg->as<linesearch_config>();
+    for (auto side : box_sides) {
+        auto &side_state = d.elastic.side[side];
+        for (auto slot : k_triplet_slots) {
+            positivity::update_pair_bounds(ls, side_state.value[slot], side_state.d_value[slot],
+                                           side_state.dual[slot], side_state.d_dual[slot]);
+        }
+    }
 }
 
 void resto_ineq_elastic_ipm_constr::backup_trial_state(data_map_t &data) const {
-    backup_trial_pairs_like_ipm(data.as<approx_data>());
+    auto &d = data.as<approx_data>();
+    for (auto side : box_sides) {
+        auto &side_state = d.elastic.side[side];
+        for (auto slot : k_triplet_slots) {
+            positivity::backup_pair(side_state.value[slot], side_state.value_backup[slot],
+                                    side_state.dual[slot], side_state.dual_backup[slot]);
+        }
+    }
+    d.multiplier_backup = d.multiplier_;
 }
 
 void resto_ineq_elastic_ipm_constr::restore_trial_state(data_map_t &data) const {
-    restore_trial_pairs_like_ipm(data.as<approx_data>());
+    auto &d = data.as<approx_data>();
+    for (auto side : box_sides) {
+        auto &side_state = d.elastic.side[side];
+        for (auto slot : k_triplet_slots) {
+            positivity::restore_pair(side_state.value[slot], side_state.value_backup[slot],
+                                     side_state.dual[slot], side_state.dual_backup[slot]);
+        }
+    }
+    update_ineq_side_residuals(d);
+    resto_ineq_elastic_ipm_constr::compute_local_model(
+        d.elastic,
+        d.require_box_spec("resto_ineq_elastic_ipm_constr::restore_trial_state"),
+        rho_value(d, "resto_ineq_elastic_ipm_constr::restore_trial_state"),
+        d.ipm_cfg != nullptr ? d.ipm_cfg->mu : scalar_t(0));
+    sync_ineq_overlay_views(d);
 }
 
 scalar_t resto_ineq_elastic_ipm_constr::objective_penalty(const func_approx_data &data) const {
-    return objective_penalty_from_pairs(static_cast<const approx_data &>(data));
+    const auto &d = static_cast<const approx_data &>(data);
+    scalar_t sum = 0.;
+    for (auto side : box_sides) {
+        sum += d.elastic.side[side].value[detail::slot_p].sum();
+        sum += d.elastic.side[side].value[detail::slot_n].sum();
+    }
+    return rho_value(d, "resto_ineq_elastic_ipm_constr::objective_penalty") * sum;
 }
 
 scalar_t resto_ineq_elastic_ipm_constr::objective_penalty_dir_deriv(const func_approx_data &data) const {
-    return objective_penalty_dir_deriv_from_pairs(static_cast<const approx_data &>(data));
+    const auto &d = static_cast<const approx_data &>(data);
+    scalar_t sum = 0.;
+    for (auto side : box_sides) {
+        sum += d.elastic.side[side].d_value[detail::slot_p].sum();
+        sum += d.elastic.side[side].d_value[detail::slot_n].sum();
+    }
+    return rho_value(d, "resto_ineq_elastic_ipm_constr::objective_penalty_dir_deriv") * sum;
 }
 
 scalar_t resto_ineq_elastic_ipm_constr::search_penalty(const func_approx_data &data) const {
-    return search_penalty_from_pairs(static_cast<const approx_data &>(data));
+    const auto &d = static_cast<const approx_data &>(data);
+    if (d.ipm_cfg == nullptr) {
+        return 0.;
+    }
+    const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::search_penalty");
+    scalar_t sum = 0.;
+    for (auto side : box_sides) {
+        for (auto slot : k_triplet_slots) {
+            const auto safe = box.present_mask[side].select(d.elastic.side[side].value[slot].array(), scalar_t(1));
+            sum += box.present_mask[side].select(safe.log(), scalar_t(0)).sum();
+        }
+    }
+    return d.ipm_cfg->mu * sum;
 }
 
 scalar_t resto_ineq_elastic_ipm_constr::search_penalty_dir_deriv(const func_approx_data &data) const {
-    return search_penalty_dir_deriv_from_pairs(static_cast<const approx_data &>(data));
+    const auto &d = static_cast<const approx_data &>(data);
+    if (d.ipm_cfg == nullptr) {
+        return 0.;
+    }
+    const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::search_penalty_dir_deriv");
+    scalar_t sum = 0.;
+    for (auto side : box_sides) {
+        for (auto slot : k_triplet_slots) {
+            const auto safe =
+                box.present_mask[side].select(d.elastic.side[side].value_backup[slot].array(), scalar_t(1));
+            sum += box.present_mask[side].select(d.elastic.side[side].d_value[slot].array() / safe, scalar_t(0)).sum();
+        }
+    }
+    return d.ipm_cfg->mu * sum;
 }
 
 scalar_t resto_ineq_elastic_ipm_constr::local_stat_residual_inf(const func_approx_data &data) const {
@@ -955,7 +1149,7 @@ void sync_outer_to_restoration_state(node_data &outer,
         for_each_overlay_match<resto_ineq_elastic_ipm_constr>(
             resto, field, [&](const resto_ineq_elastic_ipm_constr &overlay, resto_ineq_elastic_ipm_constr::approx_data &d) {
                 copy_dual_slice(d.multiplier_, outer, overlay);
-                copy_ineq_slack_slice(d.slack_init, outer, overlay);
+                copy_ineq_side_init(d.slack_init, d.multiplier_init, outer, overlay);
             });
     }
 
@@ -1010,13 +1204,50 @@ void sync_restoration_to_outer_state(node_data &resto,
         for_each_overlay_match<resto_ineq_elastic_ipm_constr>(
             resto, field, [&](const resto_ineq_elastic_ipm_constr &overlay, resto_ineq_elastic_ipm_constr::approx_data &overlay_data) {
                 auto &outer_ipm = outer.data(overlay.source()).as<solver::ipm_constr::ipm_data>();
-                const auto &resto_slack = overlay_data.elastic.value[detail::slot_t];
                 const scalar_t mu = overlay_data.ipm_cfg->mu;
-                outer_ipm.d_slack_ = resto_slack - outer_ipm.slack_;
-                outer_ipm.d_multiplier_ = (mu - (outer_ipm.multiplier_.cwiseProduct(outer_ipm.d_slack_)).array()) / resto_slack.array() - outer_ipm.multiplier_.array();
-                outer_ipm.slack_ = resto_slack;
-                outer_ipm.slack_backup_ = outer_ipm.slack_;
-                outer_ipm.multiplier_backup_ = outer_ipm.multiplier_;
+                const auto *constr = dynamic_cast<const ineq_constr *>(&outer_ipm.func_);
+                const auto *box = constr != nullptr ? constr->box_info() : nullptr;
+                if (box == nullptr) {
+                    throw std::runtime_error("boxed ipm missing box_info in restoration sync");
+                }
+                outer_ipm.multiplier_.setZero();
+                outer_ipm.d_multiplier_.setZero();
+                outer_ipm.comp_.setZero();
+                outer_ipm.v_.setConstant(-std::numeric_limits<scalar_t>::infinity());
+                for (auto side : box_sides) {
+                    auto &outer_pair = *outer_ipm.box_side_[side];
+                    const auto &resto_side = overlay_data.elastic.side[side];
+                    outer_pair.d_slack =
+                        box->present_mask[side].select(resto_side.value[detail::slot_t].array() - outer_pair.slack.array(), scalar_t(0)).matrix();
+                    outer_pair.d_multiplier =
+                        box->present_mask[side]
+                            .select((mu - outer_pair.multiplier.array() * outer_pair.d_slack.array()) /
+                                        resto_side.value[detail::slot_t].array() -
+                                        outer_pair.multiplier.array(),
+                                    scalar_t(0))
+                            .matrix();
+                    outer_pair.slack =
+                        box->present_mask[side].select(resto_side.value[detail::slot_t].array(), scalar_t(0)).matrix();
+                    outer_pair.slack_backup = outer_pair.slack;
+                    outer_pair.multiplier_backup = outer_pair.multiplier;
+                    static_cast<solver::ipm_constr::approx_data::side_data &>(outer_pair).r_s =
+                        box->present_mask[side].select(outer_pair.multiplier.array() * outer_pair.slack.array(), scalar_t(0)).matrix();
+                    const scalar_t dual_sign = side == box_side::ub ? scalar_t(1) : scalar_t(-1);
+                    outer_ipm.multiplier_.array() +=
+                        dual_sign * box->present_mask[side].select(outer_pair.multiplier.array(), scalar_t(0));
+                    outer_ipm.d_multiplier_.array() +=
+                        dual_sign * box->present_mask[side].select(outer_pair.d_multiplier.array(), scalar_t(0));
+                    outer_ipm.v_ =
+                        box->present_mask[side]
+                            .select(outer_ipm.v_.cwiseMax(resto_side.r_d).array(), outer_ipm.v_.array())
+                            .matrix();
+                    outer_ipm.comp_ =
+                        box->present_mask[side]
+                            .select((outer_pair.multiplier.array() * outer_pair.slack.array()).abs()
+                                        .max(outer_ipm.comp_.array()),
+                                    outer_ipm.comp_.array())
+                            .matrix();
+                }
             });
     }
 }

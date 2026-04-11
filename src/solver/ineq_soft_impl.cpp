@@ -4,6 +4,9 @@
 namespace moto {
 namespace solver {
 namespace ineq_soft {
+namespace {
+} // namespace
+
 void bind_runtime(const soft_constr &sf, soft_constr::data_map_t &sd) {
     if (sd.runtime_bound_) {
         return;

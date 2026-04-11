@@ -27,6 +27,14 @@ std::string overlay_name(const generic_func &source, std::string_view suffix) {
     return fmt::format("{}__{}", source.name(), suffix);
 }
 
+void copy_source_jac_sparsity(generic_func &dst, const generic_func &src) {
+    const auto &src_args = src.in_args();
+    const auto &src_sp = src.jac_sparsity();
+    for (size_t i = 0; i < src_args.size() && i < src_sp.size(); ++i) {
+        dst.set_jac_sparsity(src_args[i], src_sp[i]);
+    }
+}
+
 template <typename Overlay>
 void copy_dual_slice(vector_ref dst, const node_data &outer, const Overlay &overlay) {
     const auto &source_data = outer.data(overlay.source());
@@ -50,7 +58,9 @@ eq_init_pmm_constr::eq_init_pmm_constr(const std::string &name,
     field_hint().is_eq = true;
     field_hint().is_soft = true;
     set_default_hess_sparsity(sparsity::dense);
-    add_arguments(dynamic_cast<const generic_func &>(*source).in_args());
+    const auto &src_func = dynamic_cast<const generic_func &>(*source);
+    add_arguments(src_func.in_args());
+    copy_source_jac_sparsity(*this, src_func);
 }
 
 void eq_init_pmm_constr::value_impl(func_approx_data &data) const {
@@ -62,15 +72,15 @@ void eq_init_pmm_constr::value_impl(func_approx_data &data) const {
 
 void eq_init_pmm_constr::jacobian_impl(func_approx_data &data) const {
     forward_source_jacobian(source_, data);
-    pmm_constr::propagate_jacobian(data);
-    pmm_constr::propagate_hessian(data);
+    auto &d = data.as<pmm_constr::approx_data>();
+    propagate_jacobian(d);
+    propagate_hessian(d);
 }
 
 void eq_init_pmm_constr::hessian_impl(func_approx_data &data) const {
     if (source_->order() >= approx_order::second) {
         forward_source_hessian(source_, data);
     }
-    pmm_constr::propagate_hessian(data);
 }
 
 ocp_ptr_t build_equality_init_overlay_problem(const ocp_ptr_t &source_prob,
@@ -152,9 +162,9 @@ void sync_equality_init_overlay_duals(node_data &outer, node_data &overlay) {
                 return;
             }
             overlay_ad.multiplier_ = outer_ipm.multiplier_;
-            overlay_ad.multiplier_backup_ = outer_ipm.multiplier_backup_;
-            overlay_ad.slack_ = outer_ipm.slack_;
-            overlay_ad.slack_backup_ = outer_ipm.slack_backup_;
+            for (auto side : box_sides) {
+                *overlay_ad.box_side_[side] = *outer_ipm.box_side_[side];
+            }
             found = true;
         });
         if (!found) {
@@ -172,9 +182,9 @@ void sync_equality_init_overlay_duals(node_data &outer, node_data &overlay) {
                 return;
             }
             overlay_ad.multiplier_ = outer_ipm.multiplier_;
-            overlay_ad.multiplier_backup_ = outer_ipm.multiplier_backup_;
-            overlay_ad.slack_ = outer_ipm.slack_;
-            overlay_ad.slack_backup_ = outer_ipm.slack_backup_;
+            for (auto side : box_sides) {
+                *overlay_ad.box_side_[side] = *outer_ipm.box_side_[side];
+            }
             found = true;
         });
         if (!found) {

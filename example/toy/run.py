@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
 
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 import casadi as cs
 import moto
 import numpy as np
@@ -41,11 +48,13 @@ terminal_cost = (
 )
 
 u_limit = 0.5
-u_box = moto.constr.create(
+u_box = moto.ineq.create(
     "toy_base_u_box",
     [u],
-    cs.vertcat(u.sx - u_limit, -u.sx - u_limit),
-).cast_ineq()
+    u.sx,
+    np.full(nu, -u_limit),
+    np.full(nu, u_limit),
+)
 
 
 def build_sqp():

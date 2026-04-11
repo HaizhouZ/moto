@@ -44,11 +44,11 @@ void generic_cost::finalize_impl() {
         } else {
             /// @todo use gn_weight_ to scale the hessian
             hessian = [](func_approx_data &d) {
-                // Gauss-Newton approximation: H ≈ J^T * J
+            // Gauss-Newton approximation: H ≈ J^T * J
                 for (size_t i = 0; i < d.lag_hess_.size(); i++) {
                     for (size_t j = 0; j < d.lag_hess_[i].size(); j++) {
                         if (d.lag_hess_[i][j].size() > 0) {
-                            d.lag_hess_[i][j] = d.jac_[i].transpose() * d.jac_[j];
+                            d.lag_hess_[i][j].noalias() += d.jac_[i].transpose() * d.jac_[j];
                         }
                     }
                 }

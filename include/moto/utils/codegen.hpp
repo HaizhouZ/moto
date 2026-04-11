@@ -80,6 +80,7 @@ struct task {
     std::vector<cs::SX> jac_outputs; ///< for multiple outputs
     std::vector<std::pair<shared_expr, cs::SX>> ext_jac;
     std::vector<std::tuple<shared_expr, shared_expr, cs::SX>> ext_hess;
+    std::vector<sparsity> *jac_sp = nullptr;              ///< optional jacobian sparsity pattern
     std::vector<std::vector<sparsity>> *hess_sp = nullptr; ///< optional hessian sparsity pattern
     std::string output_dir = "gen";
     bool force_recompile = false;

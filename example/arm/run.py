@@ -1,4 +1,11 @@
 import argparse
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 import moto
 import casadi as cs
 import numpy as np
@@ -171,7 +178,7 @@ class pinCasadiModel(cpin.Model):
         return c
         res = cpin.log6(ee_des.inverse() * ee_pos).np
         # res = cs.vcat([ee_pos.translation - ee_des.translation, cpin.log3(ee_des.rotation.T @ ee_pos.rotation)])
-        # return moto.constr.create("ee_constr_ineq", self.pos_args + [self.r_des, self.quat_des], cs.vcat([res, -res])).cast_ineq()
+        # return moto.ineq.create("ee_constr_ineq", self.pos_args + [self.r_des, self.quat_des], cs.vcat([res, -res]))
         if not hasattr(self, "W_ee_cost"):
             self.W_ee_cost = moto.sym.params(
                 "W_ee_cost", 6, default_val=np.array([40.0, 40.0, 40.0, 0.0, 0.0, 0.0])
@@ -199,19 +206,21 @@ class pinCasadiModel(cpin.Model):
         self.q_min = q_min
         self.q_max = q_max
         self.v_lim = v_lim
-        return moto.constr.create(
+        return moto.ineq.create(
             "arm_q_limit",
             [self.q, self.v],
-            cs.vcat([q_min - qj, qj - q_max, vj - v_lim, -vj - v_lim]),
-        ).cast_ineq()
+            cs.vcat([qj, vj]),
+            np.concatenate([q_min, -v_lim]),
+            np.concatenate([q_max, v_lim]),
+        )
 
     def make_tq_limit_constr(self):
         tq_limit = self.fmodel.effortLimit[-self.nj :]
         in_arg = [self.tq]
         # in_arg = self.pos_args + self.vel_args + self.acc_args + [*self.active_foot, *self.f_f] + ([self.dt] if isinstance(self.dt, cs.SX) else [])
-        return moto.constr.create(
-            "arm_tq_limit", in_arg, cs.vcat([self.tq - tq_limit, -self.tq - tq_limit])
-        ).cast_ineq()
+        return moto.ineq.create(
+            "arm_tq_limit", in_arg, self.tq.sx, -tq_limit, tq_limit
+        )
 
     def get_state_cost(self, terminal: bool = False):
         q_nom_res = self.q_stack - self.q_nom
@@ -247,9 +256,7 @@ class pinCasadiModel(cpin.Model):
             moto.cost.create(
                 "arm_dt_reg", [self.dt, dt_nom, W_dt], W_dt * (self.dt - dt_nom) ** 2
             ),
-            moto.constr.create(
-                "arm_dt_bound", [self.dt], cs.vcat([self.dt - 0.1, 1e-2 - self.dt])
-            ).cast_ineq(),
+            moto.ineq.create("arm_dt_bound", [self.dt], self.dt.sx, 1e-2, 0.1),
         ]
 
 

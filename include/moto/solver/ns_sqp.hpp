@@ -217,6 +217,8 @@ struct ns_sqp {
         static void update_approx(data *d) {
             d->update_approximation();
         }
+        void backup_trial_state() override;
+        void restore_trial_state() override;
         /// row scale applied to each constraint field (empty ⟹ scaling not yet applied)
         array_type<vector, constr_fields> scale_c_;
         /// scale applied to each primal field's cost gradient
@@ -256,8 +258,6 @@ struct ns_sqp {
             scalar_t inf_res = 0.;          // primal residual (constraint violation), inf-norm
             scalar_t res_l1 = 0.;           // primal residual L1 norm
             scalar_t inf_comp = 0.;         // (inequality) complementarity residual
-            scalar_t log_slack_sum = 0.;    // sum(log(slack)) across all normal-IPM constraints, mu-free
-            scalar_t max_diag_scaling = 0.; // max Nesterov-Todd scaling
         } primal;
 
         struct dual_info {
@@ -265,27 +265,30 @@ struct ns_sqp {
             scalar_t max_eq_norm = 0.;     // max inf-norm of equality dual variables
             scalar_t max_ineq_norm = 0.;   // max inf-norm of inequality dual variables
             scalar_t max_norm = 0.;        // max inf-norm of all dual variables
-            scalar_t avg_res = 0.;         // average dual residual
+            scalar_t lambda_l1 = 0.;       // L1 norm of all dual variables
+            size_t n_constr = 0;          // number of dual variables across all constraint fields
         } dual;
 
         struct barrier_step_info {
-            scalar_t barrier_dir_deriv = 0.;
+            // scalar_t barrier_dir_deriv = 0.; // mu-free barrier directional derivative
             scalar_t search_barrier_dir_deriv = 0.;
             scalar_t augmented_objective_fullstep_dec = 0.;
             scalar_t ls_objective_fullstep_dec = 0.;
-        };
+        } barrier_step;
 
         struct step_info {
             scalar_t inf_prim_step = 0.;
             scalar_t inf_dual_step = 0.;
             scalar_t inf_eq_dual_step = 0.;
             scalar_t inf_ineq_dual_step = 0.;
-            scalar_t inf_dyn_dual_step = 0.;
-            scalar_t inf_eq_x_dual_step = 0.;
-            scalar_t inf_eq_xu_dual_step = 0.;
         } step;
 
-        barrier_step_info barrier_step;
+        /// @brief accept the rhs kkt info (excluding the step info)
+        void accept(kkt_info& rhs) {
+            barrier_objective = rhs.barrier_objective;
+            primal = rhs.primal;
+            dual = rhs.dual;
+        }
     };
 
     struct result_type : public kkt_info {
@@ -298,9 +301,16 @@ struct ns_sqp {
         barrier_objective = 1 << 1,
     };
 
-    friend constexpr point_value_mask operator|(point_value_mask lhs, point_value_mask rhs) {
-        using mask_t = std::underlying_type_t<point_value_mask>;
-        return static_cast<point_value_mask>(static_cast<mask_t>(lhs) | static_cast<mask_t>(rhs));
+    enum class step_info_mask : uint8_t {
+        none = 0,
+        orig_step = 1 << 0,
+        barrier_step = 1 << 1,
+    };
+
+    template <typename enum_type>
+    friend constexpr enum_type operator|(enum_type lhs, enum_type rhs) {
+        using mask_t = std::underlying_type_t<enum_type>;
+        return static_cast<enum_type>(static_cast<mask_t>(lhs) | static_cast<mask_t>(rhs));
     }
 
     kkt_info kkt_last;
@@ -401,15 +411,6 @@ struct ns_sqp {
     };
 
     stacked_workers<settings_t::worker> setting_per_thread;
-    stacked_workers<kkt_info> kkt_per_thread;
-    stacked_workers<kkt_info> ls_per_thread;
-    struct kkt_reduce_info {
-        scalar_t dual_res_l1 = 0.;
-        scalar_t lambda_l1 = 0.;
-        size_t n_dual_res = 0;
-        size_t n_constr = 0;
-    };
-    stacked_workers<kkt_reduce_info> kkt_reduce_per_thread;
     using profile_clock = std::chrono::high_resolution_clock;
 
     struct profile_state {
@@ -447,85 +448,13 @@ struct ns_sqp {
     scoped_profile profile_scope(profile_phase phase) { return scoped_profile(this, phase); }
     static const char *profile_phase_name(profile_phase phase);
     profile_report profile_report_;
-    /// print inf norms of constraint residuals and Jacobians across all nodes, to diagnose scaling
-    void print_scaling_info();
-    /// print per-field contribution to dual stationarity residual (first node only)
-    void print_dual_res_breakdown();
-    /// check LICQ at the current point: stacks all constraint Jacobians per node and reports rank via SVD
-    void print_licq_info();
     /// print statistics header
     void print_stat_header();
     /// print statistics for the current iteration
     void print_stats(const kkt_info &info, const iter_info &iter, size_t ls_steps);
-    template <typename Summary, typename InitFn, typename AccumulateFn, typename MergeFn>
-    Summary reduce_partials(stacked_workers<Summary> &workers,
-                            const Summary &base,
-                            InitFn &&init,
-                            AccumulateFn &&accumulate,
-                            MergeFn &&merge) {
-        auto &graph = active_data();
-        Summary summary = base;
-        std::invoke(init, summary);
-        if (in_restoration_phase()) {
-            for (auto *n : graph.flatten_nodes()) {
-                std::invoke(accumulate, summary, *n);
-            }
-            return summary;
-        }
-        if (workers.size() != settings.n_worker) {
-            workers.reset(settings.n_worker);
-        }
-        for (auto &partial : workers) {
-            partial = Summary{};
-            std::invoke(init, partial);
-        }
-        graph.for_each_parallel([&](size_t tid, data *n) {
-            std::invoke(accumulate, workers[tid], *n);
-        });
-        for (const auto &partial : workers) {
-            std::invoke(merge, summary, partial);
-        }
-        return summary;
-    }
-    template <typename Summary, typename Aux, typename InitFn, typename AccumulateFn, typename MergeFn>
-    std::pair<Summary, Aux> reduce_partials_with_aux(stacked_workers<Summary> &workers,
-                                                     stacked_workers<Aux> &aux_workers,
-                                                     const Summary &base,
-                                                     InitFn &&init,
-                                                     AccumulateFn &&accumulate,
-                                                     MergeFn &&merge) {
-        auto &graph = active_data();
-        Summary summary = base;
-        Aux aux{};
-        std::invoke(init, summary, aux);
-        if (in_restoration_phase()) {
-            for (auto *n : graph.flatten_nodes()) {
-                std::invoke(accumulate, summary, aux, *n);
-            }
-            return {summary, aux};
-        }
-        if (workers.size() != settings.n_worker) {
-            workers.reset(settings.n_worker);
-        }
-        if (aux_workers.size() != settings.n_worker) {
-            aux_workers.reset(settings.n_worker);
-        }
-        for (size_t i = 0; i < workers.size(); ++i) {
-            workers[i] = Summary{};
-            aux_workers[i] = Aux{};
-            std::invoke(init, workers[i], aux_workers[i]);
-        }
-        graph.for_each_parallel([&](size_t tid, data *n) {
-            std::invoke(accumulate, workers[tid], aux_workers[tid], *n);
-        });
-        for (size_t i = 0; i < workers.size(); ++i) {
-            std::invoke(merge, summary, aux, workers[i], aux_workers[i]);
-        }
-        return {summary, aux};
-    }
-    kkt_info compute_point_primal_info(const kkt_info &base, point_value_mask mask);
-    kkt_info compute_step_info(const kkt_info &base);
-    kkt_info compute_stationarity_info(const kkt_info &base);
+    void update_primal_info(kkt_info &base, point_value_mask mask);
+    void update_step_info(kkt_info &base, step_info_mask mask);
+    void update_stat_info(kkt_info &base);
     void initialize_equality_multipliers();
     result_type restoration_update(const kkt_info &kkt_before, const iter_info &iter_before, filter_linesearch_data &ls);
     /// perform iterative refinement to improve the solution accuracy, will modify the current solution in place
@@ -703,6 +632,9 @@ struct ns_sqp {
      * @param do_refinement  Whether to run iterative refinement after the corrector.
      * @param gauss_newton   If true, calls ns_factorization with gauss_newton=true.
      * @return               Line-search action that terminated the inner loop.
+     * @note                 Upon failure it is guarantteed that the primal and dual states are recovered, 
+     *                       but the function evaluation and the derivatives will be corrupted. 
+     *                       The kkt_current will be restored to pre-linesearch state.
      */
     line_search_action sqp_iter(filter_linesearch_data &ls, kkt_info &kkt_current,
                                 bool do_scaling, bool do_refinement,

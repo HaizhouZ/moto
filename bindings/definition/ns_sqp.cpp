@@ -159,19 +159,16 @@ void register_submodule_ns_sqp(nb::module_ &m) {
     nb::class_<ns_sqp::kkt_info::primal_info>(sqp, "primal_info")
         .def_ro("inf_res", &ns_sqp::kkt_info::primal_info::inf_res)
         .def_ro("res_l1", &ns_sqp::kkt_info::primal_info::res_l1)
-        .def_ro("inf_comp", &ns_sqp::kkt_info::primal_info::inf_comp)
-        .def_ro("log_slack_sum", &ns_sqp::kkt_info::primal_info::log_slack_sum)
-        .def_ro("max_diag_scaling", &ns_sqp::kkt_info::primal_info::max_diag_scaling);
+        .def_ro("inf_comp", &ns_sqp::kkt_info::primal_info::inf_comp);
 
     nb::class_<ns_sqp::kkt_info::dual_info>(sqp, "dual_info")
         .def_ro("inf_res", &ns_sqp::kkt_info::dual_info::inf_res)
         .def_ro("max_eq_norm", &ns_sqp::kkt_info::dual_info::max_eq_norm)
         .def_ro("max_ineq_norm", &ns_sqp::kkt_info::dual_info::max_ineq_norm)
-        .def_ro("max_norm", &ns_sqp::kkt_info::dual_info::max_norm)
-        .def_ro("avg_res", &ns_sqp::kkt_info::dual_info::avg_res);
+        .def_ro("max_norm", &ns_sqp::kkt_info::dual_info::max_norm);
 
     nb::class_<ns_sqp::kkt_info::barrier_step_info>(sqp, "barrier_step_info")
-        .def_ro("barrier_dir_deriv", &ns_sqp::kkt_info::barrier_step_info::barrier_dir_deriv)
+        // .def_ro("barrier_dir_deriv", &ns_sqp::kkt_info::barrier_step_info::barrier_dir_deriv)
         .def_ro("search_barrier_dir_deriv", &ns_sqp::kkt_info::barrier_step_info::search_barrier_dir_deriv)
         .def_ro("augmented_objective_fullstep_dec", &ns_sqp::kkt_info::barrier_step_info::augmented_objective_fullstep_dec)
         .def_ro("ls_objective_fullstep_dec", &ns_sqp::kkt_info::barrier_step_info::ls_objective_fullstep_dec);
@@ -180,10 +177,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_ro("inf_prim_step", &ns_sqp::kkt_info::step_info::inf_prim_step)
         .def_ro("inf_dual_step", &ns_sqp::kkt_info::step_info::inf_dual_step)
         .def_ro("inf_eq_dual_step", &ns_sqp::kkt_info::step_info::inf_eq_dual_step)
-        .def_ro("inf_ineq_dual_step", &ns_sqp::kkt_info::step_info::inf_ineq_dual_step)
-        .def_ro("inf_dyn_dual_step", &ns_sqp::kkt_info::step_info::inf_dyn_dual_step)
-        .def_ro("inf_eq_x_dual_step", &ns_sqp::kkt_info::step_info::inf_eq_x_dual_step)
-        .def_ro("inf_eq_xu_dual_step", &ns_sqp::kkt_info::step_info::inf_eq_xu_dual_step);
+        .def_ro("inf_ineq_dual_step", &ns_sqp::kkt_info::step_info::inf_ineq_dual_step);
 
     nb::class_<ns_sqp::kkt_info>(sqp, "kkt_info")
         .def_ro("barrier_objective", &ns_sqp::kkt_info::barrier_objective)
@@ -196,7 +190,10 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_ro("iter", &ns_sqp::result_type::iter, "Iteration metadata")
         .def_prop_ro("result", [](const ns_sqp::result_type &self) { return self.iter.result; }, "Result of the SQP iteration")
         .def_prop_ro("solved", [](const ns_sqp::result_type &self) { return self.iter.result == ns_sqp::iter_result_t::success; }, "Whether the problem is solved")
-        .def_prop_ro("num_iter", [](const ns_sqp::result_type &self) { return self.iter.num_iter; }, "Number of iterations");
+        .def_prop_ro("num_iter", [](const ns_sqp::result_type &self) { return self.iter.num_iter; }, "Number of iterations")
+        .def_prop_ro("inf_prim_res", [](const ns_sqp::result_type &self) { return self.primal.inf_res; })
+        .def_prop_ro("inf_dual_res", [](const ns_sqp::result_type &self) { return self.dual.inf_res; })
+        .def_prop_ro("inf_comp_res", [](const ns_sqp::result_type &self) { return self.primal.inf_comp; });
 
     // Iterate over all enum values provided by magic_enum
     for (auto [value, name] : magic_enum::enum_entries<moto::solver::ipm_config::adaptive_mu_t>()) {

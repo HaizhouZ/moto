@@ -10,7 +10,7 @@ namespace solver {
 ///   [J      -rho*I] [dlam] = -[  h    ]
 /// Schur complement of dlam into the du block:
 ///   Gradient:  +=(1/rho) * J^T * h  (via lag_jac_corr_ += (h/rho)^T * J)
-///              node_data separately adds J^T*lambda from the base soft_constr contribution
+///              update_approximation() separately adds J^T*lambda from the base soft_constr contribution
 ///   Hessian:   +=(1/rho) * J^T * J  (via lag_hess_)
 /// Dual update from row 2: dlam = (J*du + h) / rho
 /// As rho -> 0: (1/rho)*J^T*J penalty dominates, forcing J*du = -h (hard constraint recovery).
@@ -22,6 +22,7 @@ class pmm_constr : public soft_constr {
   public:
     struct approx_data : public base::approx_data {
         vector g_;                  ///< raw constraint residual h = C(x), snapshot of v_ after value_impl
+        vector jac_step_;           ///< reusable J * step scratch
         vector multiplier_backup_;  ///< backup of multiplier for line search trials
         scalar_t rho_ = 1.0;        ///< dual penalty weight (copied from constraint at construction)
 
@@ -34,10 +35,8 @@ class pmm_constr : public soft_constr {
 
     void value_impl(func_approx_data &data) const override;
     void jacobian_impl(func_approx_data &data) const override;
-
-    void propagate_jacobian(func_approx_data &d) const override;
-    void propagate_hessian(func_approx_data &d) const override;
-    void propagate_res_stats(func_approx_data &d) const override {};
+    void propagate_jacobian(func_approx_data &data) const;
+    void propagate_hessian(func_approx_data &data) const;
 
     /// @brief initialize: set lambda = 0 (cold start)
     void initialize(data_map_t &data) const override final;

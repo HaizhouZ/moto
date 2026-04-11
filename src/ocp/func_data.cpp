@@ -94,4 +94,8 @@ void func_approx_data::setup_hessian() {
         lag_hess_.shrink_to_fit();
     }
 }
+
+bool func_approx_data::has_jacobian_block(size_t arg_idx) const {
+    return arg_idx < jac_.size() && jac_[arg_idx].size() != 0;
+}
 } // namespace moto

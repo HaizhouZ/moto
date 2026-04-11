@@ -11,6 +11,8 @@ pmm_constr::approx_data::approx_data(base::approx_data &&rhs, scalar_t rho)
     : base::approx_data(std::move(rhs)), rho_(rho) {
     g_.resize(func_.dim());
     g_.setZero();
+    jac_step_.resize(func_.dim());
+    jac_step_.setZero();
     multiplier_backup_.resize(func_.dim());
     multiplier_backup_.setZero();
 }
@@ -29,40 +31,34 @@ void pmm_constr::value_impl(func_approx_data &data) const {
 
 void pmm_constr::jacobian_impl(func_approx_data &data) const {
     base::jacobian_impl(data);
-    auto &d = data.as<pmm_data>();
-    // Schur complement of dlam into du block; see propagate_jacobian / propagate_hessian.
-    propagate_jacobian(d);
-    propagate_hessian(d);
+    propagate_jacobian(data);
+    propagate_hessian(data);
 }
 
 void pmm_constr::propagate_jacobian(func_approx_data &data) const {
     auto &d = data.as<pmm_data>();
-    // Schur complement adds (1/rho)*J^T*h to L_jac; node_data adds J^T*lambda,
-    // so lag_jac_corr_ contributes (h/rho - lambda)^T*J to cancel lambda and add h/rho.
-    size_t j_idx = 0;
-    for (auto &j : d.jac_) {
-        if (j.size() != 0) {
-            d.lag_jac_corr_[j_idx].noalias() += (d.g_ / d.rho_).transpose() * j;
+    for (size_t arg_idx = 0; arg_idx < d.lag_jac_corr_.size(); ++arg_idx) {
+        if (d.has_jacobian_block(arg_idx)) {
+            d.lag_jac_corr_[arg_idx].noalias() += (d.g_ / d.rho_).transpose() * d.jac_[arg_idx];
         }
-        j_idx++;
     }
 }
 
 void pmm_constr::propagate_hessian(func_approx_data &data) const {
     auto &d = data.as<pmm_data>();
-    // Schur complement of dlam into du block: (1/rho) * J^T * J
     size_t outer_idx = 0;
     for (auto &outer : d.lag_hess_) {
         size_t inner_idx = 0;
         if (outer.size()) {
             for (auto &inner : outer) {
                 if (inner.size() != 0) {
-                    inner.noalias() += (1.0 / d.rho_) * d.jac_[outer_idx].transpose() * d.jac_[inner_idx];
+                    inner.noalias() +=
+                        scalar_t(1.0 / d.rho_) * (d.jac_[outer_idx].transpose() * d.jac_[inner_idx]);
                 }
-                inner_idx++;
+                ++inner_idx;
             }
         }
-        outer_idx++;
+        ++outer_idx;
     }
 }
 
@@ -86,8 +82,9 @@ void pmm_constr::finalize_newton_step(data_map_t &data) const {
     d.d_multiplier_.noalias() = d.g_;
     size_t arg_idx = 0;
     for (const sym &arg : d.func_.in_args()) {
-        if (arg.field() < field::num_prim) {
-            d.d_multiplier_.noalias() += d.jac_[arg_idx] * d.prim_step_[arg_idx];
+        if (arg.field() < field::num_prim && d.has_jacobian_block(arg_idx)) {
+            d.jac_step_.noalias() = d.jac_[arg_idx] * d.prim_step_[arg_idx];
+            d.d_multiplier_.noalias() += d.jac_step_;
         }
         arg_idx++;
     }

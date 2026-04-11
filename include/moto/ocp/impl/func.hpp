@@ -130,6 +130,11 @@ class generic_func : public expr {
     const auto &jac_sparsity() const { return jac_sp_; }   ///< get the jacobian sparsity patterns
     const auto &hess_sparsity() const { return hess_sp_; } ///< get the hessian sparsity patterns
 
+    void set_jac_sparsity(const sym &arg, sparsity sp) {
+        field_write_guard(arg.field());
+        (void)sp;
+    }
+
     void set_default_hess_sparsity(sparsity sp) {
         field_write_guard();
         default_hess_sp_ = sp;
@@ -215,6 +220,7 @@ class generic_func : public expr {
                         bool eval_val, bool eval_jac = false, bool eval_hess = false) const;
 
     auto *get_codegen_task() { return gen_.task_.get(); } ///< get the codegen task
+    const auto *get_codegen_task() const { return gen_.task_.get(); }
 
     /// @brief load external function implementation from shared library
     /// @param path path to the shared library, default is "gen"

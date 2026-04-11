@@ -33,6 +33,9 @@ using elastic_pair_array = array_type<T, std::array{slot_p, slot_n}>;
 template <typename T>
 using elastic_triplet_array = array_type<T, std::array{slot_t, slot_p, slot_n}>;
 
+template <typename T>
+using elastic_side_array = ineq_constr::box_side_array<T>;
+
 struct eq_local_state {
     size_t ns = 0;
     size_t nc = 0;
@@ -54,18 +57,32 @@ struct ineq_local_state {
     size_t nx = 0;
     size_t nu = 0;
 
-    elastic_triplet_array<vector> value;
-    elastic_triplet_array<vector> value_backup;
-    elastic_triplet_array<vector> d_value;
-    elastic_triplet_array<vector> dual;
-    elastic_triplet_array<vector> dual_backup;
-    elastic_triplet_array<vector> d_dual;
-    elastic_triplet_array<vector> r_comp;
-    elastic_triplet_array<vector> denom;
-    elastic_triplet_array<vector> backsub_rhs;
-    elastic_triplet_array<vector> corrector;
-    elastic_pair_array<vector> r_stat;
-    vector base_residual, r_d, condensed_rhs, schur_inv_diag, schur_rhs;
+    elastic_side_array<Eigen::Array<bool, Eigen::Dynamic, 1>> present_mask;
+    struct side_state {
+        elastic_triplet_array<vector> value;
+        elastic_triplet_array<vector> value_backup;
+        elastic_triplet_array<vector> d_value;
+        elastic_triplet_array<vector> dual;
+        elastic_triplet_array<vector> dual_backup;
+        elastic_triplet_array<vector> d_dual;
+        elastic_triplet_array<vector> r_comp;
+        elastic_triplet_array<vector> denom;
+        elastic_triplet_array<vector> backsub_rhs;
+        elastic_triplet_array<vector> corrector;
+        elastic_pair_array<vector> r_stat;
+        vector residual;
+        vector r_d;
+        vector condensed_rhs;
+        vector schur_inv_diag;
+        vector schur_rhs;
+    };
+
+    elastic_side_array<side_state> side;
+    vector base_residual;
+    vector primal_view;
+    vector schur_rhs_net;
+    vector schur_inv_diag_sum;
+    vector d_multiplier;
 };
 
 } // namespace detail
@@ -125,6 +142,8 @@ class resto_eq_elastic_constr final : public soft_constr {
     struct approx_data : public soft_constr::approx_data {
         solver::ipm_config *ipm_cfg = nullptr;
         vector base_residual;
+        vector jac_step;
+        vector jac_step_tmp;
         vector multiplier_backup;
         detail::eq_local_state elastic;
       scalar_t *rho = nullptr;
@@ -145,9 +164,6 @@ class resto_eq_elastic_constr final : public soft_constr {
     void value_impl(func_approx_data &data) const override;
     void jacobian_impl(func_approx_data &data) const override;
     void hessian_impl(func_approx_data &data) const override;
-    void propagate_jacobian(func_approx_data &data) const override;
-    void propagate_hessian(func_approx_data &data) const override;
-    void propagate_res_stats(func_approx_data &data) const override;
 
     void initialize(data_map_t &data) const override;
     void finalize_newton_step(data_map_t &data) const override;
@@ -187,7 +203,10 @@ class resto_ineq_elastic_ipm_constr final : public ineq_constr {
     struct approx_data : public ineq_constr::approx_data {
         solver::ipm_config *ipm_cfg = nullptr;
         vector base_residual;
-        vector slack_init;
+        vector jac_step;
+        vector jac_step_tmp;
+        box_side_array<vector> slack_init;
+        box_side_array<vector> multiplier_init;
         vector multiplier_backup;
         detail::ineq_local_state elastic;
       scalar_t *rho = nullptr;
@@ -207,9 +226,6 @@ class resto_ineq_elastic_ipm_constr final : public ineq_constr {
     void value_impl(func_approx_data &data) const override;
     void jacobian_impl(func_approx_data &data) const override;
     void hessian_impl(func_approx_data &data) const override;
-    void propagate_jacobian(func_approx_data &data) const override;
-    void propagate_hessian(func_approx_data &data) const override;
-    void propagate_res_stats(func_approx_data &data) const override;
 
     void initialize(data_map_t &data) const override;
     void finalize_newton_step(data_map_t &data) const override;
@@ -226,10 +242,10 @@ class resto_ineq_elastic_ipm_constr final : public ineq_constr {
     scalar_t local_stat_residual_inf(const func_approx_data &data) const override;
     scalar_t local_comp_residual_inf(const func_approx_data &data) const override;
     static void compute_local_model(detail::ineq_local_state &elastic,
-                                    const vector_const_ref &base_residual,
+                                    const ineq_constr::box_spec &box,
                                     scalar_t rho,
                                     scalar_t mu_bar,
-                                    const detail::elastic_triplet_array<vector> *corrector = nullptr);
+                                    const detail::elastic_side_array<detail::elastic_triplet_array<vector>> *corrector = nullptr);
     static local_residual_summary current_local_residuals(const detail::ineq_local_state &ineq);
     static local_residual_summary linearized_newton_residuals(const vector_const_ref &delta_g,
                                                               const detail::ineq_local_state &ineq);

@@ -626,6 +626,8 @@ Key helper methods:
 - `activate_lag_jac_corr()`: backs up `Q_x/Q_u/Q_y`, then adds `lag_jac_corr_` into the active stage gradient
 - `swap_active_and_lag_jac_corr()`: swaps `lag_jac_` and `lag_jac_corr_` for correction solves
 - `backup_trial_state()` / `restore_trial_state()`: line-search checkpointing
+  - these are now `virtual` on `data_base` and overridden by `ns_sqp::data`
+  - `ns_sqp::data` override first applies the base snapshots, then dispatches `ineq_soft::backup_trial_state` / `restore_trial_state`
 - `first_order_correction_start/end()`: prepare and restore correction-mode gradient corrections
 
 ### `ns_riccati_data`
@@ -907,13 +909,13 @@ In normal constrained mode:
 
 The old monolithic `compute_kkt_info(...)` path has been split. The current main entry points are:
 
-- `compute_point_primal_info(...)`
-- `compute_step_info(...)`
-- `compute_stationarity_info(...)`
+- `update_primal_info(...)`
+- `update_step_info(...)`
+- `update_stat_info(...)`
 
 Current division of responsibility:
 
-- `compute_point_primal_info(...)`
+- `update_primal_info(...)`
   - `cost`
   - `augmented_objective`
   - `barrier_value`
@@ -921,15 +923,15 @@ Current division of responsibility:
   - `inf_res`
   - `res_l1`
   - `inf_comp`
-  - `max_diag_scaling`
-- `compute_step_info(...)`
+- `update_step_info(...)`
   - line-search directional data such as:
   - `augmented_objective_fullstep_dec`
   - `ls_objective_fullstep_dec`
   - primal/dual step norms
-- `compute_stationarity_info(...)`
+- `update_stat_info(...)`
   - `dual.inf_res`
-  - `dual.avg_res`
+  - `dual.lambda_l1`
+  - `dual.n_constr`
   - max dual norms
   - restoration-local dual/complementarity residual aggregation when restoration is active
 

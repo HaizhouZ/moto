@@ -36,30 +36,49 @@ $$
 
 the hard equality constraints that are made elastic in restoration, and
 
+the inequality constraints that are made elastic in restoration.
+
+For ordinary one-sided inequalities, the source residual is simply
+
 $$
-g(w)\le 0
+g(w)\le 0.
 $$
 
-the inequality constraints that are made elastic in restoration.
+For boxed inequalities,
+
+$$
+lb \le g(w) \le ub,
+$$
+
+the OCP still stores only the base residual `g(w)`. The bound sides are tracked
+through runtime metadata:
+
+$$
+r_{ub}(w)=g(w)-ub,
+\qquad
+r_{lb}(w)=lb-g(w).
+$$
 
 The restoration problem is
 
 $$
 \begin{aligned}
-\min_{w,p_c,n_c,p_d,n_d,t}\quad &
+\min_{w,p_c,n_c,\{t_s,p_s,n_s\}_{s \in S}}\quad &
 \phi_R(w)
 \;+\;
 \rho_c \mathbf{1}^T(p_c+n_c)
 \;+\;
-\rho_d \mathbf{1}^T(p_d+n_d) \\
+\rho_d \sum_{s \in S}\mathbf{1}^T(p_s+n_s) \\
 \text{s.t.}\quad &
 F(w)=0, \\
 &
 c(w)-p_c+n_c=0, \\
 &
-g(w)+t-p_d+n_d=0, \\
+r_s(w)+t_s-p_s+n_s=0,\qquad \forall s \in S, \\
+ &
+t_s \succ 0,\quad p_s \succ 0,\quad n_s \succ 0,\qquad \forall s \in S, \\
 &
-t \succ 0,\quad p_c \succ 0,\quad n_c \succ 0,\quad p_d \succ 0,\quad n_d \succ 0.
+p_c \succ 0,\quad n_c \succ 0.
 \end{aligned}
 $$
 
@@ -68,7 +87,19 @@ Here:
 - `\phi_R(w)` is the proximal restoration cost
 - `\rho_c > 0` is the equality elastic weight
 - `\rho_d > 0` is the inequality elastic weight
-- `t` is the explicit positive slack for the inequality block
+- `S` is the set of present inequality sides
+- each present side gets its own local positive slack `t_s`
+
+The side residuals are
+
+$$
+r_{ub}(w)=g(w)-ub,\qquad r_{lb}(w)=lb-g(w).
+$$
+
+For a one-sided inequality, only the `ub` side is present. For a boxed
+inequality, both `ub` and `lb` sides may be present row-wise. The restoration
+wrapper still evaluates only one base residual `g(w)` and one base Jacobian
+`J_g(w)`, then reuses them with signs `+J_g` for `ub` and `-J_g` for `lb`.
 
 The restoration wrappers are local. They do not alter the hard dynamics block;
 they only modify how `c(w)` and `g(w)` enter the stage QP.
@@ -288,60 +319,72 @@ That is exactly why the wrapper propagates:
 
 ## 3. Inequality Elastic Block
 
-For one inequality block, restoration introduces a positive slack `t` and the
-elastic pair `p,n`:
+The implementation does **not** build one monolithic boxed inequality block.
+Instead it applies the same local elastic algebra independently to each present
+bound side and then aggregates the condensed contributions.
+
+Let `s \in S` denote a present side:
+
+- `s = ub` with residual `r_{ub}(w)=g(w)-ub`
+- `s = lb` with residual `r_{lb}(w)=lb-g(w)`
+
+Both sides reuse the same base residual `g(w)` and base Jacobian `J_g(w)`.
+Their Jacobians differ only by sign:
 
 $$
-g(w)+t-p+n=0,
+J_s = \sigma_s J_g,
 \qquad
-t \succ 0,\quad p \succ 0,\quad n \succ 0.
+\sigma_{ub}=+1,
+\qquad
+\sigma_{lb}=-1.
+$$
+
+For one present side block, restoration introduces a positive slack `t_s` and
+the elastic pair `p_s,n_s`:
+
+$$
+r_s(w)+t_s-p_s+n_s=0,
+\qquad
+t_s \succ 0,\quad p_s \succ 0,\quad n_s \succ 0.
 $$
 
 The local duals are
 
 $$
-\nu_t \succ 0,\qquad \nu_p \succ 0,\qquad \nu_n \succ 0.
+\nu_{t,s} \succ 0,\qquad \nu_{p,s} \succ 0,\qquad \nu_{n,s} \succ 0.
 $$
-
-The reduced inequality block keeps `\nu_t` as the active multiplier carried by
-the stage solver.
 
 The local residuals are
 
 $$
 \begin{aligned}
-r_d   &= g(w)+t-p+n, \\
-r_p   &= \rho_d-\nu_t-\nu_p, \\
-r_n   &= \rho_d+\nu_t-\nu_n, \\
-r_{s,t} &= \nu_t \circ t - \mu \mathbf{1}, \\
-r_{s,p} &= \nu_p \circ p - \mu \mathbf{1}, \\
-r_{s,n} &= \nu_n \circ n - \mu \mathbf{1}.
+r_{d,s}   &= r_s(w)+t_s-p_s+n_s, \\
+r_{p,s}   &= \rho_d-\nu_{t,s}-\nu_{p,s}, \\
+r_{n,s}   &= \rho_d+\nu_{t,s}-\nu_{n,s}, \\
+r_{s,t,s} &= \nu_{t,s} \circ t_s - \mu \mathbf{1}, \\
+r_{s,p,s} &= \nu_{p,s} \circ p_s - \mu \mathbf{1}, \\
+r_{s,n,s} &= \nu_{n,s} \circ n_s - \mu \mathbf{1}.
 \end{aligned}
 $$
-
-There is no extra local `\lambda_d` here. The remaining local multiplier is
-`\nu_t`.
 
 ### 3.1 Linearized KKT System
 
 Let
 
 $$
-\delta g = J_d \delta w,
-\qquad
-J_d := \frac{\partial g}{\partial w}.
+\delta r_s = J_s \delta w.
 $$
 
-The local Newton system is
+Then the local Newton system is
 
 $$
 \begin{aligned}
-\delta g + \delta t - \delta p + \delta n &= -r_d, \\
--\delta\nu_t - \delta\nu_p &= -r_p, \\
-\delta\nu_t - \delta\nu_n &= -r_n, \\
-\nu_t \circ \delta t + t \circ \delta\nu_t &= -r_{s,t}, \\
-\nu_p \circ \delta p + p \circ \delta\nu_p &= -r_{s,p}, \\
-\nu_n \circ \delta n + n \circ \delta\nu_n &= -r_{s,n}.
+\delta r_s + \delta t_s - \delta p_s + \delta n_s &= -r_{d,s}, \\
+-\delta\nu_{t,s} - \delta\nu_{p,s} &= -r_{p,s}, \\
+\delta\nu_{t,s} - \delta\nu_{n,s} &= -r_{n,s}, \\
+\nu_{t,s} \circ \delta t_s + t_s \circ \delta\nu_{t,s} &= -r_{s,t,s}, \\
+\nu_{p,s} \circ \delta p_s + p_s \circ \delta\nu_{p,s} &= -r_{s,p,s}, \\
+\nu_{n,s} \circ \delta n_s + n_s \circ \delta\nu_{n,s} &= -r_{s,n,s}.
 \end{aligned}
 $$
 
@@ -350,96 +393,95 @@ $$
 Introduce
 
 $$
-T := \operatorname{diag}(t),
+T_s := \operatorname{diag}(t_s),
 \qquad
-P := \operatorname{diag}(p),
+P_s := \operatorname{diag}(p_s),
 \qquad
-N := \operatorname{diag}(n),
+N_s := \operatorname{diag}(n_s),
 $$
 
 $$
-Z_t := \operatorname{diag}(\nu_t),
+Z_{t,s} := \operatorname{diag}(\nu_{t,s}),
 \qquad
-Z_p := \operatorname{diag}(\nu_p),
+Z_{p,s} := \operatorname{diag}(\nu_{p,s}),
 \qquad
-Z_n := \operatorname{diag}(\nu_n).
+Z_{n,s} := \operatorname{diag}(\nu_{n,s}).
 $$
 
 From the local stationarity rows,
 
 $$
-\delta\nu_p = r_p - \delta\nu_t,
+\delta\nu_{p,s} = r_{p,s} - \delta\nu_{t,s},
 \qquad
-\delta\nu_n = r_n + \delta\nu_t.
+\delta\nu_{n,s} = r_{n,s} + \delta\nu_{t,s}.
 $$
 
 Substitute into the complementarity rows:
 
 $$
 \begin{aligned}
-\delta t
+\delta t_s
 &=
--T Z_t^{-1}\delta\nu_t
-- Z_t^{-1} r_{s,t}, \\
-\delta p
+-T_s Z_{t,s}^{-1}\delta\nu_{t,s}
+- Z_{t,s}^{-1} r_{s,t,s}, \\
+\delta p_s
 &=
-P Z_p^{-1}\delta\nu_t
-- P Z_p^{-1} r_p
-- Z_p^{-1} r_{s,p}, \\
-\delta n
+P_s Z_{p,s}^{-1}\delta\nu_{t,s}
+- P_s Z_{p,s}^{-1} r_{p,s}
+- Z_{p,s}^{-1} r_{s,p,s}, \\
+\delta n_s
 &=
--N Z_n^{-1}\delta\nu_t
-- N Z_n^{-1} r_n
-- Z_n^{-1} r_{s,n}.
+-N_s Z_{n,s}^{-1}\delta\nu_{t,s}
+- N_s Z_{n,s}^{-1} r_{n,s}
+- Z_{n,s}^{-1} r_{s,n,s}.
 \end{aligned}
 $$
 
 Substitute these into
 
 $$
-\delta g+\delta t-\delta p+\delta n=-r_d.
+\delta r_s+\delta t_s-\delta p_s+\delta n_s=-r_{d,s}.
 $$
 
-This gives the condensed inequality block
+This gives the condensed side block
 
 $$
--M_d\,\delta\nu_t + \delta g = -\hat r_d,
+-M_s\,\delta\nu_{t,s} + \delta r_s = -\hat r_s,
 $$
 
 with
 
 $$
-M_d := T Z_t^{-1} + P Z_p^{-1} + N Z_n^{-1},
+M_s := T_s Z_{t,s}^{-1} + P_s Z_{p,s}^{-1} + N_s Z_{n,s}^{-1},
 $$
 
 and
 
 $$
-\hat r_d
+\hat r_s
 :=
-r_d
-- Z_t^{-1} r_{s,t}
+r_{d,s}
+- Z_{t,s}^{-1} r_{s,t,s}
 +
-P Z_p^{-1} r_p
+P_s Z_{p,s}^{-1} r_{p,s}
 +
-Z_p^{-1} r_{s,p}
+Z_{p,s}^{-1} r_{s,p,s}
 -
-N Z_n^{-1} r_n
+N_s Z_{n,s}^{-1} r_{n,s}
 -
-Z_n^{-1} r_{s,n}.
+Z_{n,s}^{-1} r_{s,n,s}.
 $$
 
 Equivalently,
 
 $$
-\delta\nu_t = M_d^{-1}(\delta g + \hat r_d).
+\delta\nu_{t,s} = M_s^{-1}(\delta r_s + \hat r_s).
 $$
 
-Again, this matches the implementation exactly: the wrapper computes the
-diagonal inverse of
+So the implementation works with the diagonal inverse
 
 $$
-\operatorname{diag}\!\left(\frac{t}{\nu_t}+\frac{p}{\nu_p}+\frac{n}{\nu_n}\right).
+\operatorname{diag}\!\left(\frac{t_s}{\nu_{t,s}}+\frac{p_s}{\nu_{p,s}}+\frac{n_s}{\nu_{n,s}}\right)^{-1}.
 $$
 
 ### 3.3 Newton-Step Recovery
@@ -447,70 +489,75 @@ $$
 Once the stage solve provides `\delta w`, the wrapper forms
 
 $$
-\delta g = J_d \delta w
+\delta r_s = J_s \delta w
 $$
 
 and recovers the eliminated local steps as
 
 $$
 \begin{aligned}
-\delta\nu_t &= M_d^{-1}(\delta g + \hat r_d), \\
-\delta t &=
--T Z_t^{-1}\delta\nu_t
-- Z_t^{-1} r_{s,t}, \\
-\delta p &=
-P Z_p^{-1}\delta\nu_t
-- P Z_p^{-1} r_p
-- Z_p^{-1} r_{s,p}, \\
-\delta n &=
--N Z_n^{-1}\delta\nu_t
-- N Z_n^{-1} r_n
-- Z_n^{-1} r_{s,n}, \\
-\delta\nu_p &= r_p - \delta\nu_t, \\
-\delta\nu_n &= r_n + \delta\nu_t .
+\delta\nu_{t,s} &= M_s^{-1}(\delta r_s + \hat r_s), \\
+\delta t_s &=
+-T_s Z_{t,s}^{-1}\delta\nu_{t,s}
+- Z_{t,s}^{-1} r_{s,t,s}, \\
+\delta p_s &=
+P_s Z_{p,s}^{-1}\delta\nu_{t,s}
+- P_s Z_{p,s}^{-1} r_{p,s}
+- Z_{p,s}^{-1} r_{s,p,s}, \\
+\delta n_s &=
+-N_s Z_{n,s}^{-1}\delta\nu_{t,s}
+- N_s Z_{n,s}^{-1} r_{n,s}
+- Z_{n,s}^{-1} r_{s,n,s}, \\
+\delta\nu_{p,s} &= r_{p,s} - \delta\nu_{t,s}, \\
+\delta\nu_{n,s} &= r_{n,s} + \delta\nu_{t,s}.
 \end{aligned}
 $$
 
-The code stores:
+The code stores these in the side-local state:
 
-- `d_dual[t] = \delta\nu_t`
-- `d_value[t] = \delta t`
-- `d_value[p] = \delta p`
-- `d_value[n] = \delta n`
-- `d_dual[p] = \delta\nu_p`
-- `d_dual[n] = \delta\nu_n`
+- `side[s].d_dual[t] = \delta\nu_{t,s}`
+- `side[s].d_value[t] = \delta t_s`
+- `side[s].d_value[p] = \delta p_s`
+- `side[s].d_value[n] = \delta n_s`
+- `side[s].d_dual[p] = \delta\nu_{p,s}`
+- `side[s].d_dual[n] = \delta\nu_{n,s}`
 
-The reduced multiplier seen by the stage QP is exactly `\nu_t`, so the wrapper
-exports
+The outer multiplier exposed to the stage QP is rebuilt from the side
+multipliers as
 
 $$
-d\_multiplier = \delta\nu_t.
+\nu = \nu_{t,ub} - \nu_{t,lb},
+\qquad
+d\nu = \delta\nu_{t,ub} - \delta\nu_{t,lb},
 $$
+
+with missing sides treated as zero.
 
 ### 3.4 Contribution To The Stage QP
 
 Because
 
 $$
-\delta\nu_t = M_d^{-1}(J_d \delta w + \hat r_d),
+\delta\nu_{t,s} = M_s^{-1}(J_s \delta w + \hat r_s),
 $$
 
-the eliminated inequality block contributes
+one side block contributes
 
 $$
-J_d^T M_d^{-1}\hat r_d
+J_s^T M_s^{-1}\hat r_s
 $$
 
 to the first-order correction and
 
 $$
-J_d^T M_d^{-1}J_d
+J_s^T M_s^{-1}J_s
 $$
 
 to the Hessian modification.
 
-This is the same condensed structure as the equality block; only the local
-diagonal `M_d` and the residual `\hat r_d` differ.
+The wrapper then sums these condensed contributions over all present sides
+`s \in S`. This is why a boxed inequality still evaluates `g` and `J_g` only
+once even though it owns two local elastic side blocks.
 
 ## 4. Initialization Used By The Wrappers
 
@@ -569,44 +616,69 @@ tiny numerical floor.
 
 ### 4.2 Inequality Elastic Initialization
 
-For one scalar inequality residual `g`, the active restoration multiplier is
-`\nu_t`, and the wrapper initializes
+For one scalar side residual `r_s`, restoration reuses the outer boxed-IPM side
+state as the initial
 
 $$
-\nu_p = \rho_d-\nu_t,
+t_s = t_{s,0},
 \qquad
-\nu_n = \rho_d+\nu_t,
-\qquad
-p = \frac{\mu}{\nu_p},
-\qquad
-n = \frac{\mu}{\nu_n},
-\qquad
-t = -g + p - n.
+\nu_{t,s} = \nu_{t,s,0},
 $$
 
-This centers the local inequality-elastic block exactly:
+and only initializes the extra elastic pair from
 
 $$
-g+t-p+n=0,
+c_s := r_s + t_{s,0},
 \qquad
-\rho_d-\nu_t-\nu_p=0,
-\qquad
-\rho_d+\nu_t-\nu_n=0,
+p_s - n_s = c_s.
 $$
 
-and
+The implementation then uses the same centered elastic-pair formula as the
+equality wrapper:
 
 $$
-\nu_t t \approx \mu,
+n_s=\frac{\mu-\rho_d c_s+\sqrt{(\mu-\rho_d c_s)^2+2\rho_d\mu c_s}}{2\rho_d},
 \qquad
-\nu_p p = \mu,
-\qquad
-\nu_n n = \mu.
+p_s=c_s+n_s,
 $$
 
-In the actual implementation, `\nu_t` is clamped strictly inside `(0,\rho_d)`
-before these formulas are applied, so the centered initialization never
-degenerates to `\nu_p \approx 0`.
+and finally sets
+
+$$
+\nu_{p,s} = \frac{\mu}{p_s},
+\qquad
+\nu_{n,s} = \frac{\mu}{n_s}.
+$$
+
+So the initialized side block satisfies
+
+$$
+r_s+t_s-p_s+n_s=0,
+\qquad
+\nu_{p,s} p_s = \mu,
+\qquad
+\nu_{n,s} n_s = \mu.
+$$
+
+In addition, because `p_s,n_s` are initialized from the centered elastic-pair
+formula, they satisfy
+
+$$
+\nu_{p,s} + \nu_{n,s} = 2\rho_d.
+$$
+
+What is **not** centered here is the full side stationarity with the inherited
+outer multiplier `\nu_{t,s,0}`. In other words, the initializer does not impose
+
+$$
+\rho_d-\nu_{t,s}-\nu_{p,s}=0,
+\qquad
+\rho_d+\nu_{t,s}-\nu_{n,s}=0.
+$$
+
+The pair `t_s,\nu_{t,s}` is inherited from the outer IPM side rather than
+re-centered from scratch, while only the added elastic pair `p_s,n_s` is
+centered locally.
 
 ## 5. Search Objective
 
@@ -622,7 +694,7 @@ $$
 \;+\;
 \rho_c \mathbf{1}^T(p_c+n_c)
 \;+\;
-\rho_d \mathbf{1}^T(p_d+n_d).
+\rho_d \sum_{s \in S}\mathbf{1}^T(p_s+n_s).
 $$
 
 The positivity barriers are not part of the original NLP. They appear only in
@@ -643,7 +715,7 @@ source residuals:
 - inequality overlay: `v = g(w)`
 
 and only after `solver::ineq_soft::initialize(...)` do they switch to the full
-elastic residuals `c-p+n` and `g+t-p+n`.
+elastic residuals `c-p+n` and the side-aware inequality elastic model.
 
 ### 6.2 Restoration Iteration Metric
 
@@ -658,7 +730,7 @@ vectors**. In particular it includes:
 
 - hard residuals kept active in the overlay, such as dynamics
 - equality elastic residuals `c-p+n`
-- inequality elastic residuals `g+t-p+n`
+- inequality elastic residual view built row-wise from the present side blocks
 
 So the per-iteration restoration log is not the original-problem infeasibility
 metric.
@@ -688,24 +760,23 @@ $$
 so restoration exits only after improving the **original** normal problem's
 `L^1` primal residual, not merely after reducing the overlay metric.
 
-The extra bound-state commit in the outer trial check matters. The outer normal
-problem must be evaluated with
-
-- outer slack `s \leftarrow t`
-- outer multiplier `z \leftarrow \nu_t`
-
-for the original IPM inequality residuals to be consistent with the candidate
-restoration point.
+For boxed outer inequalities, the extra bound-state commit in the outer trial
+check matters. The outer normal problem must be evaluated with the restoration
+side slacks and side multipliers copied back to the corresponding `ub/lb` IPM
+side state, then the outer net multiplier and lifted residual compatibility
+views rebuilt from those side states.
 
 ### 6.4 Successful Exit Cleanup
 
 On successful exit, the implementation also commits restoration inequality
-bound state back to the normal IPM constraints:
+state back to the normal IPM constraints:
 
-- outer slack `s \leftarrow t`
-- outer multiplier `z \leftarrow \nu_t`
+- one-sided inequalities copy the single side block `t / \nu_t` back directly
+- boxed inequalities copy each present side block `t_s / \nu_{t,s}` back to the
+  matching outer `ub/lb` side state and then rebuild the outer net-dual and
+  lifted-residual compatibility views
 
-and then re-evaluates the normal problem values and derivatives. Equality-side
+The normal problem is then re-evaluated in value/derivative mode. Equality-side
 dual blocks are reset afterward according to the configured threshold rule.
 
 ### 6.5 Return Semantics
@@ -736,7 +807,8 @@ The mathematically relevant condensed operators are:
 $$
 M_c = \operatorname{diag}\!\left(\frac{p}{z_p}+\frac{n}{z_n}\right),
 \qquad
-M_d = \operatorname{diag}\!\left(\frac{t}{\nu_t}+\frac{p}{\nu_p}+\frac{n}{\nu_n}\right).
+M_s = \operatorname{diag}\!\left(\frac{t_s}{\nu_{t,s}}+\frac{p_s}{\nu_{p,s}}+\frac{n_s}{\nu_{n,s}}\right).
 $$
 
-Those are the exact local Schur complements used by the restoration overlay.
+Those are the exact local Schur complements used by the restoration overlay,
+with one `M_s` per present inequality side.

@@ -228,6 +228,7 @@ void generic_func::finalize_impl() {
         t.gen_hessian = order_ >= approx_order::second;
         t.append_value = field_ == __cost;
         t.append_jac = field_ == __cost;
+        t.jac_sp = &jac_sp_;
         t.hess_sp = &hess_sp_;
         t.verbose = false;
         t.force_recompile = false;

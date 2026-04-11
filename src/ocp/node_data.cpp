@@ -2,6 +2,7 @@
 #include <moto/ocp/impl/node_data.hpp>
 #include <moto/ocp/problem.hpp>
 #include <moto/ocp/soft_constr.hpp>
+#include <moto/solver/ineq_soft.hpp>
 #include <moto/solver/data_base.hpp>
 
 namespace moto {
@@ -92,11 +93,11 @@ void node_data::update_approximation(update_mode config, bool include_original_c
                     hess_l_1.setZero();
                 }
             }
-        for (auto &hess_l_0 : dense_->hessian_modification_) {
-            for (auto &hess_l_1 : hess_l_0) {
-                hess_l_1.setZero();
+            for (auto &hess_l_0 : dense_->hessian_modification_) {
+                for (auto &hess_l_1 : hess_l_0) {
+                    hess_l_1.setZero();
+                }
             }
-        }
     }
     for (const generic_custom_func &f : prob_->exprs(__pre_comp)) {
         f.custom_call((*shared_)[f]); ///< @todo pass update mode
@@ -135,11 +136,15 @@ void node_data::update_approximation(update_mode config, bool include_original_c
     if (update_cost) {
         inf_prim_res_ = 0.;
         prim_res_l1_ = 0.;
-        for (const auto &field_data : dense_->approx_) {
-            if (field_data.v_.size() == 0)
-                continue; // skip empty fields
-            inf_prim_res_ = std::max(field_data.v_.cwiseAbs().maxCoeff(), inf_prim_res_);
-            prim_res_l1_ += field_data.v_.lpNorm<1>();
+        for (auto field : constr_fields) {
+            size_t idx = 0;
+            for (const generic_constr &c : prob_->exprs(field)) {
+                const auto &cd = *sparse_[field][idx];
+                const auto summary = c.primal_residual_summary(cd);
+                inf_prim_res_ = std::max(inf_prim_res_, summary.inf);
+                prim_res_l1_ += summary.l1;
+                ++idx;
+            }
         }
         inf_comp_res_ = 0.;
         for (const auto &comp : dense_->comp_) {

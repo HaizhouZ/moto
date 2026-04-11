@@ -95,10 +95,8 @@ void ns_sqp::print_stats(const kkt_info &info, const iter_info &iter, size_t ls_
                    info.barrier_objective.augmented_objective, info.barrier_objective.ls_objective,
                    info.barrier_objective.ls_objective - info.barrier_objective.augmented_objective);
     }
-    fmt::print("    ||lam_eq||={:.3e}  ||lam_ineq||={:.3e}  diag_scl={:.3e}  ||lam||={:.3e}\n",
-               info.dual.max_eq_norm, info.dual.max_ineq_norm, info.primal.max_diag_scaling, info.dual.max_norm);
-    fmt::print("    d_eq: dyn={:.3e}  eq_x={:.3e}  eq_xu={:.3e}\n",
-               info.step.inf_dyn_dual_step, info.step.inf_eq_x_dual_step, info.step.inf_eq_xu_dual_step);
+    fmt::print("    ||lam_eq||={:.3e}  ||lam_ineq||={:.3e}  ||lam||={:.3e}\n",
+               info.dual.max_eq_norm, info.dual.max_ineq_norm, info.dual.max_norm);
     std::vector<vector> dual_dyn;
     size_t idx = 0;
     if (i_iter == 0)

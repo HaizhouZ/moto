@@ -276,15 +276,20 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     if (settings.ls.max_steps > ls.step_cnt) {
         ls.step_cnt++;
         step_back_alpha(ls);
-        if (settings.ls.alpha_primal <= ls.alpha_min &&
-            (settings.in_restoration || current_primal > settings.prim_tol)) {
-            ls.stop = true;
-            ls.failure_reason = filter_linesearch_per_iter_data::failure_reason_t::tiny_step;
-            ls.recompute_approx = false;
-            if (settings.verbose)
+        if (settings.ls.alpha_primal <= ls.alpha_min) {
+            if (settings.in_restoration || current_kkt.primal.inf_res > settings.prim_tol) {
+                ls.stop = true;
+                ls.failure_reason = filter_linesearch_per_iter_data::failure_reason_t::tiny_step;
+                ls.recompute_approx = false;
+                if (settings.verbose)
+                    fmt::print("  line search reached min step: alpha_p {:.3e} <= alpha_min {:.3e} with prim_res {:.3e}\n",
+                               settings.ls.alpha_primal, ls.alpha_min, current_primal);
+                return line_search_action::failure;
+            } else {
                 fmt::print("  line search reached min step: alpha_p {:.3e} <= alpha_min {:.3e} with prim_res {:.3e}\n",
                            settings.ls.alpha_primal, ls.alpha_min, current_primal);
-            return line_search_action::failure;
+                fmt::print("   but the current primal residual is still above the tolerance\n");
+            }
         }
         if (settings.verbose)
             fmt::print("  backtrack, alpha_p: {:.3e}, alpha_d: {:.3e}\n",
@@ -324,8 +329,8 @@ ns_sqp::line_search_action ns_sqp::merit_linesearch(filter_linesearch_data &ls,
         return prim_l1 * prim_l1 + settings.ls.merit_sigma * dual_res * dual_res;
     };
 
-    const scalar_t merit_trial = merit(trial_kkt.primal.res_l1, trial_kkt.dual.avg_res);
-    const scalar_t merit_k = merit(current_kkt.primal.res_l1, current_kkt.dual.avg_res);
+    const scalar_t merit_trial = merit(trial_kkt.primal.res_l1, trial_kkt.dual.inf_res);
+    const scalar_t merit_k = merit(current_kkt.primal.res_l1, current_kkt.dual.inf_res);
 
     // On the first (full-step) trial, record merit to estimate the directional derivative.
     // dir_deriv ≈ (M(x + 1*d) - M(x)) / 1.0  (finite-difference estimate)
@@ -340,8 +345,8 @@ ns_sqp::line_search_action ns_sqp::merit_linesearch(filter_linesearch_data &ls,
 
     if (settings.verbose)
         fmt::print("[merit ls] step {}, merit: {:.3e} (prim: {:.3e}, avg_dual: {:.3e}), alpha_p: {:.3e}, merit_k: {:.3e} (prim: {:.3e}, avg_dual: {:.3e})\n",
-                   ls.step_cnt, merit_trial, trial_kkt.primal.res_l1, trial_kkt.dual.avg_res,
-                   settings.ls.alpha_primal, merit_k, current_kkt.primal.res_l1, current_kkt.dual.avg_res);
+                   ls.step_cnt, merit_trial, trial_kkt.primal.res_l1, trial_kkt.dual.inf_res,
+                   settings.ls.alpha_primal, merit_k, current_kkt.primal.res_l1, current_kkt.dual.inf_res);
 
     // Armijo sufficient decrease: M(x + alpha*d) <= M(x) + c * alpha * dir_deriv
     // dir_deriv estimated from the full step (negative when making progress).

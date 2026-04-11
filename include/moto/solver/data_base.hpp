@@ -54,8 +54,8 @@ struct MOTO_ALIGN_NO_SHARING data_base {
     data_base(data_base &&rhs) = default;
     void activate_lag_jac_corr();
     void swap_active_and_lag_jac_corr();
-    void backup_trial_state();
-    void restore_trial_state();
+    virtual void backup_trial_state();
+    virtual void restore_trial_state();
     /// @brief Prepare a first-order correction solve.
     /// @details The callback writes the correction into dense_->lag_jac_corr_.
     /// Then that buffer is swapped with dense_->lag_jac_ so the correction system

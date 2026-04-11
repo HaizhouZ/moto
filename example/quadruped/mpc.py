@@ -1,3 +1,10 @@
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 import moto
 import casadi as cs
 import numpy as np
@@ -191,17 +198,20 @@ class pinCasadiModel(cpin.Model):
             ]
         )
         res = cs.vcat([self.v_f[:2, i], self.k_f * self.z_f[i] + self.v_f[2, i]])
-        c = moto.constr.create(
-            f"kin_{self.foot_frames[i]}" + ("_soft" if soft else ""),
-            self.pos_args + self.vel_args + [self.k_f],  # self.z_clip],
-            # [self.q, k_f, *active_foot, z_clip],
-            # cs.vcat([self.v_f[:2, i], self.k_f * cs.tanh(self.z_f[i]) * self.z_clip + self.v_f[2, i]]) * self.active_foot[i],
-            cs.vcat([res, -res]) if soft else res,
-            # cs.vcat([v_f[:2, i], z_f[i]]) * active_foot[i],
-        )
+        if soft:
+            c = moto.ineq.create(
+                f"kin_{self.foot_frames[i]}_soft",
+                self.pos_args + self.vel_args + [self.k_f],
+                res,
+            )
+        else:
+            c = moto.constr.create(
+                f"kin_{self.foot_frames[i]}",
+                self.pos_args + self.vel_args + [self.k_f],
+                res,
+            )
         c.enable_if_all([self.f_f[i]])
-
-        return c.cast_ineq() if soft else c
+        return c
 
     def make_foot_kin_cost(self, i: int):
         pos_cost = (
@@ -225,19 +235,21 @@ class pinCasadiModel(cpin.Model):
         print("v_lim:", v_lim)
         qj = self.q[-self.nj :]
         vj = self.v[-self.nj :]
-        return moto.constr.create(
+        return moto.ineq.create(
             "q_limit",
             [self.q, self.v],
-            cs.vcat([q_min - qj, qj - q_max, vj - v_lim, -vj - v_lim]),
-        ).cast_ineq()
+            cs.vcat([qj, vj]),
+            cs.vcat([q_min, -v_lim]),
+            cs.vcat([q_max, v_lim]),
+        )
 
     def make_tq_limit_constr(self):
         tq_limit = model.effortLimit[-self.nj :]
         in_arg = [self.tq]
         # in_arg = self.pos_args + self.vel_args + self.acc_args + [*self.active_foot, *self.f_f] + ([self.dt] if isinstance(self.dt, cs.SX) else [])
-        return moto.constr.create(
-            "tq_limit", in_arg, cs.vcat([self.tq - tq_limit, -self.tq - tq_limit])
-        ).cast_ineq()
+        return moto.ineq.create(
+            "tq_limit", in_arg, self.tq.sx, -tq_limit, tq_limit
+        )
 
     def make_fric_cone(self, i, f: moto.var):
         cone = cs.vcat(
@@ -249,9 +261,9 @@ class pinCasadiModel(cpin.Model):
             ]
         )
         # cone = f[0] - self.mu * cs.sqrt(cs.sumsqr(f[1:]) + 1e-9)
-        c = moto.constr.create(
+        c = moto.ineq.create(
             f"fric_{self.foot_frames[i]}", [f, self.mu], cone
-        ).cast_ineq()
+        )
         return c
 
     def add_dt_constr_and_cost(self, prob: moto.ocp, dt_nom: moto.var):
@@ -259,11 +271,7 @@ class pinCasadiModel(cpin.Model):
             dt_bound = moto.sym.params(
                 "dt_bound", 2, default_val=np.array([1e-4, 5e-2])
             )  # bound on dt
-            dt_constr = moto.constr.create(
-                "dt",
-                [self.dt, dt_bound],
-                cs.vcat([dt_bound[0] - self.dt, self.dt - dt_bound[1]]),
-            ).cast_ineq()
+            dt_constr = moto.ineq.create("dt", [self.dt, dt_bound], self.dt.sx, dt_bound[0], dt_bound[1])
             # dt_constr = moto.constr("dt_fix", [self.dt], self.dt - 2e-2)
             prob.add(dt_constr)
             W_dt = moto.sym.params("W_dt", 1, default_val=1e8)
@@ -436,12 +444,11 @@ node_idx = 0
 current_time = 0.0
 sqp.apply_forward(stance_ref)
 # n0.data.value[model.k_f] = 0
-nodes = sqp.graph.flatten_nodes()
+nodes = sqp.active_data.flatten_nodes()
 data = go2.model.createData()
 for n in nodes[:10]:
     for f in model.f_f:
         n.value[model.k_f] = 0
-assert n0.addr == nodes[0].addr
 sqp.update(100, verbose=True)
 start = time.perf_counter()
 sqp.settings.ipm.warm_start = True

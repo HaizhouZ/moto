@@ -4,11 +4,31 @@ from multiprocessing import Pool
 import inspect
 
 
+class _graph_proxy:
+    def __init__(self, owner: "sqp"):
+        self._owner = owner
+
+    @property
+    def _model(self):
+        return ns_sqp.graph.__get__(self._owner, type(self._owner))
+
+    def flatten_nodes(self):
+        return self._owner.active_data.flatten_nodes()
+
+    def __getattr__(self, name):
+        return getattr(self._model, name)
+
+
 class sqp(ns_sqp):
 
     def __init__(self, n_job: int = 4):
         super().__init__(n_job)
         self.pool = Pool(processes=n_job)
+        self._graph_proxy = _graph_proxy(self)
+
+    @property
+    def graph(self):
+        return self._graph_proxy
 
     def for_each(self, callback: Callable[[ns_sqp.data_type], None]):
         """

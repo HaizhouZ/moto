@@ -1,9 +1,16 @@
+import os
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 import moto
 import casadi as cs
 import numpy as np
 import pinocchio as pin
 import pinocchio.casadi as cpin
-import os
 
 from example_robot_data import load
 import meshcat.geometry as mg
@@ -219,7 +226,6 @@ class pinCasadiModel(cpin.Model):
         )
         c.enable_if_all([self.f_f[i]])
         # return c
-        # return c.cast_ineq() if soft else c
         if not soft:
             return c
         else:
@@ -251,19 +257,21 @@ class pinCasadiModel(cpin.Model):
         print("v_lim:", v_lim)
         qj = self.q[-self.nj :]
         vj = self.v[-self.nj :]
-        return moto.constr.create(
+        return moto.ineq.create(
             "q_limit",
             [self.q, self.v],
-            cs.vcat([q_min - qj, qj - q_max, vj - v_lim, -vj - v_lim]),
-        ).cast_ineq()
+            cs.vcat([qj, vj]),
+            cs.vcat([q_min, -v_lim]),
+            cs.vcat([q_max, v_lim]),
+        )
 
     def make_tq_limit_constr(self):
         tq_limit = model.effortLimit[-self.nj :]
         in_arg = [self.tq]
         # in_arg = self.pos_args + self.vel_args + self.acc_args + [*self.active_foot, *self.f_f] + ([self.dt] if isinstance(self.dt, cs.SX) else [])
-        return moto.constr.create(
-            "tq_limit", in_arg, cs.vcat([self.tq - tq_limit, -self.tq - tq_limit])
-        ).cast_ineq()
+        return moto.ineq.create(
+            "tq_limit", in_arg, self.tq.sx, -tq_limit, tq_limit
+        )
 
     def make_fric_cone(self, i, f: moto.var):
         cone = cs.vcat(
@@ -275,9 +283,9 @@ class pinCasadiModel(cpin.Model):
             ]
         )
         # cone = f[0] - self.mu * cs.sqrt(cs.sumsqr(f[1:]) + 1e-9)
-        c = moto.constr.create(
+        c = moto.ineq.create(
             f"fric_{self.foot_frames[i]}", [f, self.mu], cone
-        ).cast_ineq()
+        )
         c.enable_if_all([f])
         return c
 
@@ -286,11 +294,7 @@ class pinCasadiModel(cpin.Model):
             dt_bound = moto.sym.params(
                 "dt_bound", 2, default_val=np.array([1e-4, 5e-2])
             )  # bound on dt
-            dt_constr = moto.constr.create(
-                "dt",
-                [self.dt, dt_bound],
-                cs.vcat([dt_bound[0] - self.dt, self.dt - dt_bound[1]]),
-            ).cast_ineq()
+            dt_constr = moto.ineq.create("dt", [self.dt, dt_bound], self.dt.sx, dt_bound[0], dt_bound[1])
             # dt_constr = moto.constr("dt_fix", [self.dt], self.dt - 2e-2)
             prob.add(dt_constr)
             W_dt = moto.sym.params("W_dt", 1, default_val=1e8)

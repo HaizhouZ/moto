@@ -5,6 +5,7 @@
 #include <moto/ocp/constr.hpp>
 #include <moto/ocp/cost.hpp>
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
+#include <moto/solver/ipm/ipm_constr.hpp>
 #include <moto/solver/ns_sqp.hpp>
 
 namespace {
@@ -78,16 +79,25 @@ constr make_soft_eq_xu(const std::string &name, const sym &x, const sym &u, scal
 }
 
 constr make_ineq_xu(const std::string &name, const sym &x, const sym &u, scalar_t bias) {
-    auto base = constr(new generic_constr(name, approx_order::first, 1));
-    base->field_hint().is_eq = false;
-    dynamic_cast<generic_func &>(*base).add_argument(x);
-    dynamic_cast<generic_func &>(*base).add_argument(u);
-    base->value = [bias](func_approx_data &d) { d.v_(0) = d[0](0) - d[1](0) + bias; };
-    base->jacobian = [](func_approx_data &d) {
+    auto c = ineq_constr::create(name, approx_order::first, 1);
+    dynamic_cast<generic_func &>(*c).add_argument(x);
+    dynamic_cast<generic_func &>(*c).add_argument(u);
+    c->value = [bias](func_approx_data &d) { d.v_(0) = d[0](0) - d[1](0) + bias; };
+    c->jacobian = [](func_approx_data &d) {
         d.jac_[0](0, 0) = 1.;
         d.jac_[1](0, 0) = -1.;
     };
-    return constr(base->cast_ineq("ipm"));
+    return c;
+}
+
+constr make_box_ineq_xu(const std::string &name, const sym &x, const sym &u, scalar_t bias) {
+    return ineq_constr::create(
+        name,
+        var_inarg_list(var_list{x, u}),
+        static_cast<const cs::SX &>(x) - scalar_t(0.5) * static_cast<const cs::SX &>(u) + bias,
+        scalar_t(-0.35),
+        scalar_t(0.45),
+        approx_order::first);
 }
 
 void seed_primal_state(ns_sqp &sqp, size_t n_stage_nodes) {
@@ -114,6 +124,7 @@ void configure_solver(ns_sqp &sqp, bool enable_eq_init, size_t n_edges) {
     stage_prob->add(*make_soft_eq_x("soft_eq_x_eq_init", x, scalar_t(-0.2)));
     stage_prob->add(*make_soft_eq_xu("soft_eq_xu_eq_init", x, u, scalar_t(0.05)));
     stage_prob->add(*make_ineq_xu("ineq_xu_eq_init", x, u, scalar_t(-0.3)));
+    stage_prob->add(*make_box_ineq_xu("ineq_box_xu_eq_init", x, u, scalar_t(0.1)));
 
     auto terminal_prob = node_ocp::create();
     terminal_prob->add_terminal(*cost(new generic_cost("terminal_cost_eq_init", var_list{x}, x * x, approx_order::second)));

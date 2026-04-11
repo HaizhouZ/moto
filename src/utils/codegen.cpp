@@ -30,6 +30,18 @@ auto vec_type() {
     }
 }
 
+void compress_structured_output(cs::SX &expr, sparsity *sp) {
+    if (expr.is_empty() || expr.is_zero()) {
+        expr = cs::SX();
+        if (sp != nullptr)
+            *sp = sparsity::unknown;
+        return;
+    }
+    if (sp != nullptr) {
+        *sp = sparsity::dense;
+    }
+}
+
 namespace impl {
 // job_list jobs_{};
 std::mutex mutex_{};
@@ -503,6 +515,15 @@ void task::finalize(job_list &jobs_) {
                         jacs_copy = std::move(jacs);
                 }
             }
+            if (jac_sp != nullptr) {
+                for (size_t idx = 0; idx < jacs.size(); ++idx) {
+                    compress_structured_output(jacs[idx], &(*jac_sp)[idx]);
+                }
+            } else {
+                for (auto &jac : jacs) {
+                    compress_structured_output(jac, nullptr);
+                }
+            }
             jobs_.add(std::bind(&impl::run,
                                 full_func_name + "_jac",
                                 sx_inputs,
@@ -578,19 +599,7 @@ void task::finalize(job_list &jobs_) {
                 } else if (j.has_non_trivial_integration()) { // apply integration
                     hess[idx_i][idx_j] = cs::SX::mtimes(hess[idx_i][idx_j], get_dstep_ds(j));
                 }
-                if (hess[idx_i][idx_j].is_square() && hess[idx_i][idx_j].sparsity().is_diag()) {
-                    bool is_eye = false;
-                    hess[idx_i][idx_j] = cs::SX::diag(hess[idx_i][idx_j]);
-                    if (hess[idx_i][idx_j].is_one())
-                        is_eye = true;
-                    if (is_eye)
-                        hess[idx_i][idx_j] = cs::SX::ones(hess[idx_i][idx_j].rows());
-                    if (hess_sp != nullptr)
-                        (*hess_sp)[idx_i][idx_j] = is_eye ? sparsity::eye : sparsity::diag;
-                } else {
-                    if (hess_sp != nullptr)
-                        (*hess_sp)[idx_i][idx_j] = sparsity::dense;
-                }
+                compress_structured_output(hess[idx_i][idx_j], hess_sp != nullptr ? &(*hess_sp)[idx_i][idx_j] : nullptr);
             }
         }
         // hess = [item for sublist in hess for item in sublist]
