@@ -11,6 +11,13 @@ enum class sparsity : size_t {
     num,
     unknown
 };
+struct sp_info {
+    sparsity pattern = sparsity::unknown;
+    size_t row_offset = 0;
+    size_t col_offset = 0;
+    size_t rows = std::numeric_limits<size_t>::max();
+    size_t cols = std::numeric_limits<size_t>::max();
+};
 namespace spmm {
 struct clip_info {
     constexpr static size_t no_clip = std::numeric_limits<size_t>::max();

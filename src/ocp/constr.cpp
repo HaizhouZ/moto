@@ -18,20 +18,6 @@ generic_constr::approx_data::approx_data(vector_ref multiplier,
     if (func_.order() >= approx_order::second) { // for hessian from vjp autodiff codegen
         in_args_.push_back(multiplier_);
     }
-    if (in_field(func_.field(), lag_data::stored_constr_fields) && func_.field() != __dyn) {
-        auto prob_ = lag_data_->prob_;
-        size_t f_st = prob_->get_expr_start(func_);
-        size_t arg_idx = 0;
-        for (const sym &arg : func_.in_args()) {
-            field_t f = arg.field();
-            if (f < field::num_prim && prob_->is_active(arg)) {
-                auto d = lag_data_->approx_[func_.field()].jac_[f].insert(
-                    f_st, prob_->get_expr_start_tangent(arg), func_.dim(), arg.tdim(), sparsity::dense);
-                new (&jac_[arg_idx]) matrix_ref(d);
-            }
-            arg_idx++;
-        }
-    }
 }
 void generic_constr::approx_data::map_lag_jac_from_raw(decltype(lag_data::lag_jac_) &raw, std::vector<row_vector_ref> &jac) {
     auto &in_args = func_.in_args();

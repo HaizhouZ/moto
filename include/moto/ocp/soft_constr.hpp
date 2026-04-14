@@ -43,9 +43,23 @@ class soft_constr : public generic_constr {
 
   protected:
     bool skip_field_check = false; ///< skip field check in finalize_impl
+    /// @brief accumulate soft-constraint Jacobian correction: lag_jac += scale * residual^T * jac
+    void propagate_jacobian(func_approx_data &data, const vector_const_ref &residual, scalar_t scale = 1.) const;
+
+    /// @brief accumulate soft-constraint Hessian correction from diagonal scaling:
+    /// H += scale * J^T * diag_scaling * J
+    void propagate_hessian(func_approx_data &data, const vector_const_ref &diag_scaling, scalar_t scale = 1.) const;
+
+    /// @brief accumulate soft-constraint Hessian correction with isotropic diagonal scaling:
+    /// H += scale * J^T * J
+    void propagate_hessian(func_approx_data &data, scalar_t scale) const;
 
     /// @brief finalize the soft constraint, will be called upon added to a problem
     void finalize_impl() override;
+    /// @brief setup hessian sparsity for soft/ineq constraints
+    void setup_hess() override;
+    /// @brief load external implementation and then run hessian setup for soft constraints
+    void load_external_impl(const std::string &path = "gen") override;
 
     public:
     using base::base; ///< inherit constructors

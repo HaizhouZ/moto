@@ -27,12 +27,13 @@ std::string overlay_name(const generic_func &source, std::string_view suffix) {
     return fmt::format("{}__{}", source.name(), suffix);
 }
 
-void copy_source_jac_sparsity(generic_func &dst, const generic_func &src) {
+void copy_source_sparsity(generic_func &dst, const generic_func &src) {
     const auto &src_args = src.in_args();
     const auto &src_sp = src.jac_sparsity();
     for (size_t i = 0; i < src_args.size() && i < src_sp.size(); ++i) {
         dst.set_jac_sparsity(src_args[i], src_sp[i]);
     }
+    dst.set_hess_sparsity(src.hess_sparsity());
 }
 
 template <typename Overlay>
@@ -60,7 +61,7 @@ eq_init_pmm_constr::eq_init_pmm_constr(const std::string &name,
     set_default_hess_sparsity(sparsity::dense);
     const auto &src_func = dynamic_cast<const generic_func &>(*source);
     add_arguments(src_func.in_args());
-    copy_source_jac_sparsity(*this, src_func);
+    copy_source_sparsity(*this, src_func);
 }
 
 void eq_init_pmm_constr::value_impl(func_approx_data &data) const {

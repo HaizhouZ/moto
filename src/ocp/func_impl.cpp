@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <condition_variable>
 #include <fmt/ranges.h>
 #include <moto/core/external_function.hpp>
@@ -49,6 +50,10 @@ void generic_func::jacobian_impl(func_approx_data &data) const {
         throw std::runtime_error(fmt::format("Function {} has no jacobian implementation, please implement it or load from shared library", name()));
     }
 }
+
+void generic_func::setup_hess() {
+}
+
 void generic_func::hessian_impl(func_approx_data &data) const {
     try {
         hessian(data);
@@ -71,6 +76,7 @@ void generic_func::load_external_impl(const std::string &path) {
     hessian = [hess = std::move(funcs[2])](func_approx_data &d) {
         hess.invoke(d.in_arg_data(), d.lag_hess_);
     };
+    setup_hess();
 }
 
 void generic_func::substitute(const sym &arg, const sym &rhs) {
@@ -212,9 +218,20 @@ void generic_func::finalize_impl() {
         throw std::runtime_error(fmt::format("generic_func {} has no dimension set", name_));
     }
     if (!zero_dim_) {
-        jac_sp_.assign(in_args_.size(), sparsity::dense);
-        // setup default hessian sparsity as @ref default_hess_sp_, which will be later updated by codegen
-        hess_sp_.assign(in_args_.size(), std::vector<sparsity>(in_args_.size(), default_hess_sp_));
+        jac_sp_.clear();
+        jac_sp_.reserve(in_args_.size());
+        for (const sym &arg : in_args_) {
+            jac_sp_.push_back({sparsity::dense, 0, 0, this->dim_, arg.tdim()});
+        }
+        // setup default hessian sparsity as @ref default_hess_sp_, which can be refined by codegen
+        hess_sp_.assign(in_args_.size(), {});
+        for (size_t i : range(in_args_.size())) {
+            hess_sp_[i].resize(in_args_.size());
+            for (size_t j : range(in_args_.size())) {
+                hess_sp_[i][j] = {default_hess_sp_, jac_sp_[i].col_offset, jac_sp_[j].col_offset,
+                                  jac_sp_[i].cols, jac_sp_[j].cols};
+            }
+        }
     }
     if (gen_.task_ && !gen_.task_->sx_output.is_empty()) {
         utils::cs_codegen::task &t = *gen_.task_;
@@ -228,7 +245,8 @@ void generic_func::finalize_impl() {
         t.gen_hessian = order_ >= approx_order::second;
         t.append_value = field_ == __cost;
         t.append_jac = field_ == __cost;
-        t.jac_sp = &jac_sp_;
+        // t.jac_sp = detect_jacobian_sparsity_ ? &jac_sp_ : nullptr;
+        t.jac_sp = nullptr;
         t.hess_sp = &hess_sp_;
         t.verbose = false;
         t.force_recompile = false;

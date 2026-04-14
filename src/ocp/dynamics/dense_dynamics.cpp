@@ -104,6 +104,7 @@ void dense_dynamics::substitute(const sym &arg, const sym &rhs) {
 void dense_dynamics::finalize_impl() {
     // reset info for recomputating exclusive/shared input counts and dims
     info_.reset(new info(std::move(*info_)));
+    disable_jacobian_sparsity_detection();
     // handle reordering of shared inputs
     var_list tmp; // buffer for args to move
     tmp.reserve(shared_inputs_.size());

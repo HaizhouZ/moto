@@ -68,11 +68,12 @@ class generic_func : public expr {
     /// @return true if the info is setup for the ocp, false if the info already exists
     virtual bool setup_ocpwise_info(const ocp_base *prob) const;
 
-    std::set<size_t> skip_unused_arg_check_;     ///< set of argument uids to skip unused check
-    std::vector<sparsity> jac_sp_;               ///< jacobian sparsity for each arg
-    std::vector<std::vector<sparsity>> hess_sp_; ///< hessian sparsity for each pair of args
+    std::set<size_t> skip_unused_arg_check_; ///< set of argument uids to skip unused check
+    std::vector<sp_info> jac_sp_;              ///< jacobian sparsity for each arg
+    std::vector<std::vector<sp_info>> hess_sp_; ///< hessian sparsity for each pair of args
 
     sparsity default_hess_sp_ = sparsity::dense;
+    bool detect_jacobian_sparsity_ = true;
 
     std::unordered_map<size_t, size_t> sym_uid_idx_;
 
@@ -82,6 +83,16 @@ class generic_func : public expr {
     /// @brief substitute arg with rhs in the function (order preserved)
     virtual void substitute(const sym &arg, const sym &rhs);
     void set_from_casadi(const var_inarg_list &in_args, const cs::SX &out);
+    virtual void setup_hess();
+    void disable_jacobian_sparsity_detection() {
+        field_write_guard();
+        detect_jacobian_sparsity_ = false;
+    }
+    void enable_jacobian_sparsity_detection() {
+        field_write_guard();
+        detect_jacobian_sparsity_ = true;
+    }
+    bool detect_jacobian_sparsity() const { return detect_jacobian_sparsity_; }
 
     virtual void finalize_impl() override;
     virtual void value_impl(func_approx_data &data) const;
@@ -130,11 +141,17 @@ class generic_func : public expr {
     const auto &jac_sparsity() const { return jac_sp_; }   ///< get the jacobian sparsity patterns
     const auto &hess_sparsity() const { return hess_sp_; } ///< get the hessian sparsity patterns
 
-    void set_jac_sparsity(const sym &arg, sparsity sp) {
+    void set_jac_sparsity(const sym &arg, sp_info sp) {
         field_write_guard(arg.field());
-        (void)sp;
+        jac_sp_.push_back(sp);
     }
-
+    void set_jac_sparsity(const sym &arg, sparsity sp) {
+        set_jac_sparsity(arg, {sp, 0, 0}); // compatibility
+    }
+    void set_hess_sparsity(const std::vector<std::vector<sp_info>> &sp) {
+        field_write_guard();
+        hess_sp_ = sp;
+    }
     void set_default_hess_sparsity(sparsity sp) {
         field_write_guard();
         default_hess_sp_ = sp;

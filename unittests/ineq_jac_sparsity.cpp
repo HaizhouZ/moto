@@ -53,9 +53,9 @@ TEST_CASE("inequality jacobians are stored as dense panels") {
     REQUIRE(eye_func.jac_sparsity().size() == 1);
     REQUIRE(diag_func.jac_sparsity().size() == 1);
     REQUIRE(dense_func.jac_sparsity().size() == 1);
-    REQUIRE(eye_func.jac_sparsity()[0] == sparsity::dense);
-    REQUIRE(diag_func.jac_sparsity()[0] == sparsity::dense);
-    REQUIRE(dense_func.jac_sparsity()[0] == sparsity::dense);
+    REQUIRE(eye_func.jac_sparsity()[0].pattern == sparsity::dense);
+    REQUIRE(diag_func.jac_sparsity()[0].pattern == sparsity::dense);
+    REQUIRE(dense_func.jac_sparsity()[0].pattern == sparsity::dense);
 
     node_data data(prob);
     const auto &jac = data.dense().approx_[__ineq_x].jac_[__x];
@@ -87,8 +87,8 @@ TEST_CASE("manual jacobian sparsity declarations are ignored") {
     prob->add(*diag);
     prob->wait_until_ready();
 
-    REQUIRE(dynamic_cast<const generic_func &>(*eye).jac_sparsity()[0] == sparsity::dense);
-    REQUIRE(dynamic_cast<const generic_func &>(*diag).jac_sparsity()[0] == sparsity::dense);
+    REQUIRE(dynamic_cast<const generic_func &>(*eye).jac_sparsity()[0].pattern == sparsity::dense);
+    REQUIRE(dynamic_cast<const generic_func &>(*diag).jac_sparsity()[0].pattern == sparsity::dense);
 
     node_data data(prob);
     const auto &jac = data.dense().approx_[__ineq_x].jac_[__x];

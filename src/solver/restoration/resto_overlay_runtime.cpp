@@ -75,12 +75,13 @@ void for_each_source_constr(const ocp_ptr_t &prob, field_t field, Fn &&fn) {
     }
 }
 
-void copy_source_jac_sparsity(generic_func &dst, const generic_func &src) {
+void copy_source_sparsity(generic_func &dst, const generic_func &src) {
     const auto &src_args = src.in_args();
     const auto &src_sp = src.jac_sparsity();
     for (size_t i = 0; i < src_args.size() && i < src_sp.size(); ++i) {
         dst.set_jac_sparsity(src_args[i], src_sp[i]);
     }
+    dst.set_hess_sparsity(src.hess_sparsity());
 }
 
 template <typename Factory, size_t N>
@@ -432,7 +433,7 @@ func_approx_data_ptr_t resto_prox_cost::create_approx_data(sym_data &primal,
 void resto_prox_cost::finalize_impl() {
     generic_cost::finalize_impl();
     for (size_t i = 0; i < in_args().size(); ++i) {
-        hess_sp_[i][i] = sparsity::diag;
+        hess_sp_[i][i].pattern = sparsity::diag;
     }
 }
 
@@ -499,7 +500,7 @@ resto_eq_elastic_constr::resto_eq_elastic_constr(const std::string &name,
     set_default_hess_sparsity(sparsity::dense);
     const auto &src_func = dynamic_cast<const generic_func &>(*source);
     add_arguments(src_func.in_args());
-    copy_source_jac_sparsity(*this, src_func);
+    copy_source_sparsity(*this, src_func);
 }
 
 void resto_eq_elastic_constr::finalize_impl() {
@@ -554,24 +555,8 @@ void resto_eq_elastic_constr::jacobian_impl(func_approx_data &data) const {
     }
     const scalar_t target_mu = d.ipm_cfg->ipm_enable_affine_step() ? scalar_t(0.) : d.ipm_cfg->mu;
     resto_eq_elastic_constr::compute_local_model(d.elastic, d.base_residual, d.multiplier_, rho_value(d, "resto_eq_elastic_constr::jacobian_impl"), target_mu);
-    for (size_t arg_idx = 0; arg_idx < d.lag_jac_corr_.size(); ++arg_idx) {
-        if (d.has_jacobian_block(arg_idx)) {
-            d.lag_jac_corr_[arg_idx].noalias() += d.elastic.schur_rhs.transpose() * d.jac_[arg_idx];
-        }
-    }
-    size_t outer_idx = 0;
-    for (auto &outer : d.lag_hess_) {
-        size_t inner_idx = 0;
-        if (outer.size()) {
-            for (auto &inner : outer) {
-                if (inner.size() != 0) {
-                    inner.noalias() += d.jac_[outer_idx].transpose() * d.elastic.schur_inv_diag.asDiagonal() * d.jac_[inner_idx];
-                }
-                ++inner_idx;
-            }
-        }
-        ++outer_idx;
-    }
+    propagate_jacobian(d, d.elastic.schur_rhs);
+    propagate_hessian(d, d.elastic.schur_inv_diag);
 }
 
 void resto_eq_elastic_constr::hessian_impl(func_approx_data &data) const {
@@ -638,11 +623,7 @@ void resto_eq_elastic_constr::apply_corrector_step(data_map_t &data) const {
                                                  rho_value(d, "resto_eq_elastic_constr::apply_corrector_step"),
                                                  d.ipm_cfg->mu,
                                                  corrector);
-    for (size_t arg_idx = 0; arg_idx < d.lag_jac_corr_.size(); ++arg_idx) {
-        if (d.has_jacobian_block(arg_idx)) {
-            d.lag_jac_corr_[arg_idx].noalias() += d.elastic.schur_rhs.transpose() * d.jac_[arg_idx];
-        }
-    }
+    propagate_jacobian(d, d.elastic.schur_rhs);
 }
 
 void resto_eq_elastic_constr::apply_affine_step(data_map_t &data, workspace_data *cfg) const {
@@ -702,7 +683,7 @@ resto_ineq_elastic_ipm_constr::resto_ineq_elastic_ipm_constr(const std::string &
     set_default_hess_sparsity(sparsity::dense);
     const auto &src_func = dynamic_cast<const generic_func &>(*source);
     add_arguments(src_func.in_args());
-    copy_source_jac_sparsity(*this, src_func);
+    copy_source_sparsity(*this, src_func);
     if (const auto *src_ineq = dynamic_cast<const ineq_constr *>(source.get())) {
         if (const auto *box = src_ineq->box_info(); box != nullptr) {
             set_box_info(std::make_shared<box_spec>(*box));
@@ -779,25 +760,8 @@ void resto_ineq_elastic_ipm_constr::jacobian_impl(func_approx_data &data) const 
         rho_value(d, "resto_ineq_elastic_ipm_constr::jacobian_impl"),
         target_mu);
     sync_ineq_overlay_views(d);
-    for (size_t arg_idx = 0; arg_idx < d.lag_jac_corr_.size(); ++arg_idx) {
-        if (d.has_jacobian_block(arg_idx)) {
-            d.lag_jac_corr_[arg_idx].noalias() += d.elastic.schur_rhs_net.transpose() * d.jac_[arg_idx];
-        }
-    }
-    size_t outer_idx = 0;
-    for (auto &outer : d.lag_hess_) {
-        size_t inner_idx = 0;
-        if (outer.size()) {
-            for (auto &inner : outer) {
-                if (inner.size() != 0) {
-                    inner.noalias() +=
-                        d.jac_[outer_idx].transpose() * d.elastic.schur_inv_diag_sum.asDiagonal() * d.jac_[inner_idx];
-                }
-                ++inner_idx;
-            }
-        }
-        ++outer_idx;
-    }
+    propagate_jacobian(d, d.elastic.schur_rhs_net);
+    propagate_hessian(d, d.elastic.schur_inv_diag_sum);
 }
 
 void resto_ineq_elastic_ipm_constr::hessian_impl(func_approx_data &data) const {
@@ -945,11 +909,7 @@ void resto_ineq_elastic_ipm_constr::apply_corrector_step(data_map_t &data) const
         d.ipm_cfg->mu,
         corrector_ptr);
     sync_ineq_overlay_views(d);
-    for (size_t arg_idx = 0; arg_idx < d.lag_jac_corr_.size(); ++arg_idx) {
-        if (d.has_jacobian_block(arg_idx)) {
-            d.lag_jac_corr_[arg_idx].noalias() += d.elastic.schur_rhs_net.transpose() * d.jac_[arg_idx];
-        }
-    }
+    propagate_jacobian(d, d.elastic.schur_rhs_net);
 }
 
 void resto_ineq_elastic_ipm_constr::apply_affine_step(data_map_t &data, workspace_data *cfg) const {

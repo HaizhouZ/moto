@@ -37,29 +37,12 @@ void pmm_constr::jacobian_impl(func_approx_data &data) const {
 
 void pmm_constr::propagate_jacobian(func_approx_data &data) const {
     auto &d = data.as<pmm_data>();
-    for (size_t arg_idx = 0; arg_idx < d.lag_jac_corr_.size(); ++arg_idx) {
-        if (d.has_jacobian_block(arg_idx)) {
-            d.lag_jac_corr_[arg_idx].noalias() += (d.g_ / d.rho_).transpose() * d.jac_[arg_idx];
-        }
-    }
+    soft_constr::propagate_jacobian(d, d.g_, scalar_t(1.) / d.rho_);
 }
 
 void pmm_constr::propagate_hessian(func_approx_data &data) const {
     auto &d = data.as<pmm_data>();
-    size_t outer_idx = 0;
-    for (auto &outer : d.lag_hess_) {
-        size_t inner_idx = 0;
-        if (outer.size()) {
-            for (auto &inner : outer) {
-                if (inner.size() != 0) {
-                    inner.noalias() +=
-                        scalar_t(1.0 / d.rho_) * (d.jac_[outer_idx].transpose() * d.jac_[inner_idx]);
-                }
-                ++inner_idx;
-            }
-        }
-        ++outer_idx;
-    }
+    soft_constr::propagate_hessian(d, scalar_t(1. / d.rho_));
 }
 
 void pmm_constr::finalize_newton_step(data_map_t &data) const {

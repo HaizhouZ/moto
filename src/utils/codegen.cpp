@@ -37,8 +37,81 @@ void compress_structured_output(cs::SX &expr, sparsity *sp) {
             *sp = sparsity::unknown;
         return;
     }
-    if (sp != nullptr) {
-        *sp = sparsity::dense;
+    if (expr.is_square() && expr.sparsity().is_diag()) {
+        bool is_eye = false;
+        expr = cs::SX::diag(expr);
+        if (expr.is_one())
+            is_eye = true;
+        if (is_eye)
+            expr = cs::SX::ones(expr.rows());
+        if (sp != nullptr)
+            *sp = is_eye ? sparsity::eye : sparsity::diag;
+    } else {
+        if (sp != nullptr)
+            *sp = sparsity::dense;
+    }
+}
+
+void compress_structured_output(cs::SX &expr, sp_info *sp) {
+    if (expr.is_empty() || expr.is_zero()) {
+        expr = cs::SX();
+        if (sp != nullptr)
+            sp->pattern = sparsity::unknown;
+        return;
+    }
+    if (expr.is_square() && expr.sparsity().is_diag()) {
+        bool is_eye = false;
+        expr = cs::SX::diag(expr);
+        if (expr.is_one())
+            is_eye = true;
+        if (is_eye)
+            expr = cs::SX::ones(expr.rows());
+        if (sp != nullptr)
+            sp->pattern = is_eye ? sparsity::eye : sparsity::diag;
+    } else {
+        if (sp != nullptr)
+            sp->pattern = sparsity::dense;
+    }
+}
+
+void compress_jacobian(cs::SX &expr, sp_info *sp) {
+    if (sp == nullptr) {
+        return;
+    }
+
+    const int rows = expr.rows();
+    const int cols = expr.columns();
+    sp->pattern = sparsity::dense;
+    sp->row_offset = 0;
+    sp->col_offset = 0;
+    sp->rows = static_cast<size_t>(rows);
+    sp->cols = static_cast<size_t>(cols);
+
+    if (expr.is_empty() || expr.is_zero()) {
+        expr = cs::SX();
+        sp->pattern = sparsity::unknown;
+        return;
+    }
+    // assumption full row rank
+    const int nnz = expr.nnz();
+    int min_dim = std::min(rows, cols);
+    if (nnz != min_dim) // no chance
+        return;
+    for (int i = 0; i < expr.columns(); ++i) {
+        if (i + min_dim > expr.columns()) {
+            return;
+        }
+        // check this sub-block
+        auto block = expr(cs::Slice(0, min_dim), cs::Slice(i, i + min_dim));
+        if (block.nnz() == nnz) {
+            compress_structured_output(block, &sp->pattern);
+            if (sp->pattern == sparsity::diag || sp->pattern == sparsity::eye) {
+                expr = block;
+                sp->col_offset = i;
+                sp->cols = min_dim;
+                return;
+            }
+        }
     }
 }
 
@@ -372,7 +445,7 @@ void run(
             j["inputs"][e.name()] = {e.dim(), static_cast<int>(e.field())};
         }
         for (const auto &e : filtered_outputs) {
-        j["outputs"].push_back({e.rows(), e.columns()});
+            j["outputs"].push_back({e.rows(), e.columns()});
         }
         j["md5"] = md5_hash;
         j["compile_flag"] = compile_flag;
@@ -515,15 +588,14 @@ void task::finalize(job_list &jobs_) {
                         jacs_copy = std::move(jacs);
                 }
             }
-            if (jac_sp != nullptr) {
-                for (size_t idx = 0; idx < jacs.size(); ++idx) {
-                    compress_structured_output(jacs[idx], &(*jac_sp)[idx]);
-                }
-            } else {
-                for (auto &jac : jacs) {
-                    compress_structured_output(jac, nullptr);
+
+            for (size_t idx = 0; idx < jacs.size(); ++idx) {
+                jacs[idx] = cs::SX::sparsify(jacs[idx]);
+                if (jac_sp != nullptr) {
+                    compress_jacobian(jacs[idx], &(*jac_sp)[idx]);
                 }
             }
+
             jobs_.add(std::bind(&impl::run,
                                 full_func_name + "_jac",
                                 sx_inputs,
@@ -582,7 +654,7 @@ void task::finalize(job_list &jobs_) {
                     // for i,j in same field, just copy
                     hess[idx_i][idx_j] = hess[idx_j][idx_i].T();
                     if (hess_sp != nullptr)
-                        (*hess_sp)[idx_i][idx_j] = (*hess_sp)[idx_j][idx_i];
+                        (*hess_sp)[idx_i][idx_j].pattern = (*hess_sp)[idx_j][idx_i].pattern;
                     continue;
                 }
                 if (merit_jac_for_hess) {
@@ -594,7 +666,7 @@ void task::finalize(job_list &jobs_) {
                 if (hess[idx_i][idx_j].is_zero()) {
                     hess[idx_i][idx_j] = cs::SX();
                     if (hess_sp != nullptr)
-                        (*hess_sp)[idx_i][idx_j] = sparsity::unknown; // no hessian
+                        (*hess_sp)[idx_i][idx_j].pattern = sparsity::unknown; // no hessian
                     continue;
                 } else if (j.has_non_trivial_integration()) { // apply integration
                     hess[idx_i][idx_j] = cs::SX::mtimes(hess[idx_i][idx_j], get_dstep_ds(j));

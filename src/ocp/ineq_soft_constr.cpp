@@ -3,6 +3,88 @@
 
 namespace moto {
 
+void soft_constr::propagate_jacobian(func_approx_data &data, const vector_const_ref &residual, scalar_t scale) const {
+    auto &d = data.as<data_map_t>();
+    if (residual.size() == 0 || scale == 0.) {
+        return;
+    }
+    for (size_t arg_idx = 0; arg_idx < d.lag_jac_corr_.size(); ++arg_idx) {
+        if (d.has_jacobian_block(arg_idx)) {
+            d.lag_jac_corr_[arg_idx].noalias() += (scale * residual).transpose() * d.jac_[arg_idx];
+        }
+    }
+}
+
+void soft_constr::propagate_hessian(func_approx_data &data, const vector_const_ref &diag_scaling, scalar_t scale) const {
+    auto &d = data.as<data_map_t>();
+    if (diag_scaling.size() == 0 || scale == 0.) {
+        return;
+    }
+    size_t outer_idx = 0;
+    for (auto &outer : d.lag_hess_) {
+        size_t inner_idx = 0;
+        if (outer.size()) {
+            for (auto &inner : outer) {
+                if (inner.size() != 0) {
+                    inner.noalias() +=
+                        scale * (d.jac_[outer_idx].transpose() * diag_scaling.asDiagonal() * d.jac_[inner_idx]);
+                }
+                ++inner_idx;
+            }
+        }
+        ++outer_idx;
+    }
+}
+
+void soft_constr::propagate_hessian(func_approx_data &data, scalar_t scale) const {
+    auto &d = data.as<data_map_t>();
+    if (scale == 0.) {
+        return;
+    }
+    size_t outer_idx = 0;
+    for (auto &outer : d.lag_hess_) {
+        size_t inner_idx = 0;
+        if (outer.size()) {
+            for (auto &inner : outer) {
+                if (inner.size() != 0) {
+                    inner.noalias() += scale * (d.jac_[outer_idx].transpose() * d.jac_[inner_idx]);
+                }
+                ++inner_idx;
+            }
+        }
+        ++outer_idx;
+    }
+}
+
+void soft_constr::setup_hess() {
+    if (!in_field(field_, ineq_soft_constr_fields)) {
+        return;
+    }
+    for (size_t i : range(jac_sp_.size())) {
+        for (size_t j : range(jac_sp_.size())) {
+            const auto lhs_jac_sp = jac_sp_[i];
+            const auto rhs_jac_sp = jac_sp_[j];
+            auto &hess = hess_sp_[i][j];
+            hess.row_offset = lhs_jac_sp.col_offset;
+            hess.col_offset = rhs_jac_sp.col_offset;
+            hess.rows = lhs_jac_sp.cols;
+            hess.cols = rhs_jac_sp.cols;
+            if (lhs_jac_sp.pattern == sparsity::unknown || rhs_jac_sp.pattern == sparsity::unknown) {
+                hess.pattern = sparsity::unknown;
+            } else if (lhs_jac_sp.pattern == sparsity::dense || rhs_jac_sp.pattern == sparsity::dense) {
+                hess.pattern = sparsity::dense;
+            } else {
+                hess.pattern = sparsity::diag;
+            }
+        }
+    }
+}
+
+void soft_constr::load_external_impl(const std::string &path) {
+    base::load_external_impl(path);
+    setup_hess();
+}
+
 soft_constr::approx_data::approx_data(data_base &&rhs)
     : data_base(std::move(rhs)),
       d_multiplier_(nullptr, 0) {

@@ -80,15 +80,15 @@ struct task {
     std::vector<cs::SX> jac_outputs; ///< for multiple outputs
     std::vector<std::pair<shared_expr, cs::SX>> ext_jac;
     std::vector<std::tuple<shared_expr, shared_expr, cs::SX>> ext_hess;
-    std::vector<sparsity> *jac_sp = nullptr;              ///< optional jacobian sparsity pattern
-    std::vector<std::vector<sparsity>> *hess_sp = nullptr; ///< optional hessian sparsity pattern
+    std::vector<sp_info> *jac_sp = nullptr;                ///< optional jacobian sparsity pattern
+    std::vector<std::vector<sp_info>> *hess_sp = nullptr; ///< optional hessian sparsity pattern
     std::string output_dir = "gen";
     bool force_recompile = false;
     bool check_jac_ad = false; ///< check if jacobian is correct by comparing with ad
     bool append_value = false;
     bool append_jac = false;
     cs::SX weight_gn;                ///< weight for gauss-newton hessian
-    bool gauss_newton = false;         ///< use gauss-newton hessian if true
+    bool gauss_newton = false;       ///< use gauss-newton hessian if true
     bool keep_generated_src = false; ///< keep generated files
     std::string eval_compile_flag = "-O3 -DNDEBUG -march=native";
     std::string jac_compile_flag = "-O3 -DNDEBUG -march=native";

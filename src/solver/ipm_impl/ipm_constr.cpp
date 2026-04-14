@@ -350,39 +350,25 @@ void ipm_constr::jacobian_impl(func_approx_data &data) const {
 void ipm_constr::propagate_jacobian(func_approx_data &data) const {
     auto &d = data.as<ipm_data>();
     const auto &box = d.require_box_spec("ipm_constr::propagate_jacobian");
-    for (size_t arg_idx = 0; arg_idx < d.lag_jac_corr_.size(); ++arg_idx) {
-        if (d.has_jacobian_block(arg_idx)) {
-            for (auto side : box_sides) {
-                const scalar_t sign = side == box_side::ub ? scalar_t(1) : scalar_t(-1);
-                const auto &ipm_side = static_cast<const ipm_constr::approx_data::side_data &>(*d.box_side_[side]);
-                d.lag_jac_corr_[arg_idx].noalias() += sign * ipm_side.scaled_res.transpose() * d.jac_[arg_idx];
-            }
+    for (auto side : box_sides) {
+        const scalar_t sign = side == box_side::ub ? scalar_t(1) : scalar_t(-1);
+        const auto &ipm_side = static_cast<const ipm_constr::approx_data::side_data &>(*d.box_side_[side]);
+        if (!box.present_mask[side].any()) {
+            continue;
         }
+        soft_constr::propagate_jacobian(d, ipm_side.scaled_res, sign);
     }
 }
 
 void ipm_constr::propagate_hessian(func_approx_data &data) const {
     auto &d = data.as<ipm_data>();
     const auto &box = d.require_box_spec("ipm_constr::propagate_hessian");
-    size_t outer_idx = 0;
-    for (auto &outer : d.lag_hess_) {
-        size_t inner_idx = 0;
-        if (outer.size()) {
-            for (auto &inner : outer) {
-                if (inner.size() != 0) {
-                    for (auto side : box_sides) {
-                        const auto &ipm_side = static_cast<const ipm_constr::approx_data::side_data &>(*d.box_side_[side]);
-                        if (!box.present_mask[side].any()) {
-                            continue;
-                        }
-                        inner.noalias() +=
-                            d.jac_[outer_idx].transpose() * ipm_side.diag_scaling.asDiagonal() * d.jac_[inner_idx];
-                    }
-                }
-                ++inner_idx;
-            }
+    for (auto side : box_sides) {
+        const auto &ipm_side = static_cast<const ipm_constr::approx_data::side_data &>(*d.box_side_[side]);
+        if (!box.present_mask[side].any()) {
+            continue;
         }
-        ++outer_idx;
+        soft_constr::propagate_hessian(d, ipm_side.diag_scaling);
     }
 }
 } // namespace solver
