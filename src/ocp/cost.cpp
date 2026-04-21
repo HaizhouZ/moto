@@ -8,8 +8,8 @@ void generic_cost::finalize_impl() {
         for (sym &arg : in_args_) {
             switch (arg.field()) {
             case __x:
-                fmt::print("substitution in cost {}: inarg {} with {}\n",
-                           name_, arg.name(), arg.name() + "_nxt");
+                // fmt::print("substitution in cost {}: inarg {} with {}\n",
+                //            name_, arg.name(), arg.name() + "_nxt");
                 substitute(arg, arg.next());
                 break;
             case __u:

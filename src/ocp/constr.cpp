@@ -88,8 +88,8 @@ void generic_constr::finalize_impl() {
                     // here is a bit tricky, we substitute __x to __y if only __x exists in the in_args
                     // but __y existing dont mean the constraint is solvable - probably it is not
                     if (arg.field() == __x && pure_x) {
-                        fmt::print("warning: substitution in generic_constr {} of type {}: inarg {} with {}\n",
-                                   name_, field::name(field_), arg.name(), arg.name() + "_nxt");
+                        // fmt::print("warning: substitution in generic_constr {} of type {}: inarg {} with {}\n",
+                        //            name_, field::name(field_), arg.name(), arg.name() + "_nxt");
                         substitute(arg, arg.next());
                     }
                 }
