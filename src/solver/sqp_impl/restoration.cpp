@@ -22,10 +22,10 @@ std::vector<ipm_pair_snapshot> backup_outer_ipm_pairs(ns_sqp::storage_type &oute
                 return;
             }
             const auto &box = ipm_data->require_box_spec("backup_outer_ipm_pairs");
-            box.for_each_present_side([&](auto side) {
+            for (auto side : box_sides) if (box.has_side[side]) {
                 auto &pair = *ipm_data->box_side_[side];
                 backup.push_back({&pair, pair});
-            });
+            }
         });
     });
     return backup;

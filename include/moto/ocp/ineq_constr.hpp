@@ -39,15 +39,6 @@ class ineq_constr : public soft_constr {
         box_side_array<box_bound_source> bound_source = {};
         box_side_array<var> bound_var = {};
         box_side_array<vector> bound_constant_value = {};
-
-        template <typename Callback>
-        void for_each_present_side(Callback &&callback) const {
-            for (auto side : box_sides) {
-                if (has_side[side]) {
-                    callback(side);
-                }
-            }
-        }
     };
   private:
     std::shared_ptr<box_spec> box_spec_;

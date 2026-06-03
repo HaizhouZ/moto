@@ -128,7 +128,7 @@ void ineq_constr::value_impl(func_approx_data &data) const {
     auto &d = data.as<approx_data>();
     if (d.boxed()) {
         const auto &box = d.require_box_spec("ineq_constr::value_impl");
-        box.for_each_present_side([&](auto side) {
+        for (auto side : box_sides) if (box.has_side[side]) {
             auto &pair = *d.box_side_[side];
             const auto &mask = box.present_mask[side];
             const scalar_t residual_sign = side == box_side::ub ? scalar_t(1) : scalar_t(-1);
@@ -140,7 +140,7 @@ void ineq_constr::value_impl(func_approx_data &data) const {
             } else {
                 pair.residual.setZero();
             }
-        });
+        }
     }
     d.comp_.array() = d.multiplier_.array() * d.v_.array();
 } // namespace impl

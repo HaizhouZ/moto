@@ -148,19 +148,19 @@ void copy_ineq_side_init(ineq_constr::box_side_array<vector> &slack_dst,
         throw std::runtime_error("boxed ipm missing box_info in copy_ineq_side_init");
     }
     const auto n = static_cast<Eigen::Index>(box->base_dim);
-    box->for_each_present_side([&](auto side) {
+    for (auto side : box_sides) if (box->has_side[side]) {
         slack_dst[side].resize(n);
         dual_dst[side].resize(n);
         slack_dst[side] = ipm.box_side_[side]->slack;
         dual_dst[side] = ipm.box_side_[side]->multiplier;
-    });
+    }
 }
 
 void update_ineq_side_residuals(resto_ineq_elastic_ipm_constr::approx_data &d) {
     const auto &box = d.require_box_spec("update_ineq_side_residuals");
     d.elastic.present_mask = box.present_mask;
     ineq_constr::box_side_array<vector> bound_eval;
-    box.for_each_present_side([&](auto side) {
+    for (auto side : box_sides) if (box.has_side[side]) {
         if (box.bound_source[side] == ineq_constr::box_bound_source::constant) {
             bound_eval[side] = d.box_const_[side];
         } else if (box.bound_source[side] == ineq_constr::box_bound_source::in_arg) {
@@ -172,7 +172,7 @@ void update_ineq_side_residuals(resto_ineq_elastic_ipm_constr::approx_data &d) {
             box.present_mask[side]
                 .select(side_jac_sign(side) * (d.base_residual.array() - bound_eval[side].array()), scalar_t(0))
                 .matrix();
-    });
+    }
 }
 
 void sync_ineq_overlay_views(resto_ineq_elastic_ipm_constr::approx_data &d) {
@@ -181,14 +181,14 @@ void sync_ineq_overlay_views(resto_ineq_elastic_ipm_constr::approx_data &d) {
     d.multiplier_.setZero();
     d.d_multiplier_.setZero();
     d.comp_.setZero();
-    box.for_each_present_side([&](auto side) {
+    for (auto side : box_sides) if (box.has_side[side]) {
         const auto &side_state = d.elastic.side[side];
         const scalar_t dual_sign = side == box_side::ub ? scalar_t(1) : scalar_t(-1);
         d.multiplier_.array() +=
             dual_sign * box.present_mask[side].select(side_state.dual[detail::slot_t].array(), scalar_t(0));
         d.d_multiplier_.array() +=
             dual_sign * box.present_mask[side].select(side_state.d_dual[detail::slot_t].array(), scalar_t(0));
-    });
+    }
 }
 
 template <typename ApproxData>
@@ -786,7 +786,7 @@ void resto_ineq_elastic_ipm_constr::initialize(data_map_t &data) const {
         throw std::runtime_error("resto_ineq_elastic_ipm_constr::initialize requires mu > 0");
     }
     update_ineq_side_residuals(d);
-    box.for_each_present_side([&](auto side) {
+    for (auto side : box_sides) if (box.has_side[side]) {
         auto &side_state = d.elastic.side[side];
         for (Eigen::Index i = 0; i < d.base_residual.size(); ++i) {
             if (!box.present_mask[side](i)) {
@@ -812,7 +812,7 @@ void resto_ineq_elastic_ipm_constr::initialize(data_map_t &data) const {
             side_state.dual[detail::slot_p](i) = mu_bar / p;
             side_state.dual[detail::slot_n](i) = mu_bar / n;
         }
-    });
+    }
     d.multiplier_backup = d.multiplier_;
     resto_ineq_elastic_ipm_constr::compute_local_model(d.elastic, box, rho, mu_bar);
     sync_ineq_overlay_views(d);
@@ -832,7 +832,7 @@ void resto_ineq_elastic_ipm_constr::finalize_newton_step(data_map_t &data) const
         ++arg_idx;
     }
     const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::finalize_newton_step");
-    box.for_each_present_side([&](auto side) {
+    for (auto side : box_sides) if (box.has_side[side]) {
         auto &side_state = d.elastic.side[side];
         const auto masked_delta =
             box.present_mask[side].select(side_jac_sign(side) * d.d_multiplier_.array(), scalar_t(0)).matrix();
@@ -851,7 +851,7 @@ void resto_ineq_elastic_ipm_constr::finalize_newton_step(data_map_t &data) const
                 side_state.backsub_rhs[slot].array();
             side_state.d_dual[slot] = side_state.r_stat[slot].array() + sign * side_state.d_dual[detail::slot_t].array();
         }
-    });
+    }
     sync_ineq_overlay_views(d);
 }
 
@@ -863,7 +863,7 @@ void resto_ineq_elastic_ipm_constr::finalize_predictor_step(data_map_t &data, wo
     assert(d.ipm_cfg != nullptr);
     assert(d.ipm_cfg->ipm_computing_affine_step() &&
            "ipm affine step computation not started but affine step is requested");
-    box.for_each_present_side([&](auto side) {
+    for (auto side : box_sides) if (box.has_side[side]) {
         auto &side_state = d.elastic.side[side];
         for (auto slot : k_triplet_slots) {
             worker.n_ipm_cstr += static_cast<size_t>(box.present_mask[side].count());
@@ -878,7 +878,7 @@ void resto_ineq_elastic_ipm_constr::finalize_predictor_step(data_map_t &data, wo
                             scalar_t(0))
                     .sum();
         }
-    });
+    }
 }
 
 void resto_ineq_elastic_ipm_constr::apply_corrector_step(data_map_t &data) const {
@@ -888,20 +888,20 @@ void resto_ineq_elastic_ipm_constr::apply_corrector_step(data_map_t &data) const
     }
     const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::apply_corrector_step");
     if (!d.ipm_cfg->ipm_accept_corrector()) {
-        box.for_each_present_side([&](auto side) {
+        for (auto side : box_sides) if (box.has_side[side]) {
             auto &side_state = d.elastic.side[side];
             for (auto slot : k_triplet_slots) {
                 side_state.corrector[slot].setZero();
             }
-        });
+        }
     }
     update_ineq_side_residuals(d);
     detail::elastic_side_array<detail::elastic_triplet_array<vector>> corrector;
     const auto *corrector_ptr = d.ipm_cfg->ipm_accept_corrector() ? &corrector : nullptr;
     if (corrector_ptr != nullptr) {
-        box.for_each_present_side([&](auto side) {
+        for (auto side : box_sides) if (box.has_side[side]) {
             corrector[side] = d.elastic.side[side].corrector;
-        });
+        }
     }
     resto_ineq_elastic_ipm_constr::compute_local_model(
         d.elastic,
@@ -917,7 +917,7 @@ void resto_ineq_elastic_ipm_constr::apply_affine_step(data_map_t &data, workspac
     auto &d = data.as<approx_data>();
     auto &ls = cfg->as<linesearch_config>();
     const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::apply_affine_step");
-    box.for_each_present_side([&](auto side) {
+    for (auto side : box_sides) if (box.has_side[side]) {
         auto &side_state = d.elastic.side[side];
         for (auto slot : k_triplet_slots) {
             positivity::apply_pair_step(side_state.value[slot], side_state.d_value[slot], ls.alpha_primal,
@@ -927,7 +927,7 @@ void resto_ineq_elastic_ipm_constr::apply_affine_step(data_map_t &data, workspac
             side_state.dual[slot] =
                 box.present_mask[side].select(side_state.dual[slot].array().max(1e-20), scalar_t(0)).matrix();
         }
-    });
+    }
     update_ineq_side_residuals(d);
     resto_ineq_elastic_ipm_constr::compute_local_model(
         d.elastic,
@@ -941,38 +941,38 @@ void resto_ineq_elastic_ipm_constr::update_ls_bounds(data_map_t &data, workspace
     auto &d = data.as<approx_data>();
     auto &ls = cfg->as<linesearch_config>();
     const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::update_ls_bounds");
-    box.for_each_present_side([&](auto side) {
+    for (auto side : box_sides) if (box.has_side[side]) {
         auto &side_state = d.elastic.side[side];
         for (auto slot : k_triplet_slots) {
             positivity::update_pair_bounds(ls, side_state.value[slot], side_state.d_value[slot],
                                            side_state.dual[slot], side_state.d_dual[slot]);
         }
-    });
+    }
 }
 
 void resto_ineq_elastic_ipm_constr::backup_trial_state(data_map_t &data) const {
     auto &d = data.as<approx_data>();
     const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::backup_trial_state");
-    box.for_each_present_side([&](auto side) {
+    for (auto side : box_sides) if (box.has_side[side]) {
         auto &side_state = d.elastic.side[side];
         for (auto slot : k_triplet_slots) {
             positivity::backup_pair(side_state.value[slot], side_state.value_backup[slot],
                                     side_state.dual[slot], side_state.dual_backup[slot]);
         }
-    });
+    }
     d.multiplier_backup = d.multiplier_;
 }
 
 void resto_ineq_elastic_ipm_constr::restore_trial_state(data_map_t &data) const {
     auto &d = data.as<approx_data>();
     const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::restore_trial_state");
-    box.for_each_present_side([&](auto side) {
+    for (auto side : box_sides) if (box.has_side[side]) {
         auto &side_state = d.elastic.side[side];
         for (auto slot : k_triplet_slots) {
             positivity::restore_pair(side_state.value[slot], side_state.value_backup[slot],
                                      side_state.dual[slot], side_state.dual_backup[slot]);
         }
-    });
+    }
     update_ineq_side_residuals(d);
     resto_ineq_elastic_ipm_constr::compute_local_model(
         d.elastic,
@@ -986,10 +986,10 @@ scalar_t resto_ineq_elastic_ipm_constr::objective_penalty(const func_approx_data
     const auto &d = static_cast<const approx_data &>(data);
     scalar_t sum = 0.;
     const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::objective_penalty");
-    box.for_each_present_side([&](auto side) {
+    for (auto side : box_sides) if (box.has_side[side]) {
         sum += d.elastic.side[side].value[detail::slot_p].sum();
         sum += d.elastic.side[side].value[detail::slot_n].sum();
-    });
+    }
     return rho_value(d, "resto_ineq_elastic_ipm_constr::objective_penalty") * sum;
 }
 
@@ -997,10 +997,10 @@ scalar_t resto_ineq_elastic_ipm_constr::objective_penalty_dir_deriv(const func_a
     const auto &d = static_cast<const approx_data &>(data);
     scalar_t sum = 0.;
     const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::objective_penalty_dir_deriv");
-    box.for_each_present_side([&](auto side) {
+    for (auto side : box_sides) if (box.has_side[side]) {
         sum += d.elastic.side[side].d_value[detail::slot_p].sum();
         sum += d.elastic.side[side].d_value[detail::slot_n].sum();
-    });
+    }
     return rho_value(d, "resto_ineq_elastic_ipm_constr::objective_penalty_dir_deriv") * sum;
 }
 
@@ -1011,12 +1011,12 @@ scalar_t resto_ineq_elastic_ipm_constr::search_penalty(const func_approx_data &d
     }
     const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::search_penalty");
     scalar_t sum = 0.;
-    box.for_each_present_side([&](auto side) {
+    for (auto side : box_sides) if (box.has_side[side]) {
         for (auto slot : k_triplet_slots) {
             const auto safe = box.present_mask[side].select(d.elastic.side[side].value[slot].array(), scalar_t(1));
             sum += box.present_mask[side].select(safe.log(), scalar_t(0)).sum();
         }
-    });
+    }
     return d.ipm_cfg->mu * sum;
 }
 
@@ -1027,13 +1027,13 @@ scalar_t resto_ineq_elastic_ipm_constr::search_penalty_dir_deriv(const func_appr
     }
     const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::search_penalty_dir_deriv");
     scalar_t sum = 0.;
-    box.for_each_present_side([&](auto side) {
+    for (auto side : box_sides) if (box.has_side[side]) {
         for (auto slot : k_triplet_slots) {
             const auto safe =
                 box.present_mask[side].select(d.elastic.side[side].value_backup[slot].array(), scalar_t(1));
             sum += box.present_mask[side].select(d.elastic.side[side].d_value[slot].array() / safe, scalar_t(0)).sum();
         }
-    });
+    }
     return d.ipm_cfg->mu * sum;
 }
 
@@ -1165,7 +1165,7 @@ void copy_restoration_candidate_slack_to_outer(node_data &resto,
                 if (box == nullptr) {
                     throw std::runtime_error("boxed ipm missing box_info in restoration candidate sync");
                 }
-                box->for_each_present_side([&](auto side) {
+                for (auto side : box_sides) if (box->has_side[side]) {
                     auto &outer_pair = *outer_ipm.box_side_[side];
                     const auto &resto_side = overlay_data.elastic.side[side];
                     const auto &mask = box->present_mask[side];
@@ -1175,7 +1175,7 @@ void copy_restoration_candidate_slack_to_outer(node_data &resto,
                     outer_pair.multiplier_backup = outer_pair.multiplier;
                     outer_pair.d_slack.setZero();
                     outer_pair.d_multiplier.setZero();
-                });
+                }
             });
     }
 }
@@ -1212,7 +1212,7 @@ void copy_restoration_ineq_commit_to_outer(node_data &resto,
                 outer_ipm.d_multiplier_.setZero();
                 outer_ipm.comp_.setZero();
                 outer_ipm.v_.setConstant(-std::numeric_limits<scalar_t>::infinity());
-                box->for_each_present_side([&](auto side) {
+                for (auto side : box_sides) if (box->has_side[side]) {
                     auto &outer_pair = *outer_ipm.box_side_[side];
                     const auto &resto_side = overlay_data.elastic.side[side];
                     const auto &mask = box->present_mask[side];
@@ -1244,7 +1244,7 @@ void copy_restoration_ineq_commit_to_outer(node_data &resto,
                                         .max(outer_ipm.comp_.array()),
                                     outer_ipm.comp_.array())
                             .matrix();
-                });
+                }
             });
     }
 }

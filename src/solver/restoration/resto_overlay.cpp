@@ -162,7 +162,7 @@ void resto_ineq_elastic_ipm_constr::compute_local_model(detail::ineq_local_state
     ineq.schur_rhs_net.setZero(dim);
     ineq.schur_inv_diag_sum.setZero(dim);
 
-    box.for_each_present_side([&](auto side) {
+    for (auto side : box_sides) if (box.has_side[side]) {
         auto &side_state = ineq.side[side];
         for (auto slot : k_triplet_slots) {
             if (dim != side_state.value[slot].size() || dim != side_state.dual[slot].size()) {
@@ -225,7 +225,7 @@ void resto_ineq_elastic_ipm_constr::compute_local_model(detail::ineq_local_state
             side_jac_sign(side) * box.present_mask[side].select(side_state.schur_rhs.array(), scalar_t(0));
         ineq.schur_inv_diag_sum.array() +=
             box.present_mask[side].select(side_state.schur_inv_diag.array(), scalar_t(0));
-    });
+    }
     if (ineq.primal_view.size() > 0) {
         const auto any_side = (box.present_mask[box_side::ub] || box.present_mask[box_side::lb]);
         ineq.primal_view = any_side.select(ineq.primal_view.array(), scalar_t(0)).matrix();
