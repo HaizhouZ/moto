@@ -49,9 +49,6 @@ class graph_model {
 
     struct interval_compose_options {
         ocp::active_status_config source_config;
-        // End-node pure-x terms participate in every interval compose.
-        // This flag is retained only for compatibility with older call sites.
-        bool materialize_sink_terms = false;
         bool include_terminal_sink_terms = false;
     };
 
@@ -116,7 +113,7 @@ class graph_model {
     // Convenience overload with identity stage mapping (no stage transformation).
     void realize_into(storage_interface &graph) const;
 
-    bool topology_changed() const noexcept;
+    size_t revision() const noexcept;
     size_t num_nodes() const noexcept;
     size_t num_edges() const noexcept;
 

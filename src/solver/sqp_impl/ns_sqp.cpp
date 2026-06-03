@@ -75,11 +75,13 @@ ns_sqp::storage_type &ns_sqp::active_data() {
     if (!solver_runtime_) {
         solver_runtime_ = std::make_shared<storage_type>(graph_n_jobs_);
     }
-    if (active_model_graph_->topology_changed()) {
+    const size_t model_revision = active_model_graph_->revision();
+    if (solver_runtime_revision_ != model_revision) {
         solver_graph_storage_interface realization(*solver_runtime_, [this](const ocp_ptr_t &stage_ocp) {
             return node_type(stage_ocp);
         });
         active_model_graph_->realize_into(realization);
+        solver_runtime_revision_ = model_revision;
     }
     return *solver_runtime_;
 }
@@ -94,9 +96,10 @@ ns_sqp::storage_type &ns_sqp::restoration_graph() {
         .rho_eq = settings.restoration.rho_eq,
         .rho_ineq = settings.restoration.rho_ineq,
     };
+    const size_t model_revision = active_model_graph_->revision();
     const bool needs_rebuild =
         !restoration_runtime_ ||
-        active_model_graph_->topology_changed() ||
+        restoration_runtime_revision_ != model_revision ||
         !restoration_cfg_valid_ ||
         !same_restoration_cfg(restoration_cfg_, cfg);
     if (needs_rebuild) {
@@ -110,6 +113,7 @@ ns_sqp::storage_type &ns_sqp::restoration_graph() {
             [&cfg](const ocp_ptr_t &stage_ocp) {
                 return solver::restoration::build_restoration_overlay_problem(stage_ocp, cfg);
             });
+        restoration_runtime_revision_ = model_revision;
         restoration_cfg_ = cfg;
         restoration_cfg_valid_ = true;
     }
@@ -123,9 +127,10 @@ ns_sqp::storage_type &ns_sqp::equality_init_graph() {
     solver::equality_init::equality_init_overlay_settings cfg{
         .rho_eq = settings.eq_init.rho_eq,
     };
+    const size_t model_revision = active_model_graph_->revision();
     const bool needs_rebuild =
         !equality_init_runtime_ ||
-        active_model_graph_->topology_changed() ||
+        equality_init_runtime_revision_ != model_revision ||
         !equality_init_cfg_valid_ ||
         !same_equality_init_cfg(equality_init_cfg_, cfg);
     if (needs_rebuild) {
@@ -139,6 +144,7 @@ ns_sqp::storage_type &ns_sqp::equality_init_graph() {
             [&cfg](const ocp_ptr_t &stage_ocp) {
                 return solver::equality_init::build_equality_init_overlay_problem(stage_ocp, cfg);
             });
+        equality_init_runtime_revision_ = model_revision;
         equality_init_cfg_ = cfg;
         equality_init_cfg_valid_ = true;
     }

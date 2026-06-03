@@ -748,6 +748,8 @@ ns_sqp::result_type ns_sqp::update(size_t n_iter, bool verbose) {
         }
     } catch (...) {
         if (settings.no_except) {
+            // TODO: convert no_except to explicit error-code handling so solver
+            // failures are reported without swallowing arbitrary exceptions.
             if (settings.verbose)
                 fmt::print("Exception caught during SQP iterations. Terminating.\n");
         } else {

@@ -154,6 +154,7 @@ bool ocp_base::add_impl(shared_expr ex, bool terminal) {
             disabled_uids_.insert(_uid);
             disabled_expr_[ex->field()].emplace_back(std::move(ex));
         }
+        bump_formulation_version();
         return true;
     }
     return false;
@@ -425,10 +426,7 @@ void ocp_base::update_active_status(const active_status_config &config, bool upd
         return false;
     };
     for (expr &ex : config.activate_list) {
-        /// by activating an expression, previously pruned expressions may be re-enabled
-        /// but previously user-disabled expressions should not be re-enabled
-        if (re_enable_expr(ex, true) || re_enable_expr(ex, false)) {
-            // add(ex); // does not previously exist, add as new expr
+        if (!re_enable_expr(ex, true) && !re_enable_expr(ex, false)) {
             throw std::runtime_error(fmt::format("Cannot activate expression {} uid {}, it does not exist in the problem",
                                                  ex.name(), ex.uid()));
         }
@@ -515,6 +513,9 @@ ITER_START:
     if (changed)
         goto ITER_START;
     finalized_ = false;
+    if (!config.empty()) {
+        bump_formulation_version();
+    }
 }
 } // namespace moto
 

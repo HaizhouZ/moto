@@ -55,9 +55,11 @@ class ocp_base {
     std::array<size_t, field::num> dim_{};
     std::array<size_t, field::num_prim> tdim_{};
     std::unordered_set<size_t> uids_, disabled_uids_, pruned_uids_;
+    size_t formulation_version_ = 0;
 
     void set_dim_and_idx();
     void finalize();
+    void bump_formulation_version() noexcept { ++formulation_version_; }
     /// Refresh clone-local caches and recursively clone sub-problems after a
     /// copy-construction based clone.
     void refresh_after_clone(const active_status_config &config);
@@ -94,6 +96,7 @@ class ocp_base {
     bool contains(const expr &ex, bool include_sub_prob = true) const;
     /// Whether an expression is currently active in this problem.
     bool is_active(const expr &ex, bool include_sub_prob = true) const;
+    size_t formulation_version() const noexcept { return formulation_version_; }
     /// Wait for all expressions to be ready, then finalize the problem.
     void wait_until_ready();
     /// Print a compact summary grouped by field.
@@ -139,6 +142,7 @@ class ocp_base {
 
     void add(const ocp_base_ptr_t &sub) {
         sub_probs_.push_back(sub);
+        bump_formulation_version();
     }
 
     /// Start offset of an expression in the flattened storage of its field.

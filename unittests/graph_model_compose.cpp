@@ -588,6 +588,33 @@ TEST_CASE("ns_sqp model_graph flatten_nodes reuses realized graph until graph be
     REQUIRE(static_cast<const void *>(flat_after_dirty.front()) != nullptr);
 }
 
+TEST_CASE("ns_sqp model_graph refreshes realized stages after formulation mutation") {
+    using namespace moto;
+
+    auto [x, xn] = sym::states("x_graph_formulation_dirty", 1);
+    auto u = sym::inputs("u_graph_formulation_dirty", 1);
+    const var_inarg_list dyn_args = var_list{x, xn, u};
+    const var_inarg_list x_args = var_list{x};
+    auto dyn = dynamics(new dense_dynamics("dyn_graph_formulation_dirty", dyn_args, xn - x - u, approx_order::second, __dyn));
+
+    ns_sqp sqp;
+    auto modeled = sqp.create_graph();
+    auto source = modeled.create_node(node_ocp::create());
+    auto sink = modeled.create_node(node_ocp::create());
+    auto edge = modeled.connect(source, sink);
+    edge->add(*dyn);
+
+    auto &flat_first = sqp.active_data().flatten_nodes();
+    REQUIRE_FALSE(contains_name_prefix(expr_names(flat_first.front()->problem(), __cost),
+                                       "cost_graph_formulation_dirty"));
+
+    edge->add(*cost(new generic_cost("cost_graph_formulation_dirty", x_args, x, approx_order::second)));
+
+    auto &flat_after_mutation = sqp.active_data().flatten_nodes();
+    REQUIRE(contains_name_prefix(expr_names(flat_after_mutation.front()->problem(), __cost),
+                                 "cost_graph_formulation_dirty"));
+}
+
 TEST_CASE("graph_model reserve supports bulk node and edge creation") {
     using namespace moto;
     using namespace moto;
@@ -673,4 +700,18 @@ TEST_CASE("node_ocp rejects y-dependent terms and dynamics") {
     REQUIRE_THROWS_WITH(
         node->add(*dyn),
         Catch::Matchers::ContainsSubstring("dynamics must be added to an edge_ocp"));
+}
+
+TEST_CASE("ocp active status can reactivate disabled expressions") {
+    using namespace moto;
+
+    auto x = sym::states("x_active_reactivate", 1).first;
+    auto x_cost = cost(new generic_cost("cost_active_reactivate", var_list{x}, x, approx_order::second));
+    auto node = node_ocp::create();
+    node->add(*x_cost);
+
+    node->update_active_status({{*x_cost}, {}});
+    REQUIRE_FALSE(node->is_active(*x_cost, false));
+    REQUIRE_NOTHROW(node->update_active_status({{}, {*x_cost}}));
+    REQUIRE(node->is_active(*x_cost, false));
 }

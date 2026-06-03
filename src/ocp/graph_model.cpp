@@ -1,6 +1,7 @@
 #include <moto/ocp/graph_model.hpp>
 
 #include <algorithm>
+#include <unordered_map>
 
 namespace moto {
 
@@ -43,54 +44,43 @@ bool is_pure_state_node_term(const shared_expr &expr, bool include_terminal = fa
 struct graph_model::impl {
     std::vector<model_node_ptr_t> nodes;
     std::vector<model_edge_ptr_t> edges;
-    bool topology_changed = true;
+    size_t topology_revision = 1;
 
     void reserve(size_t node_capacity, size_t edge_capacity) {
         if (node_capacity > nodes.capacity()) nodes.reserve(node_capacity);
         if (edge_capacity > edges.capacity()) edges.reserve(edge_capacity);
     }
 
-    size_t find_node_id(const node_ocp_ptr_t &prob) const {
-        if (!prob) {
-            throw std::runtime_error("graph_model cannot resolve a null node problem");
+    void mark_topology_changed() noexcept { ++topology_revision; }
+
+    size_t revision() const noexcept {
+        size_t seed = topology_revision;
+        const auto mix = [](size_t &s, size_t v) {
+            s ^= v + 0x9e3779b97f4a7c15ULL + (s << 6) + (s >> 2);
+        };
+        for (const auto &node : nodes) {
+            if (!node) continue;
+            mix(seed, node->uid());
+            mix(seed, node->formulation_version());
         }
-        const auto it = std::find_if(nodes.begin(), nodes.end(), [&](const model_node_ptr_t &node) {
-            return node == prob;
-        });
-        if (it == nodes.end()) {
-            throw std::runtime_error("graph_model cannot resolve node handle from node problem");
+        for (const auto &edge : edges) {
+            if (!edge) continue;
+            mix(seed, edge->uid());
+            mix(seed, edge->formulation_version());
         }
-        return static_cast<size_t>(std::distance(nodes.begin(), it));
+        return seed;
     }
 
-    size_t find_node_id_by_uid(size_t uid) const {
-        const auto it = std::find_if(nodes.begin(), nodes.end(), [&](const model_node_ptr_t &node) {
-            return node && node->uid() == uid;
-        });
-        if (it == nodes.end()) {
-            throw std::runtime_error("graph_model cannot resolve node id from uid");
+    std::unordered_map<size_t, size_t> node_ids_by_uid() const {
+        std::unordered_map<size_t, size_t> out;
+        out.reserve(nodes.size());
+        for (size_t i = 0; i < nodes.size(); ++i) {
+            if (!nodes[i]) {
+                throw std::runtime_error("graph_model contains a null node handle");
+            }
+            out.emplace(nodes[i]->uid(), i);
         }
-        return static_cast<size_t>(std::distance(nodes.begin(), it));
-    }
-
-    bool has_incoming_edge(size_t node_id, size_t exclude_edge_id) const {
-        const size_t uid = nodes.at(node_id)->uid();
-        for (size_t i = 0; i < edges.size(); ++i) {
-            if (i == exclude_edge_id) continue;
-            const auto &ed = edges[i] ? edges[i]->ed_node_prob() : node_ocp_ptr_t{};
-            if (ed && ed->uid() == uid) return true;
-        }
-        return false;
-    }
-
-    bool has_outgoing_edge(size_t node_id, size_t exclude_edge_id) const {
-        const size_t uid = nodes.at(node_id)->uid();
-        for (size_t i = 0; i < edges.size(); ++i) {
-            if (i == exclude_edge_id) continue;
-            const auto &st = edges[i] ? edges[i]->st_node_prob() : node_ocp_ptr_t{};
-            if (st && st->uid() == uid) return true;
-        }
-        return false;
+        return out;
     }
 };
 
@@ -102,7 +92,7 @@ void graph_model::reserve(size_t node_capacity, size_t edge_capacity) {
 
 model_node_ptr_t graph_model::create_node(const node_ocp_ptr_t &base_prob) {
     auto node = base_prob ? base_prob->clone_node() : node_ocp::create();
-    state_->topology_changed = true;
+    state_->mark_topology_changed();
     state_->nodes.emplace_back(node);
     return node;
 }
@@ -118,7 +108,7 @@ model_edge_ptr_t graph_model::connect(const model_node_ptr_t &st,
                                       const edge_ocp_ptr_t &base_prob) {
     validate_node(st);
     validate_node(ed);
-    state_->topology_changed = true;
+    state_->mark_topology_changed();
     auto edge = base_prob ? base_prob->clone_edge() : edge_ocp::create();
     edge->bind_nodes(st, ed);
     state_->edges.emplace_back(edge);
@@ -239,14 +229,7 @@ std::vector<edge_ocp_ptr_t> graph_model::compose_all() const {
     for (size_t eid = 0; eid < state_->edges.size(); ++eid) {
         const auto &edge_h = state_->edges[eid];
         validate_edge(edge_h);
-        const auto &ed_prob = edge_h->ed_node_prob();
-        if (!ed_prob) {
-            throw std::runtime_error("graph_model::compose_all found edge without bound end node");
-        }
-        const size_t ed_id = state_->find_node_id_by_uid(ed_prob->uid());
-        const bool sink_final = !state_->has_outgoing_edge(ed_id, eid);
         auto composed = compose_interval(edge_h, {
-            .materialize_sink_terms = sink_final,
             .include_terminal_sink_terms = false,
         });
         composed->wait_until_ready();
@@ -262,6 +245,7 @@ void graph_model::realize_into(storage_interface &graph,
     const size_t num_edges = state_->edges.size();
     graph.reserve(num_edges, num_edges);
 
+    const auto node_ids = state_->node_ids_by_uid();
     std::vector<std::vector<size_t>> incoming(num_nodes), outgoing(num_nodes);
     for (size_t eid = 0; eid < num_edges; ++eid) {
         const auto &edge = state_->edges[eid];
@@ -270,9 +254,30 @@ void graph_model::realize_into(storage_interface &graph,
         if (!st_prob || !ed_prob) {
             throw std::runtime_error("graph_model::realize_into found edge without bound endpoints");
         }
-        incoming[state_->find_node_id_by_uid(ed_prob->uid())].push_back(eid);
-        outgoing[state_->find_node_id_by_uid(st_prob->uid())].push_back(eid);
+        incoming.at(node_ids.at(ed_prob->uid())).push_back(eid);
+        outgoing.at(node_ids.at(st_prob->uid())).push_back(eid);
     }
+
+    size_t head_node = static_cast<size_t>(-1);
+    size_t tail_node = static_cast<size_t>(-1);
+    for (size_t nid = 0; nid < num_nodes; ++nid) {
+        const auto &inc = incoming[nid];
+        const auto &out = outgoing[nid];
+        if (inc.empty() && out.empty()) continue;
+        if (inc.empty()) {
+            if (out.size() != 1) throw std::runtime_error("graph_model::realize_into expects a unique outgoing edge from the source model node");
+            if (head_node != static_cast<size_t>(-1)) throw std::runtime_error("graph_model::realize_into expects a single source path");
+            head_node = nid;
+        } else if (out.empty()) {
+            if (inc.size() != 1) throw std::runtime_error("graph_model::realize_into expects a unique incoming edge for a sink model node");
+            if (tail_node != static_cast<size_t>(-1)) throw std::runtime_error("graph_model::realize_into expects a single sink path");
+            tail_node = nid;
+        } else if (inc.size() != 1 || out.size() != 1) {
+            throw std::runtime_error("graph_model::realize_into expects a single connected chain");
+        }
+    }
+    if (head_node == static_cast<size_t>(-1)) throw std::runtime_error("graph_model::realize_into expects a single source path");
+    if (tail_node == static_cast<size_t>(-1)) throw std::runtime_error("graph_model::realize_into expects a single sink path");
 
     std::vector<size_t> realized(num_edges, static_cast<size_t>(-1));
     for (size_t eid = 0; eid < num_edges; ++eid) {
@@ -281,10 +286,9 @@ void graph_model::realize_into(storage_interface &graph,
         if (!ed_prob) {
             throw std::runtime_error("graph_model::realize_into found edge without bound end node");
         }
-        const size_t ed_id = state_->find_node_id_by_uid(ed_prob->uid());
+        const size_t ed_id = node_ids.at(ed_prob->uid());
         const bool sink_final = outgoing[ed_id].empty();
         auto stage_ocp = std::static_pointer_cast<ocp>(compose_interval(edge, {
-            .materialize_sink_terms = sink_final,
             .include_terminal_sink_terms = sink_final,
         }));
         if (stage_builder) {
@@ -296,39 +300,23 @@ void graph_model::realize_into(storage_interface &graph,
         realized[eid] = graph.add_stage(stage_ocp);
     }
 
-    size_t head = static_cast<size_t>(-1);
-    size_t tail = static_cast<size_t>(-1);
     for (size_t nid = 0; nid < num_nodes; ++nid) {
         const auto &inc = incoming[nid];
         const auto &out = outgoing[nid];
-        if (inc.empty() && out.empty()) continue;
-        if (inc.empty()) {
-            if (out.size() != 1) throw std::runtime_error("graph_model::realize_into expects a unique outgoing edge from the source model node");
-            if (head != static_cast<size_t>(-1)) throw std::runtime_error("graph_model::realize_into expects a single source path");
-            head = realized[out.front()];
-        } else if (out.empty()) {
-            if (inc.size() != 1) throw std::runtime_error("graph_model::realize_into expects a unique incoming edge for a sink model node");
-            if (tail != static_cast<size_t>(-1)) throw std::runtime_error("graph_model::realize_into expects a single sink path");
-            tail = realized[inc.front()];
-        } else {
-            for (size_t in_eid : inc)
-                for (size_t out_eid : out)
-                    graph.connect(realized[in_eid], realized[out_eid]);
+        if (!inc.empty() && !out.empty()) {
+            graph.connect(realized[inc.front()], realized[out.front()]);
         }
     }
 
-    if (head == static_cast<size_t>(-1)) throw std::runtime_error("graph_model::realize_into expects a single source path");
-    if (tail == static_cast<size_t>(-1)) throw std::runtime_error("graph_model::realize_into expects a single sink path");
-    graph.set_head(head);
-    graph.set_tail(tail);
-    state_->topology_changed = false;
+    graph.set_head(realized[outgoing[head_node].front()]);
+    graph.set_tail(realized[incoming[tail_node].front()]);
 }
 
 void graph_model::realize_into(storage_interface &graph) const {
     realize_into(graph, stage_builder_t{});
 }
 
-bool graph_model::topology_changed() const noexcept { return state_->topology_changed; }
+size_t graph_model::revision() const noexcept { return state_->revision(); }
 
 size_t graph_model::num_nodes() const noexcept { return state_->nodes.size(); }
 size_t graph_model::num_edges() const noexcept { return state_->edges.size(); }
@@ -377,7 +365,7 @@ std::vector<model_edge_ptr_t> graph_model::add_path_impl(const model_node_ptr_t 
     edges.reserve(n_edges);
     auto prev = st;
     for (size_t i = 0; i < n_edges; ++i) {
-        auto next = (i + 1 == n_edges) ? ed : create_node(prev->clone_node());
+        auto next = (i + 1 == n_edges) ? ed : create_node(prev);
         edges.emplace_back(connect(prev, next, base_prob));
         prev = next;
     }

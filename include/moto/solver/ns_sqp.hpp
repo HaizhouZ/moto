@@ -192,6 +192,8 @@ struct ns_sqp {
         iterative_refinement_setting rf;
         scaling_settings scaling;
 
+        // TODO: replace this exception-suppression mode with explicit error-code
+        // propagation from worker callbacks and the SQP update loop.
         bool no_except = false;
 
         settings_t()
@@ -357,9 +359,12 @@ struct ns_sqp {
     graph_model &create_graph() {
         active_model_graph_ = std::make_shared<graph_model>();
         solver_runtime_ = std::make_shared<storage_type>(graph_n_jobs_);
+        solver_runtime_revision_ = 0;
         restoration_runtime_.reset();
+        restoration_runtime_revision_ = 0;
         restoration_cfg_valid_ = false;
         equality_init_runtime_.reset();
+        equality_init_runtime_revision_ = 0;
         equality_init_cfg_valid_ = false;
         return *active_model_graph_;
     }
@@ -395,10 +400,13 @@ struct ns_sqp {
     std::unique_ptr<solver_type> riccati_solver_ = nullptr;
     std::shared_ptr<graph_model> active_model_graph_;
     std::shared_ptr<storage_type> solver_runtime_;
+    size_t solver_runtime_revision_ = 0;
     std::shared_ptr<storage_type> restoration_runtime_;
+    size_t restoration_runtime_revision_ = 0;
     solver::restoration::restoration_overlay_settings restoration_cfg_{};
     bool restoration_cfg_valid_ = false;
     std::shared_ptr<storage_type> equality_init_runtime_;
+    size_t equality_init_runtime_revision_ = 0;
     solver::equality_init::equality_init_overlay_settings equality_init_cfg_{};
     bool equality_init_cfg_valid_ = false;
     storage_type *phase_graph_override_ = nullptr;
