@@ -21,10 +21,11 @@ std::vector<ipm_pair_snapshot> backup_outer_ipm_pairs(ns_sqp::storage_type &oute
             if (ipm_data == nullptr || !ipm_data->boxed()) {
                 return;
             }
-            for (auto side : box_sides) {
+            const auto &box = ipm_data->require_box_spec("backup_outer_ipm_pairs");
+            box.for_each_present_side([&](auto side) {
                 auto &pair = *ipm_data->box_side_[side];
                 backup.push_back({&pair, pair});
-            }
+            });
         });
     });
     return backup;

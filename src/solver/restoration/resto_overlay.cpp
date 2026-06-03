@@ -162,7 +162,7 @@ void resto_ineq_elastic_ipm_constr::compute_local_model(detail::ineq_local_state
     ineq.schur_rhs_net.setZero(dim);
     ineq.schur_inv_diag_sum.setZero(dim);
 
-    for (auto side : box_sides) {
+    box.for_each_present_side([&](auto side) {
         auto &side_state = ineq.side[side];
         for (auto slot : k_triplet_slots) {
             if (dim != side_state.value[slot].size() || dim != side_state.dual[slot].size()) {
@@ -225,7 +225,7 @@ void resto_ineq_elastic_ipm_constr::compute_local_model(detail::ineq_local_state
             side_jac_sign(side) * box.present_mask[side].select(side_state.schur_rhs.array(), scalar_t(0));
         ineq.schur_inv_diag_sum.array() +=
             box.present_mask[side].select(side_state.schur_inv_diag.array(), scalar_t(0));
-    }
+    });
     if (ineq.primal_view.size() > 0) {
         const auto any_side = (box.present_mask[box_side::ub] || box.present_mask[box_side::lb]);
         ineq.primal_view = any_side.select(ineq.primal_view.array(), scalar_t(0)).matrix();
@@ -247,6 +247,7 @@ local_residual_summary resto_ineq_elastic_ipm_constr::current_local_residuals(co
     local_residual_summary out;
     out.inf_prim = max_abs_or_zero(ineq.primal_view);
     for (auto side : box_sides) {
+        if (!ineq.present_mask[side].any()) continue;
         const auto &side_state = ineq.side[side];
         out.inf_prim = std::max(out.inf_prim, max_abs_or_zero(side_state.r_d));
         for (auto slot : k_pair_slots) {
@@ -283,6 +284,7 @@ local_residual_summary resto_ineq_elastic_ipm_constr::linearized_newton_residual
                                                                                   const detail::ineq_local_state &ineq) {
     local_residual_summary out;
     for (auto side : box_sides) {
+        if (!ineq.present_mask[side].any()) continue;
         const auto &side_state = ineq.side[side];
         vector res_d = ineq.present_mask[side].select(side_jac_sign(side) * delta_g.array(), scalar_t(0)).matrix();
         res_d += side_state.r_d;
