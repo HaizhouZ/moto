@@ -28,9 +28,8 @@ inline parallel_block_order get_parallel_block_order() {
         const char *env = std::getenv("MOTO_PARALLEL_BLOCK_ORDER");
         if (env == nullptr) {
             // Default to chunking in the same order as the provided view.
-            // For backward recursions the view itself is already reversed by
-            // directed_graph::apply_backward(), so "forward" chunking still
-            // preserves traversal-locality.
+            // Backward recursions pass an already-reversed traversal view, so
+            // "forward" chunking still preserves traversal-locality.
             return parallel_block_order::forward;
         }
         const std::string_view value(env);

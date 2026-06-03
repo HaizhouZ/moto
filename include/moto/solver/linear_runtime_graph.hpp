@@ -1,8 +1,11 @@
 #ifndef MOTO_SOLVER_LINEAR_RUNTIME_GRAPH_HPP
 #define MOTO_SOLVER_LINEAR_RUNTIME_GRAPH_HPP
 
+#include <functional>
 #include <limits>
 #include <stdexcept>
+#include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -140,36 +143,6 @@ class linear_runtime_graph {
         return ordered_;
     }
 
-    template <typename callback_t>
-    void for_each_parallel(callback_t &&callback) {
-        ensure_order();
-        constexpr bool with_tid = std::is_invocable_r_v<void, callback_t, size_t, data_type *>;
-        constexpr bool unary = std::is_invocable_r_v<void, callback_t, data_type *>;
-        if constexpr (with_tid) {
-            parallel_for(
-                0, ordered_.size(),
-                [&](size_t tid, size_t i) { callback(tid, ordered_[i]); },
-                n_jobs_, no_except_);
-        } else if constexpr (unary) {
-            parallel_for(
-                0, ordered_.size(),
-                [&](size_t i) { callback(ordered_[i]); },
-                n_jobs_, no_except_);
-        } else {
-            static_assert(with_tid || unary, "unsupported callback arity in linear_runtime_graph::for_each_parallel");
-        }
-    }
-
-    template <bool parallel = false, typename callback_t>
-    void apply_forward(callback_t &&callback, bool null_on_end = false) {
-        apply_binary<true, parallel>(std::forward<callback_t>(callback), null_on_end);
-    }
-
-    template <typename callback_t>
-    void apply_backward(callback_t &&callback, bool null_on_end = false) {
-        apply_binary<false, false>(std::forward<callback_t>(callback), null_on_end);
-    }
-
   private:
     static constexpr size_t npos = std::numeric_limits<size_t>::max();
 
@@ -220,72 +193,6 @@ class linear_runtime_graph {
         order_dirty_ = false;
     }
 
-    template <bool forward, bool parallel, typename callback_t>
-    void apply_binary(callback_t &&callback, bool null_on_end) {
-        ensure_order();
-        constexpr bool with_tid =
-            std::is_invocable_r_v<void, callback_t, size_t, data_type *, data_type *>;
-        constexpr bool binary =
-            std::is_invocable_r_v<void, callback_t, data_type *, data_type *>;
-        const size_t n_pairs = ordered_.empty()
-                                   ? 0
-                                   : (ordered_.size() - 1) + static_cast<size_t>(null_on_end);
-        if constexpr (with_tid) {
-            auto job = [&](size_t tid, size_t i) {
-                if constexpr (forward) {
-                    data_type *cur = ordered_[i];
-                    data_type *next = (i + 1 < ordered_.size()) ? ordered_[i + 1] : nullptr;
-                    callback(tid, cur, next);
-                } else if (i + 1 == n_pairs && null_on_end) {
-                    callback(tid, ordered_.front(), nullptr);
-                } else {
-                    const size_t cur_idx = ordered_.size() - 1 - i;
-                    callback(tid, ordered_[cur_idx], ordered_[cur_idx - 1]);
-                }
-            };
-            if constexpr (parallel) {
-                parallel_for(0, n_pairs, job, n_jobs_, no_except_);
-            } else {
-                for (size_t i = 0; i < n_pairs; ++i) {
-                    job(0, i);
-                }
-            }
-        } else if constexpr (binary) {
-            if constexpr (parallel) {
-                parallel_for(
-                    0, n_pairs,
-                    [&](size_t i) {
-                        if constexpr (forward) {
-                            data_type *cur = ordered_[i];
-                            data_type *next = (i + 1 < ordered_.size()) ? ordered_[i + 1] : nullptr;
-                            callback(cur, next);
-                        } else if (i + 1 == n_pairs && null_on_end) {
-                            callback(ordered_.front(), nullptr);
-                        } else {
-                            const size_t cur_idx = ordered_.size() - 1 - i;
-                            callback(ordered_[cur_idx], ordered_[cur_idx - 1]);
-                        }
-                    },
-                    n_jobs_, no_except_);
-            } else {
-                for (size_t i = 0; i < n_pairs; ++i) {
-                    if constexpr (forward) {
-                        data_type *cur = ordered_[i];
-                        data_type *next = (i + 1 < ordered_.size()) ? ordered_[i + 1] : nullptr;
-                        callback(cur, next);
-                    } else if (i + 1 == n_pairs && null_on_end) {
-                        callback(ordered_.front(), nullptr);
-                    } else {
-                        const size_t cur_idx = ordered_.size() - 1 - i;
-                        callback(ordered_[cur_idx], ordered_[cur_idx - 1]);
-                    }
-                }
-            }
-        } else {
-            static_assert(with_tid || binary, "unsupported callback arity in linear_runtime_graph::apply_binary");
-        }
-    }
-
     size_t n_jobs_ = MAX_THREADS;
     bool no_except_ = false;
     std::vector<node> nodes_;
@@ -296,6 +203,135 @@ class linear_runtime_graph {
     size_t tail_id_ = npos;
     bool order_dirty_ = true;
 };
+
+namespace solver {
+
+struct seq_t {};
+struct par_t {};
+inline constexpr seq_t seq{};
+inline constexpr par_t par{};
+
+namespace graph_detail {
+
+template <typename T>
+concept graph_like = requires(T &g) { typename T::data_type; g.flatten_nodes(); g.n_jobs(); g.no_except(); };
+
+template <typename Callback, typename... Ptrs>
+void invoke(Callback &&callback, size_t tid, Ptrs... ptrs) {
+    if constexpr (std::is_invocable_r_v<void, Callback, size_t, Ptrs...>) {
+        std::invoke(std::forward<Callback>(callback), tid, ptrs...);
+    } else {
+        static_assert(std::is_invocable_r_v<void, Callback, Ptrs...>,
+                      "unsupported traversal callback arguments");
+        std::invoke(std::forward<Callback>(callback), ptrs...);
+    }
+}
+
+template <typename Callback, typename Item>
+void invoke_item(Callback &&callback, size_t tid, Item &&item) {
+    std::apply([&](auto... ptrs) { invoke(std::forward<Callback>(callback), tid, ptrs...); }, item);
+}
+
+} // namespace graph_detail
+
+template <typename GraphA, typename GraphB>
+struct zip_range {
+    using data_type = typename GraphA::data_type;
+    zip_range(GraphA &a, GraphB &b)
+        : a_(&a.flatten_nodes()), b_(&b.flatten_nodes()),
+          n_jobs_(a.n_jobs()), no_except_(a.no_except()) {
+        if (a_->size() != b_->size()) {
+            throw std::runtime_error("zip range size mismatch");
+        }
+    }
+    size_t size() const { return a_->size(); }
+    auto at(size_t i) const { return std::tuple{(*a_)[i], (*b_)[i]}; }
+    size_t n_jobs() const { return n_jobs_; }
+    bool no_except() const { return no_except_; }
+    std::vector<typename GraphA::data_type *> *a_;
+    std::vector<typename GraphB::data_type *> *b_;
+    size_t n_jobs_;
+    bool no_except_;
+};
+
+template <graph_detail::graph_like GraphA, graph_detail::graph_like GraphB>
+auto zip(GraphA &a, GraphB &b) {
+    return zip_range<GraphA, GraphB>(a, b);
+}
+
+template <bool Forward, typename Graph>
+struct adjacent_range {
+    using data_type = typename Graph::data_type;
+    explicit adjacent_range(Graph &graph, bool null_on_end = false)
+        : ordered_(&graph.flatten_nodes()), n_jobs_(graph.n_jobs()),
+          no_except_(graph.no_except()), null_on_end_(null_on_end) {}
+    size_t size() const {
+        const size_t n = ordered_->size();
+        return n == 0 ? 0 : (n - 1) + static_cast<size_t>(null_on_end_);
+    }
+    auto at(size_t i) const {
+        if constexpr (Forward) {
+            return std::tuple{(*ordered_)[i],
+                              i + 1 < ordered_->size() ? (*ordered_)[i + 1] : nullptr};
+        } else {
+            if (i + 1 == size() && null_on_end_) {
+                return std::tuple{ordered_->front(), static_cast<data_type *>(nullptr)};
+            }
+            const size_t cur = ordered_->size() - 1 - i;
+            return std::tuple{(*ordered_)[cur], (*ordered_)[cur - 1]};
+        }
+    }
+    size_t n_jobs() const { return n_jobs_; }
+    bool no_except() const { return no_except_; }
+    std::vector<data_type *> *ordered_;
+    size_t n_jobs_;
+    bool no_except_;
+    bool null_on_end_;
+};
+
+template <graph_detail::graph_like Graph>
+auto forward_edges(Graph &graph, bool null_on_end = false) {
+    return adjacent_range<true, Graph>(graph, null_on_end);
+}
+
+template <graph_detail::graph_like Graph>
+auto backward_edges(Graph &graph, bool null_on_end = false) {
+    return adjacent_range<false, Graph>(graph, null_on_end);
+}
+
+template <typename Range, typename Callback>
+    requires(!graph_detail::graph_like<std::remove_cvref_t<Range>>)
+void for_each(seq_t, const Range &range, Callback &&callback) {
+    for (size_t i = 0, n = range.size(); i < n; ++i) {
+        graph_detail::invoke_item(callback, 0, range.at(i));
+    }
+}
+
+template <typename Range, typename Callback>
+    requires(!graph_detail::graph_like<std::remove_cvref_t<Range>>)
+void for_each(par_t, const Range &range, Callback &&callback) {
+    parallel_for(0, range.size(),
+                 [&](size_t tid, size_t i) { graph_detail::invoke_item(callback, tid, range.at(i)); },
+                 range.n_jobs(), range.no_except());
+}
+
+template <graph_detail::graph_like Graph, typename Callback>
+void for_each(seq_t, Graph &graph, Callback &&callback) {
+    auto &nodes = graph.flatten_nodes();
+    for (auto *node : nodes) {
+        graph_detail::invoke(callback, 0, node);
+    }
+}
+
+template <graph_detail::graph_like Graph, typename Callback>
+void for_each(par_t, Graph &graph, Callback &&callback) {
+    auto &nodes = graph.flatten_nodes();
+    parallel_for(0, nodes.size(),
+                 [&](size_t tid, size_t i) { graph_detail::invoke(callback, tid, nodes[i]); },
+                 graph.n_jobs(), graph.no_except());
+}
+
+} // namespace solver
 
 } // namespace moto
 

@@ -66,19 +66,27 @@ void data_base::swap_active_and_lag_jac_corr() {
     }
 }
 
-void data_base::backup_trial_state() {
+void data_base::backup_primal_state() {
     for (auto field : primal_fields) {
         trial_prim_state_bak[field] = sym_->value_[field];
     }
+}
+
+void data_base::restore_primal_state() {
+    for (auto field : primal_fields) {
+        sym_->value_[field] = trial_prim_state_bak[field];
+    }
+}
+
+void data_base::backup_trial_state() {
+    backup_primal_state();
     for (auto field : constr_fields) {
         trial_dual_state_bak[field] = dense_->dual_[field];
     }
 }
 
 void data_base::restore_trial_state() {
-    for (auto field : primal_fields) {
-        sym_->value_[field] = trial_prim_state_bak[field];
-    }
+    restore_primal_state();
     for (auto field : constr_fields) {
         dense_->dual_[field] = trial_dual_state_bak[field];
     }

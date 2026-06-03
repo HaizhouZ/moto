@@ -136,7 +136,7 @@ void ns_sqp::compute_and_apply_scaling(const kkt_info &info) {
 
     // ── Recompute scale vectors if needed ────────────────────────────────────
     if (needs_recompute) {
-        graph.for_each_parallel([&](data *d) {
+        solver::for_each(solver::par, graph, [&](data *d) {
             const scalar_t min_s = sc.min_scale;
 
             for (field_t cf : hard_constr_fields_non_dyn) {
@@ -217,7 +217,7 @@ void ns_sqp::compute_and_apply_scaling(const kkt_info &info) {
     // compute_project_jacobians (proj_f_x_, proj_f_u_) and apply_jac_y_inverse_transpose.
     // Inequality constraints (IPM) are also excluded: their Jacobians and duals are aliased
     // into ipm_constr and managed internally by the IPM.
-    graph.for_each_parallel([&](data *d) {
+    solver::for_each(solver::par, graph, [&](data *d) {
         for (field_t cf : hard_constr_fields_non_dyn) {
             const auto &s = d->scale_c_[cf];
             if (s.size() == 0)
@@ -246,7 +246,7 @@ void ns_sqp::compute_and_apply_scaling(const kkt_info &info) {
 
 void ns_sqp::unscale_duals() {
     auto &graph = active_data();
-    graph.for_each_parallel([this](data *d) { unscale_duals(d); });
+    solver::for_each(solver::par, graph, [this](data *d) { unscale_duals(d); });
 }
 
 void ns_sqp::unscale_duals(data *d) {

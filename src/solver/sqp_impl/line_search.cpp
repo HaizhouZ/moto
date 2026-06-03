@@ -286,9 +286,11 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
                                settings.ls.alpha_primal, ls.alpha_min, current_primal);
                 return line_search_action::failure;
             } else {
-                fmt::print("  line search reached min step: alpha_p {:.3e} <= alpha_min {:.3e} with prim_res {:.3e}\n",
-                           settings.ls.alpha_primal, ls.alpha_min, current_primal);
-                fmt::print("   but the current primal residual is still above the tolerance\n");
+                if (settings.verbose) {
+                    fmt::print("  line search reached min step: alpha_p {:.3e} <= alpha_min {:.3e} with prim_res {:.3e}\n",
+                               settings.ls.alpha_primal, ls.alpha_min, current_primal);
+                    fmt::print("   but the current primal residual is still above the tolerance\n");
+                }
             }
         }
         if (settings.verbose)
@@ -297,9 +299,15 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
         return line_search_action::backtrack;
     }
 
-    // Line search failed — apply fallback strategy
+    // Line search failed. The fallback step is only applied when explicitly enabled.
     ls.stop = true;
     ls.failure_reason = filter_linesearch_per_iter_data::failure_reason_t::other;
+    if (settings.ls.on_failure == linesearch_setting::on_failure_action::abort) {
+        if (settings.verbose)
+            fmt::print("  ls failed after max steps; aborting without fallback\n");
+        return line_search_action::failure;
+    }
+
     if (settings.ls.failure_strategy == linesearch_setting::failure_backup_strategy::min_step) {
         if (settings.verbose)
             fmt::print("  ls failed, use min primal step...\n");
@@ -316,10 +324,13 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
         if (settings.ls.update_alpha_dual)
             settings.ls.alpha_dual = ls.best_trial.alpha_dual;
     }
-    fmt::println(" line search failed, dec_full_pred = {:.3e}, best trial primal res: {:.3e}, objective: {:.3e}\n",
-                 fullstep_dec, ls.best_trial.prim_res, ls.best_trial.objective);
+    if (settings.verbose) {
+        fmt::println(" line search failed, dec_full_pred = {:.3e}, best trial primal res: {:.3e}, objective: {:.3e}\n",
+                     fullstep_dec, ls.best_trial.prim_res, ls.best_trial.objective);
+    }
     ls.update_filter(current_kkt, settings);
-    return line_search_action::failure;
+    ls.recompute_approx = true;
+    return line_search_action::backtrack;
 }
 
 ns_sqp::line_search_action ns_sqp::merit_linesearch(filter_linesearch_data &ls,
@@ -368,8 +379,15 @@ ns_sqp::line_search_action ns_sqp::merit_linesearch(filter_linesearch_data &ls,
         return line_search_action::backtrack;
     }
 
-    // Line search failed — apply fallback strategy
+    // Line search failed. The fallback step is only applied when explicitly enabled.
     ls.stop = true;
+    ls.failure_reason = filter_linesearch_per_iter_data::failure_reason_t::other;
+    if (settings.ls.on_failure == linesearch_setting::on_failure_action::abort) {
+        if (settings.verbose)
+            fmt::print("  merit ls failed after max steps; aborting without fallback\n");
+        return line_search_action::failure;
+    }
+
     if (settings.ls.failure_strategy == linesearch_setting::failure_backup_strategy::min_step) {
         if (settings.verbose)
             fmt::print("  merit ls failed, use min primal step...\n");
@@ -383,9 +401,12 @@ ns_sqp::line_search_action ns_sqp::merit_linesearch(filter_linesearch_data &ls,
         if (settings.ls.update_alpha_dual)
             settings.ls.alpha_dual = ls.best_merit_trial.alpha_dual;
     }
-    fmt::println(" merit line search failed, merit_k: {:.3e}, best merit: {:.3e}\n",
-                 merit_k, ls.best_merit_trial.merit);
-    return line_search_action::failure;
+    if (settings.verbose) {
+        fmt::println(" merit line search failed, merit_k: {:.3e}, best merit: {:.3e}\n",
+                     merit_k, ls.best_merit_trial.merit);
+    }
+    ls.recompute_approx = true;
+    return line_search_action::backtrack;
 }
 
 void ns_sqp::second_order_correction() {

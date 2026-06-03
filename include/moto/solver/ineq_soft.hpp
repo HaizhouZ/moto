@@ -26,8 +26,11 @@ auto get_for_each(Callback &&callback) {
     };
 }
 /// @brief for each soft constraint, call the callback with (const soft_constr&, soft_constr::data_map_t&)
-inline void for_each(auto *data, auto &&callback) {
-    get_for_each(std::forward<decltype(callback)>(callback))(data);
+inline void for_each(node_data *data, auto &&callback) {
+    data->for_each<ineq_soft_constr_fields>(
+        [&](const soft_constr &sf, soft_constr_data_t &sd) {
+            callback(sf, sd);
+        });
 }
 void bind_runtime(const soft_constr &sf, soft_constr_data_t &sd);
 void bind_runtime(node_data *data);
@@ -35,6 +38,8 @@ void invalidate_initialized(const soft_constr &sf, soft_constr_data_t &sd);
 void invalidate_initialized(node_data *data);
 void bind_and_invalidate(node_data *data);
 void ensure_initialized(const soft_constr &sf, soft_constr_data_t &sd);
+void mark_initialized(const soft_constr &sf, soft_constr_data_t &sd);
+void mark_initialized(node_data *data);
 /**
  * @brief finalize the newton step for the soft constraints
  * @details it will call finalize_newton_step on each soft constraint

@@ -1,24 +1,39 @@
 #include <algorithm>
 #include <moto/ocp/ineq_constr.hpp>
 #include <moto/solver/ineq_soft.hpp>
+#include <moto/solver/ipm/ipm_constr.hpp>
 #include <moto/solver/ns_sqp.hpp>
 #include <moto/solver/restoration/resto_overlay.hpp>
 
 namespace moto {
 namespace {
 
-template <typename Fn>
-void for_each_overlay_pair(ns_sqp::storage_type &outer_graph,
-                           ns_sqp::storage_type &resto_graph,
-                           Fn &&fn) {
-    auto &outer_nodes = outer_graph.flatten_nodes();
-    auto &resto_nodes = resto_graph.flatten_nodes();
-    if (outer_nodes.size() != resto_nodes.size()) {
-        throw std::runtime_error("restoration overlay graph/node mismatch");
-    }
-    parallel_for(0, outer_nodes.size(), [&](size_t i) {
-        fn(*outer_nodes[i], *resto_nodes[i]);
+struct ipm_pair_snapshot {
+    ineq_constr::approx_data::box_pair_runtime *pair;
+    ineq_constr::approx_data::box_pair_runtime state;
+};
+
+std::vector<ipm_pair_snapshot> backup_outer_ipm_pairs(ns_sqp::storage_type &outer_graph) {
+    std::vector<ipm_pair_snapshot> backup;
+    solver::for_each(solver::seq, outer_graph, [&](node_data *node) {
+        node->for_each<ineq_constr_fields>([&](const ineq_constr &, ineq_constr::data_map_t &id) {
+            auto *ipm_data = dynamic_cast<solver::ipm_constr::ipm_data *>(&id);
+            if (ipm_data == nullptr || !ipm_data->boxed()) {
+                return;
+            }
+            for (auto side : box_sides) {
+                auto &pair = *ipm_data->box_side_[side];
+                backup.push_back({&pair, pair});
+            }
+        });
     });
+    return backup;
+}
+
+void restore_outer_ipm_pairs(const std::vector<ipm_pair_snapshot> &backup) {
+    for (const auto &state : backup) {
+        *state.pair = state.state;
+    }
 }
 
 } // namespace
@@ -30,6 +45,9 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
 
     auto &outer_graph = active_data();
     auto &resto_graph = restoration_graph();
+    const auto outer_ipm_backup = settings.has_ipm_ineq
+                                      ? backup_outer_ipm_pairs(outer_graph)
+                                      : std::vector<ipm_pair_snapshot>{};
     if (settings.verbose) {
         fmt::print("\n=== enter restoration ===\n");
         fmt::print("  entry iter={}  outer aug_obj={:.3e}  outer ls_obj={:.3e}  prim={:.3e}  dual={:.3e}  comp={:.3e}\n",
@@ -44,73 +62,73 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
             .num_iter = iter_before.num_iter,
         }};
 
-    const auto refresh_restoration_derivatives = [&]() {
-        resto_graph.for_each_parallel([this](data *d) {
-            d->update_approximation(node_data::update_mode::eval_derivatives, true);
-        });
-    };
     const auto initialize_restoration_problem = [&]() {
         const auto prox_eps = scalar_t(1.0);
-        for_each_overlay_pair(outer_graph, resto_graph, [&](data &outer, data &resto) {
-            solver::restoration::sync_outer_to_restoration_state(outer, resto, prox_eps, &settings.mu);
-        });
-        resto_graph.for_each_parallel([this](data *d) {
-            d->for_each_constr([this](const generic_func &c, func_approx_data &fd) {
+        solver::for_each(solver::par, solver::zip(outer_graph, resto_graph),
+                     [&](data *outer, data *resto) {
+            solver::restoration::sync_outer_to_restoration_state(*outer, *resto, prox_eps, &settings.mu);
+            resto->for_each_constr([this](const generic_func &c, func_approx_data &fd) {
                 c.setup_workspace_data(fd, &settings);
             });
-            solver::ineq_soft::bind_and_invalidate(d);
-            d->update_approximation(node_data::update_mode::eval_val, true);
+            solver::ineq_soft::bind_and_invalidate(resto);
+            resto->update_approximation(node_data::update_mode::eval_val, true);
         });
-        resto_graph.for_each_parallel([](data *d) {
+        solver::for_each(solver::par, resto_graph, [](data *d) {
             d->update_approximation(node_data::update_mode::eval_all, true);
         });
     };
     const auto evaluate_outer_trial_from_restoration = [&]() {
         // Bounce through the outer graph only long enough to evaluate the
         // candidate in normal-phase metrics, then restore the restoration phase.
-        resto_graph.for_each_parallel([this](data *d) {
-            d->update_approximation(node_data::update_mode::eval_val, true);
-        });
-        outer_graph.for_each_parallel([](data *d) { d->backup_trial_state(); });
-        for_each_overlay_pair(resto_graph, outer_graph, [&](data &resto, data &outer) {
-            solver::restoration::sync_restoration_to_outer_state(resto, outer);
-        });
-        outer_graph.for_each_parallel([this](data *d) {
-            d->update_approximation(node_data::update_mode::eval_val, true);
+        solver::for_each(solver::par, solver::zip(resto_graph, outer_graph),
+                     [&](data *resto, data *outer) {
+            outer->backup_primal_state();
+            solver::ineq_soft::backup_trial_state(outer);
+            solver::restoration::sync_restoration_candidate_to_outer_state(*resto, *outer);
+            outer->update_approximation(node_data::update_mode::eval_val, true);
         });
         clear_phase_graph_override();
         kkt_info outer_trial;
         /// no need update step info because the reference kkt is from outside (Backup)
         update_primal_info(outer_trial, point_value_mask::primal | point_value_mask::barrier_objective);
         set_phase_graph_override(resto_graph);
-        outer_graph.for_each_parallel([](data *d) { d->restore_trial_state(); });
-        refresh_restoration_derivatives();
+        solver::for_each(solver::par, outer_graph, [](data *d) {
+            d->restore_primal_state();
+            solver::ineq_soft::restore_trial_state(d);
+        });
         return outer_trial;
     };
     const auto finish_restoration = [&](bool success) {
         if (success) {
-            for_each_overlay_pair(resto_graph, outer_graph, [&](data &resto, data &outer) {
-                solver::restoration::sync_restoration_to_outer_state(resto, outer);
-            });
-            // apply fraction-to-boundary to the multipliers
+            const bool rebuild_eq_duals =
+                settings.eq_init.enabled && settings.eq_init.rebuild_after_restoration_exit;
+
             reset_ls_workers();
-            outer_graph.for_each_parallel([this](size_t tid, data *d) {
-                solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
+            solver::for_each(solver::par, solver::zip(resto_graph, outer_graph),
+                         [&](size_t tid, data *resto, data *outer) {
+                solver::restoration::commit_restoration_to_outer_state(*resto, *outer);
+                if (settings.has_ineq_soft) {
+                    solver::ineq_soft::update_ls_bounds(outer, &setting_per_thread[tid]);
+                }
             });
             solver::linesearch_config ls_dual_only;
             for (solver::linesearch_config &s : setting_per_thread) {
                 ls_dual_only.dual.merge_from(s.dual);
             }
-            // check multiplier reset threshold
+
             std::vector<bool> local_exceed_bound(setting_per_thread.size(), false);
-            outer_graph.for_each_parallel([&, this](size_t tid, data *d) {
+            solver::for_each(solver::par, outer_graph, [&, this](size_t tid, data *d) {
                 d->for_each<ineq_constr_fields>([&](const ineq_constr &c, ineq_constr::data_map_t &id) {
                     c.restoration_commit_dual_step(id, ls_dual_only.dual.alpha_max);
                 });
                 for (auto field : ineq_constr_fields) {
+                    const auto &dual = d->dense().dual_[field];
+                    if (dual.size() == 0) {
+                        continue;
+                    }
                     local_exceed_bound[tid] =
                         local_exceed_bound[tid] ||
-                        d->dense().dual_[field].cwiseAbs().maxCoeff() >
+                        dual.cwiseAbs().maxCoeff() >
                             settings.restoration.bound_mult_reset_threshold;
                 }
             });
@@ -122,23 +140,34 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
             }
 
             clear_phase_graph_override();
-            outer_graph.for_each_parallel([&, this](data *d) {
-                d->update_approximation(node_data::update_mode::eval_all, true);
-                if (reset_bound_multipliers) {
-                    d->for_each<ineq_constr_fields>([&](const ineq_constr &c, ineq_constr::data_map_t &id) {
+            if (reset_bound_multipliers && rebuild_eq_duals) {
+                solver::for_each(solver::par, outer_graph, [](data *d) {
+                    d->for_each<ineq_constr_fields>([](const ineq_constr &c, ineq_constr::data_map_t &id) {
+                        c.restoration_reset_bound_multipliers(id);
+                    });
+                });
+            }
+
+            if (rebuild_eq_duals) {
+                initialize_equality_multipliers(false);
+            }
+            solver::for_each(solver::par, outer_graph, [reset_bound_multipliers, rebuild_eq_duals](data *d) {
+                if (reset_bound_multipliers && !rebuild_eq_duals) {
+                    d->for_each<ineq_constr_fields>([](const ineq_constr &c, ineq_constr::data_map_t &id) {
                         c.restoration_reset_bound_multipliers(id);
                     });
                 }
+                d->update_approximation(node_data::update_mode::eval_all, true);
             });
-
-            if (settings.eq_init.enabled && settings.eq_init.rebuild_after_restoration_exit) {
-                initialize_equality_multipliers();
-            }
             // update the result with the final solution
             update_primal_info(rest_state, point_value_mask::primal | point_value_mask::barrier_objective);
             update_stat_info(rest_state);
         } else {
+            restore_outer_ipm_pairs(outer_ipm_backup);
             clear_phase_graph_override();
+            solver::for_each(solver::par, outer_graph, [](data *d) {
+                d->update_approximation(node_data::update_mode::eval_val, true);
+            });
         }
         settings.in_restoration = false;
     };

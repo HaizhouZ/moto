@@ -267,7 +267,8 @@ void sync_outer_to_restoration_state(node_data &outer,
                                      node_data &resto,
                                      scalar_t prox_eps = scalar_t(1.0),
                                      scalar_t *mu = nullptr);
-void sync_restoration_to_outer_state(node_data &resto,
-                                     node_data &outer);
+void sync_restoration_candidate_to_outer_state(node_data &resto,
+                                               node_data &outer);
+void commit_restoration_to_outer_state(node_data &resto, node_data &outer);
 
 } // namespace moto::solver::restoration

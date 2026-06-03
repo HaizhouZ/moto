@@ -87,7 +87,7 @@ void node_data::update_approximation(update_mode config, bool include_original_c
 
         if (config == update_mode::eval_hess ||
             config == update_mode::eval_derivatives ||
-            config == update_mode::eval_all)
+            config == update_mode::eval_all) {
             for (auto &hess_l_0 : dense_->lag_hess_) {
                 for (auto &hess_l_1 : hess_l_0) {
                     hess_l_1.setZero();
@@ -98,6 +98,7 @@ void node_data::update_approximation(update_mode config, bool include_original_c
                     hess_l_1.setZero();
                 }
             }
+        }
     }
     for (const generic_custom_func &f : prob_->exprs(__pre_comp)) {
         f.custom_call((*shared_)[f]); ///< @todo pass update mode

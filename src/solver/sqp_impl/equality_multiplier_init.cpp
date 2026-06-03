@@ -5,50 +5,17 @@
 namespace moto {
 namespace {
 
-/*
-Equality-multiplier initialization is implemented as a one-shot solve on a
-restoration-style overlay graph.
-
-Design summary:
-- reuse the realized outer x/u/y chain
-- keep __dyn hard
-- replace hard __eq_x / __eq_xu with PMM overlay constraints
-- keep existing __eq_x_soft / __eq_xu_soft as cloned soft constraints
-- keep inequalities active in the overlay and sync their IPM state from outer
-- warm-start overlay duals from the current outer iterate
-- run one accepted Newton step with line search disabled and restoration disabled
-- optionally run equality-init-specific iterative refinement
-- copy back only equality-type multipliers
-
-The outer problem must keep fixed:
-- primal x/u/y
-- inequality multipliers
-- inequality slack / bound state
-*/
-
-template <typename Fn>
-void for_each_overlay_pair(ns_sqp::storage_type &outer_graph,
-                           ns_sqp::storage_type &overlay_graph,
-                           Fn &&fn) {
-    auto &outer_nodes = outer_graph.flatten_nodes();
-    auto &overlay_nodes = overlay_graph.flatten_nodes();
-    if (outer_nodes.size() != overlay_nodes.size()) {
-        throw std::runtime_error("equality-init overlay graph/node mismatch");
-    }
-    for (size_t i = 0; i < outer_nodes.size(); ++i) {
-        fn(*outer_nodes[i], *overlay_nodes[i]);
-    }
-}
-
 bool graph_has_equality_targets(ns_sqp::storage_type &graph) {
-    for (auto *node : graph.flatten_nodes()) {
+    bool has_targets = false;
+    solver::for_each(solver::seq, graph, [&](node_data *node) {
         for (auto field : std::array{__dyn, __eq_x, __eq_xu, __eq_x_soft, __eq_xu_soft}) {
             if (node->problem().dim(field) > 0) {
-                return true;
+                has_targets = true;
+                return;
             }
         }
-    }
-    return false;
+    });
+    return has_targets;
 }
 
 struct scoped_eq_init_settings {
@@ -75,14 +42,14 @@ struct scoped_eq_init_settings {
 
 } // namespace
 
-void ns_sqp::initialize_equality_multipliers() {
+bool ns_sqp::initialize_equality_multipliers(bool refresh_outer_derivatives) {
     if (!settings.eq_init.enabled) {
-        return;
+        return false;
     }
 
     auto &outer_graph = active_data();
     if (!graph_has_equality_targets(outer_graph)) {
-        return;
+        return false;
     }
 
     auto &overlay_graph = equality_init_graph();
@@ -91,22 +58,14 @@ void ns_sqp::initialize_equality_multipliers() {
     settings.in_restoration = false;
     set_phase_graph_override(overlay_graph);
     try {
-        for_each_overlay_pair(outer_graph, overlay_graph, [&](data &outer, data &overlay) {
-            solver::equality_init::sync_equality_init_overlay_primal(outer, overlay);
-        });
-
-        overlay_graph.for_each_parallel([this](data *d) {
-            d->for_each_constr([this](const generic_func &c, func_approx_data &fd) { c.setup_workspace_data(fd, &settings); });
-            solver::ineq_soft::bind_and_invalidate(d);
-            d->update_approximation(node_data::update_mode::eval_val, true);
-        });
-
-        for_each_overlay_pair(outer_graph, overlay_graph, [&](data &outer, data &overlay) {
-            solver::equality_init::sync_equality_init_overlay_duals(outer, overlay);
-        });
-
-        overlay_graph.for_each_parallel([](data *d) {
-            d->update_approximation(node_data::update_mode::eval_all, true);
+        solver::for_each(solver::par, solver::zip(outer_graph, overlay_graph),
+                     [&](data *outer, data *overlay) {
+            solver::equality_init::sync_equality_init_overlay_primal(*outer, *overlay);
+            overlay->for_each_constr([this](const generic_func &c, func_approx_data &fd) { c.setup_workspace_data(fd, &settings); });
+            solver::ineq_soft::bind_and_invalidate(overlay);
+            solver::equality_init::sync_equality_init_overlay_duals(*outer, *overlay);
+            solver::ineq_soft::mark_initialized(overlay);
+            overlay->update_approximation(node_data::update_mode::eval_all, true);
         });
 
         kkt_info kkt_overlay;
@@ -115,8 +74,9 @@ void ns_sqp::initialize_equality_multipliers() {
         ls.constr_vio_min = std::max(kkt_overlay.primal.res_l1 * settings.ls.constr_vio_min_frac, settings.prim_tol);
         sqp_iter(ls, kkt_overlay, /*do_scaling=*/false, /*do_refinement=*/settings.rf.enabled);
 
-        for_each_overlay_pair(outer_graph, overlay_graph, [&](data &outer, data &overlay) {
-            solver::equality_init::commit_equality_init_overlay_duals(outer, overlay);
+        solver::for_each(solver::par, solver::zip(outer_graph, overlay_graph),
+                     [&](data *outer, data *overlay) {
+            solver::equality_init::commit_equality_init_overlay_duals(*outer, *overlay);
         });
     } catch (...) {
         settings.in_restoration = was_in_restoration;
@@ -126,9 +86,12 @@ void ns_sqp::initialize_equality_multipliers() {
     settings.in_restoration = was_in_restoration;
     clear_phase_graph_override();
 
-    outer_graph.for_each_parallel([](data *d) {
-        d->update_approximation(node_data::update_mode::eval_derivatives, true);
-    });
+    if (refresh_outer_derivatives) {
+        solver::for_each(solver::par, outer_graph, [](data *d) {
+            d->update_approximation(node_data::update_mode::eval_derivatives, true);
+        });
+    }
+    return true;
 }
 
 } // namespace moto

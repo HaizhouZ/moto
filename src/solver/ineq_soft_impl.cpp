@@ -58,6 +58,16 @@ void ensure_initialized(const soft_constr &sf, soft_constr_data_t &sd) {
     }
 }
 
+void mark_initialized(const soft_constr &, soft_constr_data_t &sd) {
+    sd.initialized_ = true;
+}
+
+void mark_initialized(node_data *cur) {
+    for_each(cur, [](auto &&sf, auto &&sd) {
+        mark_initialized(sf, sd);
+    });
+}
+
 void finalize_newton_step(node_data *cur) {
     for_each(cur, [](auto &&sf, auto &&sd) {
         sf.finalize_newton_step(sd);

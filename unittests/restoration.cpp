@@ -1425,8 +1425,8 @@ TEST_CASE("restoration boxed overlay syncs back to outer ipm like equivalent sta
             d.elastic, d.require_box_spec("test"), scalar_t(20.0), ws.mu);
     });
 
-    sync_restoration_to_outer_state(resto_box, outer_box);
-    sync_restoration_to_outer_state(resto_stacked, outer_stacked);
+    commit_restoration_to_outer_state(resto_box, outer_box);
+    commit_restoration_to_outer_state(resto_stacked, outer_stacked);
     outer_box.update_approximation(node_data::update_mode::eval_val, true);
     outer_stacked.update_approximation(node_data::update_mode::eval_val, true);
 

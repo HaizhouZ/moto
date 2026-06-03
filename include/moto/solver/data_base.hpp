@@ -54,6 +54,8 @@ struct MOTO_ALIGN_NO_SHARING data_base {
     data_base(data_base &&rhs) = default;
     void activate_lag_jac_corr();
     void swap_active_and_lag_jac_corr();
+    void backup_primal_state();
+    void restore_primal_state();
     virtual void backup_trial_state();
     virtual void restore_trial_state();
     /// @brief Prepare a first-order correction solve.

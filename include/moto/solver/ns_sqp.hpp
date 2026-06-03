@@ -112,6 +112,11 @@ struct ns_sqp {
             best_trial, ///< reset to the best trial so far
         } failure_strategy = failure_backup_strategy::best_trial;
 
+        enum class on_failure_action : size_t {
+            abort,           ///< return failure after max line-search steps
+            accept_fallback, ///< re-evaluate and accept the configured fallback step
+        } on_failure = on_failure_action::abort;
+
         enum class backtrack_scheme_t : size_t {
             linspace,  ///< alpha decreases by alpha_init / max_steps each step (uniform spacing)
             geometric, ///< alpha *= backtrack_factor each step (exponential decay)
@@ -455,7 +460,7 @@ struct ns_sqp {
     void update_primal_info(kkt_info &base, point_value_mask mask);
     void update_step_info(kkt_info &base, step_info_mask mask);
     void update_stat_info(kkt_info &base);
-    void initialize_equality_multipliers();
+    bool initialize_equality_multipliers(bool refresh_outer_derivatives = true);
     result_type restoration_update(const kkt_info &kkt_before, const iter_info &iter_before, filter_linesearch_data &ls);
     /// perform iterative refinement to improve the solution accuracy, will modify the current solution in place
     void iterative_refinement();
@@ -598,14 +603,14 @@ struct ns_sqp {
     void refresh_ls_bounds();
     template <typename Prepare, typename Finalize>
     void run_correction_step(Prepare &&prepare, Finalize &&finalize) {
-        active_data().for_each_parallel(
+        solver::for_each(solver::par, active_data(),
             [prepare = std::forward<Prepare>(prepare)](data *d) mutable {
                 std::invoke(prepare, d);
             });
         post_factorization_correction_step();
         {
             auto phase_profile = profile_scope(profile_phase::correction_finalize);
-            active_data().for_each_parallel(
+            solver::for_each(solver::par, active_data(),
                 [finalize = std::forward<Finalize>(finalize)](data *d) mutable {
                     std::invoke(finalize, d);
                 });

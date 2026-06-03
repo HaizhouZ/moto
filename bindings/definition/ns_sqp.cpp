@@ -79,6 +79,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("enable_soc", &ns_sqp::linesearch_setting::enable_soc, "Whether to try a second-order correction before backtracking")
         .def_rw("max_soc_iter", &ns_sqp::linesearch_setting::max_soc_iter, "Maximum number of second-order correction retries per SQP iteration")
         .def_rw("failure_strategy", &ns_sqp::linesearch_setting::failure_strategy, "Line search failure backup strategy")
+        .def_rw("on_failure", &ns_sqp::linesearch_setting::on_failure, "Action to take after line search exhausts max_steps")
         .def_rw("method", &ns_sqp::linesearch_setting::method, "Line search method: filter (default) or merit_backtracking")
         .def_rw("primal_gamma", &ns_sqp::linesearch_setting::primal_gamma, "Primal improvement requirement for the filter (higher is stricter)")
         .def_rw("dual_gamma", &ns_sqp::linesearch_setting::dual_gamma, "Objective improvement requirement for the filter (higher is stricter)")
@@ -96,6 +97,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("backtrack_factor", &ns_sqp::linesearch_setting::backtrack_factor, "Geometric backtracking reduction factor (alpha *= factor each step, used when backtrack_scheme == geometric)");
 
     moto::export_enum<ns_sqp::linesearch_setting::failure_backup_strategy>(ls_setting);
+    moto::export_enum<ns_sqp::linesearch_setting::on_failure_action>(ls_setting);
     moto::export_enum<ns_sqp::linesearch_setting::backtrack_scheme_t>(sqp);
     moto::export_enum<ns_sqp::linesearch_setting::search_method>(sqp);
     nb::class_<ns_sqp::settings_t>(sqp, "settings_type")
