@@ -53,26 +53,22 @@ class generic_constr : public generic_func {
         bool is_soft = false;              ///< true if soft constraint, false if hard constraint, default is false
     } field_hint_;                         ///< type hint for the constraint
     bool terminal_add_ = false;
-    bool lower_x_to_y_ = false;
+    void set_terminal_add(bool terminal) { terminal_add_ = terminal; }
 
     /// @brief finalize the constraint, will be called upon added to a problem
-    /// @note will set the field (if unset) based on the field hint and substitute __x to __y for pure-state constraints
+    /// @note will set the field (if unset) based on the field hint
     void finalize_impl() override;
 
   public:
-    void prepare_add_to_ocp(bool terminal) override { terminal_add_ = terminal; }
-    void add_to_ocp_callback(ocp_base *prob) override;
-    void set_lower_x_to_y(bool lower) { lower_x_to_y_ = lower; }
+    friend class ocp_base;
     bool terminal_add() const noexcept { return terminal_add_; }
-    void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const override {
+    virtual void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const {
         data.as<approx_data>().ls_cfg = &ws_data->as<solver::linesearch_config>();
     }
     template <typename derived = generic_constr>
     using data_type = derived::approx_data; // constr_data_tpl<typename derived::approx_data, typename derived::approx_data>;
     using base = generic_func;
     using base::base; ///< inherit base constructor
-
-    PROPERTY(field_hint); ///< getter for field hint
 
     /**
      * @brief make an approximation data for the constraint

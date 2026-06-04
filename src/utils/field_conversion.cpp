@@ -3,6 +3,7 @@
 #include <moto/ocp/sym.hpp>
 #include <moto/utils/field_conversion.hpp>
 #include <ranges>
+#include <unordered_map>
 
 namespace moto {
 namespace utils {
@@ -60,10 +61,10 @@ void copy_x_to_y_tangent(vector_ref from_x, vector_ref to_y,
 /// @todo change to block permutation
 Eigen::PermutationMatrix<-1, -1> &permutation_from_y_to_x(const ocp *prob_y, const ocp *prob_x) {
     using perm_type = Eigen::PermutationMatrix<-1, -1>;
-    static std::unordered_map<size_t, std::unordered_map<size_t, perm_type>> perm_cache;
+    thread_local std::unordered_map<size_t, std::unordered_map<size_t, perm_type>> perm_cache;
     assert(prob_y->tdim(__y) == prob_x->tdim(__x) && "tangent space dimension between states must match!");
-    perm_cache.try_emplace(prob_y->uid());
-    auto [it, inserted] = perm_cache[prob_y->uid()].try_emplace(prob_x->uid(), prob_x->tdim(__x));
+    auto &by_x = perm_cache.try_emplace(prob_y->uid()).first->second;
+    auto [it, inserted] = by_x.try_emplace(prob_x->uid(), prob_x->tdim(__x));
     if (!inserted)
         return it->second; // already exists
     else {

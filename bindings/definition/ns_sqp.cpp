@@ -1,31 +1,29 @@
 #include <moto/solver/ns_sqp.hpp>
-#include <nanobind/stl/function.h>
-#include <nanobind/stl/list.h>
 #include <type_cast.hpp>
 
-#include <nanobind/stl/bind_vector.h>
-#include <nanobind/stl/optional.h>
 #include <nanobind/stl/vector.h>
 
 #include <enum_export.hpp>
 using namespace moto;
-using graph_type = ns_sqp::storage_type;
-using binary_func_type = std::function<void(ns_sqp::data *, ns_sqp::data *)>;
-using unary_func_type = std::function<void(ns_sqp::data *)>;
 
 void register_submodule_ns_sqp(nb::module_ &m) {
 
     nb::class_<ns_sqp> sqp(m, "ns_sqp_impl");
     sqp.def(nb::init<size_t>(), "Constructor for the SQP solver with a specified number of jobs")
-        .def_prop_ro("active_data", [](ns_sqp &self) -> graph_type & { return self.active_data(); }, nb::rv_policy::reference_internal)
-        .def_prop_ro("graph", [](ns_sqp &self) -> graph_model & { return self.graph(); }, nb::rv_policy::reference_internal)
-        .def("create_graph", &ns_sqp::create_graph, nb::rv_policy::reference_internal, "Create a graph_model builder that synchronizes staged paths into this SQP solver")
-        .def("update", [](ns_sqp &self, size_t n_iter, bool verbose) {
+        .def("_add_path",
+             [](ns_sqp &self, const node_ocp_ptr_t &stage, const node_ocp_ptr_t &next, const edge_ocp_ptr_t &edge, size_t n_edges) {
+                 self.graph().add_path(stage, next, edge, n_edges);
+             },
+             nb::arg("stage"),
+             nb::arg("next"),
+             nb::arg("edge"),
+             nb::arg("n_edges"))
+        .def("update", [](ns_sqp &self, size_t n_iter, bool verbose, bool profile) {
             nb::gil_scoped_release rel;
-            return self.update(n_iter, verbose); }, nb::arg("n_iter") = 1, nb::arg("verbose") = true, "Update the SQP solver for a given number of iterations")
-        .def("reset_profile", &ns_sqp::reset_profile, "Clear the last SQP profile report")
+            return self.update(n_iter, verbose, profile);
+        }, nb::arg("n_iter") = 1, nb::arg("verbose") = true, nb::arg("profile") = false,
+           "Update the SQP solver for a given number of iterations")
         .def("get_profile_report", &ns_sqp::profile, "Get the latest SQP wall-clock profile report")
-        .def_prop_ro("profile_report", &ns_sqp::profile, "Get the latest SQP wall-clock profile report")
         .def_ro("settings", &ns_sqp::settings, "Get the settings of the SQP solver");
 
     nb::class_<ns_sqp::ipm_config>(sqp, "ipm_config")
@@ -76,8 +74,6 @@ void register_submodule_ns_sqp(nb::module_ &m) {
     nb::class_<ns_sqp::linesearch_setting, solver::linesearch_config> ls_setting(sqp, "linesearch_setting");
     ls_setting.def_rw("enabled", &ns_sqp::linesearch_setting::enabled, "Whether to use line search")
         .def_rw("max_steps", &ns_sqp::linesearch_setting::max_steps, "Maximum number of line search steps")
-        .def_rw("enable_soc", &ns_sqp::linesearch_setting::enable_soc, "Whether to try a second-order correction before backtracking")
-        .def_rw("max_soc_iter", &ns_sqp::linesearch_setting::max_soc_iter, "Maximum number of second-order correction retries per SQP iteration")
         .def_rw("failure_strategy", &ns_sqp::linesearch_setting::failure_strategy, "Line search failure backup strategy")
         .def_rw("on_failure", &ns_sqp::linesearch_setting::on_failure, "Action to take after line search exhausts max_steps")
         .def_rw("method", &ns_sqp::linesearch_setting::method, "Line search method: filter (default) or merit_backtracking")
@@ -170,7 +166,6 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_ro("max_norm", &ns_sqp::kkt_info::dual_info::max_norm);
 
     nb::class_<ns_sqp::kkt_info::barrier_step_info>(sqp, "barrier_step_info")
-        // .def_ro("barrier_dir_deriv", &ns_sqp::kkt_info::barrier_step_info::barrier_dir_deriv)
         .def_ro("search_barrier_dir_deriv", &ns_sqp::kkt_info::barrier_step_info::search_barrier_dir_deriv)
         .def_ro("augmented_objective_fullstep_dec", &ns_sqp::kkt_info::barrier_step_info::augmented_objective_fullstep_dec)
         .def_ro("ls_objective_fullstep_dec", &ns_sqp::kkt_info::barrier_step_info::ls_objective_fullstep_dec);
@@ -203,74 +198,10 @@ void register_submodule_ns_sqp(nb::module_ &m) {
     }
     enum_binder.export_values(); // Makes enum members accessible like MyEnum.MEMBER
 
-    nb::class_<ns_sqp::node_type>(sqp, "node_type")
-        .def_prop_ro("addr", [](ns_sqp::node_type &self) { return fmt::format("{:p}", static_cast<const void *>(self.data_.get())); }, "Get the data address associated with this node")
-        .def_prop_ro("data", [](ns_sqp::node_type &self) { return std::optional<node_data *>(self.data_.get()); }, "Get the data associated with this node");
+    nb::class_<ns_sqp::data, node_data>(sqp, "data_type");
 
-    nb::class_<ns_sqp::data, node_data>(sqp, "data_type")
-        .def_prop_ro("addr", [](ns_sqp::data &self) { return fmt::format("{:p}", static_cast<const void *>(&self)); }, "Get the data address associated with this node")
-        .def(nb::init<ocp_ptr_t>(), nb::arg("prob"), "Constructor for ns_sqp data with OCP problem");
-
-    nb::class_<graph_type> active_data(sqp, "storage_type");
-    active_data.def(nb::init<>())
-        .def("reserve", &graph_type::reserve, nb::arg("stage_capacity"), "Reserve storage for a linear runtime chain")
-        .def("add", &graph_type::add, nb::arg("node"), "Add a node to the graph and return a reference to it", nb::rv_policy::reference)
-        .def("add_head", &graph_type::add_head, nb::arg("node"), nb::rv_policy::reference, "Add a node and set it as the head")
-        .def("add_tail", &graph_type::add_tail, nb::arg("node"), nb::rv_policy::reference, "Add a node and set it as the tail")
-        .def("set_head", &graph_type::set_head, nb::arg("node"), nb::rv_policy::reference)
-        .def("set_tail", &graph_type::set_tail, nb::arg("node"), nb::rv_policy::reference)
-        .def("connect",
-             [](graph_type &self, ns_sqp::node_type &start, ns_sqp::node_type &to, size_t steps) {
-                 self.connect(start, to, {steps, true, true});
-             },
-             nb::arg("start"), nb::arg("to"), nb::arg("steps") = 2,
-             "Connect two existing nodes with a path of the requested length")
-        .def("add_edge",
-             [](graph_type &self, ns_sqp::node_type &start, ns_sqp::node_type &to, size_t steps) {
-                 self.add_edge(start, to, steps, true, true);
-             },
-             nb::arg("start"), nb::arg("to"), nb::arg("steps") = 2,
-             "Add an edge from one node to another with a given number of steps")
-        .def("insert_after",
-             [](graph_type &self, ns_sqp::node_type &start, ns_sqp::node_type next, size_t steps) -> ns_sqp::node_type & {
-                 return self.insert_after(start, std::move(next), {steps, true, true});
-             },
-             nb::arg("start"), nb::arg("node"), nb::arg("steps") = 2,
-             nb::rv_policy::reference, "Add a new node after the given node and connect it immediately")
-        .def("add_path",
-             [](graph_type &self,
-                std::vector<ns_sqp::node_type> nodes,
-                const std::vector<size_t> &steps,
-                bool set_head,
-                bool set_tail) {
-                 if (nodes.empty()) {
-                     return std::vector<ns_sqp::node_type *>{};
-                 }
-                 if (steps.size() + 1 != nodes.size()) {
-                     throw std::invalid_argument("graph.add_path expects exactly one fewer edge-length than nodes");
-                 }
-                 std::vector<ns_sqp::node_type *> added;
-                 added.reserve(nodes.size());
-                 for (auto &node : nodes) {
-                     auto &added_node = self.add(std::move(node));
-                     added.push_back(&added_node);
-                 }
-                 if (set_head) {
-                     self.set_head(*added.front());
-                 }
-                 if (set_tail) {
-                     self.set_tail(*added.back());
-                 }
-                 for (size_t i = 1; i < added.size(); ++i) {
-                     self.connect(*added[i - 1], *added[i], {steps[i - 1], true, false});
-                 }
-                 return added;
-             },
-             nb::arg("nodes"),
-             nb::arg("steps"),
-             nb::arg("set_head") = false,
-             nb::arg("set_tail") = false,
-             "Add a sequence of nodes and connect adjacent pairs with the provided path lengths")
-        .def("flatten_nodes", &graph_type::flatten_nodes, nb::rv_policy::reference, "Get the ordered flattened list of all nodes in the graph")
-        .def_prop_ro("nodes", [](graph_type &self) -> auto & { return self.nodes(); }, nb::rv_policy::reference, "Linear runtime nodes");
+    sqp.def("_flatten_nodes",
+            [](ns_sqp &self) -> auto & { return self.solver_nodes(); },
+            nb::rv_policy::reference_internal,
+            "Get the ordered solver nodes for wrapper internals");
 }

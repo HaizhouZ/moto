@@ -705,7 +705,7 @@ barrier parameter `\mu`.
 
 ### 6.1 Pre-Initialization Value Pass
 
-On restoration entry, the overlay graph is evaluated once in value mode before
+On restoration entry, the overlay runtime storage is evaluated once in value mode before
 the soft-constraint initializer sizes and seeds the local elastic state.
 
 So during that first value-only pass, the elastic wrappers simply forward the
@@ -739,11 +739,11 @@ metric.
 
 The actual restoration success test is stricter:
 
-1. accept a restoration trial on the overlay graph,
-2. sync the trial primal state and hard duals back to the normal graph,
+1. accept a restoration trial on the overlay runtime storage,
+2. sync the trial primal state and hard duals back to the outer runtime storage,
 3. commit the restoration inequality bound state back to the outer IPM blocks,
-3. evaluate the normal graph,
-4. require both
+4. evaluate the outer runtime storage,
+5. require both
 
 $$
 \text{outer\_filter\_accept}

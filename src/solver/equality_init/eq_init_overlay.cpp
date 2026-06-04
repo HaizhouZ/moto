@@ -8,21 +8,6 @@
 namespace moto::solver::equality_init {
 namespace {
 
-template <typename Src>
-void forward_source_value(const Src &source, func_approx_data &data) {
-    dynamic_cast<const generic_func &>(*source).value(data);
-}
-
-template <typename Src>
-void forward_source_jacobian(const Src &source, func_approx_data &data) {
-    dynamic_cast<const generic_func &>(*source).jacobian(data);
-}
-
-template <typename Src>
-void forward_source_hessian(const Src &source, func_approx_data &data) {
-    dynamic_cast<const generic_func &>(*source).hessian(data);
-}
-
 std::string overlay_name(const generic_func &source, std::string_view suffix) {
     return fmt::format("{}__{}", source.name(), suffix);
 }
@@ -48,39 +33,89 @@ void commit_dual_slice(node_data &outer, const Overlay &overlay, const vector_co
     source_data.template as<generic_constr::approx_data>().multiplier_ = src;
 }
 
+void sync_ineq_overlay_dual_field(node_data &outer, node_data &overlay, field_t field) {
+    const auto &outer_exprs = outer.problem().exprs(field);
+    const auto &overlay_exprs = overlay.problem().exprs(field);
+    if (outer_exprs.size() != overlay_exprs.size()) {
+        throw std::runtime_error(fmt::format("equality-init {} source/overlay size mismatch: {} vs {}",
+                                             field::name(field), outer_exprs.size(), overlay_exprs.size()));
+    }
+    for (size_t i = 0; i < outer_exprs.size(); ++i) {
+        auto &outer_ipm = outer.data(constr(outer_exprs[i])).as<solver::ipm_constr::approx_data>();
+        auto &overlay_ipm = overlay.data(constr(overlay_exprs[i])).as<solver::ipm_constr::approx_data>();
+        overlay_ipm.multiplier_ = outer_ipm.multiplier_;
+        for (auto side : box_sides) {
+            *overlay_ipm.box_side_[side] = *outer_ipm.box_side_[side];
+        }
+    }
+}
+
+void check_soft_overlay_prefix(const node_data &outer, const node_data &overlay, field_t field) {
+    const auto &outer_exprs = outer.problem().exprs(field);
+    const auto &overlay_exprs = overlay.problem().exprs(field);
+    if (overlay_exprs.size() < outer_exprs.size()) {
+        throw std::runtime_error(fmt::format("equality-init {} source/overlay prefix mismatch: {} vs {}",
+                                             field::name(field), outer_exprs.size(), overlay_exprs.size()));
+    }
+}
+
+void sync_soft_overlay_dual_field(node_data &outer, node_data &overlay, field_t field) {
+    check_soft_overlay_prefix(outer, overlay, field);
+    const auto &outer_exprs = outer.problem().exprs(field);
+    const auto &overlay_exprs = overlay.problem().exprs(field);
+    for (size_t i = 0; i < outer_exprs.size(); ++i) {
+        auto &d = overlay.data(constr(overlay_exprs[i])).as<pmm_constr::approx_data>();
+        d.multiplier_ = outer.problem().extract(outer.dense().dual_[field], outer_exprs[i]);
+    }
+}
+
+void commit_soft_overlay_dual_field(node_data &outer, node_data &overlay, field_t field) {
+    check_soft_overlay_prefix(outer, overlay, field);
+    const auto &outer_exprs = outer.problem().exprs(field);
+    const auto &overlay_exprs = overlay.problem().exprs(field);
+    for (size_t i = 0; i < outer_exprs.size(); ++i) {
+        auto &d = overlay.data(constr(overlay_exprs[i])).as<pmm_constr::approx_data>();
+        auto dst = outer.problem().extract(outer.dense().dual_[field], outer_exprs[i]);
+        dst = d.multiplier_;
+    }
+}
+
 } // namespace
 
 eq_init_pmm_constr::eq_init_pmm_constr(const std::string &name,
                                        const constr &source,
                                        scalar_t rho)
     : pmm_constr(name, approx_order::second, source->dim()),
-    source_(source) {
+      source_(source),
+      source_func_(dynamic_cast<const generic_func *>(source.get())) {
+    if (source_func_ == nullptr) {
+        throw std::runtime_error(fmt::format("eq_init_pmm_constr source {} is not a generic_func", source->name()));
+    }
     this->rho = rho;
-    field_hint().is_eq = true;
-    field_hint().is_soft = true;
+    field_hint_.is_eq = true;
+    field_hint_.is_soft = true;
     set_default_hess_sparsity(sparsity::dense);
-    const auto &src_func = dynamic_cast<const generic_func &>(*source);
-    add_arguments(src_func.in_args());
-    copy_source_sparsity(*this, src_func);
+    add_arguments(source_func_->in_args());
+    copy_source_sparsity(*this, *source_func_);
 }
 
 void eq_init_pmm_constr::value_impl(func_approx_data &data) const {
-    forward_source_value(source_, data);
+    source_func_->value(data);
     auto &d = data.as<pmm_constr::approx_data>();
     solver::ineq_soft::ensure_initialized(*this, d);
     d.g_ = d.v_ - d.rho_ * d.multiplier_;
 }
 
 void eq_init_pmm_constr::jacobian_impl(func_approx_data &data) const {
-    forward_source_jacobian(source_, data);
+    source_func_->jacobian(data);
     auto &d = data.as<pmm_constr::approx_data>();
     propagate_jacobian(d);
     propagate_hessian(d);
 }
 
 void eq_init_pmm_constr::hessian_impl(func_approx_data &data) const {
-    if (source_->order() >= approx_order::second) {
-        forward_source_hessian(source_, data);
+    if (source_func_->order() >= approx_order::second) {
+        source_func_->hessian(data);
     }
 }
 
@@ -93,7 +128,7 @@ ocp_ptr_t build_equality_init_overlay_problem(const ocp_ptr_t &source_prob,
         }
     }
 
-    auto overlay_prob = std::static_pointer_cast<ocp>(source_prob->clone_base(config));
+    auto overlay_prob = source_prob->clone(config);
     for (auto field : std::array{__eq_x, __eq_xu}) {
         for (const shared_expr &expr : source_prob->exprs(field)) {
             auto source = std::dynamic_pointer_cast<generic_constr>(expr);
@@ -129,70 +164,10 @@ void sync_equality_init_overlay_duals(node_data &outer, node_data &overlay) {
     overlay.for_each(__eq_xu, [&](const eq_init_pmm_constr &c, pmm_constr::approx_data &d) {
         copy_dual_slice(d.multiplier_, outer, c);
     });
-    size_t pos_eq_x_soft = 0;
-    overlay.for_each(__eq_x_soft, [&](const generic_constr &c, func_approx_data &ad) {
-        if (dynamic_cast<const eq_init_pmm_constr *>(&c) != nullptr) {
-            return;
-        }
-        auto &d = ad.as<pmm_constr::approx_data>();
-        const auto &exprs = outer.problem().exprs(__eq_x_soft);
-        if (pos_eq_x_soft >= exprs.size()) {
-            throw std::runtime_error("equality-init soft eq_x source position out of range");
-        }
-        d.multiplier_ = outer.problem().extract(outer.dense().dual_[__eq_x_soft], exprs[pos_eq_x_soft++]);
-    });
-    size_t pos_eq_xu_soft = 0;
-    overlay.for_each(__eq_xu_soft, [&](const generic_constr &c, func_approx_data &ad) {
-        if (dynamic_cast<const eq_init_pmm_constr *>(&c) != nullptr) {
-            return;
-        }
-        auto &d = ad.as<pmm_constr::approx_data>();
-        const auto &exprs = outer.problem().exprs(__eq_xu_soft);
-        if (pos_eq_xu_soft >= exprs.size()) {
-            throw std::runtime_error("equality-init soft eq_xu source position out of range");
-        }
-        d.multiplier_ = outer.problem().extract(outer.dense().dual_[__eq_xu_soft], exprs[pos_eq_xu_soft++]);
-    });
-    size_t pos_ineq_x = 0;
-    outer.for_each(__ineq_x, [&](const generic_constr &, func_approx_data &outer_ad) {
-        auto &outer_ipm = outer_ad.as<solver::ipm_constr::approx_data>();
-        size_t overlay_pos = 0;
-        bool found = false;
-        overlay.for_each(__ineq_x, [&](const solver::ipm_constr &, solver::ipm_constr::approx_data &overlay_ad) {
-            if (overlay_pos++ != pos_ineq_x) {
-                return;
-            }
-            overlay_ad.multiplier_ = outer_ipm.multiplier_;
-            for (auto side : box_sides) {
-                *overlay_ad.box_side_[side] = *outer_ipm.box_side_[side];
-            }
-            found = true;
-        });
-        if (!found) {
-            throw std::runtime_error("equality-init ineq_x source position out of range");
-        }
-        ++pos_ineq_x;
-    });
-    size_t pos_ineq_xu = 0;
-    outer.for_each(__ineq_xu, [&](const generic_constr &, func_approx_data &outer_ad) {
-        auto &outer_ipm = outer_ad.as<solver::ipm_constr::approx_data>();
-        size_t overlay_pos = 0;
-        bool found = false;
-        overlay.for_each(__ineq_xu, [&](const solver::ipm_constr &, solver::ipm_constr::approx_data &overlay_ad) {
-            if (overlay_pos++ != pos_ineq_xu) {
-                return;
-            }
-            overlay_ad.multiplier_ = outer_ipm.multiplier_;
-            for (auto side : box_sides) {
-                *overlay_ad.box_side_[side] = *outer_ipm.box_side_[side];
-            }
-            found = true;
-        });
-        if (!found) {
-            throw std::runtime_error("equality-init ineq_xu source position out of range");
-        }
-        ++pos_ineq_xu;
-    });
+    sync_soft_overlay_dual_field(outer, overlay, __eq_x_soft);
+    sync_soft_overlay_dual_field(outer, overlay, __eq_xu_soft);
+    sync_ineq_overlay_dual_field(outer, overlay, __ineq_x);
+    sync_ineq_overlay_dual_field(outer, overlay, __ineq_xu);
 }
 
 void commit_equality_init_overlay_duals(node_data &outer, node_data &overlay) {
@@ -205,32 +180,8 @@ void commit_equality_init_overlay_duals(node_data &outer, node_data &overlay) {
     overlay.for_each(__eq_xu, [&](const eq_init_pmm_constr &c, pmm_constr::approx_data &d) {
         commit_dual_slice(outer, c, d.multiplier_);
     });
-    size_t pos_eq_x_soft = 0;
-    overlay.for_each(__eq_x_soft, [&](const generic_constr &c, func_approx_data &ad) {
-        if (dynamic_cast<const eq_init_pmm_constr *>(&c) != nullptr) {
-            return;
-        }
-        auto &d = ad.as<pmm_constr::approx_data>();
-        auto &exprs = outer.problem().exprs(__eq_x_soft);
-        if (pos_eq_x_soft >= exprs.size()) {
-            throw std::runtime_error("equality-init soft eq_x source position out of range");
-        }
-        auto dst = outer.problem().extract(outer.dense().dual_[__eq_x_soft], exprs[pos_eq_x_soft++]);
-        dst = d.multiplier_;
-    });
-    size_t pos_eq_xu_soft = 0;
-    overlay.for_each(__eq_xu_soft, [&](const generic_constr &c, func_approx_data &ad) {
-        if (dynamic_cast<const eq_init_pmm_constr *>(&c) != nullptr) {
-            return;
-        }
-        auto &d = ad.as<pmm_constr::approx_data>();
-        auto &exprs = outer.problem().exprs(__eq_xu_soft);
-        if (pos_eq_xu_soft >= exprs.size()) {
-            throw std::runtime_error("equality-init soft eq_xu source position out of range");
-        }
-        auto dst = outer.problem().extract(outer.dense().dual_[__eq_xu_soft], exprs[pos_eq_xu_soft++]);
-        dst = d.multiplier_;
-    });
+    commit_soft_overlay_dual_field(outer, overlay, __eq_x_soft);
+    commit_soft_overlay_dual_field(outer, overlay, __eq_xu_soft);
 }
 
 } // namespace moto::solver::equality_init

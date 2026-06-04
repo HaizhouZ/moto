@@ -1,38 +1,10 @@
 #include <moto/core/external_function.hpp>
 #include <moto/ocp/cost.hpp>
-#include <moto/ocp/problem.hpp>
 #include <moto/utils/codegen.hpp>
 
 namespace moto {
-void generic_cost::add_to_ocp_callback(ocp_base *prob) {
-    lower_x_to_y_ = dynamic_cast<node_ocp *>(prob) == nullptr &&
-                    dynamic_cast<edge_ocp *>(prob) == nullptr;
-}
-
 void generic_cost::finalize_impl() {
-    if (lower_x_to_y_) {
-        if (has_pure_x_primal_args()) {
-            finalize_hint_.substitute_x_to_y = true;
-        } else {
-            for (const sym &arg : in_args_) {
-                if (arg.field() != __x && in_field(arg.field(), primal_fields)) {
-                    fmt::print("cost {} has non-x inarg {}, no substitution will be done\n", name_, arg.name());
-                    break;
-                }
-            }
-        }
-    }
-    if (finalize_hint_.substitute_x_to_y) {
-        for (const sym &arg : in_args_) {
-            if (arg.field() == __u) {
-                throw std::runtime_error(fmt::format(
-                    "cost {} can only be terminal state-only cost, but has input arguments of type {}",
-                    name_, field::name(arg.field())));
-            }
-        }
-        lower_x_to_y_in_place(fmt::format("cost {} finalize", name_));
-    }
-    if (finalize_hint_.gauss_newton) {
+    if (use_gauss_newton_) {
         if (!gn_weight_) {
             throw std::runtime_error(fmt::format("cost {} gauss-newton weight not set. Did you provide a non-scalar output ?", name_));
         }
@@ -66,9 +38,8 @@ generic_cost::generic_cost(const std::string &name, approx_order order)
 generic_cost::generic_cost(const std::string &name, const var_inarg_list &in_args, const cs::SX &out, approx_order order)
     : generic_func(name, in_args, out, order, __cost) {
     // assert(out.is_scalar() && "cost output must be a scalar");
-    if (out.is_scalar()) {
-    } else {
-        finalize_hint_.gauss_newton = true;
+    if (!out.is_scalar()) {
+        use_gauss_newton_ = true;
     }
 }
 
@@ -77,15 +48,9 @@ generic_cost *generic_cost::set_diag_hess() {
     return this;
 }
 
-generic_cost *generic_cost::as_terminal() {
-    name_ += "_terminal";
-    finalize_hint_.substitute_x_to_y = true;
-    return this;
-}
-
 generic_cost *generic_cost::set_gauss_newton(const var &weight) {
     gn_weight_ = weight;
-    finalize_hint_.gauss_newton = true;
+    use_gauss_newton_ = true;
     return this;
 }
 

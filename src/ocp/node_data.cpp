@@ -2,7 +2,6 @@
 #include <moto/ocp/impl/node_data.hpp>
 #include <moto/ocp/problem.hpp>
 #include <moto/ocp/soft_constr.hpp>
-#include <moto/solver/ineq_soft.hpp>
 #include <moto/solver/data_base.hpp>
 
 namespace moto {
@@ -10,7 +9,7 @@ sym_data::sym_data(ocp *prob) : prob_(prob) {
     prob->wait_until_ready();
     auto set_default_val = [this](const sym &s) {
         if (s.default_value().size() > 0) {
-            auto v = this->prob_->extract(this->value_.at(s.field()), s);
+            auto v = this->prob_->extract(this->value_[s.field()], s);
             if (s.default_value().size() != s.dim())
                 throw std::runtime_error(fmt::format("default value size mismatch for sym {} in field {}, expected {}, got {}",
                                                      s.name(), field::name(s.field()), s.dim(), s.default_value().size()));
@@ -52,7 +51,7 @@ vector_ref sym_data::get(const sym &s) {
     if (s.field() == __usr_var)
         return usr_value_.at(s.uid());
     else
-        return prob_->extract(value_.at(s.field()), s);
+        return prob_->extract(value_[s.field()], s);
 }
 
 node_data::node_data(const ocp_ptr_t &prob)
@@ -61,7 +60,6 @@ node_data::node_data(const ocp_ptr_t &prob)
       dense_(new lag_data(prob.get())),
       shared_(new shared_data(prob.get(), sym_.get())) {
     for (size_t field : func_fields) {
-        size_t idx = 0;
         for (const generic_func &f : prob->exprs(field)) {
             sparse_[f.field()].push_back(f.create_approx_data(*sym_, *dense_, *shared_));
         }
@@ -70,14 +68,21 @@ node_data::node_data(const ocp_ptr_t &prob)
 void node_data::update_approximation(update_mode config, bool include_original_cost) {
     /// @todo: always eval residual?
     // call to precompute
-    bool update_cost = config == update_mode::eval_val || config == update_mode::eval_all;
-    const bool reset_lag_jac = config != update_mode::eval_val && !include_original_cost;
-    if (update_cost) {
+    const bool eval_value = config == update_mode::eval_val || config == update_mode::eval_all;
+    const bool eval_jacobian = config == update_mode::eval_jac ||
+                               config == update_mode::eval_derivatives ||
+                               config == update_mode::eval_all;
+    const bool eval_hessian = config == update_mode::eval_hess ||
+                              config == update_mode::eval_derivatives ||
+                              config == update_mode::eval_all;
+    const bool eval_derivatives = eval_jacobian || eval_hessian;
+    const bool reset_lag_jac = eval_derivatives && !include_original_cost;
+    if (eval_value) {
         dense_->cost_ = 0.;
         dense_->lag_ = 0.;
     }
     // set lagrangian gradient to zero
-    if (config != update_mode::eval_val) {
+    if (eval_derivatives) {
         for (auto field : primal_fields) {
             if (reset_lag_jac)
                 dense_->lag_jac_[field].setZero();
@@ -85,9 +90,7 @@ void node_data::update_approximation(update_mode config, bool include_original_c
             dense_->cost_jac_[field].setZero();
         }
 
-        if (config == update_mode::eval_hess ||
-            config == update_mode::eval_derivatives ||
-            config == update_mode::eval_all) {
+        if (eval_hessian) {
             for (auto &hess_l_0 : dense_->lag_hess_) {
                 for (auto &hess_l_1 : hess_l_0) {
                     hess_l_1.setZero();
@@ -103,38 +106,32 @@ void node_data::update_approximation(update_mode config, bool include_original_c
     for (const generic_custom_func &f : prob_->exprs(__pre_comp)) {
         f.custom_call((*shared_)[f]); ///< @todo pass update mode
     }
-    bool no_eval = config != update_mode::eval_val && config != update_mode::eval_all;
-    bool no_jac = config != update_mode::eval_jac &&
-                  config != update_mode::eval_derivatives &&
-                  config != update_mode::eval_all;
-    bool no_hess = config != update_mode::eval_hess &&
-                   config != update_mode::eval_derivatives &&
-                   config != update_mode::eval_all;
     for_each<func_fields>([=, this](const generic_func &_f, func_approx_data &data) {
         _f.compute_approx(data,
-                          !no_eval && _f.order() >= approx_order::zero,
-                          !no_jac && _f.order() >= approx_order::first,
-                          !no_hess && _f.order() >= approx_order::second);
+                          eval_value && _f.order() >= approx_order::zero,
+                          eval_jacobian && _f.order() >= approx_order::first,
+                          eval_hessian && _f.order() >= approx_order::second);
     });
     for (const generic_custom_func &f : prob_->exprs(__post_comp)) {
         f.custom_call((*shared_)[f]); ///< @todo pass update mode
     }
-    if (config != update_mode::eval_val && include_original_cost)
+    if (eval_derivatives && include_original_cost)
         for (auto field : primal_fields)
             dense_->lag_jac_[field] = dense_->cost_jac_[field];
 
     for (auto f : lag_data::stored_constr_fields) {
         if (prob_->dim(f) == 0)
             continue; // skip empty jacobian
-        dense_->lag_ += dense_->approx_[f].v_.dot(dense_->dual_[f]);
-        if (config >= update_mode::eval_jac)
+        if (eval_value)
+            dense_->lag_ += dense_->approx_[f].v_.dot(dense_->dual_[f]);
+        if (eval_jacobian)
             for (auto p : primal_fields) {
                 if (dense_->approx_[f].jac_[p].is_empty())
                     continue; // skip empty jacobian
                 dense_->approx_[f].jac_[p].right_T_times(dense_->dual_[f], dense_->lag_jac_[p]);
             }
     }
-    if (update_cost) {
+    if (eval_value) {
         inf_prim_res_ = 0.;
         prim_res_l1_ = 0.;
         for (auto field : constr_fields) {

@@ -96,7 +96,7 @@ class ineq_constr : public soft_constr {
     using base::base;
     ineq_constr(const std::string &name, approx_order order, size_t dim, field_t field = field_t::__undefined)
         : base(name, order, dim, field) {
-        field_hint().is_eq = false;
+        field_hint_.is_eq = false;
     }
     ineq_constr(const std::string &name,
                 const var_inarg_list &args,
@@ -104,13 +104,13 @@ class ineq_constr : public soft_constr {
                 approx_order order,
                 field_t field = field_t::__undefined)
         : base(name, args, out, order, field) {
-        field_hint().is_eq = false;
+        field_hint_.is_eq = false;
     }
     ineq_constr(generic_constr &&rhs) : base(std::move(rhs)) {
         if (auto *src = dynamic_cast<ineq_constr *>(&rhs); src != nullptr) {
             box_spec_ = src->box_spec_;
         }
-        field_hint().is_eq = false; ///< set the field hint to inequality
+        field_hint_.is_eq = false; ///< set the field hint to inequality
     } ///< move constructor from generic_constr
     void set_box_info(std::shared_ptr<box_spec> box) { box_spec_ = std::move(box); }
     const box_spec *box_info() const noexcept { return box_spec_.get(); }

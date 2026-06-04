@@ -49,7 +49,7 @@ void ns_sqp::print_stat_header() {
 }
 
 void ns_sqp::print_stats(const kkt_info &info, const iter_info &iter, size_t ls_steps) {
-    const bool restoration_active = in_restoration_phase();
+    const bool restoration_active = settings.in_restoration;
     auto mu_info = current_phase_mu(restoration_active, settings.has_ipm_ineq, settings.ipm.mu);
     scalar_t stats_value[] = {0., info.barrier_objective.augmented_objective, info.primal.inf_res, info.dual.inf_res, info.primal.inf_comp, info.step.inf_prim_step, info.step.inf_eq_dual_step, info.step.inf_ineq_dual_step,
                               settings.ls.alpha_primal, settings.ls.alpha_dual, 0., mu_info.display};

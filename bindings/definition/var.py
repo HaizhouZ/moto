@@ -45,10 +45,6 @@ class var(cs.SX):
     def tdim(self):
         return self.__sym__.tdim
 
-    @tdim.setter
-    def tdim(self, val):
-        self.__sym__.tdim = val
-
     @property
     def default_value(self):
         return self.__sym__.default_value

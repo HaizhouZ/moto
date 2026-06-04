@@ -89,9 +89,6 @@ struct func_arg_map {
 
     auto problem() const { return shared_.prob_; }
 
-    // template <typename T>
-    // T &as() { return dynamic_cast<T &>(*this); }
-
     template <typename T>
         requires(std::is_base_of_v<func_arg_map, T>)
     T &as() { return static_cast<T &>(*this); }
@@ -130,8 +127,6 @@ struct func_approx_data : public func_arg_map {
     /// @brief get the jacobian reference
     auto jac(const sym &in) const { return jac_[sym_uid_idx_.at(in.uid())]; }
     auto jac(size_t i) const { return jac_.at(i); }
-
-    virtual void reset() {}
 };
 
 def_unique_ptr(func_approx_data);

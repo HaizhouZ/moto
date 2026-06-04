@@ -107,8 +107,6 @@ struct MOTO_ALIGN_NO_SHARING node_data {
         for_each<constr_fields>(std::forward<Callback>(f));
     }
 
-    void clear_lag_jac();
-    void clear_lag_hessian();
     void bind_soft_runtime_owner(solver::data_base *owner);
 
     void print_residuals() const;

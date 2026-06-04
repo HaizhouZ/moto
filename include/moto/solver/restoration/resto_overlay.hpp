@@ -196,6 +196,7 @@ class resto_eq_elastic_constr final : public soft_constr {
     static void resize_local_state(detail::eq_local_state &state, size_t ns_dim, size_t nc_dim);
 
     constr source_;
+    const generic_func *source_func_ = nullptr;
 };
 
 class resto_ineq_elastic_ipm_constr final : public ineq_constr {
@@ -258,6 +259,7 @@ class resto_ineq_elastic_ipm_constr final : public ineq_constr {
     local_residual_summary current_local_residuals(const approx_data &data) const;
 
     constr source_;
+    const generic_func *source_func_ = nullptr;
 };
 
 ocp_ptr_t build_restoration_overlay_problem(const ocp_ptr_t &source_prob,

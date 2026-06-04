@@ -62,81 +62,10 @@ struct type_caster<cs::SX> {
 } // namespace detail
 } // namespace nanobind
 
-#include <moto/core/array.hpp>
-#include <nanobind/stl/array.h>
-
-namespace nanobind {
-namespace detail {
-template <typename Entry, size_t Size, size_t shift>
-struct type_caster<moto::shifted_array<Entry, Size, shift>> {
-    using Array = moto::shifted_array<Entry, Size, shift>;
-    NB_TYPE_CASTER(Array, const_name("moto.shifted_array"))
-    using Caster = make_caster<Entry>;
-
-    bool from_python(handle src, uint8_t flags, cleanup_list *cleanup) noexcept {
-        PyObject *temp;
-
-        /* Will initialize 'temp' (NULL in the case of a failure.) */
-        PyObject **o = seq_get_with_size(src.ptr(), Size, &temp);
-
-        Caster caster;
-        bool success = o != nullptr;
-
-        flags = flags_for_local_caster<Entry>(flags);
-
-        if (success) {
-            for (size_t i = 0; i < Size; ++i) {
-                if (!caster.from_python(o[i], flags, cleanup) ||
-                    !caster.template can_cast<Entry>()) {
-                    success = false;
-                    break;
-                }
-
-                value[i] = caster.operator cast_t<Entry>();
-            }
-
-            Py_XDECREF(temp);
-        }
-
-        return success;
-    }
-
-    template <typename T>
-    static handle from_cpp(T &&src, rv_policy policy, cleanup_list *cleanup) {
-        object ret = steal(PyList_New(Size));
-
-        if (ret.is_valid()) {
-            Py_ssize_t index = 0;
-
-            for (auto &value : src) {
-                handle h = Caster::from_cpp(forward_like_<T>(value), policy, cleanup);
-
-                if (!h.is_valid()) {
-                    ret.reset();
-                    break;
-                }
-
-                NB_LIST_SET_ITEM(ret.ptr(), index++, h.ptr());
-            }
-        }
-
-        return ret.release();
-    }
-};
-
-} // namespace detail
-} // namespace nanobind
-
 #include <moto/ocp/impl/func.hpp>
 
 namespace moto {
-struct var_alias : public var {
-    using var::var;
-};
-// using var_alias = var;
 expr *get_expr_ptr(const nb::handle &h);
-// var &cast_to_var(const nb::handle &h);
-func &cast_to_func(const nb::handle &h);
 } // namespace moto
 
 namespace nanobind {
@@ -257,8 +186,6 @@ struct type_caster<moto::var> {
     }
     static nb::handle from_cpp(const moto::var &src, rv_policy policy, cleanup_list *cleanup) {
         nb::object py_cs_module = nb::module_::import_("moto");
-        // use the sym stored to initialize a casadi.SX object
-        // nb::object py_cs_var = py_cs_module.attr("var")((const std::shared_ptr<moto::sym> &)(src));
         nb::object py_cs_var = py_cs_module.attr("var")(type_caster<std::shared_ptr<moto::sym>>::from_cpp(src, policy, cleanup));
         return py_cs_var.release();
     }

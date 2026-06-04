@@ -25,12 +25,6 @@ data_base::data_base(sym_data *s, lag_data *dense)
         base_lag_grad_backup[f].setZero();
         kkt_stat_err_[f].resize(dense->lag_jac_[f].size());
         kkt_stat_err_[f].setZero();
-    }
-    V_xx.resize(nx, nx);
-    V_xx.setZero();
-    V_yy.resize(ny, ny);
-    V_yy.setZero();
-    for (auto f : primal_fields) {
         trial_prim_step[f].resize(dense->lag_jac_[f].size());
         trial_prim_step[f].setZero();
         prim_corr[f].resize(dense->lag_jac_[f].size());
@@ -38,6 +32,10 @@ data_base::data_base(sym_data *s, lag_data *dense)
         trial_prim_state_bak[f].resize(dense->lag_jac_[f].size());
         trial_prim_state_bak[f].setZero();
     }
+    V_xx.resize(nx, nx);
+    V_xx.setZero();
+    V_yy.resize(ny, ny);
+    V_yy.setZero();
     // set rollout data for constraints
     for (auto f : constr_fields) {
         trial_dual_step[f].resize(dense->approx_[f].v_.size());
@@ -48,9 +46,9 @@ data_base::data_base(sym_data *s, lag_data *dense)
 }
 void data_base::activate_lag_jac_corr() {
     timed_block_start("backup_jacobian");
-    base_lag_grad_backup[__u] = Q_u;
-    base_lag_grad_backup[__x] = Q_x;
-    base_lag_grad_backup[__y] = Q_y;
+    for (const auto &field : primal_fields) {
+        base_lag_grad_backup[field] = dense_->lag_jac_[field];
+    }
     timed_block_end("backup_jacobian");
 
     timed_block_start("activate_lag_jac_corr");

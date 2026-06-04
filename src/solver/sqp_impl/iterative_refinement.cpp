@@ -3,7 +3,6 @@
 #include <moto/utils/timed_block.hpp>
 #define SHOW_DETAIL_TIMING
 
-#include <moto/solver/ineq_soft.hpp>
 #include <moto/solver/ns_riccati/generic_solver.hpp>
 #include <moto/utils/field_conversion.hpp>
 
@@ -14,6 +13,11 @@ void ns_sqp::iterative_refinement() {
     // if (info.inf_prim_step < 1e-1 || info.inf_dual_step < 1e-1) {
     size_t iter_refine_max = settings.rf.max_iters;
     size_t iter_refine = 0;
+    struct MOTO_ALIGN_NO_SHARING inf_res_state_worker {
+        scalar_t inf_kkt_stat_err_u = 0.;
+        scalar_t inf_kkt_stat_err_y = 0.;
+    };
+    std::vector<inf_res_state_worker> thread_res(graph.n_jobs());
     detail_timed_block_start("iterative_refinement");
     while (iter_refine < iter_refine_max) {
         {
@@ -22,17 +26,15 @@ void ns_sqp::iterative_refinement() {
             // finalize the dual step to get the correct dual variables for computing the residual, and compute the residual with the updated dual variables
             solver::for_each(solver::par, graph,
                 [&](data *d) {
-                    riccati_solver_->finalize_dual_newton_step(d);
-                    riccati_solver_->compute_kkt_residual(d);
+                    riccati_solver_.finalize_dual_newton_step(d);
+                    riccati_solver_.compute_kkt_residual(d);
                 });
             detail_timed_block_end("check_residual");
         }
-        struct MOTO_ALIGN_NO_SHARING inf_res_state_worker {
-            scalar_t inf_kkt_stat_err_u = 0.;
-            scalar_t inf_kkt_stat_err_y = 0.;
-        } thread_res[settings.n_worker];
-        size_t step = 0;
-        solver::for_each(solver::par, solver::forward_edges(graph, true),
+        for (auto &w : thread_res) {
+            w = {};
+        }
+        solver::for_each(solver::par, solver::forward_edges(graph),
                          [&](size_t tid, data *d, data *next) {
             if (d->kkt_stat_err_[__u].size() > 0) {
                 thread_res[tid].inf_kkt_stat_err_u = std::max(thread_res[tid].inf_kkt_stat_err_u, d->kkt_stat_err_[__u].cwiseAbs().maxCoeff());

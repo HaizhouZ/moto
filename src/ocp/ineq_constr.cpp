@@ -2,7 +2,6 @@
 #include <moto/solver/ipm/ipm_constr.hpp>
 #include <moto/utils/codegen.hpp>
 
-#include <limits>
 #include <optional>
 
 namespace moto {

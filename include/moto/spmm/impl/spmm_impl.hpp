@@ -252,10 +252,6 @@ struct operand {
     }
     decltype(auto) get_impl() const {
         constexpr bool col_block = is_rhs == transposed; // true if we are dealing with a column block
-        // if constexpr (all) {
-        //     if (st != 0 || dim != inner_dim)
-        //         throw std::runtime_error("Cannot get all data from operand with non-zero starting point or non-full dimension");
-        // }
         if constexpr (is_panel && !is_eigen_expr) {
             using dense_map_t = const_map_t<decltype(val.data_)>;
             if constexpr (sp_type == sparsity::dense) {

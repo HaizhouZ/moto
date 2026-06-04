@@ -39,7 +39,7 @@ func_approx_data::func_approx_data(sym_data &primal,
         const auto f_field = func_.field();
         auto *prob = raw.prob_;
         for (size_t i : range(in_args_.size())) {
-            auto arg = in_args[i];
+            const auto &arg = in_args[i];
             if (arg->field() < field::num_prim && prob->is_active(arg) && f_field != __dyn) {
                 if (f_field == __cost) {
                     jac_.push_back(prob->extract_row_tangent(raw.cost_jac_[arg->field()], arg));

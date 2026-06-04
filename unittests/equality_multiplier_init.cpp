@@ -36,7 +36,6 @@ cost make_stage_cost(const std::string &name, const sym &x, const sym &u) {
 
 constr make_hard_eq_x(const std::string &name, const sym &x, scalar_t target) {
     auto c = constr(new generic_constr(name, approx_order::first, 1));
-    c->field_hint().is_eq = true;
     dynamic_cast<generic_func &>(*c).add_argument(x);
     c->value = [target](func_approx_data &d) { d.v_(0) = d[0](0) - target; };
     c->jacobian = [](func_approx_data &d) { d.jac_[0](0, 0) = 1.; };
@@ -45,7 +44,6 @@ constr make_hard_eq_x(const std::string &name, const sym &x, scalar_t target) {
 
 constr make_hard_eq_xu(const std::string &name, const sym &x, const sym &u, scalar_t bias) {
     auto c = constr(new generic_constr(name, approx_order::first, 1));
-    c->field_hint().is_eq = true;
     dynamic_cast<generic_func &>(*c).add_argument(x);
     dynamic_cast<generic_func &>(*c).add_argument(u);
     c->value = [bias](func_approx_data &d) { d.v_(0) = d[0](0) + scalar_t(2.0) * d[1](0) + bias; };
@@ -58,7 +56,6 @@ constr make_hard_eq_xu(const std::string &name, const sym &x, const sym &u, scal
 
 constr make_soft_eq_x(const std::string &name, const sym &x, scalar_t target) {
     auto base = constr(new generic_constr(name, approx_order::first, 1));
-    base->field_hint().is_eq = true;
     dynamic_cast<generic_func &>(*base).add_argument(x);
     base->value = [target](func_approx_data &d) { d.v_(0) = d[0](0) - target; };
     base->jacobian = [](func_approx_data &d) { d.jac_[0](0, 0) = 1.; };
@@ -67,7 +64,6 @@ constr make_soft_eq_x(const std::string &name, const sym &x, scalar_t target) {
 
 constr make_soft_eq_xu(const std::string &name, const sym &x, const sym &u, scalar_t bias) {
     auto base = constr(new generic_constr(name, approx_order::first, 1));
-    base->field_hint().is_eq = true;
     dynamic_cast<generic_func &>(*base).add_argument(x);
     dynamic_cast<generic_func &>(*base).add_argument(u);
     base->value = [bias](func_approx_data &d) { d.v_(0) = scalar_t(-0.5) * d[0](0) + d[1](0) + bias; };
@@ -101,7 +97,7 @@ constr make_box_ineq_xu(const std::string &name, const sym &x, const sym &u, sca
 }
 
 void seed_primal_state(ns_sqp &sqp, size_t n_stage_nodes) {
-    auto &flat = sqp.active_data().flatten_nodes();
+    auto &flat = sqp.solver_nodes();
     REQUIRE(flat.size() == n_stage_nodes);
 
     for (size_t i = 0; i < flat.size(); ++i) {
@@ -134,13 +130,10 @@ void configure_solver(ns_sqp &sqp, bool enable_eq_init, size_t n_edges) {
     sqp.settings.eq_init.enabled = enable_eq_init;
     sqp.settings.eq_init.rho_eq = 10.0;
 
-    auto modeled = sqp.create_graph();
-    auto n0 = modeled.create_node(stage_prob);
-    auto nt = modeled.create_node(terminal_prob);
-    auto edges = modeled.add_path(n0, nt, n_edges);
-    for (const auto &edge : edges) {
-        edge->add(*dyn);
-    }
+    auto &modeled = sqp.graph();
+    auto edge_prob = edge_ocp::create();
+    edge_prob->add(*dyn);
+    modeled.add_path(stage_prob, terminal_prob, edge_prob, n_edges);
 
     seed_primal_state(sqp, n_edges);
 }
@@ -155,8 +148,8 @@ TEST_CASE("equality multiplier initialization leaves primals and inequalities fi
     REQUIRE_NOTHROW(without_init.update(0, false));
     REQUIRE_NOTHROW(with_init.update(0, false));
 
-    auto &flat_without = without_init.active_data().flatten_nodes();
-    auto &flat_with = with_init.active_data().flatten_nodes();
+    auto &flat_without = without_init.solver_nodes();
+    auto &flat_with = with_init.solver_nodes();
     REQUIRE(flat_without.size() == flat_with.size());
 
     bool saw_soft_dual = false;
@@ -189,8 +182,8 @@ TEST_CASE("equality multiplier initialization reduces initial hard-equality dual
     const auto kkt_without = without_init.update(0, false);
     const auto kkt_with = with_init.update(0, false);
 
-    auto &flat_without = without_init.active_data().flatten_nodes();
-    auto &flat_with = with_init.active_data().flatten_nodes();
+    auto &flat_without = without_init.solver_nodes();
+    auto &flat_with = with_init.solver_nodes();
     REQUIRE(flat_without.size() == flat_with.size());
 
     bool changed_hard_dual = false;
@@ -214,8 +207,8 @@ TEST_CASE("equality multiplier initialization updates soft equalities and leaves
     REQUIRE_NOTHROW(without_init.update(0, false));
     REQUIRE_NOTHROW(with_init.update(0, false));
 
-    auto &flat_without = without_init.active_data().flatten_nodes();
-    auto &flat_with = with_init.active_data().flatten_nodes();
+    auto &flat_without = without_init.solver_nodes();
+    auto &flat_with = with_init.solver_nodes();
     REQUIRE(flat_without.size() == flat_with.size());
 
     bool saw_soft_dual = false;

@@ -33,20 +33,21 @@ class pmm_constr : public soft_constr {
 
     using base::base;
 
-    void value_impl(func_approx_data &data) const override;
-    void jacobian_impl(func_approx_data &data) const override;
+  protected:
     void propagate_jacobian(func_approx_data &data) const;
     void propagate_hessian(func_approx_data &data) const;
+
+  public:
+    void value_impl(func_approx_data &data) const override;
+    void jacobian_impl(func_approx_data &data) const override;
 
     /// @brief initialize: set lambda = 0 (cold start)
     void initialize(data_map_t &data) const override final;
     /// @brief compute d_multiplier = (J*du + h) / rho  from row 2 of KKT
     void finalize_newton_step(data_map_t &data) const override final;
-    /// @brief no-op: no predictor step
-    void finalize_predictor_step(data_map_t &data, workspace_data *cfg) const override final {};
-    /// @brief backup slack and multiplier before a line-search attempt
+    /// @brief backup multiplier before a line-search attempt
     void backup_trial_state(data_map_t &data) const override final;
-    /// @brief restore slack and multiplier for the next line-search attempt
+    /// @brief restore multiplier for the next line-search attempt
     void restore_trial_state(data_map_t &data) const override final;
     /// @brief apply: lambda += alpha*d_multiplier
     void apply_affine_step(data_map_t &data, workspace_data *cfg) const override final;

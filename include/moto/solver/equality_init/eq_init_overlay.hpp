@@ -30,6 +30,7 @@ class eq_init_pmm_constr final : public pmm_constr {
 
   private:
     constr source_;
+    const generic_func *source_func_ = nullptr;
 };
 
 ocp_ptr_t build_equality_init_overlay_problem(const ocp_ptr_t &source_prob,

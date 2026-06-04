@@ -99,11 +99,11 @@ void accumulate_row_infnorms(const sparse_mat &mat, Eigen::Ref<vector> norms) {
 
 void ns_sqp::reset_scaling() {
     auto &graph = active_data();
-    for (data &d : graph.nodes()) {
+    for (data *d : graph.flatten_nodes()) {
         for (field_t cf : constr_fields)
-            d.scale_c_[cf].resize(0);
-        d.scale_p_.fill(1.);
-        d.scaling_applied_ = false;
+            d->scale_c_[cf].resize(0);
+        d->scale_p_.fill(1.);
+        d->scaling_applied_ = false;
     }
 }
 
@@ -122,9 +122,9 @@ void ns_sqp::compute_and_apply_scaling(const kkt_info &info) {
     bool needs_recompute = (info.step.inf_prim_step >= 1. / sc.update_ratio_threshold);
     // Also recompute if no cached scales exist yet (first call after reset)
     if (!needs_recompute) {
-        for (const data &d : graph.nodes()) {
+        for (const data *d : graph.flatten_nodes()) {
             for (field_t cf : hard_constr_fields_non_dyn) {
-                if (d.dense().approx_[cf].v_.size() > 0 && d.scale_c_[cf].size() == 0) {
+                if (d->dense().approx_[cf].v_.size() > 0 && d->scale_c_[cf].size() == 0) {
                     needs_recompute = true;
                     break;
                 }
@@ -134,90 +134,12 @@ void ns_sqp::compute_and_apply_scaling(const kkt_info &info) {
         }
     }
 
-    // ── Recompute scale vectors if needed ────────────────────────────────────
-    if (needs_recompute) {
-        solver::for_each(solver::par, graph, [&](data *d) {
-            const scalar_t min_s = sc.min_scale;
-
-            for (field_t cf : hard_constr_fields_non_dyn) {
-                auto &approx = d->dense().approx_[cf];
-                int m = (int)approx.v_.size();
-                if (m == 0) {
-                    d->scale_c_[cf].resize(0);
-                    continue;
-                }
-
-                vector &s = d->scale_c_[cf];
-                s.resize(m);
-
-                if (sc.mode == scaling_settings::mode_t::gradient) {
-                    s.setZero();
-                    for (field_t pf : primal_fields)
-                        if (!approx.jac_[pf].is_empty())
-                            accumulate_row_infnorms(approx.jac_[pf], s);
-                    // Widen scale for rows with large residuals too
-                    s = s.cwiseMax(approx.v_.cwiseAbs());
-                    for (int i = 0; i < m; ++i)
-                        s[i] = 1. / std::max(min_s, s[i]);
-
-                } else { // equilibrium
-                    s.setOnes();
-                    for (size_t iter = 0; iter < sc.equilibrium_iters; ++iter) {
-                        // Accumulate scaled row inf-norms via row_scale_inplace helper:
-                        // apply s, accumulate norms, then divide s by norms.
-                        // Work on a temporary copy so we don't touch approx in-place here.
-                        vector row_norms = s.cwiseAbs().cwiseProduct(approx.v_.cwiseAbs());
-                        for (field_t pf : primal_fields) {
-                            if (approx.jac_[pf].is_empty())
-                                continue;
-                            // Compute s[i] * ||J_row_i||_inf for each row using stored panels.
-                            for (const auto &panel : approx.jac_[pf].dense_panels_) {
-                                for (int local_r = 0; local_r < panel.rows_; ++local_r) {
-                                    int i = panel.row_st_ + local_r;
-                                    if (i >= m) continue;
-                                    scalar_t rn = s[i] * panel.data_.row(local_r).cwiseAbs().maxCoeff();
-                                    if (rn > row_norms[i]) row_norms[i] = rn;
-                                }
-                            }
-                            for (const auto &panel : approx.jac_[pf].diag_panels_) {
-                                for (int local_r = 0; local_r < panel.rows_; ++local_r) {
-                                    int i = panel.row_st_ + local_r;
-                                    if (i >= m) continue;
-                                    scalar_t rn = s[i] * std::abs(panel.data_[local_r]);
-                                    if (rn > row_norms[i]) row_norms[i] = rn;
-                                }
-                            }
-                            for (const auto &panel : approx.jac_[pf].eye_panels_) {
-                                for (int local_r = 0; local_r < panel.rows_; ++local_r) {
-                                    int i = panel.row_st_ + local_r;
-                                    if (i >= m) continue;
-                                    if (s[i] > row_norms[i]) row_norms[i] = s[i]; // |1| * s[i]
-                                }
-                            }
-                        }
-                        for (int i = 0; i < m; ++i)
-                            s[i] /= std::max(min_s, row_norms[i]);
-                    }
-                    for (int i = 0; i < m; ++i)
-                        s[i] = std::max(min_s, s[i]);
-                }
-            }
-
-            // Cost gradient scaling is intentionally disabled.
-            // Q_y is propagated across stages during the backward Riccati recursion.
-            // Scaling Q_y in-place at each stage would therefore contaminate the
-            // cross-stage first-order value terms across the horizon.
-            d->scale_p_.fill(1.);
-        });
-    }
-
-    // ── Always apply the (possibly freshly computed) scale vectors ───────────
     // Only __eq_x / __eq_xu are scaled; __dyn is excluded because approx_[__dyn].jac_[__y]
     // is aliased to f_y_ in dense_dynamics — scaling it in-place corrupts the LU used by
     // compute_project_jacobians (proj_f_x_, proj_f_u_) and apply_jac_y_inverse_transpose.
     // Inequality constraints (IPM) are also excluded: their Jacobians and duals are aliased
     // into ipm_constr and managed internally by the IPM.
-    solver::for_each(solver::par, graph, [&](data *d) {
+    const auto apply_node_scaling = [](data *d) {
         for (field_t cf : hard_constr_fields_non_dyn) {
             const auto &s = d->scale_c_[cf];
             if (s.size() == 0)
@@ -229,6 +151,83 @@ void ns_sqp::compute_and_apply_scaling(const kkt_info &info) {
                     row_scale_inplace(approx.jac_[pf], s);
         }
         d->scaling_applied_ = true;
+    };
+    const auto compute_node_scaling = [&](data *d) {
+        const scalar_t min_s = sc.min_scale;
+
+        for (field_t cf : hard_constr_fields_non_dyn) {
+            auto &approx = d->dense().approx_[cf];
+            int m = (int)approx.v_.size();
+            if (m == 0) {
+                d->scale_c_[cf].resize(0);
+                continue;
+            }
+
+            vector &s = d->scale_c_[cf];
+            s.resize(m);
+
+            if (sc.mode == scaling_settings::mode_t::gradient) {
+                s.setZero();
+                for (field_t pf : primal_fields)
+                    if (!approx.jac_[pf].is_empty())
+                        accumulate_row_infnorms(approx.jac_[pf], s);
+                // Widen scale for rows with large residuals too
+                s = s.cwiseMax(approx.v_.cwiseAbs());
+                for (int i = 0; i < m; ++i)
+                    s[i] = 1. / std::max(min_s, s[i]);
+
+            } else { // equilibrium
+                s.setOnes();
+                for (size_t iter = 0; iter < sc.equilibrium_iters; ++iter) {
+                    // Work on a temporary copy so we don't touch approx in-place here.
+                    vector row_norms = s.cwiseAbs().cwiseProduct(approx.v_.cwiseAbs());
+                    for (field_t pf : primal_fields) {
+                        if (approx.jac_[pf].is_empty())
+                            continue;
+                        for (const auto &panel : approx.jac_[pf].dense_panels_) {
+                            for (int local_r = 0; local_r < panel.rows_; ++local_r) {
+                                int i = panel.row_st_ + local_r;
+                                if (i >= m) continue;
+                                scalar_t rn = s[i] * panel.data_.row(local_r).cwiseAbs().maxCoeff();
+                                if (rn > row_norms[i]) row_norms[i] = rn;
+                            }
+                        }
+                        for (const auto &panel : approx.jac_[pf].diag_panels_) {
+                            for (int local_r = 0; local_r < panel.rows_; ++local_r) {
+                                int i = panel.row_st_ + local_r;
+                                if (i >= m) continue;
+                                scalar_t rn = s[i] * std::abs(panel.data_[local_r]);
+                                if (rn > row_norms[i]) row_norms[i] = rn;
+                            }
+                        }
+                        for (const auto &panel : approx.jac_[pf].eye_panels_) {
+                            for (int local_r = 0; local_r < panel.rows_; ++local_r) {
+                                int i = panel.row_st_ + local_r;
+                                if (i >= m) continue;
+                                if (s[i] > row_norms[i]) row_norms[i] = s[i]; // |1| * s[i]
+                            }
+                        }
+                    }
+                    for (int i = 0; i < m; ++i)
+                        s[i] /= std::max(min_s, row_norms[i]);
+                }
+                for (int i = 0; i < m; ++i)
+                    s[i] = std::max(min_s, s[i]);
+            }
+        }
+
+        // Cost gradient scaling is intentionally disabled.
+        // Q_y is propagated across stages during the backward Riccati recursion.
+        // Scaling Q_y in-place at each stage would therefore contaminate the
+        // cross-stage first-order value terms across the horizon.
+        d->scale_p_.fill(1.);
+    };
+
+    solver::for_each(solver::par, graph, [&](data *d) {
+        if (needs_recompute) {
+            compute_node_scaling(d);
+        }
+        apply_node_scaling(d);
     });
 }
 

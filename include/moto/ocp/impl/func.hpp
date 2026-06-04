@@ -1,7 +1,6 @@
 #ifndef __MOTO_OCP_IMPL_FUNC_HPP__
 #define __MOTO_OCP_IMPL_FUNC_HPP__
 
-#include <moto/core/workspace_data.hpp>
 #include <moto/ocp/impl/func_data.hpp>
 #include <moto/utils/movable_ptr.hpp>
 #include <moto/utils/unique.hpp>
@@ -124,8 +123,6 @@ class generic_func : public expr {
         set_from_casadi(in_args, out);
     }
 
-    virtual void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const {}
-
     /// @brief get a shared duplicate of the function with different uid
     /// @param duplicate_args whether to copy the input arguments (with new uid) or just share the same arguments
     /// @warning make sure the func is finalized before calling this function, otherwise it will block the thread
@@ -134,8 +131,9 @@ class generic_func : public expr {
     generic_func(generic_func &&) = default;
     generic_func &operator=(generic_func &&) = default;
 
-    PROPERTY(order)
-    PROPERTY(in_args)
+    const auto &order() const { return order_; }
+    const auto &__get_order() const { return order_; }
+    const auto &in_args() const { return in_args_; }
     const auto &in_args(size_t i) const { return in_args_[i]; }
 
     const auto &jac_sparsity() const { return jac_sp_; }   ///< get the jacobian sparsity patterns
@@ -146,7 +144,7 @@ class generic_func : public expr {
         jac_sp_.push_back(sp);
     }
     void set_jac_sparsity(const sym &arg, sparsity sp) {
-        set_jac_sparsity(arg, {sp, 0, 0}); // compatibility
+        set_jac_sparsity(arg, {sp, 0, 0});
     }
     void set_hess_sparsity(const std::vector<std::vector<sp_info>> &sp) {
         field_write_guard();

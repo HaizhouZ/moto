@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
 #include <moto/ocp/impl/node_data.hpp>
 #include <moto/solver/ipm/ipm_constr.hpp>
 #include <moto/solver/ipm/positivity_step.hpp>

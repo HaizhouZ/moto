@@ -61,10 +61,10 @@ class soft_constr : public generic_constr {
     /// @brief load external implementation and then run hessian setup for soft constraints
     void load_external_impl(const std::string &path = "gen") override;
 
-    public:
+  public:
     using base::base; ///< inherit constructors
     soft_constr(generic_constr &&rhs) : base(std::move(rhs)) {
-        field_hint().is_soft = true; ///< set the field hint to soft
+        field_hint_.is_soft = true; ///< set the field hint to soft
     } ///< move constructor from generic_constr
     void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const override {
         base::setup_workspace_data(data, ws_data);
@@ -108,8 +108,6 @@ class soft_constr : public generic_constr {
     virtual scalar_t local_stat_residual_inf(const func_approx_data &data) const { return 0.; }
     /// @brief optional local complementarity summary owned by the constraint
     virtual scalar_t local_comp_residual_inf(const func_approx_data &data) const { return 0.; }
-
-    // soft_constr(base &&rhs) : base(std::move(rhs)) { field_hint().is_soft = true; } ///< move constructor from generic_constr
     /***
      * @brief make approximation data for the soft constraint, will use default @ref data_type
      */

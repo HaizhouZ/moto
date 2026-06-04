@@ -16,8 +16,8 @@ Checked files:
 - [src/solver/sqp_impl/line_search.cpp](/home/harper/Documents/moto/src/solver/sqp_impl/line_search.cpp)
 - [src/solver/sqp_impl/print_stat.cpp](/home/harper/Documents/moto/src/solver/sqp_impl/print_stat.cpp)
 - [src/solver/restoration/resto_overlay.cpp](/home/harper/Documents/moto/src/solver/restoration/resto_overlay.cpp)
-- [normal_iteration.md](/home/harper/Documents/moto/normal_iteration.md)
-- [restoration.md](/home/harper/Documents/moto/restoration.md)
+- [normal_iteration.md](/home/harper/Documents/moto/docs/normal_iteration.md)
+- [restoration.md](/home/harper/Documents/moto/docs/restoration.md)
 
 ## 1. Shared Outer Skeleton
 
@@ -49,7 +49,7 @@ phase problem.
 
 ### 2.2 Restoration
 
-Restoration now runs on a separate **overlay graph**.
+Restoration now runs on separate **overlay runtime storage**.
 Its original problem is:
 
 - hard dynamics remain hard
@@ -67,14 +67,14 @@ The solver shell is otherwise the same.
 
 ### 3.1 Normal
 
-Normal uses the main realized solver graph stored in the active `graph_model_state`.
+Normal uses the main linear solver storage lazily realized from `ns_sqp::model_graph_`.
 
 ### 3.2 Restoration
 
-Restoration does **not** mutate the normal graph in place.
+Restoration does **not** mutate the normal runtime storage in place.
 
-It creates a separate graph from composed finalized interval `edge_ocp`s and
-then builds restoration overlays on top of them.
+It creates separate runtime storage from composed finalized interval `edge_ocp`s
+and then builds restoration overlays on top of them.
 
 Therefore normal and restoration do **not** share:
 
@@ -128,7 +128,7 @@ Restoration uses the **same** NSP / Riccati machinery.
 
 It does not use a second Riccati implementation.
 The only difference is that the assembled stage problem comes from the
-restoration overlay graph rather than the normal graph.
+restoration overlay runtime storage rather than the normal runtime storage.
 
 ## 6. Iterative Refinement
 
@@ -138,11 +138,11 @@ Normal iterative refinement reduces the recovered original-phase Lagrangian
 stationarity residual in stage `x/u/y` coordinates.
 
 That is the contract documented in
-[normal_iteration.md](/home/harper/Documents/moto/normal_iteration.md).
+[normal_iteration.md](/home/harper/Documents/moto/docs/normal_iteration.md).
 
 ### 6.2 Restoration
 
-Restoration reuses the same iterative-refinement shell on the overlay graph.
+Restoration reuses the same iterative-refinement shell on the overlay runtime storage.
 
 Important current behavior:
 
@@ -270,7 +270,7 @@ The current implementation is now aligned in these ways:
 The current remaining issue is no longer dataflow ambiguity.
 It is numerical:
 
-- in the current `arm` case, restoration reaches the overlay graph correctly
+- in the current `arm` case, restoration reaches the overlay runtime storage correctly
 - restoration objective and search objective are re-evaluated correctly
 - but restoration still ends in tiny-step failure because useful primal progress
   only appears at extremely small accepted steps

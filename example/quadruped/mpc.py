@@ -266,7 +266,7 @@ class pinCasadiModel(cpin.Model):
         )
         return c
 
-    def add_dt_constr_and_cost(self, prob: moto.ocp, dt_nom: moto.var):
+    def add_dt_constr_and_cost(self, prob: moto.node_ocp, dt_nom: moto.var):
         if isinstance(self.dt, cs.SX):
             dt_bound = moto.sym.params(
                 "dt_bound", 2, default_val=np.array([1e-4, 5e-2])
@@ -280,7 +280,7 @@ class pinCasadiModel(cpin.Model):
             )
             prob.add(timing_cost)
 
-    def get_state_cost(self, terminal: bool = False):
+    def get_state_cost(self):
         q_nom_res = cpin.difference(self, self.q.sx, self.q_nom.sx)
         state_cost = (
             100.0 * cs.sumsqr(q_nom_res[:3])
@@ -292,8 +292,6 @@ class pinCasadiModel(cpin.Model):
         )
         state_args = self.pos_args + self.vel_args
         cost = moto.cost.create("c_mpc", state_args + [self.q_nom], state_cost)
-        if terminal:
-            return cost
         return cost
 
     def get_input_cost(self):
@@ -330,7 +328,7 @@ class pinCasadiModel(cpin.Model):
                 * cs.sumsqr(
                     (self.z_f - self.z_f_lift_d) * (1 - cs.vcat(self.active_foot))
                 ),
-            ).set_gauss_newton()
+            )
             return foot_lift_cost
 
 
@@ -353,8 +351,7 @@ model = pinCasadiModel(
     model, dt=dt, q_nom=q_d, dense=True, foot_frames=foot_frames, use_fwd_dyn=True
 )
 
-prob = moto.ocp.create()
-prob.add(model.dyn)
+prob = moto.node_ocp.create()
 if full:
     prob.add(model.fric)
 prob.add(model.kin_constr)
@@ -369,7 +366,9 @@ prob.add(model.get_input_cost())
 # prob.add(model.make_foot_lift_cost(lifted=True))
 
 prob_term = prob.clone()
-prob_term.add_terminal(model.get_state_cost(terminal=True))
+prob_term.add_terminal(model.get_state_cost())
+edge_prob = moto.edge_ocp.create()
+edge_prob.add(model.dyn)
 
 prob.print_summary()
 print("--" * 15)
@@ -383,10 +382,7 @@ gait_setting = {
     "hopping": [0, 0, 0, 0],
 }
 sqp = moto.sqp(n_job=10)
-g = sqp.graph
-n0 = g.add_head(sqp.create_node(prob))
-n1 = g.add_tail(sqp.create_node(prob_term))
-g.connect(n0, n1, N_horizon)
+sqp.graph.add_path(prob, prob_term, edge_prob, N_horizon)
 
 sqp.settings.ipm.mu0 = 0.1
 sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
@@ -442,9 +438,11 @@ sqp.settings.ipm.warm_start = False
 # warm start
 node_idx = 0
 current_time = 0.0
-sqp.apply_forward(stance_ref)
+for node in sqp.graph.flatten_nodes():
+    stance_ref(node)
 # n0.data.value[model.k_f] = 0
-nodes = sqp.active_data.flatten_nodes()
+nodes = sqp.graph.flatten_nodes()
+n0 = nodes[0]
 data = go2.model.createData()
 for n in nodes[:10]:
     for f in model.f_f:
@@ -461,19 +459,20 @@ with mujoco.viewer.launch_passive(mj_model, mj_data) as viewer:
     while viewer.is_running():
         loop_start = time.perf_counter()
         # Update initial state for MPC
-        n0.data.value[model.q] = mj_data.qpos.copy()
+        n0.value[model.q] = mj_data.qpos.copy()
         # convert mujoco quaternion to pinocchio format
-        n0.data.value[model.q][3:7] = np.array(
+        n0.value[model.q][3:7] = np.array(
             [mj_data.qpos[4], mj_data.qpos[5], mj_data.qpos[6], mj_data.qpos[3]]
         )
-        print("Current base:", n0.data.value[model.q])
-        n0.data.value[model.v] = mj_data.qvel.copy()
-        print("Current base velocity:", n0.data.value[model.v])
+        print("Current base:", n0.value[model.q])
+        n0.value[model.v] = mj_data.qvel.copy()
+        print("Current base velocity:", n0.value[model.v])
 
         # Update reference trajectory
         node_idx = 0
         current_time = mj_data.time
-        sqp.apply_forward(stance_ref)
+        for node in sqp.graph.flatten_nodes():
+            stance_ref(node)
         print(f"Updated reference trajectory for node {node_idx}")
         # Run MPC iteration
         mpc_st = time.perf_counter()
@@ -488,7 +487,7 @@ with mujoco.viewer.launch_passive(mj_model, mj_data) as viewer:
         # Extract and apply control
         # for n in nodes:
 
-        print("n0 reaction forces:", [n0.data.value[f] / dt for f in model.f_f])
+        print("n0 reaction forces:", [n0.value[f] / dt for f in model.f_f])
         for i, n in enumerate(nodes[0:5]):
             print(f"n{i} base state:\t\t", n.value[model.q][:7])
             print(f"n{i} base velocity:\t", n.value[model.v][:6])
@@ -509,22 +508,6 @@ with mujoco.viewer.launch_passive(mj_model, mj_data) as viewer:
                 "reaction forces:",
                 [n.value[f] / dt for f in model.f_f],
             )
-            # check the forward dynamics acceleration
-            # pin.computeJointJacobians(go2.model, data, n.value[model.q])
-            # Jac = [
-            #     pin.getFrameJacobian(go2.model, data, f, pin.LOCAL_WORLD_ALIGNED)[:3, :]
-            #     for f in model.foot_idx
-            # ]
-            # a = pin.aba(
-            #     go2.model,
-            #     data,
-            #     n.value[model.q],
-            #     n.value[model.v],
-            #     np.concatenate([np.zeros(6), n.value[model.tq]])
-            #     + sum(Jac[i].T @ n.value[f] for i, f in enumerate(model.f_f)) / dt,
-            # )
-            # print("forward dyn acc:", a)
-
         step = 0
         while step < update_interval:
             current_node_idx = int(step * sim_dt // dt + 1)

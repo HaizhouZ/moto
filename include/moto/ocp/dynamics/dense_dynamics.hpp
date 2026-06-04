@@ -30,7 +30,6 @@ class dense_dynamics : public generic_dynamics {
         aligned_map_t proj_f_x_;                           ///< Jacobian of x
         std::vector<aligned_map_t> proj_f_u_shared_;       ///< projection of f_u
         approx_data(generic_constr::approx_data &&rhs);
-        void reset() override;
         ~approx_data();
     };
 
@@ -50,16 +49,13 @@ class dense_dynamics : public generic_dynamics {
     /// @note should be called before finalization
     void mark_shared_inputs(const var_inarg_list &args);
 
+  private:
     bool input_shared(const sym &s) const {
         return shared_inputs_indices_.contains(s.uid());
     } ///< check if an input variable is shared
-
     size_t active_dim_exclusive_inputs(const ocp_base *prob) const;
     size_t active_dim_shared_inputs(const ocp_base *prob) const;
-    size_t active_num_exclusive_inputs(const ocp_base *prob) const;
-    size_t active_num_shared_inputs(const ocp_base *prob) const;
 
-  private:
     struct info : public generic_func::info {
         size_t num_exclusive_inputs_ = 0; ///< number of exclusive input variables (i.e., not shared)
         size_t num_shared_inputs_ = 0;    ///< number of shared input variables

@@ -2,16 +2,12 @@
 #include <moto/ocp/constr.hpp>
 #include <moto/ocp/cost.hpp>
 #include <moto/ocp/ineq_constr.hpp>
-#include <moto/ocp/pre_comp.hpp>
 #include <moto/ocp/sym.hpp>
-#include <moto/ocp/usr_func.hpp>
 #include <moto/solver/soft_constr/pmm_constr.hpp>
 #include <type_cast.hpp>
 
 #include <nanobind/stl/function.h>
 #include <nanobind/stl/variant.h>
-
-#include <moto/ocp/problem.hpp>
 
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
 
@@ -28,15 +24,30 @@ expr *get_expr_ptr(const nb::handle &h) {
         throw std::runtime_error("Unsupported type for cast_to_shared_expr");
     }
 }
-func &cast_to_func(const nb::handle &h) {
-    if (nb::isinstance<moto::func>(h)) {
-        return nb::cast<moto::func &>(h);
-    } else {
-        nb::print("Unsupported type for cast_to_func: ", h);
-        throw std::runtime_error("Unsupported type for cast_to_func");
+} // namespace moto
+
+namespace {
+moto::ineq_constr::box_bound_t cast_box_bound(const nb::handle &h) {
+    using namespace moto;
+
+    if (nb::isinstance<nb::float_>(h) || nb::isinstance<nb::int_>(h)) {
+        return nb::cast<scalar_t>(h);
+    }
+    if (nb::hasattr(h, "this")) {
+        return nb::cast<cs::SX>(h);
+    }
+    try {
+        return nb::cast<vector>(h);
+    } catch (const nb::cast_error &) {
+        auto values = nb::cast<std::vector<scalar_t>>(h);
+        vector out(values.size());
+        for (size_t i = 0; i < values.size(); ++i) {
+            out(static_cast<Eigen::Index>(i)) = values[i];
+        }
+        return out;
     }
 }
-} // namespace moto
+} // namespace
 namespace nanobind {
 namespace detail {
 template <>
@@ -69,12 +80,6 @@ struct type_caster<moto::var_inarg_list> {
 } // namespace detail
 } // namespace nanobind
 
-
-#define TO_SHARED_PTR(cls, ptr) std::shared_ptr<cls>(static_cast<cls *>(ptr))
-
-#define DEF_CLONE_FUNC(cls) \
-    def("clone", [](const cls &self) { return TO_SHARED_PTR(cls, self.clone()); })
-
 void register_submodule_functional(nb::module_ &m) {
     using namespace moto;
     export_enum<moto::approx_order>(m);
@@ -85,15 +90,12 @@ void register_submodule_functional(nb::module_ &m) {
             return fmt::format("expr({:p}, name={}, uid={}, dim={}, field={})",
                                static_cast<const void *>(&self), self.name(), self.uid(), self.dim(), self.field());
         })
-        .def_prop_rw("name", &expr::__get_name, &expr::__set_name)
-        .def_prop_rw("field", &expr::__get_field, &expr::__set_field)
-        .def_prop_rw("dim", &expr::__get_dim, &expr::__set_dim)
+        .def_prop_ro("name", &expr::__get_name)
+        .def_prop_ro("field", &expr::__get_field)
+        .def_prop_ro("dim", &expr::__get_dim)
         .def_prop_ro("uid", [](const expr &self) { return size_t(self.uid()); })
         .def("finalize", [](expr &self, bool block_until_ready) { return self.finalize(block_until_ready); }, nb::arg("block_until_ready") = true)
-        .def("wait_until_ready", [](expr &self) { return self.wait_until_ready(); })
-        .def_prop_ro("finalized", &expr::__get_finalized)
-        .def_prop_rw("tdim", &expr::__get_tdim, &expr::__set_tdim)
-        .def_prop_rw("default_active_status", &expr::__get_default_active_status, &expr::__set_default_active_status);
+        .def_prop_ro("tdim", &expr::__get_tdim);
 
     nb::class_<sym, expr>(m, "sym")
         .def("__str__", [](const sym &v) { return fmt::format("sym(name='{}', dim={}, field={}, uid={})",
@@ -116,28 +118,19 @@ void register_submodule_functional(nb::module_ &m) {
         .def_static("inputs", &sym::inputs, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
         .def_static("params", &sym::params, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none());
 
-    using func_callback_t = std::function<void(func_approx_data &)>;
-
     nb::class_<generic_func, expr>(m, "func")
         .def_prop_ro("in_args", [](generic_func &self) -> auto & { return static_cast<const std::vector<var> &>(self.in_args()); }, nb::rv_policy::reference_internal)
-        .def_prop_ro("num_args", [](generic_func &self, field_t f) { return self.arg_num(f); })
         .def_rw("value", &generic_func::value)
         .def_rw("jacobian", &generic_func::jacobian)
         .def_rw("hessian", &generic_func::hessian)
-        .def_prop_rw("order", &generic_func::__get_order, &generic_func::__set_order)
+        .def_prop_ro("order", &generic_func::__get_order)
         .def("__str__", [](const generic_func &f) { return fmt::format("func(name='{}', uid={}, order={}, dim={}, field={})",
                                                                        f.name(), f.uid(), f.order(), f.dim(), f.field()); })
         .def("enable_if_all", [](generic_func &self, const expr_inarg_list &args) { self.enable_if_all(args); }, nb::arg("args"))
         .def("disable_if_any", [](generic_func &self, const expr_inarg_list &args) { self.disable_if_any(args); }, nb::arg("args"))
         .def("enable_if_any", [](generic_func &self, const expr_inarg_list &args) { self.enable_if_any(args); }, nb::arg("args"))
         .def("add_argument", [](generic_func &self, py_var_inarg_wrapper v) { self.add_argument((sym &)v); }, nb::arg("in"))
-        .def("add_arguments", [](generic_func &self, const var_inarg_list &args) { self.add_arguments(args); })
-        .def("active_dim", &generic_func::active_dim)
-        .def("active_num", &generic_func::active_num)
-        .def("active_tdim", &generic_func::active_tdim)
-        .def("active_args", &generic_func::active_args)
-        .DEF_CLONE_FUNC(generic_func)
-        .def("create_approx_data", [](generic_func &self, sym_data &primal, lag_data &raw, shared_data &shared) { return self.create_approx_data(primal, raw, shared); }, nb::arg("primal"), nb::arg("raw"), nb::arg("shared"));
+        .def("add_arguments", [](generic_func &self, const var_inarg_list &args) { self.add_arguments(args); });
 
     nb::class_<generic_constr, generic_func>(m, "constr")
         .def_static(
@@ -152,10 +145,11 @@ void register_submodule_functional(nb::module_ &m) {
                 return std::make_shared<generic_constr>(name, order, dim, field);
             },
             nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined)
-        .DEF_CLONE_FUNC(generic_constr)
         .def(
             "cast_soft",
-            [](generic_constr &self, const std::string &type_name) { return TO_SHARED_PTR(generic_constr, self.cast_soft(type_name)); },
+            [](generic_constr &self, const std::string &type_name) {
+                return std::shared_ptr<generic_constr>(self.cast_soft(type_name));
+            },
             nb::arg("type_name") = "pmm_constr");
 
     nb::class_<ineq_constr, generic_constr>(m, "ineq")
@@ -176,18 +170,18 @@ void register_submodule_functional(nb::module_ &m) {
             [](const std::string &name,
                const var_inarg_list &args,
                const cs::SX &out,
-               const ineq_constr::box_bound_t &lb,
-               const ineq_constr::box_bound_t &ub,
+               const nb::handle &lb,
+               const nb::handle &ub,
                approx_order order,
                field_t field) {
-                return std::shared_ptr<generic_constr>(ineq_constr::create(name, args, out, lb, ub, order, field));
+                return std::shared_ptr<generic_constr>(
+                    ineq_constr::create(name, args, out, cast_box_bound(lb), cast_box_bound(ub), order, field));
             },
             nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("lb"), nb::arg("ub"),
             nb::arg("order") = approx_order::first, nb::arg("field") = field_t::__undefined);
 
     nb::class_<moto::pmm_constr, generic_constr>(m, "pmm_constr")
-        .def_rw("rho", &moto::pmm_constr::rho, "Dual penalty weight for the proximal multiplier method")
-        .DEF_CLONE_FUNC(moto::pmm_constr);
+        .def_rw("rho", &moto::pmm_constr::rho, "Dual penalty weight for the proximal multiplier method");
 
     nb::class_<generic_cost, generic_func>(m, "cost")
         .def_static(
@@ -202,36 +196,10 @@ void register_submodule_functional(nb::module_ &m) {
                 return std::make_shared<generic_cost>(name, order);
             },
             nb::arg("name"), nb::arg("order") = approx_order::second)
-        .DEF_CLONE_FUNC(generic_cost)
         .def("set_diag_hess",
              [](generic_cost &self) { return self.set_diag_hess(); })
-        .def("as_terminal",
-             [](generic_cost &self) { return self.as_terminal(); })
         .def("set_gauss_newton",
              [](generic_cost &self, const py_var_inarg_wrapper &v) { return self.set_gauss_newton(var((sym &)v)); });
-
-    // nb::class_<custom_func, func>(m, "custom_func")
-    //     .def_prop_rw(
-    //         "custom_call",
-    //         [](custom_func &self) { return self->custom_call; },
-    //         [](custom_func &self, const decltype(generic_custom_func::custom_call) &v) { self->custom_call = v; })
-    //     .def_prop_rw(
-    //         "create_custom_data",
-    //         [](custom_func &self) { return self->create_custom_data; },
-    //         [](custom_func &self, const decltype(generic_custom_func::create_custom_data) &v) { self->create_custom_data = v; });
-
-    // nb::class_<usr_func, custom_func>(m, "usr_func")
-    //     .def(
-    //         nb::init<const std::string &, const var_inarg_list &, const cs::SX &, approx_order>(),
-    //         nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("order") = approx_order::first)
-    //     .def(
-    //         nb::init<const std::string &, approx_order, size_t>(),
-    //         nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd);
-
-    // nb::class_<pre_compute, custom_func>(m, "pre_compute")
-    //     .def(
-    //         nb::init<const std::string &>(),
-    //         nb::arg("name") = "pre_compute");
 
     nb::class_<dense_dynamics, generic_constr>(m, "dense_dynamics")
         .def_static(
@@ -246,9 +214,5 @@ void register_submodule_functional(nb::module_ &m) {
                 return std::make_shared<dense_dynamics>(name, order, dim);
             },
             nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd)
-        .def("active_dim_exclusive_inputs", &dense_dynamics::active_dim_exclusive_inputs, nb::arg("prob"))
-        .def("active_dim_shared_inputs", &dense_dynamics::active_dim_shared_inputs, nb::arg("prob"))
-        .def("active_num_exclusive_inputs", &dense_dynamics::active_num_exclusive_inputs, nb::arg("prob"))
-        .def("active_num_shared_inputs", &dense_dynamics::active_num_shared_inputs, nb::arg("prob"))
         .def("mark_shared_inputs", &dense_dynamics::mark_shared_inputs, nb::arg("shared_inputs"));
 }

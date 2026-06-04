@@ -5,9 +5,8 @@ namespace moto {
 namespace solver {
 namespace ineq_soft {
 namespace {
-} // namespace
 
-void bind_runtime(const soft_constr &sf, soft_constr::data_map_t &sd) {
+void bind_runtime(const moto::soft_constr &sf, moto::soft_constr::data_map_t &sd) {
     if (sd.runtime_bound_) {
         return;
     }
@@ -30,36 +29,34 @@ void bind_runtime(const soft_constr &sf, soft_constr::data_map_t &sd) {
     sd.runtime_bound_ = true;
 }
 
+void invalidate_initialized(const moto::soft_constr &, moto::soft_constr::data_map_t &sd) {
+    sd.initialized_ = false;
+}
+
+void mark_initialized(const moto::soft_constr &, moto::soft_constr::data_map_t &sd) {
+    sd.initialized_ = true;
+}
+
+} // namespace
+
 void bind_runtime(node_data *cur) {
     for_each(cur, [](auto &&sf, auto &&sd) {
         bind_runtime(sf, sd);
     });
 }
 
-void invalidate_initialized(const soft_constr &, soft_constr_data_t &sd) {
-    sd.initialized_ = false;
-}
-
-void invalidate_initialized(node_data *cur) {
+void bind_and_invalidate(node_data *cur) {
     for_each(cur, [](auto &&sf, auto &&sd) {
+        bind_runtime(sf, sd);
         invalidate_initialized(sf, sd);
     });
 }
 
-void bind_and_invalidate(node_data *cur) {
-    bind_runtime(cur);
-    invalidate_initialized(cur);
-}
-
-void ensure_initialized(const soft_constr &sf, soft_constr_data_t &sd) {
+void ensure_initialized(const moto::soft_constr &sf, moto::soft_constr::data_map_t &sd) {
     if (!sd.initialized_) {
         sf.initialize(sd);
         sd.initialized_ = true;
     }
-}
-
-void mark_initialized(const soft_constr &, soft_constr_data_t &sd) {
-    sd.initialized_ = true;
 }
 
 void mark_initialized(node_data *cur) {
@@ -99,10 +96,15 @@ void restore_trial_state(node_data *cur) {
     });
 }
 void corrector_step_start(data_base *data) {
-    data->first_order_correction_start(
-        get_for_each([](auto &&sf, auto &&sd) {
+    auto *node = dynamic_cast<node_data *>(data);
+    if (node == nullptr) {
+        throw std::runtime_error("ineq_soft::corrector_step_start expects data_base to also be node_data");
+    }
+    data->first_order_correction_start([node]() {
+        for_each(node, [](auto &&sf, auto &&sd) {
             sf.apply_corrector_step(sd);
-        }));
+        });
+    });
 }
 void corrector_step_end(data_base *data) {
     data->first_order_correction_end();

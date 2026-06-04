@@ -9,7 +9,6 @@
 namespace moto {
 namespace solver {
 namespace ns_riccati {
-extern void print_debug(ns_riccati_data *cur);
 
 void generic_solver::ns_factorization_correction(ns_riccati_data *cur) {
     auto &d = *cur;

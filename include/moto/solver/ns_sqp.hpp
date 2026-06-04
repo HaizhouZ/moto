@@ -10,13 +10,13 @@
 #include <moto/ocp/constr.hpp>
 #include <moto/ocp/impl/node_data.hpp>
 #include <moto/solver/equality_init/eq_init_overlay.hpp>
+#include <moto/solver/ineq_soft.hpp>
 #include <moto/solver/ipm/ipm_config.hpp>
 #include <moto/solver/linear_runtime_graph.hpp>
 #include <moto/solver/linesearch_config.hpp>
 #include <moto/solver/ns_riccati/generic_solver.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
 #include <moto/solver/restoration/resto_overlay.hpp>
-#include <optional>
 #include <string>
 
 namespace moto {
@@ -48,7 +48,7 @@ struct ns_sqp {
         correction_primal_sensitivity,
         correction_fwd_rollout,
         correction_finalize,
-        correction_refresh_ls_bounds,
+        correction_finalize_ls_bounds,
         prepare_globalization,
         run_globalization,
         evaluate_trial_point,
@@ -104,9 +104,6 @@ struct ns_sqp {
     struct linesearch_setting : public solver::linesearch_config {
         bool enabled = true;       ///< whether to use line search
         size_t max_steps = 5;      ///< max line search steps
-        bool enable_soc = true;    ///< whether to try a second-order correction before backtracking
-        size_t max_soc_iter = 4;   ///< max number of second-order correction retries per SQP iteration (p_max in IPOPT)
-        scalar_t kappa_soc = 0.99; ///< SOC abort threshold: abort if θ(x_soc) > kappa_soc * θ_soc_old (IPOPT eq. A-5.9)
         enum class failure_backup_strategy : size_t {
             min_step,   ///< reset to the minimum step size
             best_trial, ///< reset to the best trial so far
@@ -183,7 +180,6 @@ struct ns_sqp {
         ipm_config &ipm;
         restoration_settings &restoration;
         equality_multiplier_init_settings &eq_init;
-        size_t max_iter = 100;  ///< maximum number of SQP iterations
         double prim_tol = 1e-6; ///< primal feasibility tolerance
         double dual_tol = 1e-4; ///< dual feasibility tolerance
         double comp_tol = 1e-6; ///< complementarity feasibility tolerance
@@ -205,11 +201,9 @@ struct ns_sqp {
       private:
         friend class ns_sqp;
         bool verbose = true;
-        size_t n_worker = MAX_THREADS; ///< number of worker threads
         bool in_restoration = false;
         bool has_ineq_soft = false; ///< whether the problem has inequality constraints (used to adjust printouts and possibly other settings)
         bool has_ipm_ineq = false;  ///< whether the problem contains true IPM inequalities (__ineq_x / __ineq_xu)
-        bool initialized = false;   ///< whether the settings have been initialized based on the problem (used to trigger one-time initialization in the first iteration, e.g. setting initial mu based on initial residuals)
     } settings;
 
     using solver_type = solver::ns_riccati::generic_solver;
@@ -221,9 +215,6 @@ struct ns_sqp {
             bind_soft_runtime_owner(this);
         }
         data(data &&rhs) = default;
-        static void update_approx(data *d) {
-            d->update_approximation();
-        }
         void backup_trial_state() override;
         void restore_trial_state() override;
         /// row scale applied to each constraint field (empty ⟹ scaling not yet applied)
@@ -241,11 +232,6 @@ struct ns_sqp {
         restoration_failed,           ///< restoration was triggered but failed to make sufficient progress
         restoration_reached_max_iter, ///< restoration reached its iteration budget without satisfying the exit test
         infeasible_stationary,        ///< reached an infeasible stationary point (e.g. due to LICQ failure) and cannot make progress
-    };
-
-    enum class iteration_phase : uint8_t {
-        normal,
-        restoration,
     };
 
     struct iter_info {
@@ -323,28 +309,20 @@ struct ns_sqp {
     kkt_info kkt_last;
     iter_info iter_last;
 
-    result_type update(size_t n_iter, bool verbose = true);
+    result_type update(size_t n_iter, bool verbose = true, bool profile = false);
     const profile_report &profile() const { return profile_report_; }
-    void reset_profile();
 
     struct node_type final {
         using data_type = data;
         std::unique_ptr<data_type> data_;
-        size_t storage_id_ = std::numeric_limits<size_t>::max();
-        node_type() = default;
-        explicit node_type(const ocp_ptr_t &formulation) {
-            data_ = std::make_unique<data_type>(formulation);
-        }
-        data_type *operator->() { return data_.get(); }
-        const data_type *operator->() const { return data_.get(); }
-        operator data_type &() { return *data_; }
-        operator const data_type &() const { return *data_; }
-        node_type(const node_type &rhs) {
-            if (rhs.data_) {
-                data_ = std::make_unique<data_type>(rhs.data_->problem_ptr());
-            }
-        }
+        explicit node_type(const ocp_ptr_t &formulation)
+            : data_(std::make_unique<data_type>(formulation)) {}
+        data_type &payload() { return *data_; }
+        const data_type &payload() const { return *data_; }
+        node_type(const node_type &) = delete;
+        node_type &operator=(const node_type &) = delete;
         node_type(node_type &&rhs) noexcept = default;
+        node_type &operator=(node_type &&rhs) noexcept = default;
     };
 
     ns_sqp(size_t n_jobs = MAX_THREADS);
@@ -352,65 +330,42 @@ struct ns_sqp {
     ~ns_sqp() = default;
     using storage_type = linear_runtime_graph<node_type>;
 
-    void reset_riccati_solver(solver_type *s) {
-        riccati_solver_.reset(s);
-    }
-
-    graph_model &create_graph() {
-        active_model_graph_ = std::make_shared<graph_model>();
-        solver_runtime_ = std::make_shared<storage_type>(graph_n_jobs_);
-        solver_runtime_revision_ = 0;
-        restoration_runtime_.reset();
-        restoration_runtime_revision_ = 0;
-        restoration_cfg_valid_ = false;
-        equality_init_runtime_.reset();
-        equality_init_runtime_revision_ = 0;
-        equality_init_cfg_valid_ = false;
-        return *active_model_graph_;
-    }
-
-    graph_model &graph() {
-        if (!active_model_graph_) {
-            throw std::runtime_error("ns_sqp has no active model graph; call create_graph() first");
-        }
-        return *active_model_graph_;
-    }
-
-    const graph_model &graph() const {
-        if (!active_model_graph_) {
-            throw std::runtime_error("ns_sqp has no active model graph; call create_graph() first");
-        }
-        return *active_model_graph_;
-    }
-
-    storage_type &active_data();
+    graph_model &graph() noexcept { return model_graph_; }
+    const graph_model &graph() const noexcept { return model_graph_; }
+    std::vector<data *> &solver_nodes();
 
   private:
     struct filter_linesearch_data;
 
+    storage_type &active_data();
     storage_type &restoration_graph();
     storage_type &equality_init_graph();
-    void clear_phase_graph_override() { phase_graph_override_ = nullptr; }
-    void set_phase_graph_override(storage_type &graph) { phase_graph_override_ = &graph; }
-    bool using_restoration_overlay_graph() const {
-        return settings.in_restoration && phase_graph_override_ != nullptr && restoration_runtime_ &&
-               restoration_runtime_.get() == phase_graph_override_;
-    }
-
-    std::unique_ptr<solver_type> riccati_solver_ = nullptr;
-    std::shared_ptr<graph_model> active_model_graph_;
-    std::shared_ptr<storage_type> solver_runtime_;
+    template <typename StageBuilder>
+    void realize_runtime(storage_type &runtime, StageBuilder &&stage_builder);
+    struct scoped_phase_graph_override {
+        ns_sqp &owner;
+        bool in_restoration_backup;
+        scoped_phase_graph_override(ns_sqp &owner, storage_type &graph, bool in_restoration);
+        scoped_phase_graph_override(const scoped_phase_graph_override &) = delete;
+        scoped_phase_graph_override &operator=(const scoped_phase_graph_override &) = delete;
+        void use_graph(storage_type &graph, bool in_restoration);
+        void use_default_graph(bool in_restoration);
+        ~scoped_phase_graph_override();
+    };
+    solver_type riccati_solver_;
+    graph_model model_graph_;
+    size_t graph_n_jobs_ = MAX_THREADS;
+    storage_type solver_runtime_;
     size_t solver_runtime_revision_ = 0;
-    std::shared_ptr<storage_type> restoration_runtime_;
+    storage_type restoration_runtime_;
     size_t restoration_runtime_revision_ = 0;
     solver::restoration::restoration_overlay_settings restoration_cfg_{};
     bool restoration_cfg_valid_ = false;
-    std::shared_ptr<storage_type> equality_init_runtime_;
+    storage_type equality_init_runtime_;
     size_t equality_init_runtime_revision_ = 0;
     solver::equality_init::equality_init_overlay_settings equality_init_cfg_{};
     bool equality_init_cfg_valid_ = false;
     storage_type *phase_graph_override_ = nullptr;
-    size_t graph_n_jobs_ = MAX_THREADS;
 
     template <typename worker_type>
     struct stacked_workers : public std::vector<worker_type> {
@@ -429,13 +384,12 @@ struct ns_sqp {
     struct profile_state {
         std::array<double, static_cast<size_t>(profile_phase::count)> total_ms{};
         std::array<size_t, static_cast<size_t>(profile_phase::count)> calls{};
-        std::array<double, static_cast<size_t>(profile_phase::count)> iter_ms{};
-        std::array<size_t, static_cast<size_t>(profile_phase::count)> iter_calls{};
         profile_clock::time_point update_start{};
         profile_clock::time_point iter_start{};
         size_t current_trial_evaluations = 0;
         size_t total_trial_evaluations = 0;
         std::vector<profile_iteration> iterations;
+        bool enabled = false;
 
         void reset();
         void start_update();
@@ -450,6 +404,7 @@ struct ns_sqp {
         ns_sqp *owner = nullptr;
         profile_phase phase = profile_phase::initialize_total;
         profile_clock::time_point start{};
+        scoped_profile() = default;
         scoped_profile(ns_sqp *owner, profile_phase phase);
         scoped_profile(const scoped_profile &) = delete;
         scoped_profile &operator=(const scoped_profile &) = delete;
@@ -458,7 +413,9 @@ struct ns_sqp {
         ~scoped_profile();
     };
 
-    scoped_profile profile_scope(profile_phase phase) { return scoped_profile(this, phase); }
+    scoped_profile profile_scope(profile_phase phase) {
+        return profiler_.enabled ? scoped_profile(this, phase) : scoped_profile{};
+    }
     static const char *profile_phase_name(profile_phase phase);
     profile_report profile_report_;
     /// print statistics header
@@ -468,8 +425,9 @@ struct ns_sqp {
     void update_primal_info(kkt_info &base, point_value_mask mask);
     void update_step_info(kkt_info &base, step_info_mask mask);
     void update_stat_info(kkt_info &base);
-    bool initialize_equality_multipliers(bool refresh_outer_derivatives = true);
-    result_type restoration_update(const kkt_info &kkt_before, const iter_info &iter_before, filter_linesearch_data &ls);
+    bool initialize_equality_multipliers(storage_type &outer_graph, bool refresh_outer_derivatives = true);
+    result_type restoration_update(const kkt_info &kkt_before, const iter_info &iter_before,
+                                   filter_linesearch_data &ls, size_t update_iter_limit);
     /// perform iterative refinement to improve the solution accuracy, will modify the current solution in place
     void iterative_refinement();
     /// update the line search bounds with the (probably updated) max value
@@ -494,20 +452,12 @@ struct ns_sqp {
         enum class failure_reason_t : uint8_t {
             none,
             tiny_step,
-            other,
         };
-        bool recompute_approx = true;
         bool stop = false;                                                  ///< whether to stop the line search
-        bool enforce_min = false;                                           ///< whether to enforce the minimum step size
-        size_t soc_iter_cnt = 0;                                            ///< number of second-order correction attempts in the current SQP iteration
-        bool skip_soc = false;                                              ///< whether to skip second-order correction
-        scalar_t theta_soc_old = std::numeric_limits<scalar_t>::infinity(); ///< θ(x_k) at SOC entry, for κ_soc abort check (IPOPT A-5.9)
         size_t step_cnt = 0;                                                ///< current line search step
         scalar_t initial_alpha_primal = 0.;
         scalar_t initial_alpha_dual = 0.;
         scalar_t alpha_min = 0.;
-        bool switching_condition = false; ///< whether the switching condition for line search is met (used to decide whether to require Armijo decrease in the line search)
-        bool armijo_cond_met = false;     ///< whether the Armijo condition is met for the current trial step
         failure_reason_t failure_reason = failure_reason_t::none;
         void reset_per_iter_data() {
             new (this) filter_linesearch_per_iter_data();
@@ -517,7 +467,6 @@ struct ns_sqp {
         /***** filter part *****/
         struct point {
             scalar_t prim_res = std::numeric_limits<scalar_t>::infinity();
-            scalar_t dual_res = std::numeric_limits<scalar_t>::infinity();
             scalar_t objective = std::numeric_limits<scalar_t>::infinity();
             /// @check if a point is in the filter
             bool in_filter(const point &filter_entry, const settings_t &settings) const;
@@ -541,10 +490,12 @@ struct ns_sqp {
         };
         struct trial : public point, public solver::linesearch_config {
         } best_trial;
+        struct step_decision {
+            bool accept = false;
+            bool update_filter = false;
+        };
         std::vector<point> points;                                           ///< filter for accepting line search steps
         scalar_t constr_vio_min = std::numeric_limits<scalar_t>::infinity(); ///< constraint violation bound for switching condition in line search
-        bool last_step_was_armijo = false;
-        size_t filter_reject_cnt = 0; ///< number of consecutive filter rejections, used for adaptive strategies in line search
 
         void update_filter(const kkt_info &kkt, settings_t &settings);
         static normal_filter_eval_result evaluate_normal_filter_step(const std::vector<point> &filter_points,
@@ -553,9 +504,9 @@ struct ns_sqp {
                                                                      scalar_t constr_vio_min,
                                                                      const settings_t &settings,
                                                                      bool allow_flat_objective = true);
-        bool try_step(const kkt_info &trial_kkt,
-                      const kkt_info &current_kkt,
-                      settings_t &settings);
+        step_decision try_step(const kkt_info &trial_kkt,
+                               const kkt_info &current_kkt,
+                               settings_t &settings);
 
         /***** merit backtracking part (used when settings.ls.method == merit_backtracking) *****/
         scalar_t merit_fullstep = std::numeric_limits<scalar_t>::infinity(); ///< merit value at full step (alpha=1), for directional derivative estimate
@@ -568,7 +519,6 @@ struct ns_sqp {
         void augment_filter_for_restoration_start(const kkt_info &reference_kkt, settings_t &settings) {
             points.push_back(point{
                 .prim_res = (1.0 - settings.ls.primal_gamma) * reference_kkt.primal.res_l1,
-                .dual_res = reference_kkt.dual.inf_res,
                 .objective = reference_kkt.barrier_objective.augmented_objective - settings.ls.dual_gamma * reference_kkt.primal.res_l1,
             });
         }
@@ -577,14 +527,12 @@ struct ns_sqp {
     enum class line_search_action {
         accept,
         backtrack,
-        retry_second_order_correction,
         failure,
     };
 
     struct iteration_context {
         kkt_info current;
         kkt_info trial;
-        iteration_phase phase = iteration_phase::normal;
         line_search_action action = line_search_action::accept;
         bool mu_changed = false;
     };
@@ -596,43 +544,50 @@ struct ns_sqp {
                                          const kkt_info &current_kkt);
     line_search_action merit_linesearch(filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &current_kkt);
     bool outer_filter_accepts(const filter_linesearch_data &ls, const kkt_info &trial_kkt, const kkt_info &reference_kkt);
-    bool in_restoration_phase() const { return settings.in_restoration; }
-    bool use_normal_soft_phase() const { return !settings.in_restoration; }
 
-    void second_order_correction();
-    void refresh_problem_flags();
+    void refresh_problem_flags(storage_type &graph);
     void ineq_constr_correction(iteration_context &ctx);
     void ineq_constr_prediction();
     /// initialize the solver before the first iteration or after a reset, returns the initial kkt info
-    kkt_info initialize();
+    kkt_info initialize(storage_type &graph);
     void post_factorization_correction_step();
     void finalize_correction(data *d);
     void reset_ls_workers();
-    void refresh_ls_bounds();
     template <typename Prepare, typename Finalize>
     void run_correction_step(Prepare &&prepare, Finalize &&finalize) {
-        solver::for_each(solver::par, active_data(),
+        auto &graph = active_data();
+        solver::for_each(solver::par, graph,
             [prepare = std::forward<Prepare>(prepare)](data *d) mutable {
                 std::invoke(prepare, d);
             });
         post_factorization_correction_step();
         {
             auto phase_profile = profile_scope(profile_phase::correction_finalize);
-            solver::for_each(solver::par, active_data(),
-                [finalize = std::forward<Finalize>(finalize)](data *d) mutable {
-                    std::invoke(finalize, d);
-                });
+            if (settings.has_ineq_soft) {
+                reset_ls_workers();
+                solver::for_each(solver::par, graph,
+                    [this, finalize = std::forward<Finalize>(finalize)](size_t tid, data *d) mutable {
+                        std::invoke(finalize, d);
+                        solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
+                    });
+            } else {
+                solver::for_each(solver::par, graph,
+                    [finalize = std::forward<Finalize>(finalize)](data *d) mutable {
+                        std::invoke(finalize, d);
+                    });
+                reset_ls_workers();
+            }
         }
         {
-            auto phase_profile = profile_scope(profile_phase::correction_refresh_ls_bounds);
-            refresh_ls_bounds();
+            auto phase_profile = profile_scope(profile_phase::correction_finalize_ls_bounds);
+            finalize_ls_bound_and_set_to_max();
         }
     }
     void solve_direction(iteration_context &ctx, bool do_scaling, bool gauss_newton);
     void correct_direction(iteration_context &ctx, bool do_refinement);
     void prepare_globalization(filter_linesearch_data &ls, iteration_context &ctx);
-    bool evaluate_trial_point(filter_linesearch_data &ls, iteration_context &ctx);
-    void accept_trial_point(filter_linesearch_data &ls, iteration_context &ctx);
+    bool evaluate_trial_point(iteration_context &ctx);
+    void accept_trial_point(iteration_context &ctx);
     line_search_action select_globalization_action(filter_linesearch_data &ls, iteration_context &ctx);
     line_search_action handle_globalization_failure(filter_linesearch_data &ls, iteration_context &ctx);
     line_search_action run_globalization(filter_linesearch_data &ls, iteration_context &ctx);
@@ -652,24 +607,6 @@ struct ns_sqp {
     line_search_action sqp_iter(filter_linesearch_data &ls, kkt_info &kkt_current,
                                 bool do_scaling, bool do_refinement,
                                 bool gauss_newton = false);
-    /**
-     * @brief Bind a callback to the current @ref riccati_solver_ instance
-     *
-     * @tparam Func function type
-     * @param f function to be bound, must have the first argument as a pointer to @ref solver_type
-     * @return decltype(auto) the bound function
-     * @note the function can have any number of additional arguments
-     */
-    template <typename Func>
-    decltype(auto) solver_call(Func f) {
-        using arg_type = utils::func_traits<decltype(f)>::arg_types;
-        auto make_wrapper = [this, f]<typename... Args>(std::tuple<Args...> *) {
-            return [this, f](Args... args) {
-                std::invoke(f, riccati_solver_, std::forward<Args>(args)...);
-            };
-        };
-        return make_wrapper((arg_type *)nullptr);
-    }
 };
 
 } // namespace moto

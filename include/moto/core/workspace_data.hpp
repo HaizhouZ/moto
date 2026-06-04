@@ -3,6 +3,8 @@
 
 #include <concepts>
 #include <moto/core/fwd.hpp>
+#include <stdexcept>
+#include <typeinfo>
 
 namespace moto {
 /**
@@ -16,11 +18,10 @@ struct workspace_data {
      */
     template <typename T>
     T &as() {
-        try {
-            return dynamic_cast<T &>(*this);
-        } catch (const std::bad_cast &e) {
-            throw std::runtime_error(fmt::format("Invalid cast from workspace_data to {}", typeid(T).name()));
+        if (auto *ptr = dynamic_cast<T *>(this)) {
+            return *ptr;
         }
+        throw std::runtime_error(fmt::format("Invalid cast from workspace_data to {}", typeid(T).name()));
     }
 
     virtual ~workspace_data() = default;

@@ -30,7 +30,7 @@ function(add_moto_test name)
     #     COMPILE_DEFINITIONS "$<$<CONFIG:Debug>:NDEBUG>"
     # )
     
-    add_test(NAME ${test_name} COMMAND ${test_name} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(NAME ${test_name} COMMAND ${test_name} ${ARGN} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     set_tests_properties(
         ${test_name}
         PROPERTIES
@@ -57,12 +57,4 @@ add_moto_test(ineq_jac_sparsity)
 add_moto_test(graph_model_compose)
 add_moto_test(equality_multiplier_init)
 add_moto_test(restoration)
-# add_moto_test(expr_ownership)
-# add_moto_test(constr_cast)
-# add_moto_test(dynamics)
-# add_moto_test(field_conversion)
-# add_moto_test(spmm)
-# add_moto_test(dynamics_cen)
-# add_moto_test(blasfeo_factor)
-# add_moto_test(multibody_euler)
-# target_link_libraries(multibody_euler_test PRIVATE )
+add_moto_test(spmm --rng-seed 1)

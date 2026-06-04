@@ -10,10 +10,6 @@ dense_dynamics::approx_data::~approx_data() {
     }
 }
 
-void dense_dynamics::approx_data::reset() {
-    new (lu_.get()) lu_t(); // reset the LU factorizer
-}
-
 dense_dynamics::approx_data::approx_data(generic_constr::approx_data &&rhs)
     : generic_dynamics::approx_data(std::move(rhs)), lu_(new lu_t()) {
     auto &prob = *lag_data_->prob_;
@@ -163,12 +159,6 @@ size_t dense_dynamics::active_dim_exclusive_inputs(const ocp_base *prob) const {
 }
 size_t dense_dynamics::active_dim_shared_inputs(const ocp_base *prob) const {
     access_ocp_info(dim_shared_inputs_);
-}
-size_t dense_dynamics::active_num_exclusive_inputs(const ocp_base *prob) const {
-    access_ocp_info(num_exclusive_inputs_);
-}
-size_t dense_dynamics::active_num_shared_inputs(const ocp_base *prob) const {
-    access_ocp_info(num_shared_inputs_);
 }
 bool dense_dynamics::setup_ocpwise_info(const ocp_base *prob) const {
     if (generic_func::setup_ocpwise_info(prob)) {

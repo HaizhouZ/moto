@@ -23,23 +23,11 @@ struct expr_list : public std::vector<shared_expr> {
 
 constexpr size_t dim_tbd = 0;
 
-#define CONST_PROPERTY(mem_name) \
-    const auto &mem_name() const { return mem_name##_; }
-
-#define PROPERTY(mem_name)                                                             \
-    auto &mem_name() { return mem_name##_; }                                           \
-    const auto &mem_name() const { return mem_name##_; }                               \
-    void __set_##mem_name(const decltype(mem_name##_) &value) { mem_name##_ = value; } \
-    const auto &__get_##mem_name() const { return mem_name##_; }
-
 class ocp_base;
 /**
  * @brief general expression base class (now merged with impl)
  */
 class expr : public std::enable_shared_from_this<expr>, public utils::clone_base<expr> {
-  public:
-    static size_t max_uid; /// < uid used to index global expressions
-
   protected:
     class async_ready_status {
       private:
@@ -75,13 +63,26 @@ class expr : public std::enable_shared_from_this<expr>, public utils::clone_base
     expr(const expr &rhs); ///< copy constructor
 
   public:
-    PROPERTY(name);                 ///< getter for name
-    PROPERTY(dim);                  ///< getter for dim
-    PROPERTY(uid);                  ///< getter for uid
-    PROPERTY(field);                ///< getter for field
-    PROPERTY(finalized);            ///< getter for finalized
-    PROPERTY(tdim)                  ///< tangent space dimension of the symbolic variable
-    PROPERTY(default_active_status) ///< default active status when added to an ocp
+    auto &name() { return name_; }
+    const auto &name() const { return name_; }
+    const auto &__get_name() const { return name_; }
+
+    const auto &dim() const { return dim_; }
+    const auto &__get_dim() const { return dim_; }
+
+    const auto &uid() const { return uid_; }
+
+    const auto &field() const { return field_; }
+    const auto &__get_field() const { return field_; }
+
+    const auto &finalized() const { return finalized_; }
+    const auto &__get_finalized() const { return finalized_; }
+
+    auto &tdim() { return tdim_; }
+    const auto &tdim() const { return tdim_; }
+    const auto &__get_tdim() const { return tdim_; }
+
+    bool default_active_status() const { return default_active_status_; }
 
     auto &dep() { return dep_; } ///< get the dependencies of this expression
 
@@ -97,9 +98,6 @@ class expr : public std::enable_shared_from_this<expr>, public utils::clone_base
             add_dep(e);
         }
     }
-
-    virtual void add_to_ocp_callback(ocp_base *) {} /// callback when added to an ocp
-    virtual void prepare_add_to_ocp(bool terminal) {}
 
     explicit operator bool() const { return uid_.is_valid(); }
 

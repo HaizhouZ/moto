@@ -5,7 +5,6 @@
 #include <moto/solver/ns_riccati/generic_solver.hpp>
 #include <moto/solver/ns_sqp.hpp>
 #include <moto/utils/field_conversion.hpp>
-#include <numeric>
 
 // #define ENABLE_TIMED_BLOCK
 #define SHOW_DETAIL_TIMING
@@ -36,24 +35,30 @@ scalar_t max_abs_or_zero(const row_vector &v) {
 } // namespace
 
 void ns_sqp::profile_state::reset() {
+    const bool keep_enabled = enabled;
     total_ms.fill(0.0);
     calls.fill(0);
-    iter_ms.fill(0.0);
-    iter_calls.fill(0);
     update_start = {};
     iter_start = {};
     current_trial_evaluations = 0;
     total_trial_evaluations = 0;
     iterations.clear();
+    enabled = keep_enabled;
 }
 
 void ns_sqp::profile_state::start_update() {
     reset();
+    if (!enabled) {
+        return;
+    }
     update_start = profile_clock::now();
 }
 
 void ns_sqp::profile_state::finish_update(profile_report &report) const {
     report = {};
+    if (!enabled) {
+        return;
+    }
     report.total_ms = std::chrono::duration<double, std::milli>(profile_clock::now() - update_start).count();
     report.initialize_ms = total_ms[static_cast<size_t>(profile_phase::initialize_total)];
     report.sqp_iterations = iterations.size();
@@ -75,14 +80,18 @@ void ns_sqp::profile_state::finish_update(profile_report &report) const {
 }
 
 void ns_sqp::profile_state::start_iteration(size_t index) {
-    iter_ms.fill(0.0);
-    iter_calls.fill(0);
+    if (!enabled) {
+        return;
+    }
     current_trial_evaluations = 0;
     iter_start = profile_clock::now();
     iterations.push_back(profile_iteration{.index = index + 1});
 }
 
 void ns_sqp::profile_state::finish_iteration(size_t ls_steps) {
+    if (!enabled) {
+        return;
+    }
     auto &iter = iterations.back();
     iter.total_ms = std::chrono::duration<double, std::milli>(profile_clock::now() - iter_start).count();
     iter.ls_steps = ls_steps;
@@ -90,14 +99,18 @@ void ns_sqp::profile_state::finish_iteration(size_t ls_steps) {
 }
 
 void ns_sqp::profile_state::record(profile_phase phase, double elapsed_ms) {
+    if (!enabled) {
+        return;
+    }
     const size_t idx = static_cast<size_t>(phase);
     total_ms[idx] += elapsed_ms;
     ++calls[idx];
-    iter_ms[idx] += elapsed_ms;
-    ++iter_calls[idx];
 }
 
 void ns_sqp::profile_state::bump_trial_evaluation() {
+    if (!enabled) {
+        return;
+    }
     ++current_trial_evaluations;
     ++total_trial_evaluations;
 }
@@ -133,25 +146,19 @@ const char *ns_sqp::profile_phase_name(profile_phase phase) {
     return name.empty() ? "unknown" : name.data();
 }
 
-void ns_sqp::reset_profile() {
-    profiler_.reset();
-    profile_report_ = {};
-}
-
-void ns_sqp::refresh_problem_flags() {
+void ns_sqp::refresh_problem_flags(storage_type &graph) {
     settings.has_ineq_soft = false;
     settings.has_ipm_ineq = false;
-    for (data &n : active_data().nodes()) {
+    for (data *n : graph.flatten_nodes()) {
         for (auto ct : ineq_soft_constr_fields) {
-            if (n.problem().dim(ct) > 0) {
+            if (n->problem().dim(ct) > 0) {
                 settings.has_ineq_soft = true;
-                break;
-            }
-        }
-        for (auto ct : ineq_constr_fields) {
-            if (n.problem().dim(ct) > 0) {
-                settings.has_ipm_ineq = true;
-                break;
+                if (in_field(ct, ineq_constr_fields)) {
+                    settings.has_ipm_ineq = true;
+                }
+                if (settings.has_ipm_ineq) {
+                    break;
+                }
             }
         }
         if (settings.has_ineq_soft && settings.has_ipm_ineq) {
@@ -160,25 +167,23 @@ void ns_sqp::refresh_problem_flags() {
     }
 }
 
-ns_sqp::kkt_info ns_sqp::initialize() {
+ns_sqp::kkt_info ns_sqp::initialize(storage_type &graph) {
     auto total_profile = profile_scope(profile_phase::initialize_total);
-    auto &graph = active_data();
     if (settings.verbose)
         fmt::print("Initialization for SQP...\n");
-    refresh_problem_flags();
+    refresh_problem_flags(graph);
     if (!settings.ipm.warm_start)
         settings.ipm.mu = settings.ipm.mu0; // initialize mu before setting up workspace data, as it may be used in the workspace data setup
     {
         auto phase_profile = profile_scope(profile_phase::initialize_setup_eval);
         solver::for_each(solver::par, graph, [this](data *cur) {
             // setup solver settings
-            cur->for_each_constr([this](const generic_func &c, func_approx_data &d) { c.setup_workspace_data(d, &settings); });
+            cur->for_each_constr([this](const generic_constr &c, func_approx_data &d) { c.setup_workspace_data(d, &settings); });
             solver::ineq_soft::bind_runtime(cur);
             cur->update_approximation(node_data::update_mode::eval_all);
         });
-        settings.initialized = true;
     }
-    initialize_equality_multipliers();
+    initialize_equality_multipliers(graph);
     kkt_info kkt;
     {
         auto phase_profile = profile_scope(profile_phase::initialize_kkt);
@@ -188,7 +193,6 @@ ns_sqp::kkt_info ns_sqp::initialize() {
     reset_scaling(); // clear scale vectors; will be recomputed on first iteration
     // print statistics header
     if (settings.verbose) {
-        // print_scaling_info();
         print_stat_header();
         print_stats(kkt, iter_info{}, 0); // print initial stats
     }
@@ -200,42 +204,34 @@ void ns_sqp::post_factorization_correction_step() {
     {
         auto phase_profile = profile_scope(profile_phase::correction_riccati_recursion);
         detail_timed_block_start("riccati_recursion_correction");
-        solver::for_each(solver::seq, solver::backward_edges(graph, true),
-                     solver_call(&solver_type::riccati_recursion_correction));
+        solver::for_each(solver::seq, solver::backward_edges(graph),
+                     [this](data *cur, data *prev) {
+                         riccati_solver_.riccati_recursion_correction(cur, prev);
+                     });
         detail_timed_block_end("riccati_recursion_correction");
     }
     {
         auto phase_profile = profile_scope(profile_phase::correction_primal_sensitivity);
-        solver::for_each(solver::par, graph,
-                     solver_call(&solver_type::compute_primal_sensitivity_correction));
+        solver::for_each(solver::par, graph, [this](data *cur) {
+            riccati_solver_.compute_primal_sensitivity_correction(cur);
+        });
     }
     {
         auto phase_profile = profile_scope(profile_phase::correction_fwd_rollout);
-        solver::for_each(solver::seq, solver::forward_edges(graph, true),
-                     solver_call(&solver_type::fwd_linear_rollout_correction));
+        solver::for_each(solver::seq, solver::forward_edges(graph),
+                     [this](data *cur, data *next) {
+                         riccati_solver_.fwd_linear_rollout_correction(cur, next);
+                     });
     }
 }
 void ns_sqp::finalize_correction(data *d) {
-    riccati_solver_->finalize_primal_step_correction(d);
+    riccati_solver_.finalize_primal_step_correction(d);
     solver::ineq_soft::finalize_newton_step(d);
 }
 
 void ns_sqp::reset_ls_workers() {
     settings.ls.reset();
-    setting_per_thread.reset(settings.n_worker);
-}
-
-void ns_sqp::refresh_ls_bounds() {
-    reset_ls_workers();
-    if (!settings.has_ineq_soft) {
-        finalize_ls_bound_and_set_to_max();
-        return;
-    }
-    auto &graph = active_data();
-    solver::for_each(solver::par, graph, [this](size_t tid, data *d) {
-        solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
-    });
-    finalize_ls_bound_and_set_to_max();
+    setting_per_thread.reset(graph_n_jobs_);
 }
 
 void ns_sqp::ineq_constr_correction(iteration_context &ctx) {
@@ -250,8 +246,8 @@ void ns_sqp::ineq_constr_correction(iteration_context &ctx) {
         settings.ipm.ipm_end_predictor_computation(); // ipm affine step computation is done
         // collect worker ipm data
         solver::ipm_config::worker main_worker{};
-        for (size_t i : range(settings.n_worker)) {
-            main_worker += setting_per_thread[i].as<solver::ipm_config::worker_type>();
+        for (auto &worker_cfg : setting_per_thread) {
+            main_worker += worker_cfg.as<solver::ipm_config::worker_type>();
         }
         if (settings.has_ipm_ineq) {
             settings.ipm.adaptive_mu_update(main_worker);
@@ -286,7 +282,7 @@ void ns_sqp::solve_direction(iteration_context &ctx, bool do_scaling, bool gauss
         auto ns_factor_profile = profile_scope(profile_phase::ns_factorization);
         detail_timed_block_start("ns factorization");
         solver::for_each(solver::par, graph, [this, gauss_newton](data *d) {
-            riccati_solver_->ns_factorization(d, gauss_newton);
+            riccati_solver_.ns_factorization(d, gauss_newton);
         });
         detail_timed_block_end("ns factorization");
     }
@@ -294,22 +290,27 @@ void ns_sqp::solve_direction(iteration_context &ctx, bool do_scaling, bool gauss
     {
         auto recursion_profile = profile_scope(profile_phase::riccati_recursion);
         detail_timed_block_start("riccati_recursion");
-        solver::for_each(solver::seq, solver::backward_edges(graph, true),
-                     solver_call(&solver_type::riccati_recursion));
+        solver::for_each(solver::seq, solver::backward_edges(graph),
+                     [this](data *cur, data *prev) {
+                         riccati_solver_.riccati_recursion(cur, prev);
+                     });
         detail_timed_block_end("riccati_recursion");
     }
     {
         auto post_solve_profile = profile_scope(profile_phase::post_solve);
         detail_timed_block_start("post solve");
-        solver::for_each(solver::par, graph,
-                     solver_call(&solver_type::compute_primal_sensitivity));
+        solver::for_each(solver::par, graph, [this](data *cur) {
+            riccati_solver_.compute_primal_sensitivity(cur);
+        });
         detail_timed_block_end("post solve");
     }
     {
         auto rollout_profile = profile_scope(profile_phase::fwd_linear_rollout);
         detail_timed_block_start("fwd_linear_rollout");
-        solver::for_each(solver::seq, solver::forward_edges(graph, true),
-                     solver_call(&solver_type::fwd_linear_rollout));
+        solver::for_each(solver::seq, solver::forward_edges(graph),
+                     [this](data *cur, data *next) {
+                         riccati_solver_.fwd_linear_rollout(cur, next);
+                     });
         detail_timed_block_end("fwd_linear_rollout");
     }
 
@@ -320,13 +321,13 @@ void ns_sqp::solve_direction(iteration_context &ctx, bool do_scaling, bool gauss
         detail_timed_block_start("finalize_primal_step");
         if (settings.has_ineq_soft) {
             solver::for_each(solver::par, graph, [this](size_t tid, data *d) {
-                riccati_solver_->finalize_primal_step(d);
+                riccati_solver_.finalize_primal_step(d);
                 solver::ineq_soft::finalize_newton_step(d);
                 solver::ineq_soft::update_ls_bounds(d, &setting_per_thread[tid]);
             });
         } else {
             solver::for_each(solver::par, graph, [this](data *d) {
-                riccati_solver_->finalize_primal_step(d);
+                riccati_solver_.finalize_primal_step(d);
             });
         }
         detail_timed_block_end("finalize_primal_step");
@@ -336,7 +337,6 @@ void ns_sqp::solve_direction(iteration_context &ctx, bool do_scaling, bool gauss
 
 void ns_sqp::correct_direction(iteration_context &ctx, bool do_refinement) {
     auto phase_profile = profile_scope(profile_phase::correct_direction);
-    auto &graph = active_data();
     {
         auto corrector_profile = profile_scope(profile_phase::ineq_corrector_step);
         detail_timed_block_start("ineq_corrector_step");
@@ -359,8 +359,8 @@ void ns_sqp::prepare_globalization(filter_linesearch_data &ls, iteration_context
     ls.merit_fullstep = std::numeric_limits<scalar_t>::infinity();
     ls.best_merit_trial = filter_linesearch_data::merit_trial{};
 
-    solver::for_each(solver::par, graph, [this](size_t tid, data *d) {
-        riccati_solver_->finalize_dual_newton_step(d);
+    solver::for_each(solver::par, graph, [this](data *d) {
+        riccati_solver_.finalize_dual_newton_step(d);
         unscale_duals(d);
         d->backup_trial_state();
     });
@@ -373,29 +373,29 @@ void ns_sqp::prepare_globalization(filter_linesearch_data &ls, iteration_context
     update_step_info(ctx.current, step_info_mask::orig_step | step_info_mask::barrier_step);
 }
 
-bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context &ctx) {
+bool ns_sqp::evaluate_trial_point(iteration_context &ctx) {
     auto phase_profile = profile_scope(profile_phase::evaluate_trial_point);
     auto &graph = active_data();
     profiler_.bump_trial_evaluation();
     const bool need_trial_stat =
         settings.ls.method == linesearch_setting::search_method::merit_backtracking ||
-        in_restoration_phase();
+        settings.in_restoration;
+    const auto trial_update_mode = need_trial_stat ? node_data::update_mode::eval_all
+                                                   : node_data::update_mode::eval_val;
     {
         auto apply_profile = profile_scope(profile_phase::apply_affine_step);
         detail_timed_block_start("apply_affine_step");
-        const auto trial_update_mode = need_trial_stat ? node_data::update_mode::eval_all
-                                                       : node_data::update_mode::eval_val;
         if (settings.has_ineq_soft) {
             solver::for_each(solver::par, graph, [this, trial_update_mode](data *d) {
                 d->restore_trial_state();
-                riccati_solver_->apply_affine_step(d, &settings);
+                riccati_solver_.apply_affine_step(d, &settings);
                 solver::ineq_soft::apply_affine_step(d, &settings);
                 d->update_approximation(trial_update_mode, true);
             });
         } else {
             solver::for_each(solver::par, graph, [this, trial_update_mode](data *d) {
                 d->restore_trial_state();
-                riccati_solver_->apply_affine_step(d, &settings);
+                riccati_solver_.apply_affine_step(d, &settings);
                 d->update_approximation(trial_update_mode, true);
             });
         }
@@ -412,23 +412,19 @@ bool ns_sqp::evaluate_trial_point(filter_linesearch_data &ls, iteration_context 
         update_primal_info(ctx.trial, point_value_mask::primal | point_value_mask::barrier_objective);
         detail_timed_block_end("update_res_stat");
     }
-    // Restoration filter trials evaluate derivatives for trial statistics, but
-    // the accepted-step refresh still has stateful soft/IPM side effects.
-    return settings.ls.method == linesearch_setting::search_method::merit_backtracking;
+    return trial_update_mode == node_data::update_mode::eval_all;
 }
 
-void ns_sqp::accept_trial_point(filter_linesearch_data &ls, iteration_context &ctx) {
+void ns_sqp::accept_trial_point(iteration_context &ctx) {
     auto phase_profile = profile_scope(profile_phase::accept_trial_point);
     auto &graph = active_data();
     {
         auto accepted_profile = profile_scope(profile_phase::update_approx_accepted);
         detail_timed_block_start("update_approx_accepted");
-        if (settings.ls.method != linesearch_setting::search_method::merit_backtracking) {
-            solver::for_each(solver::par, graph, [this](data *d) {
-                d->update_approximation(node_data::update_mode::eval_derivatives, true);
-            });
-            update_stat_info(ctx.trial);
-        }
+        solver::for_each(solver::par, graph, [this](data *d) {
+            d->update_approximation(node_data::update_mode::eval_derivatives, true);
+        });
+        update_stat_info(ctx.trial);
         detail_timed_block_end("update_approx_accepted");
     }
     ctx.current.accept(ctx.trial);
@@ -446,7 +442,7 @@ ns_sqp::line_search_action ns_sqp::select_globalization_action(filter_linesearch
 
 ns_sqp::line_search_action ns_sqp::handle_globalization_failure(filter_linesearch_data &ls, iteration_context &ctx) {
     if (!settings.ls.enabled) {
-        accept_trial_point(ls, ctx);
+        accept_trial_point(ctx);
         return line_search_action::accept;
     }
 
@@ -467,23 +463,18 @@ ns_sqp::line_search_action ns_sqp::handle_globalization_failure(filter_linesearc
 ns_sqp::line_search_action ns_sqp::run_globalization(filter_linesearch_data &ls, iteration_context &ctx) {
     auto phase_profile = profile_scope(profile_phase::run_globalization);
     while (true) {
-        bool has_trial_derivatives = evaluate_trial_point(ls, ctx);
+        bool has_trial_derivatives = evaluate_trial_point(ctx);
 
         ctx.action = select_globalization_action(ls, ctx);
 
         switch (ctx.action) {
         case line_search_action::accept:
             if (!has_trial_derivatives)
-                accept_trial_point(ls, ctx);
+                accept_trial_point(ctx);
             else
                 ctx.current.accept(ctx.trial);
             return ctx.action;
-        case line_search_action::retry_second_order_correction:
-            second_order_correction();
-            break;
         case line_search_action::backtrack:
-            if (!ls.recompute_approx)
-                throw std::runtime_error("Backtrack requested without recompute");
             break;
         case line_search_action::failure:
             return handle_globalization_failure(ls, ctx);
@@ -496,7 +487,6 @@ ns_sqp::line_search_action ns_sqp::sqp_iter(filter_linesearch_data &ls, kkt_info
     auto phase_profile = profile_scope(profile_phase::sqp_iter_total);
     iteration_context ctx{
         .current = kkt_current, // must do this because prepare_globalization will only update the step info
-        .phase = in_restoration_phase() ? iteration_phase::restoration : iteration_phase::normal,
     };
     reset_ls_workers();
     solve_direction(ctx, do_scaling, gauss_newton);
@@ -521,15 +511,21 @@ void ns_sqp::update_step_info(kkt_info &kkt, step_info_mask mask) {
     if (compute_barrier_step_info)
         reset_part(kkt.barrier_step);
 
-    solver::for_each(solver::seq, solver::forward_edges(graph, true),
-        [&](data *d, data * /*next*/) {
-            if (compute_original_step_info) {
+    solver::for_each(solver::seq, graph,
+        [&](data *d) {
+            if (compute_original_step_info || compute_barrier_step_info) {
                 for (auto f : primal_fields) {
-                    if (d->trial_prim_step[f].size() == 0) {
+                    const auto &step = d->trial_prim_step[f];
+                    if (step.size() == 0) {
                         continue;
                     }
-                    kkt.step.inf_prim_step = std::max(kkt.step.inf_prim_step, d->trial_prim_step[f].cwiseAbs().maxCoeff());
+                    if (compute_original_step_info)
+                        kkt.step.inf_prim_step = std::max(kkt.step.inf_prim_step, step.cwiseAbs().maxCoeff());
+                    if (compute_barrier_step_info)
+                        kkt.barrier_step.augmented_objective_fullstep_dec += d->dense().cost_jac_[f].dot(step);
                 }
+            }
+            if (compute_original_step_info) {
                 for (auto f : constr_fields) {
                     if (d->trial_dual_step[f].size() == 0) {
                         continue;
@@ -544,11 +540,6 @@ void ns_sqp::update_step_info(kkt_info &kkt, step_info_mask mask) {
                 }
             }
             if (compute_barrier_step_info) {
-                for (auto f : primal_fields) {
-                    if (d->trial_prim_step[f].size() == 0)
-                        continue;
-                    kkt.barrier_step.augmented_objective_fullstep_dec += d->dense().cost_jac_[f].dot(d->trial_prim_step[f]);
-                }
                 d->for_each<ineq_soft_constr_fields>([&](const soft_constr &c, soft_constr::data_map_t &sd) {
                     kkt.barrier_step.augmented_objective_fullstep_dec += c.objective_penalty_dir_deriv(sd);
                     kkt.barrier_step.search_barrier_dir_deriv += c.search_penalty_dir_deriv(sd);
@@ -570,25 +561,26 @@ void ns_sqp::update_primal_info(kkt_info &kkt, point_value_mask mask) {
     }
     if (include_barrier_objective) {
         reset_part(kkt.barrier_objective);
-        if (!include_primal) {
-        }
     }
 
-    solver::for_each(solver::seq, solver::forward_edges(graph, true),
-        [&](node_data *cur, node_data * /*next*/) {
+    solver::for_each(solver::seq, graph,
+        [&](node_data *cur) {
             if (include_primal) {
                 kkt.primal.inf_res = std::max(kkt.primal.inf_res, cur->inf_prim_res_);
                 kkt.primal.res_l1 += cur->prim_res_l1_;
                 kkt.primal.inf_comp = std::max(kkt.primal.inf_comp, cur->inf_comp_res_);
-                cur->for_each<ineq_soft_constr_fields>([&](const soft_constr &c, soft_constr::data_map_t &sd) {
-                    kkt.primal.inf_comp = std::max(kkt.primal.inf_comp, c.local_comp_residual_inf(sd));
-                });
             }
             if (include_barrier_objective) {
                 kkt.barrier_objective.cost += cur->cost();
+            }
+            if (include_primal || include_barrier_objective) {
                 cur->for_each<ineq_soft_constr_fields>([&](const soft_constr &c, soft_constr::data_map_t &sd) {
-                    kkt.barrier_objective.augmented_objective += c.objective_penalty(sd);
-                    kkt.barrier_objective.barrier_value += c.search_penalty(sd);
+                    if (include_primal)
+                        kkt.primal.inf_comp = std::max(kkt.primal.inf_comp, c.local_comp_residual_inf(sd));
+                    if (include_barrier_objective) {
+                        kkt.barrier_objective.augmented_objective += c.objective_penalty(sd);
+                        kkt.barrier_objective.barrier_value += c.search_penalty(sd);
+                    }
                 });
             }
         });
@@ -605,7 +597,8 @@ void ns_sqp::update_stat_info(kkt_info &kkt) {
     const auto update_dual_inf_res = [&kkt](const row_vector &r) {
         kkt.dual.inf_res = std::max(kkt.dual.inf_res, max_abs_or_zero(r));
     };
-    solver::for_each(solver::seq, solver::forward_edges(graph, true),
+    row_vector projected_y_stat;
+    solver::for_each(solver::seq, solver::forward_edges(graph),
         [&](node_data *cur, node_data *next) {
             for (auto cf : constr_fields) {
                 const auto &lam = cur->dense().dual_[cf];
@@ -629,19 +622,18 @@ void ns_sqp::update_stat_info(kkt_info &kkt) {
                 update_dual_inf_res(cur->dense().lag_jac_[__u]);
             }
             if (next != nullptr) [[likely]] {
-                row_vector tmp;
-                tmp.conservativeResize(next->dense().lag_jac_[__x].cols());
-                tmp.noalias() = next->dense().lag_jac_[__x] *
-                                    utils::permutation_from_y_to_x(&cur->problem(), &next->problem()) +
-                                cur->dense().lag_jac_[__y];
-                if (tmp.size() > 0) {
-                    update_dual_inf_res(tmp);
+                projected_y_stat.resize(next->dense().lag_jac_[__x].cols());
+                projected_y_stat.noalias() = next->dense().lag_jac_[__x] *
+                                                 utils::permutation_from_y_to_x(&cur->problem(), &next->problem()) +
+                                             cur->dense().lag_jac_[__y];
+                if (projected_y_stat.size() > 0) {
+                    update_dual_inf_res(projected_y_stat);
                 }
             } else if (cur->dense().lag_jac_[__y].size() > 0) {
                 update_dual_inf_res(cur->dense().lag_jac_[__y]);
             }
         });
-    if (!in_restoration_phase() && kkt.dual.n_constr > 0) {
+    if (!settings.in_restoration && kkt.dual.n_constr > 0) {
         const scalar_t s_d = std::max(static_cast<scalar_t>(settings.s_max),
                                       kkt.dual.lambda_l1 / static_cast<scalar_t>(kkt.dual.n_constr)) /
                              static_cast<scalar_t>(settings.s_max);
@@ -649,21 +641,19 @@ void ns_sqp::update_stat_info(kkt_info &kkt) {
     }
 }
 
-ns_sqp::result_type ns_sqp::update(size_t n_iter, bool verbose) {
-    reset_profile();
+ns_sqp::result_type ns_sqp::update(size_t n_iter, bool verbose, bool profile) {
+    profiler_.enabled = profile;
+    profiler_.reset();
+    profile_report_ = {};
     profiler_.start_update();
     settings.verbose = verbose;
     auto &graph = active_data();
-    graph.no_except() = settings.no_except;
-    settings.n_worker = graph.n_jobs();
+    graph.set_no_except(settings.no_except);
     iter_last = {};
-    kkt_last = initialize();
+    kkt_last = initialize(graph);
     try {
         filter_linesearch_data ls;
         ls.constr_vio_min = std::max(kkt_last.primal.res_l1 * settings.ls.constr_vio_min_frac, settings.prim_tol);
-        // ls.constr_vio_min = kkt_last.primal.res_l1 * settings.ls.constr_vio_min_frac;
-        refresh_problem_flags();
-        settings.max_iter = n_iter;
         for (size_t i_iter = iter_last.num_iter; i_iter < n_iter;) {
             if (verbose) {
                 fmt::println("======================== Iteration: {}", i_iter + 1);
@@ -690,7 +680,7 @@ ns_sqp::result_type ns_sqp::update(size_t n_iter, bool verbose) {
                 settings.ls.alpha_primal <= current_linesearch_alpha_min(ls);
 
             if (tiny_step_trigger) {
-                auto resto = restoration_update(kkt_last, iter_last, ls);
+                auto resto = restoration_update(kkt_last, iter_last, ls, n_iter);
                 kkt_last = resto;
                 iter_last = resto.iter;
                 ls.reset_per_iter_data();
@@ -753,10 +743,12 @@ ns_sqp::result_type ns_sqp::update(size_t n_iter, bool verbose) {
             if (settings.verbose)
                 fmt::print("Exception caught during SQP iterations. Terminating.\n");
         } else {
+            profiler_.enabled = false;
             throw;
         }
     }
     profiler_.finish_update(profile_report_);
+    profiler_.enabled = false;
     result_type result;
     static_cast<kkt_info &>(result) = kkt_last;
     result.iter = iter_last;

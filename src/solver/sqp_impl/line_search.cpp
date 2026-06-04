@@ -1,10 +1,6 @@
 #include <algorithm>
 #include <cmath>
 #include <moto/solver/ns_sqp.hpp>
-// #define ENABLE_TIMED_BLOCK
-#include <moto/utils/timed_block.hpp>
-#define SHOW_DETAIL_TIMING
-#include <moto/solver/ineq_soft.hpp>
 
 namespace moto {
 
@@ -31,7 +27,6 @@ void ns_sqp::finalize_ls_bound_and_set_to_max() {
 void ns_sqp::filter_linesearch_data::update_filter(const kkt_info &current_kkt, settings_t &settings) {
     const point current_point{
         .prim_res = current_kkt.primal.res_l1,
-        .dual_res = current_kkt.dual.inf_res,
         .objective = current_kkt.barrier_objective.ls_objective,
     };
     points.erase(
@@ -60,13 +55,11 @@ ns_sqp::filter_linesearch_data::evaluate_normal_filter_step(const std::vector<po
         .trial_point =
             {
                 .prim_res = trial_kkt.primal.res_l1,
-                .dual_res = trial_kkt.dual.inf_res,
                 .objective = trial_kkt.barrier_objective.ls_objective,
             },
         .current_point =
             {
                 .prim_res = current_kkt.primal.res_l1,
-                .dual_res = current_kkt.dual.inf_res,
                 .objective = current_kkt.barrier_objective.ls_objective,
             },
     };
@@ -126,9 +119,10 @@ ns_sqp::filter_linesearch_data::evaluate_normal_filter_step(const std::vector<po
     return result;
 }
 
-bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt,
-                                              const kkt_info &current_kkt,
-                                              settings_t &settings) {
+ns_sqp::filter_linesearch_data::step_decision
+ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt,
+                                         const kkt_info &current_kkt,
+                                         settings_t &settings) {
     auto log = [&]<typename... Args>(fmt::format_string<Args...> fmt_str, Args &&...args) {
         if (settings.verbose)
             fmt::print(fmt_str, std::forward<Args>(args)...);
@@ -136,17 +130,18 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt,
 
     const auto eval =
         evaluate_normal_filter_step(points, trial_kkt, current_kkt, constr_vio_min, settings);
-    switching_condition = eval.switching_condition;
-    armijo_cond_met = eval.armijo_cond_met;
+    const step_decision decision{
+        .accept = eval.accepted,
+        .update_filter = eval.accepted && (!eval.switching_condition || !eval.armijo_cond_met),
+    };
 
     log("  switching condition: {}, armijo condition: {}\n",
-        switching_condition ? "met" : "not met", armijo_cond_met ? "met" : "not met");
+        eval.switching_condition ? "met" : "not met", eval.armijo_cond_met ? "met" : "not met");
     log("  cost step dec: {:.3e}, full step decrease: {:.3e}, switching lhs: {:.3e}, switching rhs: {:.3e}\n",
         current_kkt.barrier_step.augmented_objective_fullstep_dec, eval.fullstep_dec, eval.switching_lhs, eval.switching_rhs);
 
     auto log_flat_obj = [&]() -> bool {
         if (eval.accepted_by_flat_objective) {
-            last_step_was_armijo = false;
             log("  trial point accepted by flat-objective condition (fullstep_dec={:.3e}, prim_res={:.3e}, comp_res={:.3e}, step_norm={:.3e})\n",
                 eval.fullstep_dec, current_kkt.primal.res_l1, current_kkt.primal.inf_comp,
                 current_kkt.step.inf_dual_step);
@@ -159,40 +154,39 @@ bool ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt,
     };
 
     if (eval.dominated_by_filter) {
-        filter_reject_cnt++;
         log("  trial point rejected by filter (primal res: {:.3e}, objective: {:.3e}), dominated by filter point (primal res: {:.3e}, objective: {:.3e})\n",
             eval.trial_point.prim_res, eval.trial_point.objective,
             eval.dominating_filter_point.prim_res,
             eval.dominating_filter_point.objective);
-        return log_flat_obj();
+        log_flat_obj();
+        return decision;
     }
-    filter_reject_cnt = 0;
 
-    if (!settings.in_restoration && switching_condition && current_kkt.primal.res_l1 <= constr_vio_min) {
+    if (!settings.in_restoration && eval.switching_condition && current_kkt.primal.res_l1 <= constr_vio_min) {
         if (eval.accepted_by_armijo) {
-            last_step_was_armijo = true;
             log("  trial point accepted by Armijo condition in switching mode (primal res: {:.3e}, objective: {:.3e}), armijo target: {:.3e}\n",
                 eval.trial_point.prim_res, eval.trial_point.objective,
                 eval.armijo_target);
-            return true;
+            return decision;
         }
         log("  trial point rejected by Armijo condition in switching mode (primal res: {:.3e}, objective: {:.3e}), armijo target: {:.3e}\n",
             eval.trial_point.prim_res, eval.trial_point.objective,
             eval.armijo_target);
-        return log_flat_obj();
+        log_flat_obj();
+        return decision;
     }
 
     if (eval.accepted_by_filter) {
-        last_step_was_armijo = false;
         log("  trial point accepted by filter condition in non-switching mode (primal res: {:.3e}, objective: {:.3e}) sufficient progress wrt current point (primal res: {:.3e}, objective: {:.3e})\n",
             eval.trial_point.prim_res, eval.trial_point.objective,
             eval.current_point.prim_res, eval.current_point.objective);
-        return true;
+        return decision;
     }
     log("  trial point rejected by filter condition in non-switching mode (primal res: {:.3e}, objective: {:.3e}), dominated by current point (primal res: {:.3e}, objective: {:.3e})\n",
         eval.trial_point.prim_res, eval.trial_point.objective,
         eval.current_point.prim_res, eval.current_point.objective);
-    return log_flat_obj();
+    log_flat_obj();
+    return decision;
 }
 
 bool ns_sqp::outer_filter_accepts(const filter_linesearch_data &ls,
@@ -225,12 +219,8 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
                                                      const kkt_info &current_kkt) {
     const filter_linesearch_data::point trial_point{
         .prim_res = trial_kkt.primal.res_l1,
-        .dual_res = trial_kkt.dual.inf_res,
         .objective = trial_kkt.barrier_objective.ls_objective,
     };
-
-    if (ls.step_cnt == 0 && trial_kkt.primal.res_l1 < current_kkt.primal.res_l1)
-        ls.skip_soc = true;
 
     const scalar_t fullstep_dec = current_kkt.barrier_step.ls_objective_fullstep_dec;
     ls.alpha_min = current_linesearch_alpha_min(ls);
@@ -238,7 +228,6 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     // Update best trial
     if (trial_point.prim_res < ls.best_trial.prim_res || trial_point.objective < ls.best_trial.objective) {
         ls.best_trial.prim_res = trial_point.prim_res;
-        ls.best_trial.dual_res = trial_point.dual_res;
         ls.best_trial.objective = trial_point.objective;
         ls.best_trial.alpha_primal = settings.ls.alpha_primal;
         ls.best_trial.alpha_dual = settings.ls.alpha_dual;
@@ -255,20 +244,12 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
         }
     }
 
-    const bool accept = ls.try_step(trial_kkt, current_kkt, settings);
+    const auto decision = ls.try_step(trial_kkt, current_kkt, settings);
 
-    if (accept || ls.stop) {
-        ls.recompute_approx = false;
-        if (accept && !ls.stop && (!ls.switching_condition || !ls.armijo_cond_met))
+    if (decision.accept) {
+        if (decision.update_filter)
             ls.update_filter(current_kkt, settings);
-        return accept ? line_search_action::accept : line_search_action::failure;
-    }
-
-    ls.recompute_approx = true;
-    // try second-order correction (IPOPT §3.4 / A-5.5): only on the first rejection,
-    // only when rejected by filter (not Armijo), and κ_soc abort not triggered.
-    if (settings.ls.enable_soc && ls.step_cnt == 0 && !ls.skip_soc &&
-        ls.soc_iter_cnt < settings.ls.max_soc_iter && !ls.switching_condition) {
+        return line_search_action::accept;
     }
 
     const scalar_t current_primal = current_kkt.primal.res_l1;
@@ -280,7 +261,6 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
             if (settings.in_restoration || current_kkt.primal.inf_res > settings.prim_tol) {
                 ls.stop = true;
                 ls.failure_reason = filter_linesearch_per_iter_data::failure_reason_t::tiny_step;
-                ls.recompute_approx = false;
                 if (settings.verbose)
                     fmt::print("  line search reached min step: alpha_p {:.3e} <= alpha_min {:.3e} with prim_res {:.3e}\n",
                                settings.ls.alpha_primal, ls.alpha_min, current_primal);
@@ -289,7 +269,7 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
                 if (settings.verbose) {
                     fmt::print("  line search reached min step: alpha_p {:.3e} <= alpha_min {:.3e} with prim_res {:.3e}\n",
                                settings.ls.alpha_primal, ls.alpha_min, current_primal);
-                    fmt::print("   but the current primal residual is still above the tolerance\n");
+                    fmt::print("   continuing because the current primal residual is within tolerance\n");
                 }
             }
         }
@@ -301,7 +281,6 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
 
     // Line search failed. The fallback step is only applied when explicitly enabled.
     ls.stop = true;
-    ls.failure_reason = filter_linesearch_per_iter_data::failure_reason_t::other;
     if (settings.ls.on_failure == linesearch_setting::on_failure_action::abort) {
         if (settings.verbose)
             fmt::print("  ls failed after max steps; aborting without fallback\n");
@@ -311,7 +290,6 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     if (settings.ls.failure_strategy == linesearch_setting::failure_backup_strategy::min_step) {
         if (settings.verbose)
             fmt::print("  ls failed, use min primal step...\n");
-        ls.enforce_min = true;
         settings.ls.alpha_primal = ls.initial_alpha_primal * std::min(0.01 / ls.initial_alpha_primal, 1.0);
     } else {
         if (settings.verbose) {
@@ -329,7 +307,6 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
                      fullstep_dec, ls.best_trial.prim_res, ls.best_trial.objective);
     }
     ls.update_filter(current_kkt, settings);
-    ls.recompute_approx = true;
     return line_search_action::backtrack;
 }
 
@@ -365,12 +342,10 @@ ns_sqp::line_search_action ns_sqp::merit_linesearch(filter_linesearch_data &ls,
     const scalar_t armijo_target = merit_k + settings.ls.armijo_dec_frac * settings.ls.alpha_primal * dir_deriv;
     const bool accept = merit_trial <= armijo_target;
 
-    if (accept || ls.stop) {
-        ls.recompute_approx = false;
-        return accept ? line_search_action::accept : line_search_action::failure;
+    if (accept) {
+        return line_search_action::accept;
     }
 
-    ls.recompute_approx = true;
     if (settings.ls.max_steps > ls.step_cnt) {
         ls.step_cnt++;
         step_back_alpha(ls);
@@ -381,7 +356,6 @@ ns_sqp::line_search_action ns_sqp::merit_linesearch(filter_linesearch_data &ls,
 
     // Line search failed. The fallback step is only applied when explicitly enabled.
     ls.stop = true;
-    ls.failure_reason = filter_linesearch_per_iter_data::failure_reason_t::other;
     if (settings.ls.on_failure == linesearch_setting::on_failure_action::abort) {
         if (settings.verbose)
             fmt::print("  merit ls failed after max steps; aborting without fallback\n");
@@ -391,7 +365,6 @@ ns_sqp::line_search_action ns_sqp::merit_linesearch(filter_linesearch_data &ls,
     if (settings.ls.failure_strategy == linesearch_setting::failure_backup_strategy::min_step) {
         if (settings.verbose)
             fmt::print("  merit ls failed, use min primal step...\n");
-        ls.enforce_min = true;
         settings.ls.alpha_primal = ls.initial_alpha_primal * std::min(0.01 / ls.initial_alpha_primal, 1.0);
     } else {
         if (settings.verbose)
@@ -405,11 +378,7 @@ ns_sqp::line_search_action ns_sqp::merit_linesearch(filter_linesearch_data &ls,
         fmt::println(" merit line search failed, merit_k: {:.3e}, best merit: {:.3e}\n",
                      merit_k, ls.best_merit_trial.merit);
     }
-    ls.recompute_approx = true;
     return line_search_action::backtrack;
-}
-
-void ns_sqp::second_order_correction() {
 }
 
 } // namespace moto

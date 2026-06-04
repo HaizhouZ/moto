@@ -14,56 +14,45 @@ import numpy as np
 
 def main():
     x = moto.sym.states("x", 4)[0]
+    dt = moto.sym.params("dt", 1)
     p_lb = moto.sym.params("p_lb", 4)
     p_ub = moto.sym.params("p_ub", 4)
 
-    box_numeric = moto.ineq.create(
-        "x_box_numeric",
-        [x],
-        x.sx,
-        np.array([-1.0, 0.0, -2.0, 1.0]),
-        np.array([2.0, 3.0, 4.0, 5.0]),
-    )
-
-    box_mixed = moto.ineq.create(
-        "x_box_mixed",
-        [x],
-        x.sx,
-        np.array([-np.inf, 0.5, -1.0, -np.inf]),
-        np.array([2.0, np.inf, 3.0, 4.0]),
-    )
+    boxes = [
+        moto.ineq.create(
+            "x_box_numeric",
+            [x],
+            x.sx,
+            np.array([-1.0, 0.0, -2.0, 1.0]),
+            np.array([2.0, 3.0, 4.0, 5.0]),
+        ),
+        moto.ineq.create(
+            "x_box_mixed",
+            [x],
+            x.sx,
+            np.array([-np.inf, 0.5, -1.0, -np.inf]),
+            np.array([2.0, np.inf, 3.0, 4.0]),
+        ),
+    ]
 
     g = cs.vertcat(x.sx[0] + x.sx[1], cs.sin(x.sx[2]))
-    box_nonlinear = moto.ineq.create(
-        "g_box",
-        [x],
-        g,
-        np.array([-1.0, -0.2]),
-        np.array([1.0, 0.8]),
-    )
-
-    box_symbolic = moto.ineq.create(
-        "x_box_symbolic",
-        [x, p_lb, p_ub],
-        x.sx,
-        p_lb.sx,
-        p_ub.sx,
-    )
+    boxes.append(moto.ineq.create("g_box", [x], g, np.array([-1.0, -0.2]), np.array([1.0, 0.8])))
+    boxes.append(moto.ineq.create("x_box_symbolic", [x, p_lb, p_ub], x.sx, p_lb.sx, p_ub.sx))
+    boxes.append(moto.ineq.create("dt_box_scalar", [dt], dt.sx, 1e-3, 0.1))
 
     sel = cs.vertcat(x.sx[0], x.sx[3])
-    box_linear_slice = moto.ineq.create(
-        "x_box_linear_slice",
-        [x],
-        sel,
-        np.array([-1.0, 2.0]),
-        np.array([4.0, 5.0]),
-    )
+    boxes.append(moto.ineq.create("x_box_slice", [x], sel, np.array([-1.0, 2.0]), np.array([4.0, 5.0])))
 
-    print("box_numeric.dim      =", box_numeric.dim)
-    print("box_mixed.dim        =", box_mixed.dim)
-    print("box_nonlinear.dim    =", box_nonlinear.dim)
-    print("box_symbolic.dim     =", box_symbolic.dim)
-    print("box_linear_slice.dim =", box_linear_slice.dim)
+    print("native box inequality examples")
+    for box in boxes:
+        print(f"  {box.name:<16} dim={box.dim}")
+
+    try:
+        moto.ineq.create("bad_primal_bound", [x], x.sx, x.sx - 1.0, x.sx + 1.0)
+    except RuntimeError as exc:
+        print("  bad_primal_bound rejected:", str(exc).splitlines()[0])
+    else:
+        raise AssertionError("box bounds that depend on primal variables should be rejected")
 
 
 if __name__ == "__main__":

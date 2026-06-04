@@ -2,11 +2,6 @@
 #include <moto/ocp/problem.hpp>
 
 namespace moto {
-void generic_constr::add_to_ocp_callback(ocp_base *prob) {
-    lower_x_to_y_ = dynamic_cast<node_ocp *>(prob) == nullptr &&
-                    dynamic_cast<edge_ocp *>(prob) == nullptr;
-}
-
 generic_constr::approx_data::approx_data(func_approx_data &&d)
     : approx_data(d.lag_data_->prob_->extract(d.lag_data_->dual_[d.func_.field()], d.func_), *d.lag_data_, std::move(d)) {
 }
@@ -41,7 +36,7 @@ void generic_constr::finalize_impl() {
         }
         auto &_field = field_;
         if (field_hint_.is_eq == utils::optional_bool::Unset) {
-            throw std::runtime_error(fmt::format("generic_constr {} eq/ineq hint unset, please set field_hint().is_eq explicitly", name_));
+            throw std::runtime_error(fmt::format("generic_constr {} eq/ineq hint unset; use ineq_constr::create or pass an explicit constraint field", name_));
         }
         if (field_hint_.is_eq) {
             if (has_[__u] && !has_[__y])

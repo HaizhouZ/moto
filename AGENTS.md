@@ -61,12 +61,12 @@ The main SQP iteration loop lives in:
 - [`src/solver/sqp_impl/iterative_refinement.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/iterative_refinement.cpp): residual correction
 - [`include/moto/solver/ipm/ipm_constr.hpp`](/home/harper/Documents/moto/include/moto/solver/ipm/ipm_constr.hpp): IPM inequality implementation
 - [`include/moto/solver/soft_constr/pmm_constr.hpp`](/home/harper/Documents/moto/include/moto/solver/soft_constr/pmm_constr.hpp): PMM soft equality implementation
-- [`restoration.md`](/home/harper/Documents/moto/restoration.md): restoration design note; useful for the elastic KKT / condensation math, but not a complete description of the current overlay-based implementation
+- [`docs/restoration.md`](/home/harper/Documents/moto/docs/restoration.md): restoration design note; useful for the elastic KKT / condensation math, but not a complete description of the current overlay-based implementation
 - [`bindings/`](/home/harper/Documents/moto/bindings): Python bindings
 - [`example/`](/home/harper/Documents/moto/example): manual examples
 - [`unittests/`](/home/harper/Documents/moto/unittests): Catch2 tests
 - [`include/moto/ocp/graph_model.hpp`](/home/harper/Documents/moto/include/moto/ocp/graph_model.hpp): graph-first modeling layer
-- [`include/moto/core/directed_graph.hpp`](/home/harper/Documents/moto/include/moto/core/directed_graph.hpp): internal expanded solver graph
+- [`include/moto/solver/linear_runtime_graph.hpp`](/home/harper/Documents/moto/include/moto/solver/linear_runtime_graph.hpp): internal linear solver traversal storage
 
 ## Build And Validation
 
@@ -131,7 +131,6 @@ Useful benchmarking / profiling environment variables in `example/quadruped/run.
 - `MOTO_PROFILE_SQP`: print the last run's SQP profile summary
 - `MOTO_SQP_BENCH_VERBOSE`: if set, print verbose logs for every timed run; otherwise only the last timed run is verbose
 - `MOTO_PARALLEL_BLOCK_ORDER={forward,reverse}`: override chunk assignment order in `parallel_for`
-- `MOTO_PARALLEL_TID_MODE={logical,omp}`: choose whether solver callbacks see logical chunk ids or OpenMP thread ids
 - `MOTO_DEBUG_SOLVER_PROBS`: print head/tail solver problems for the realized graph
 - `MOTO_DEBUG_GRAPH_LAYOUT`: print flattened solver graph dimensions and dynamics count
 
@@ -145,8 +144,9 @@ Current benchmark-script caveats:
 Current default parallel behavior:
 
 - chunk order defaults to `forward`
-- tid mode defaults to `logical`
-- this means chunking follows the order of the provided view; for backward passes the view itself is already reversed by `apply_backward(...)`
+- solver callbacks receive the logical chunk id used by `parallel_for`
+- chunking follows the order of the provided view; backward passes use the
+  reversed traversal view from `solver::backward_edges(...)`
 
 ## Field System
 
@@ -229,7 +229,8 @@ Important `ocp` behaviors:
 There are now three related problem containers that matter in practice:
 
 - `ocp`
-  - generic base/container used by solver internals and legacy paths
+  - generic container used by C++ solver internals
+  - not a Python modeling entry point; user-facing path construction uses `node_ocp` and `edge_ocp`
 - `node_ocp`
   - node-local modeling prototype
   - only `x/u/p`-style terms are accepted
@@ -250,16 +251,14 @@ The key invariant is:
 
 The current recommended API is graph-first.
 
-Core types:
+Core type:
 
 - [`graph_model`](/home/harper/Documents/moto/include/moto/ocp/graph_model.hpp)
-- [`model_node`](/home/harper/Documents/moto/include/moto/ocp/graph_model.hpp)
-- [`model_edge`](/home/harper/Documents/moto/include/moto/ocp/graph_model.hpp)
 
 Intended semantics:
 
-- `model_node` holds node-local prototype terms
-- `model_edge` holds edge-local terms such as dynamics
+- `node_ocp` holds node-local prototype terms
+- `edge_ocp` holds interval-local terms such as dynamics
 - current compose is strict and edge-centric:
   - start-node non-pure terms belong to the current edge
   - end-node pure-`x` terms lower onto the current edge `y`
@@ -271,7 +270,7 @@ Important compose rules that are now covered by unit tests:
 - end-node pure-`x` costs and constraints lower onto the current edge `y`
 - intermediate node pure-`x` terms affect only their incoming edge
 - terminal sink `x`-only terms are merged into the final real edge problem
-- terminal sink terms depending on `u` are invalid for the final `x/u` terminal node semantics; they emit a warning and are ignored
+- terminal sink terms depending on `u` are invalid for final pure-state terminal semantics and are ignored
 - codegen finalization of lowered/materialized clones must be serialized or uniquely named to avoid `.so` races
 - current implementation chooses serialization plus reuse:
   - finalized clones intentionally share stable generated symbol names
@@ -279,63 +278,58 @@ Important compose rules that are now covered by unit tests:
   - compiled `.so` and `.json` outputs are written through `.tmp` files and renamed atomically
 - graph realization now lives with `graph_model` itself:
   - `graph_model::compose_interval(...)` handles interval composition and sink-term materialization
-  - `graph_model::realize_into(...)` expands the modeled topology into a runtime `directed_graph`
-  - `graph_model_state` owns the realized runtime object through a type-erased slot
+  - `ns_sqp::realize_runtime(...)` consumes composed intervals to build internal solver storage
 
 ## SQP Graph Ownership
 
-`ns_sqp` no longer owns a separate solver-graph member. The active [`graph_model_state`](/home/harper/Documents/moto/include/moto/ocp/graph_model.hpp) owns the realized runtime graph, and `ns_sqp` fetches it as needed through `sqp.graph`.
+`ns_sqp` owns a default `graph_model` exposed as `sqp.graph` in Python and `sqp.graph()` in C++. Solver storage is realized lazily from that model.
 
 Current restoration detail:
 
-- `ns_sqp` now uses a derived graph-state wrapper that can cache a realized restoration overlay graph
-- the cached restoration runtime is rebuilt only when the modeled graph is dirty or restoration settings change
+- `ns_sqp` caches separate restoration runtime storage built from overlay problems
+- the cached restoration runtime is rebuilt only when the modeled path or restoration settings change
 - this avoids rebuilding the restoration overlay on every restoration entry
 
 Current recommended Python flow:
 
 ```python
 sqp = moto.sqp(n_job=10)
-modeled = sqp.create_graph()
 
-stage_node = modeled.create_node(stage_node_proto)
-terminal_node = modeled.create_node(terminal_node_proto)
+stage_node_proto = moto.node_ocp.create()
+edge_proto = moto.edge_ocp.create()
+edge_proto.add(model.dyn)
+terminal_node_proto = stage_node_proto.clone()
+terminal_node_proto.add_terminal(model.terminal_cost)
 
-for edge in modeled.add_path(stage_node, terminal_node, N):
-    edge.add(model.dyn)
+sqp.graph.add_path(stage_node_proto, terminal_node_proto, edge_proto, N)
 
 flat_nodes = sqp.graph.flatten_nodes()
 ```
 
 Important current path semantics:
 
-- `graph_model.add_path(start, end, N)` means exactly `N` graph edges
+- `sqp.graph.add_path(start_node, end_node, edge_proto, N)` means exactly `N` graph edges
 - there is no hidden terminal tail edge anymore
-- intermediate nodes created by `add_path(...)` clone the `start` prototype, so a path segment inherits outgoing-edge semantics from its start node
+- each added segment snapshots explicit `start` and `end` prototypes; intermediate nodes clone `start`, so the segment inherits outgoing-edge semantics from `start`
 - if `end` carries terminal `x`-only terms, they are materialized onto the final edge/node realization
 - users should not compensate with `N - 1` just because the sink is terminal
 
 Current division of responsibility:
 
-- user edits only the `graph_model`
-- `sqp.create_graph()` returns a plain `graph_model` bound to the solver's active model state
-- `graph_model` owns composition and topology realization policy
-- `sqp.graph` is the realized runtime `directed_graph` used for traversal, initialization, and debug inspection
+- user edits only `sqp.graph`
+- `graph_model` owns path composition and topology realization policy
+- `sqp.graph.flatten_nodes()` returns realized solver stages for initialization and debug inspection
+- Python top-level exports only the modeling/solver surface; low-level runtime/data bindings stay behind `moto._moto_pywrap` for debugging
 
 Useful modeling entry points:
 
-- `create_graph()`
-- `graph_model.create_node(...)`
-- `graph_model.connect(...)`
-- `graph_model.add_path(...)`
-- `graph_model.compose_interval(...)`
-- `graph_model.realize_into(...)`
+- `sqp.graph.add_path(...)`
 - `sqp.graph.flatten_nodes()`
 
 The design direction is:
 
-- keep `directed_graph` as internal runtime storage / traversal machinery
-- let `graph_model` / `sqp.create_graph()` be the public modeling surface
+- keep linear runtime storage internal
+- let `sqp.graph` be the public modeling surface
 - avoid re-exposing graph-building or realization policy directly on `ns_sqp`
 
 ## X-U-Y Triplet Formulation
@@ -362,11 +356,12 @@ That makes stage-local modeling harder than it needs to be.
 Recommended usage:
 
 - define node-local expressions on `node_ocp`
-- create graph nodes with `graph_model.create_node(...)`
-- connect or expand paths with `graph_model.connect(...)` / `graph_model.add_path(...)`
+- create node-local prototypes with `node_ocp`
+- create interval prototypes with `edge_ocp`
+- expand paths with `sqp.graph.add_path(...)`
 - add terminal terms with `prob.add_terminal(...)`
-- put `__dyn` and any `y`-dependent terms only on `edge_ocp` / `model_edge`
-- build solver paths through `sqp.create_graph()`
+- put `__dyn` and any `y`-dependent terms only on `edge_ocp`
+- build solver paths through `sqp.graph.add_path(...)`
 - inspect realized stages through `sqp.graph.flatten_nodes()` when needed
 
 ### Best Internal Mental Model
@@ -379,14 +374,14 @@ If the solver keeps the triplet, the cleanest interpretation is:
 
 That is better than presenting all three as peer modeling variables.
 
-## Model Graph And Directed Graph
+## Model Graph And Runtime Storage
 
 Recent refactor work exposed an important design constraint:
 
-- `graph_model` is the modeling-side graph
-- `graph_model_state` now owns both the authored topology and the realized runtime payload
-- `directed_graph` is the solver/runtime graph implementation, not a separately-owned solver-side model
-- graph-building APIs should live on `graph_model`
+- `graph_model` is the modeling-side linear path graph
+- `ns_sqp` owns one default `graph_model`
+- linear runtime storage is internal solver traversal machinery, not a public modeling object
+- graph-building APIs should live on `sqp.graph`
 - graph realization policy should live on `graph_model`
 - `ns_sqp` should consume a realized graph model rather than mirror its topology or lowering API
 
@@ -415,14 +410,14 @@ Practical implication for future work:
   - strips pure-`x` terms from the start-node contribution to the current edge
   - lowers eligible end-node pure-`x` terms onto the current edge `y`
   - leaves terminal terms explicit unless final-edge materialization is requested
-  - then materializes solver problems in a form compatible with `directed_graph`
+  - then materializes solver problems in a form compatible with internal linear solver storage
 
 Current status of the refactor:
 
-- Python `model_node` / `model_edge` now reuse `node_ocp` / `edge_ocp` APIs through inheritance
+- Python uses `node_ocp` / `edge_ocp` directly as modeling prototypes
 - compose-time logging exists for lowering and should remain explicit because it changes formulation
-- `ns_sqp` no longer exposes graph-building helpers like `create_node(...)` or `flatten_nodes()`
-- `ns_sqp::create_graph()` now returns plain `graph_model`
+- `ns_sqp` no longer exposes graph-building helpers like `create_node(...)`
+- Python graph construction goes through `sqp.graph.add_path(...)`
 - quadruped runs through the modeled composition path and still converges under `MOTO_SQP_MAX_ITER=50`
 
 In short:
@@ -475,7 +470,7 @@ Restoration note:
 
 - restoration is active through the overlay-based path in [`src/solver/sqp_impl/restoration.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/restoration.cpp)
 - restoration overlay problems are assembled in [`src/solver/restoration/resto_overlay.cpp`](/home/harper/Documents/moto/src/solver/restoration/resto_overlay.cpp)
-- [`restoration.md`](/home/harper/Documents/moto/restoration.md) remains useful for the local elastic KKT derivation, but current entry/exit, logging, and cleanup behavior live in code
+- [`docs/restoration.md`](/home/harper/Documents/moto/docs/restoration.md) remains useful for the local elastic KKT derivation, but current entry/exit, logging, and cleanup behavior live in code
 
 Registry-based conversion:
 
@@ -680,7 +675,7 @@ Key members:
 
 [`ns_sqp`](/home/harper/Documents/moto/include/moto/solver/ns_sqp.hpp) owns:
 
-- active runtime graph is stored inside `graph_model_state` and accessed through `ns_sqp::active_data()`
+- active runtime storage is realized from `model_graph_` and accessed internally through `ns_sqp::active_data()`
 - `mem_`: node-data memory pool
 - `riccati_solver_`: `generic_solver`
 - `settings`
@@ -983,10 +978,8 @@ Current practical interpretation:
   - applying the affine step
   - re-evaluating the accepted point's derivatives for the next SQP iteration
 
-The SOC scaffolding exists but is intentionally not implemented:
-
-- `second_order_correction()` is empty
-- dispatch paths still exist and should not be removed casually
+The old empty SOC scaffold has been removed. Do not add solver settings,
+actions, or dispatch branches unless they execute real algorithmic work.
 
 ### Merit backtracking
 
@@ -1123,7 +1116,7 @@ This is a true correction solve on the linearized KKT system, not a full relinea
 - the legacy restoration implementation was removed, but restoration is still active through the overlay-based path in [`src/solver/sqp_impl/restoration.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/restoration.cpp)
 - restoration overlay problems are built by [`src/solver/restoration/resto_overlay.cpp`](/home/harper/Documents/moto/src/solver/restoration/resto_overlay.cpp)
 - the active graph state caches the realized restoration runtime and invalidates it when the modeled graph or restoration settings change
-- [`restoration.md`](/home/harper/Documents/moto/restoration.md) is still useful as historical design context, but it is not a complete description of the current overlay implementation
+- [`docs/restoration.md`](/home/harper/Documents/moto/docs/restoration.md) is still useful as historical design context, but it is not a complete description of the current overlay implementation
 
 ## Diagnostics
 
@@ -1156,11 +1149,10 @@ When adding or changing settings, enum values, or public solver surface area:
 - update the implementation
 - update bindings and generated stubs if needed
 
-Current profiling-related Python entry points on `ns_sqp_impl`:
+Current profiling-related Python entry points on `moto.sqp`:
 
 - `reset_profile()`
 - `get_profile_report()`
-- `profile_report` (property)
 
 ## Practical Editing Rules
 
@@ -1170,7 +1162,7 @@ Current profiling-related Python entry points on `ns_sqp_impl`:
 - remember many sparse/dense objects are views into shared storage, not owned copies
 - do not copy `settings_t`
 - do not assume soft constraints are only inequalities; PMM soft equalities use the same dispatch layer
-- do not remove commented or dormant solver hooks like SOC infrastructure without checking intended roadmap
+- do not keep dormant solver hooks as public API; either implement the algorithmic work or remove the misleading surface
 - when changing C++ code that affects Python examples, always wait for the full build to finish before running Python tests
 - do not trust a Python test run started while `moto` / `moto_pywrap` is still linking; stale modules can easily give misleading results
 - do not compare first-run wall time across commits without separating solver time from codegen / shared-library compilation time
@@ -1187,7 +1179,7 @@ Current profiling-related Python entry points on `ns_sqp_impl`:
 - blaming [`src/solver/sqp_impl/line_search.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/line_search.cpp) predicates for globalization cost before checking `update_approx_accepted`
 - changing a settings struct without updating bindings
 - treating [`example/quadruped/run.py`](/home/harper/Documents/moto/example/quadruped/run.py) as canonical; it is often used for experiments
-- seeing `warning: substitution in generic_constr ... go2_q_nxt` in quadruped logs means the example is still using the legacy `ocp.create()` path, not the newer `node_ocp / edge_ocp` modeling path
+- seeing `warning: substitution in generic_constr ... go2_q_nxt` means some path has reintroduced generic expression substitution instead of graph-level lowering
 
 ## Suggested Reading Order For Solver Work
 
@@ -1210,7 +1202,7 @@ That path covers most bugs involving assembly, factorization, rollout, globaliza
 As of the current working tree, the OCP layer has been partially refactored to introduce:
 
 - `ocp_base` as the shared storage / activation / flattening container
-- `ocp` as the generic legacy-compatible problem type
+- `ocp` as the generic internal problem type
 - `node_ocp` as a thin node-local wrapper
 - `edge_ocp` as a thin transition-local wrapper that can bind start/end node problems
 
@@ -1223,11 +1215,6 @@ What is already true:
   - run with `python example/quadruped/run.py`
   - current strict-semantics result is convergence in `22` iterations with objective about `1.144e+02`
 
-What is not true yet:
-
-- graph semantics are still evolving and old notes about predecessor-edge lowering are stale
-- `node_ocp / edge_ocp` are still intentionally thin wrappers around the stricter graph-aware compose policy
-
 Recommended next step from here:
 
 1. Keep adding focused compose tests that separate start-node `u/non-pure-x` ownership from end-node pure-`x` lowering
@@ -1238,7 +1225,5 @@ This order helps keep future graph-semantics changes explicit and testable inste
 
 ## Todo
 
-- rename `directed graph` to `active_data` in the NS SQP bindings
-  - comment: feature only, not urgent
 - add rank-based backward degeneration test and propagation
 - add automatic inertia correction after ill-conditioning is detected

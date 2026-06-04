@@ -15,139 +15,118 @@ bool same_equality_init_cfg(const solver::equality_init::equality_init_overlay_s
                             const solver::equality_init::equality_init_overlay_settings &rhs) {
     return lhs.rho_eq == rhs.rho_eq;
 }
-
-class solver_graph_storage_interface final : public graph_model::storage_interface {
-  public:
-    using graph_type = ns_sqp::storage_type;
-    using stage_node_builder_t = std::function<ns_sqp::node_type(const ocp_ptr_t &)>;
-
-    explicit solver_graph_storage_interface(graph_type &graph, stage_node_builder_t stage_node_builder)
-        : graph_(graph), stage_node_builder_(std::move(stage_node_builder)) {}
-
-    void clear() override {
-        graph_.clear();
-        node_refs_.clear();
-    }
-
-    void reserve(size_t node_capacity, size_t edge_capacity) override {
-        (void)edge_capacity;
-        graph_.reserve(node_capacity);
-        node_refs_.reserve(node_capacity);
-    }
-
-    size_t add_stage(const ocp_ptr_t &stage_ocp) override {
-        node_refs_.emplace_back(&graph_.add(stage_node_builder_(stage_ocp)));
-        return node_refs_.size() - 1;
-    }
-
-    void connect(size_t st_id, size_t ed_id) override {
-        graph_.connect(*node_refs_.at(st_id), *node_refs_.at(ed_id), {2, true, true});
-    }
-
-    void set_head(size_t node_id) override {
-        graph_.set_head(*node_refs_.at(node_id));
-    }
-
-    void set_tail(size_t node_id) override {
-        graph_.set_tail(*node_refs_.at(node_id));
-    }
-
-  private:
-    graph_type &graph_;
-    stage_node_builder_t stage_node_builder_;
-    std::vector<ns_sqp::node_type *> node_refs_;
-};
 } // namespace
 
 ns_sqp::ns_sqp(size_t n_jobs)
-    : graph_n_jobs_(std::min(n_jobs, size_t(MAX_THREADS))),
-      riccati_solver_(new solver_type()) {
+    : graph_n_jobs_(normalize_parallel_jobs(n_jobs)),
+      solver_runtime_(graph_n_jobs_),
+      restoration_runtime_(graph_n_jobs_),
+      equality_init_runtime_(graph_n_jobs_) {
     Eigen::setNbThreads(1);
+}
+
+template <typename StageBuilder>
+void ns_sqp::realize_runtime(storage_type &runtime, StageBuilder &&stage_builder) {
+    runtime.clear();
+    const size_t num_edges = model_graph_.edges_.size();
+    if (num_edges == 0) {
+        throw std::runtime_error("graph_model expects a non-empty path");
+    }
+    runtime.reserve(num_edges);
+    for (size_t eid = 0; eid < num_edges; ++eid) {
+        const auto &edge = model_graph_.edges_[eid];
+        if (!edge) {
+            throw std::runtime_error("graph_model found null edge");
+        }
+        const auto stage_ocp = std::static_pointer_cast<ocp>(
+            model_graph_.compose_interval(edge, eid + 1 == num_edges));
+        auto built = stage_builder(stage_ocp);
+        if (!built) {
+            throw std::runtime_error("ns_sqp::realize_runtime stage_builder returned null stage_ocp");
+        }
+        runtime.add(node_type(built));
+    }
 }
 
 ns_sqp::storage_type &ns_sqp::active_data() {
     if (phase_graph_override_ != nullptr) {
         return *phase_graph_override_;
     }
-    if (!active_model_graph_) {
-        throw std::runtime_error("ns_sqp has no active model graph; call create_graph() first");
-    }
-    if (!solver_runtime_) {
-        solver_runtime_ = std::make_shared<storage_type>(graph_n_jobs_);
-    }
-    const size_t model_revision = active_model_graph_->revision();
+    const size_t model_revision = model_graph_.revision_;
     if (solver_runtime_revision_ != model_revision) {
-        solver_graph_storage_interface realization(*solver_runtime_, [this](const ocp_ptr_t &stage_ocp) {
-            return node_type(stage_ocp);
-        });
-        active_model_graph_->realize_into(realization);
+        realize_runtime(solver_runtime_, [](const ocp_ptr_t &stage_ocp) { return stage_ocp; });
         solver_runtime_revision_ = model_revision;
     }
-    return *solver_runtime_;
+    return solver_runtime_;
+}
+
+std::vector<ns_sqp::data *> &ns_sqp::solver_nodes() {
+    return active_data().flatten_nodes();
+}
+
+ns_sqp::scoped_phase_graph_override::scoped_phase_graph_override(ns_sqp &owner,
+                                                                 storage_type &graph,
+                                                                 bool in_restoration)
+    : owner(owner), in_restoration_backup(owner.settings.in_restoration) {
+    use_graph(graph, in_restoration);
+}
+
+void ns_sqp::scoped_phase_graph_override::use_graph(storage_type &graph,
+                                                    bool in_restoration) {
+    owner.settings.in_restoration = in_restoration;
+    owner.phase_graph_override_ = &graph;
+}
+
+void ns_sqp::scoped_phase_graph_override::use_default_graph(bool in_restoration) {
+    owner.settings.in_restoration = in_restoration;
+    owner.phase_graph_override_ = nullptr;
+}
+
+ns_sqp::scoped_phase_graph_override::~scoped_phase_graph_override() {
+    owner.settings.in_restoration = in_restoration_backup;
+    owner.phase_graph_override_ = nullptr;
 }
 
 ns_sqp::storage_type &ns_sqp::restoration_graph() {
-    if (!active_model_graph_) {
-        throw std::runtime_error("ns_sqp has no active model graph; call create_graph() first");
-    }
     solver::restoration::restoration_overlay_settings cfg{
         .rho_u = settings.restoration.rho_u,
         .rho_y = settings.restoration.rho_y,
         .rho_eq = settings.restoration.rho_eq,
         .rho_ineq = settings.restoration.rho_ineq,
     };
-    const size_t model_revision = active_model_graph_->revision();
+    const size_t model_revision = model_graph_.revision_;
     const bool needs_rebuild =
-        !restoration_runtime_ ||
         restoration_runtime_revision_ != model_revision ||
         !restoration_cfg_valid_ ||
         !same_restoration_cfg(restoration_cfg_, cfg);
     if (needs_rebuild) {
-        restoration_runtime_ = std::make_shared<storage_type>(graph_n_jobs_);
-        solver_graph_storage_interface realization(*restoration_runtime_,
-                                                   [this](const ocp_ptr_t &stage_ocp) {
-                                                       return node_type(stage_ocp);
-                                                   });
-        active_model_graph_->realize_into(
-            realization,
-            [&cfg](const ocp_ptr_t &stage_ocp) {
-                return solver::restoration::build_restoration_overlay_problem(stage_ocp, cfg);
-            });
+        realize_runtime(restoration_runtime_, [&cfg](const ocp_ptr_t &stage_ocp) {
+            return solver::restoration::build_restoration_overlay_problem(stage_ocp, cfg);
+        });
         restoration_runtime_revision_ = model_revision;
         restoration_cfg_ = cfg;
         restoration_cfg_valid_ = true;
     }
-    return *restoration_runtime_;
+    return restoration_runtime_;
 }
 
 ns_sqp::storage_type &ns_sqp::equality_init_graph() {
-    if (!active_model_graph_) {
-        throw std::runtime_error("ns_sqp has no active model graph; call create_graph() first");
-    }
     solver::equality_init::equality_init_overlay_settings cfg{
         .rho_eq = settings.eq_init.rho_eq,
     };
-    const size_t model_revision = active_model_graph_->revision();
+    const size_t model_revision = model_graph_.revision_;
     const bool needs_rebuild =
-        !equality_init_runtime_ ||
         equality_init_runtime_revision_ != model_revision ||
         !equality_init_cfg_valid_ ||
         !same_equality_init_cfg(equality_init_cfg_, cfg);
     if (needs_rebuild) {
-        equality_init_runtime_ = std::make_shared<storage_type>(graph_n_jobs_);
-        solver_graph_storage_interface realization(*equality_init_runtime_,
-                                                   [this](const ocp_ptr_t &stage_ocp) {
-                                                       return node_type(stage_ocp);
-                                                   });
-        active_model_graph_->realize_into(
-            realization,
-            [&cfg](const ocp_ptr_t &stage_ocp) {
-                return solver::equality_init::build_equality_init_overlay_problem(stage_ocp, cfg);
-            });
+        realize_runtime(equality_init_runtime_, [&cfg](const ocp_ptr_t &stage_ocp) {
+            return solver::equality_init::build_equality_init_overlay_problem(stage_ocp, cfg);
+        });
         equality_init_runtime_revision_ = model_revision;
         equality_init_cfg_ = cfg;
         equality_init_cfg_valid_ = true;
     }
-    return *equality_init_runtime_;
+    return equality_init_runtime_;
 }
 } // namespace moto

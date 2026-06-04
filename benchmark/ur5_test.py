@@ -214,7 +214,7 @@ class pinCasadiModel(cpin.Model):
             "tq_limit", in_arg, cs.vcat([self.tq - tq_limit, -self.tq - tq_limit])
         ).cast_ineq()
 
-    def get_state_cost(self, terminal: bool = False):
+    def get_state_cost(self):
         q_nom_res = self.q_stack - self.q_nom
         if self.is_floating_based:
             state_cost = (
@@ -229,8 +229,6 @@ class pinCasadiModel(cpin.Model):
         cost = moto.cost.create(
             "c", state_args + [self.q_nom], state_cost
         ).set_diag_hess()
-        if terminal:
-            return cost
         return cost
 
     def get_input_cost(self):
@@ -249,16 +247,18 @@ model = pin.buildModelFromUrdf(ur5.urdf)
 np.set_printoptions(precision=3, suppress=True, linewidth=200)
 model = pinCasadiModel(model, dt=dt, q_nom=q_d, dense=True, use_fwd_dyn=True)
 
-prob = moto.ocp.create()
-prob.add(model.dyn)
+prob = moto.node_ocp.create()
 prob.add(model.make_tq_limit_constr())
 prob.add(model.make_joint_limit_constr())
 prob.add(model.get_state_cost())
 prob.add(model.get_input_cost())
 
+edge_prob = moto.edge_ocp.create()
+edge_prob.add(model.dyn)
+
 prob_term = prob.clone()
 prob_term.add_terminal(model.make_ee_pos_constr(soft=args.soft, cost=args.cost))
-prob_term.add_terminal(model.get_state_cost(terminal=True))
+prob_term.add_terminal(model.get_state_cost())
 
 prob.print_summary()
 print("--" * 15)
@@ -276,21 +276,20 @@ import time
 
 for idx_cfg, cfg in tqdm(enumerate(config), total=len(config)):
     sqp = moto.sqp(n_job=4)
-    g = sqp.graph
-    n0 = g.set_head(g.add(sqp.create_node(prob)))
-    n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
-    g.add_edge(n0, n1, N_horizon)
+    sqp.graph.add_path(prob, prob_term, edge_prob, N_horizon)
+    nodes = sqp.graph.flatten_nodes()
 
-    n1.data.value[model.r_des] = np.array(cfg[0][:3])
-    n1.data.value[model.quat_des] = np.array(cfg[0][3:7])
+    nodes[-1].value[model.r_des] = np.array(cfg[0][:3])
+    nodes[-1].value[model.quat_des] = np.array(cfg[0][3:7])
     if args.cost:
-        n1.data.value[model.W_ee_cost] = np.ones(6) * 1e3
+        nodes[-1].value[model.W_ee_cost] = np.ones(6) * 1e3
 
     def set_initial_state(data: moto.sqp.data_type):
         data.value[model.q] = np.array(cfg[1])
         data.value[model.qn] = np.array(cfg[1])
 
-    sqp.apply_forward(set_initial_state)
+    for node in nodes:
+        set_initial_state(node)
 
     sqp.settings.ipm.mu0 = 1
     # sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing

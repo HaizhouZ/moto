@@ -59,20 +59,18 @@ u_box = moto.ineq.create(
 
 def build_sqp():
     sqp = moto.sqp(n_job=1)
-    modeled = sqp.create_graph()
 
-    stage_node_prob = moto.node_ocp.create()
-    stage_node_prob.add(running_cost)
-    stage_node_prob.add(u_box)
+    stage_prob = moto.node_ocp.create()
+    stage_prob.add(running_cost)
+    stage_prob.add(u_box)
 
-    terminal_node_prob = stage_node_prob.clone()
+    edge_prob = moto.edge_ocp.create()
+    edge_prob.add(dyn)
+
+    terminal_node_prob = moto.node_ocp.create()
     terminal_node_prob.add_terminal(terminal_cost)
 
-    stage_node = modeled.create_node(stage_node_prob)
-    terminal_node = modeled.create_node(terminal_node_prob)
-
-    for edge in modeled.add_path(stage_node, terminal_node, N):
-        edge.add(dyn)
+    sqp.graph.add_path(stage_prob, terminal_node_prob, edge_prob, N)
 
     flat_nodes = sqp.graph.flatten_nodes()
     print("Stage problem")
@@ -82,10 +80,11 @@ def build_sqp():
 
     def init(node: moto.sqp.data_type):
         node.value[x] = x0.copy()
-        if node.prob.dim(moto.field___y) > 0:
+        if node.prob.dim(moto.field.field___y) > 0:
             node.value[xn] = x0.copy()
 
-    sqp.apply_forward(init)
+    for node in sqp.graph.flatten_nodes():
+        init(node)
     sqp.settings.prim_tol = 1e-8
     sqp.settings.dual_tol = 1e-8
     sqp.settings.comp_tol = 1e-8
@@ -102,7 +101,8 @@ def main():
         values["x"].append(np.asarray(node.value[x], dtype=float).reshape(-1))
         values["u"].append(np.asarray(node.value[u], dtype=float).reshape(-1))
 
-    sqp.apply_forward(grab)
+    for node in sqp.graph.flatten_nodes():
+        grab(node)
 
     print(f"result   : {kkt.result}")
     print(f"num_iter : {kkt.num_iter}")

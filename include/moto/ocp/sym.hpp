@@ -74,11 +74,13 @@ class sym : public expr, public cs::SX {
         return operator==((const expr &)lhs, (const expr &)rhs);
     }
 
-    PROPERTY(default_value) ///< default value of the symbolic variable
-    PROPERTY(dual)          ///< dual variable, only used for state variables
+    const auto &default_value() const { return default_value_; }
+    const auto &__get_default_value() const { return default_value_; }
+    void __set_default_value(const default_val_t &default_val) { set_default_value(default_val); }
+    const auto &dual() const { return dual_; } ///< paired state variable, only used for state variables
 
-    CONST_PROPERTY(has_non_trivial_integration) ///< whether the symbolic variable has non-trivial integration
-    CONST_PROPERTY(has_non_trivial_difference)  ///< whether the symbolic variable has non-trivial difference
+    bool has_non_trivial_integration() const { return has_non_trivial_integration_; }
+    bool has_non_trivial_difference() const { return has_non_trivial_difference_; }
 
     void set_default_value(const default_val_t &default_val); ///< set the default value of the symbolic variable
 
@@ -131,7 +133,6 @@ class sym : public expr, public cs::SX {
     }
     static auto state(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
         auto [x, y] = states(name, dim, default_val);
-        setup_states(x, y);
         return x;
     }
     const var &next() const {

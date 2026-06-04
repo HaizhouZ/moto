@@ -1,5 +1,11 @@
 #include <moto/utils/codegen.hpp>
 
+#include <cerrno>
+#include <cstring>
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
+
 namespace moto {
 namespace utils {
 
@@ -117,7 +123,6 @@ void compress_jacobian(cs::SX &expr, sp_info *sp) {
 
 namespace impl {
 // job_list jobs_{};
-std::mutex mutex_{};
 std::mutex func_mutex_map_mutex_{};
 std::unordered_map<std::string, std::shared_ptr<std::mutex>> func_mutexes_{};
 std::unordered_map<std::string, std::string> completed_compile_flags_{};
@@ -127,6 +132,39 @@ std::shared_ptr<std::mutex> get_func_mutex(const std::string &func_name) {
     auto [it, inserted] = func_mutexes_.try_emplace(func_name, std::make_shared<std::mutex>());
     return it->second;
 }
+
+class process_codegen_lock {
+  public:
+    explicit process_codegen_lock(const fs::path &lock_path) {
+        fd_ = ::open(lock_path.c_str(), O_CREAT | O_RDWR, 0666);
+        if (fd_ == -1) {
+            throw std::runtime_error(fmt::format("failed to open codegen lock {}: {}",
+                                                 lock_path.string(), std::strerror(errno)));
+        }
+        while (::flock(fd_, LOCK_EX) == -1) {
+            if (errno == EINTR) {
+                continue;
+            }
+            const std::string msg = std::strerror(errno);
+            ::close(fd_);
+            fd_ = -1;
+            throw std::runtime_error(fmt::format("failed to lock codegen file {}: {}",
+                                                 lock_path.string(), msg));
+        }
+    }
+    process_codegen_lock(const process_codegen_lock &) = delete;
+    process_codegen_lock &operator=(const process_codegen_lock &) = delete;
+    ~process_codegen_lock() {
+        if (fd_ != -1) {
+            ::flock(fd_, LOCK_UN);
+            ::close(fd_);
+        }
+    }
+
+  private:
+    int fd_ = -1;
+};
+
 // Generates a list of (row, col) pairs from CasADi's CCS sparsity format
 std::vector<std::pair<int, int>> ccs_index_to_ij(const cs::Sparsity &sp) {
     std::vector<std::pair<int, int>> ij_pairs;
@@ -231,6 +269,9 @@ std::string process_generated_code(
             }
 
             if (copying_helper) {
+                if (line.starts_with("casadi_real casadi_")) {
+                    line = "static inline " + line;
+                }
                 processed_code << line << "\n";
                 update_brace_depth(line, helper_brace_depth);
                 if (helper_brace_depth == 0) {
@@ -241,7 +282,7 @@ std::string process_generated_code(
 
             if (line.find("static int casadi_f0") != std::string::npos) {
                 processed_code << "CASADI_SYMBOL_EXPORT void " << func_name << "(\n"
-                               << "  std::vector<Eigen::Ref<Eigen::" << vec_type() << ">>& inputs,\n";
+                               << "  const std::vector<Eigen::Ref<Eigen::" << vec_type() << ">>& inputs,\n";
                 if (vec_out) {
                     processed_code << "  Eigen::Ref<Eigen::" << vec_type() << "> outputs) {\n";
                 } else {
@@ -303,6 +344,8 @@ void run(
     // func_name_raw.c / func_name.cpp / func_name.json / libfunc_name.so.
     auto func_mutex = get_func_mutex(func_name);
     std::lock_guard<std::mutex> func_lock(*func_mutex);
+    fs::create_directories(output_dir);
+    process_codegen_lock process_lock(fs::path(output_dir) / (func_name + ".lock"));
 
     fs::path so_file_path = fs::path(output_dir) / ("lib" + func_name + ".so");
     fs::path so_tmp_path = so_file_path;
@@ -346,10 +389,6 @@ void run(
     opts["casadi_real"] = casadi_real_t;
     cs::CodeGenerator cgen(func_name + "_raw.c", opts);
     cgen.add(casadi_func);
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        fs::create_directories(output_dir);
-    }
     std::string raw_c_path = fs::path(output_dir) / (func_name + "_raw.c");
     cgen.generate(output_dir + '/'); // Generates file in the specified dir
 

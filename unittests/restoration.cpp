@@ -432,14 +432,12 @@ TEST_CASE("restoration overlay problem keeps dyn and replaces non-dynamics with 
     prob->add(*cost_stage);
 
     auto eq = constr(new generic_constr("eq", approx_order::second, 1));
-    eq->field_hint().is_eq = true;
     dynamic_cast<generic_func &>(*eq).add_argument(x);
     eq->value = [](func_approx_data &d) { d.v_(0) = d[0](0); };
     eq->jacobian = [](func_approx_data &d) { d.jac_[0](0, 0) = 1.; };
     prob->add(*eq);
 
-    auto iq = constr(new generic_constr("iq", approx_order::second, 1));
-    iq->field_hint().is_eq = false;
+    auto iq = ineq_constr::create("iq", approx_order::second, 1);
     dynamic_cast<generic_func &>(*iq).add_argument(u);
     iq->value = [](func_approx_data &d) { d.v_(0) = d[0](0) - scalar_t(1.0); };
     iq->jacobian = [](func_approx_data &d) { d.jac_[0](0, 0) = 1.; };
@@ -495,9 +493,7 @@ TEST_CASE("restoration soft-equality overlays are built and keep synced multipli
     auto x = sym::state("x_resto_soft", 1);
     prob->add(*x);
 
-    auto soft_eq = constr(new generic_constr("soft_eq", approx_order::second, 1));
-    soft_eq->field_hint().is_eq = true;
-    soft_eq->field_hint().is_soft = true;
+    auto soft_eq = constr(new generic_constr("soft_eq", approx_order::second, 1, __eq_x_soft));
     dynamic_cast<generic_func &>(*soft_eq).add_argument(x);
     soft_eq->value = [](func_approx_data &d) { d.v_(0) = d[0](0) - scalar_t(0.25); };
     soft_eq->jacobian = [](func_approx_data &d) { d.jac_[0](0, 0) = 1.; };
@@ -524,7 +520,7 @@ TEST_CASE("restoration soft-equality overlays are built and keep synced multipli
     ns_sqp::data resto(resto_prob);
     ns_sqp::settings_t ws;
 
-    resto.for_each_constr([&](const generic_func &c, func_approx_data &fd) {
+    resto.for_each_constr([&](const generic_constr &c, func_approx_data &fd) {
         c.setup_workspace_data(fd, &ws);
     });
 
@@ -561,7 +557,6 @@ TEST_CASE("box helper stores only base box dimension in ocp") {
 
     auto box = ineq_constr::create("x_box_bound", var_inarg_list{*x}, static_cast<const cs::SX &>(x), lb, ub);
     REQUIRE(box->dim() == 2);
-    REQUIRE(box->field_hint().is_eq == utils::optional_bool::False);
 
     REQUIRE(box->finalize());
     REQUIRE(box->field() == __ineq_x);
@@ -579,7 +574,6 @@ TEST_CASE("box helper keeps generic casadi lowering for single-arg linear select
         lb,
         ub);
     REQUIRE(bound->dim() == 2);
-    REQUIRE(bound->field_hint().is_eq == utils::optional_bool::False);
     REQUIRE(bound->get_codegen_task() != nullptr);
 
     REQUIRE(bound->finalize());
@@ -593,7 +587,6 @@ TEST_CASE("box helper drops unbounded sides row-wise") {
 
     auto box = ineq_constr::create("x_half_box_bound", var_inarg_list{*x}, static_cast<const cs::SX &>(x), lb, ub);
     REQUIRE(box->dim() == 2);
-    REQUIRE(box->field_hint().is_eq == utils::optional_bool::False);
 
     REQUIRE(box->finalize());
     REQUIRE(box->field() == __ineq_x);
@@ -610,7 +603,6 @@ TEST_CASE("box helper accepts symbolic parameter bounds through generic casadi l
         -std::numeric_limits<scalar_t>::infinity(),
         static_cast<const cs::SX &>(p));
     REQUIRE(box->dim() == 2);
-    REQUIRE(box->field_hint().is_eq == utils::optional_bool::False);
     REQUIRE(box->get_codegen_task() != nullptr);
 
     REQUIRE(box->finalize());
@@ -668,7 +660,7 @@ TEST_CASE("ordinary ipm inequality is normalized into an upper half-box") {
 
     ns_sqp::data stage(prob);
     ns_sqp::settings_t ws;
-    stage.for_each_constr([&](const generic_func &c, func_approx_data &fd) {
+    stage.for_each_constr([&](const generic_constr &c, func_approx_data &fd) {
         c.setup_workspace_data(fd, &ws);
     });
 
@@ -706,7 +698,7 @@ TEST_CASE("native ipm box groups side workspace in approx data") {
 
     ns_sqp::data stage(prob);
     ns_sqp::settings_t ws;
-    stage.for_each_constr([&](const generic_func &c, func_approx_data &fd) {
+    stage.for_each_constr([&](const generic_constr &c, func_approx_data &fd) {
         c.setup_workspace_data(fd, &ws);
     });
 
@@ -750,7 +742,7 @@ TEST_CASE("native ipm box backup and restore use side workspace") {
 
     ns_sqp::data stage(prob);
     ns_sqp::settings_t ws;
-    stage.for_each_constr([&](const generic_func &c, func_approx_data &fd) {
+    stage.for_each_constr([&](const generic_constr &c, func_approx_data &fd) {
         c.setup_workspace_data(fd, &ws);
     });
 
@@ -835,7 +827,7 @@ TEST_CASE("boxed outer ipm runtime matches equivalent stacked one-sided rows") {
     ws.alpha_dual = scalar_t(0.35);
 
     auto setup_stage = [&](ns_sqp::data &stage) {
-        stage.for_each_constr([&](const generic_func &c, func_approx_data &fd) {
+        stage.for_each_constr([&](const generic_constr &c, func_approx_data &fd) {
             c.setup_workspace_data(fd, &ws);
         });
         solver::ineq_soft::bind_runtime(&stage);
@@ -951,7 +943,7 @@ TEST_CASE("boxed outer ipm derivative propagation matches equivalent stacked one
     ws.mu = scalar_t(0.3);
 
     auto setup_stage = [&](ns_sqp::data &stage) {
-        stage.for_each_constr([&](const generic_func &c, func_approx_data &fd) {
+        stage.for_each_constr([&](const generic_constr &c, func_approx_data &fd) {
             c.setup_workspace_data(fd, &ws);
         });
         solver::ineq_soft::bind_runtime(&stage);
@@ -1043,7 +1035,7 @@ TEST_CASE("boxed outer ipm predictor-corrector matches equivalent stacked one-si
     ws_stacked.alpha_dual = ws_box.alpha_dual;
 
     auto setup_stage = [&](ns_sqp::data &stage, ns_sqp::settings_t &ws) {
-        stage.for_each_constr([&](const generic_func &c, func_approx_data &fd) {
+        stage.for_each_constr([&](const generic_constr &c, func_approx_data &fd) {
             c.setup_workspace_data(fd, &ws);
         });
         solver::ineq_soft::bind_runtime(&stage);
@@ -1368,7 +1360,7 @@ TEST_CASE("restoration boxed overlay syncs back to outer ipm like equivalent sta
     ws.mu = scalar_t(0.3);
 
     auto setup_stage = [&](ns_sqp::data &stage) {
-        stage.for_each_constr([&](const generic_func &c, func_approx_data &fd) {
+        stage.for_each_constr([&](const generic_constr &c, func_approx_data &fd) {
             c.setup_workspace_data(fd, &ws);
         });
         solver::ineq_soft::bind_runtime(&stage);
@@ -1523,7 +1515,7 @@ TEST_CASE("restoration boxed inequality runtime matches equivalent stacked rows 
     ws.alpha_dual = scalar_t(0.35);
 
     auto setup_stage = [&](ns_sqp::data &stage) {
-        stage.for_each_constr([&](const generic_func &c, func_approx_data &fd) {
+        stage.for_each_constr([&](const generic_constr &c, func_approx_data &fd) {
             c.setup_workspace_data(fd, &ws);
         });
         solver::ineq_soft::bind_runtime(&stage);

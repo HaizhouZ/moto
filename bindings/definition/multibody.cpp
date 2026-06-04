@@ -1,13 +1,5 @@
-#include <moto/ocp/constr.hpp>
-#include <moto/ocp/sym.hpp>
-#include <moto/ocp/usr_func.hpp>
-#include <nanobind/stl/function.h>
-#include <nanobind/stl/variant.h>
-#include <type_cast.hpp>
-
 #include <moto/multibody/quaternion.hpp>
-
-#include <moto/ocp/dynamics/dense_dynamics.hpp>
+#include <type_cast.hpp>
 
 void register_submodule_multibody(nb::module_ &m) {
     using namespace moto::multibody;

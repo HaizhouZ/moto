@@ -494,13 +494,16 @@ void resto_prox_cost::hessian_impl(func_approx_data &data) const {
 resto_eq_elastic_constr::resto_eq_elastic_constr(const std::string &name,
                                                  const constr &source)
     : soft_constr(name, approx_order::second, source->dim()),
-            source_(source) {
-    field_hint().is_eq = true;
-    field_hint().is_soft = true;
+      source_(source),
+      source_func_(dynamic_cast<const generic_func *>(source.get())) {
+    if (source_func_ == nullptr) {
+        throw std::runtime_error(fmt::format("resto_eq_elastic_constr source {} is not a generic_func", source->name()));
+    }
+    field_hint_.is_eq = true;
+    field_hint_.is_soft = true;
     set_default_hess_sparsity(sparsity::dense);
-    const auto &src_func = dynamic_cast<const generic_func &>(*source);
-    add_arguments(src_func.in_args());
-    copy_source_sparsity(*this, src_func);
+    add_arguments(source_func_->in_args());
+    copy_source_sparsity(*this, *source_func_);
 }
 
 void resto_eq_elastic_constr::finalize_impl() {
@@ -522,7 +525,7 @@ func_approx_data_ptr_t resto_eq_elastic_constr::create_approx_data(sym_data &pri
 }
 
 void resto_eq_elastic_constr::value_impl(func_approx_data &data) const {
-    dynamic_cast<const generic_func &>(*source_).value(data);
+    source_func_->value(data);
     auto &d = data.as<approx_data>();
     d.base_residual = d.v_;
     solver::ineq_soft::ensure_initialized(*this, d);
@@ -544,7 +547,7 @@ void resto_eq_elastic_constr::value_impl(func_approx_data &data) const {
 }
 
 void resto_eq_elastic_constr::jacobian_impl(func_approx_data &data) const {
-    dynamic_cast<const generic_func &>(*source_).jacobian(data);
+    source_func_->jacobian(data);
     auto &d = data.as<approx_data>();
     if (d.ipm_cfg == nullptr) {
         throw std::runtime_error("resto_eq_elastic_constr::jacobian_impl requires ipm_cfg");
@@ -560,8 +563,8 @@ void resto_eq_elastic_constr::jacobian_impl(func_approx_data &data) const {
 }
 
 void resto_eq_elastic_constr::hessian_impl(func_approx_data &data) const {
-    if (source_->order() >= approx_order::second) {
-        dynamic_cast<const generic_func &>(*source_).hessian(data);
+    if (source_func_->order() >= approx_order::second) {
+        source_func_->hessian(data);
     }
 }
 
@@ -678,12 +681,15 @@ scalar_t resto_eq_elastic_constr::local_comp_residual_inf(const func_approx_data
 resto_ineq_elastic_ipm_constr::resto_ineq_elastic_ipm_constr(const std::string &name,
                                                              const constr &source)
     : ineq_constr(name, approx_order::second, source->dim()),
-            source_(source) {
-    field_hint().is_eq = false;
+      source_(source),
+      source_func_(dynamic_cast<const generic_func *>(source.get())) {
+    if (source_func_ == nullptr) {
+        throw std::runtime_error(fmt::format("resto_ineq_elastic_ipm_constr source {} is not a generic_func", source->name()));
+    }
+    field_hint_.is_eq = false;
     set_default_hess_sparsity(sparsity::dense);
-    const auto &src_func = dynamic_cast<const generic_func &>(*source);
-    add_arguments(src_func.in_args());
-    copy_source_sparsity(*this, src_func);
+    add_arguments(source_func_->in_args());
+    copy_source_sparsity(*this, *source_func_);
     if (const auto *src_ineq = dynamic_cast<const ineq_constr *>(source.get())) {
         if (const auto *box = src_ineq->box_info(); box != nullptr) {
             set_box_info(std::make_shared<box_spec>(*box));
@@ -715,7 +721,7 @@ local_residual_summary resto_ineq_elastic_ipm_constr::current_local_residuals(co
 }
 
 void resto_ineq_elastic_ipm_constr::value_impl(func_approx_data &data) const {
-    dynamic_cast<const generic_func &>(*source_).value(data);
+    source_func_->value(data);
     auto &d = data.as<approx_data>();
     d.base_residual = d.v_;
     solver::ineq_soft::ensure_initialized(*this, d);
@@ -743,7 +749,7 @@ void resto_ineq_elastic_ipm_constr::value_impl(func_approx_data &data) const {
 }
 
 void resto_ineq_elastic_ipm_constr::jacobian_impl(func_approx_data &data) const {
-    dynamic_cast<const generic_func &>(*source_).jacobian(data);
+    source_func_->jacobian(data);
     auto &d = data.as<approx_data>();
     if (d.ipm_cfg == nullptr) {
         throw std::runtime_error("resto_ineq_elastic_ipm_constr::jacobian_impl requires ipm_cfg");
@@ -765,8 +771,8 @@ void resto_ineq_elastic_ipm_constr::jacobian_impl(func_approx_data &data) const 
 }
 
 void resto_ineq_elastic_ipm_constr::hessian_impl(func_approx_data &data) const {
-    if (source_->order() >= approx_order::second) {
-        dynamic_cast<const generic_func &>(*source_).hessian(data);
+    if (source_func_->order() >= approx_order::second) {
+        source_func_->hessian(data);
     }
 }
 
@@ -1056,7 +1062,7 @@ ocp_ptr_t build_restoration_overlay_problem(const ocp_ptr_t &source_prob,
         }
     }
 
-    auto resto_prob = std::static_pointer_cast<ocp>(source_prob->clone_base(config));
+    auto resto_prob = source_prob->clone(config);
     var_list u_args;
     var_list y_args;
     for (const sym &arg : resto_prob->exprs(__u)) {
@@ -1087,9 +1093,6 @@ ocp_ptr_t build_restoration_overlay_problem(const ocp_ptr_t &source_prob,
     resto_prob->wait_until_ready();
     return resto_prob;
 }
-
-namespace {
-} // namespace
 
 void sync_outer_to_restoration_state(node_data &outer,
                                      node_data &resto,

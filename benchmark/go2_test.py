@@ -254,7 +254,7 @@ class pinCasadiModel(cpin.Model):
         ).cast_ineq()
         return c
 
-    def add_dt_constr_and_cost(self, prob: moto.ocp, dt_nom: moto.var):
+    def add_dt_constr_and_cost(self, prob: moto.node_ocp, dt_nom: moto.var):
         if isinstance(self.dt, cs.SX):
             dt_bound = moto.sym.params(
                 "dt_bound", 2, default_val=np.array([1e-4, 5e-2])
@@ -272,7 +272,7 @@ class pinCasadiModel(cpin.Model):
             )
             prob.add(timing_cost)
 
-    def get_state_cost(self, terminal: bool = False):
+    def get_state_cost(self):
         q_nom_res = self.q_stack - self.q_nom
         state_cost = (
             100.0 * cs.sumsqr(q_nom_res[: self.nqb])
@@ -282,8 +282,6 @@ class pinCasadiModel(cpin.Model):
         )
         state_args = self.pos_args + self.vel_args
         cost = moto.cost.create("c", state_args + [self.q_nom], state_cost)
-        if terminal:
-            return cost
         return cost
 
     def get_input_cost(self):
@@ -320,7 +318,7 @@ class pinCasadiModel(cpin.Model):
                 * cs.sumsqr(
                     (self.z_f - self.z_f_lift_d) * (1 - cs.vcat(self.active_foot))
                 ),
-            ).set_gauss_newton()
+            )
             return foot_lift_cost
 
 
@@ -341,20 +339,8 @@ foot_frames = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
 model = pinCasadiModel(
     model, dt=dt, q_nom=q_d, dense=True, foot_frames=foot_frames, use_fwd_dyn=True
 )
-# fmodel = model.fmodel
-# config = pin.randomConfiguration(fmodel)
-# config[:3] = np.random.rand(3) * 0.1
-# data = fmodel.createData()
-# pin.computeJointJacobians(fmodel, data, config)
-# pin.updateFramePlacements(fmodel, data)
-# np.set_printoptions(precision=1, suppress=True, linewidth=200)
-# # print(pin.getFrameJacobian(fmodel, data, model.foot_idx[0], pin.LOCAL_WORLD_ALIGNED))
-# jq, jv = pin.dIntegrate(fmodel, config, np.random.random(fmodel.nv))
-# print(jq.shape, jv.shape)
-# exit(0)
 
-prob = moto.ocp.create()
-prob.add(model.dyn)
+prob = moto.node_ocp.create()
 if benchmark.args.full:
     prob.add(model.fric)
 prob.add(model.kin_constr)
@@ -368,8 +354,11 @@ prob.add(model.get_state_cost())
 prob.add(model.get_input_cost())
 # prob.add(model.make_foot_lift_cost(lifted=True))
 
+edge_prob = moto.edge_ocp.create()
+edge_prob.add(model.dyn)
+
 prob_term = prob.clone()
-prob_term.add_terminal(model.get_state_cost(terminal=True))
+prob_term.add_terminal(model.get_state_cost())
 
 prob.print_summary()
 print("--" * 15)
@@ -392,13 +381,11 @@ for gait, (idx_cfg, cfg) in tqdm(
 ):
     assert isinstance(cfg, list) and len(cfg) == 2
     sqp = moto.sqp(n_job=10)
-    g = sqp.graph
     # setup gait
     steps = 4
     nodes_per_step = 20
     total_gait_steps = steps * nodes_per_step
     stance_length = int((N_horizon - total_gait_steps) / 2)
-    n0 = g.set_head(g.add(sqp.create_node(prob)))
 
     def create_phase_problem(step):
         constr_to_disable = []
@@ -410,22 +397,20 @@ for gait, (idx_cfg, cfg) in tqdm(
                 if gait_setting[gait][idx]:
                     constr_to_disable += [model.f_f[f]]
         phase_prob = prob.clone(
-            moto.ocp.active_status_config(deactivate_list=constr_to_disable)
+            moto.active_status_config(deactivate_list=constr_to_disable)
         )
         return phase_prob
 
-    for step in range(steps):
-        np = g.add(sqp.create_node(create_phase_problem(step + 1)))
-        if step == 0:
-            g.add_edge(n0, np, stance_length, include_ed=False)
-        else:
-            g.add_edge(n_prev, np, nodes_per_step, include_ed=False)
-        n_prev = np
+    segment_lengths = [stance_length]
+    segment_lengths.extend([nodes_per_step] * steps)
+    segment_lengths.append(stance_length)
 
-    nstop = g.add(sqp.create_node(prob))
-    g.add_edge(n_prev, nstop, nodes_per_step, include_ed=False)
-    n1 = g.set_tail(g.add(sqp.create_node(prob_term)))
-    g.add_edge(nstop, n1, stance_length)
+    segment_start_nodes = [prob]
+    segment_start_nodes.extend(create_phase_problem(step) for step in range(1, steps + 1))
+    segment_start_nodes.append(prob.clone())
+    segment_end_nodes = segment_start_nodes[1:] + [prob_term]
+    for start_prob, end_prob, n_edges in zip(segment_start_nodes, segment_end_nodes, segment_lengths):
+        sqp.graph.add_path(start_prob, end_prob, edge_prob, n_edges)
 
     sqp.settings.ipm.mu0 = 1
     # sqp.settings.mu_method = moto.sqp.adaptive_mu_t.mehrotra_probing
@@ -462,7 +447,8 @@ for gait, (idx_cfg, cfg) in tqdm(
         # data.value[model.q_nom][0] = node_idx / N_horizon * 2.0
         node_idx += 1
 
-    sqp.apply_forward(gait_setup)
+    for node in sqp.graph.flatten_nodes():
+        gait_setup(node)
 
     benchmark.run(sqp, gait, idx_cfg, cfg)
 

@@ -6,39 +6,18 @@
 #include <moto/solver/data_base.hpp>
 
 namespace moto {
-class node_data; // forward declaration
 namespace solver {
 namespace ineq_soft {
-using soft_constr = soft_constr;
-using soft_constr_data_t = soft_constr::data_map_t;
-/// @brief Get a lambda that applies the callback to each soft constraint
-/// @tparam Callback
-/// @param callback
-/// @return
-template <typename Callback>
-    requires std::is_invocable_v<Callback, const soft_constr &, soft_constr_data_t &>
-auto get_for_each(Callback &&callback) {
-    return [callback = std::forward<Callback>(callback)]<typename data_type>(data_type *data) -> void {
-        dynamic_cast<node_data *>(data)->for_each<ineq_soft_constr_fields>(
-            [&](const soft_constr &sf, soft_constr_data_t &sd) {
-            callback(sf, sd);
-        });
-    };
-}
 /// @brief for each soft constraint, call the callback with (const soft_constr&, soft_constr::data_map_t&)
 inline void for_each(node_data *data, auto &&callback) {
     data->for_each<ineq_soft_constr_fields>(
-        [&](const soft_constr &sf, soft_constr_data_t &sd) {
+        [&](const moto::soft_constr &sf, moto::soft_constr::data_map_t &sd) {
             callback(sf, sd);
         });
 }
-void bind_runtime(const soft_constr &sf, soft_constr_data_t &sd);
 void bind_runtime(node_data *data);
-void invalidate_initialized(const soft_constr &sf, soft_constr_data_t &sd);
-void invalidate_initialized(node_data *data);
 void bind_and_invalidate(node_data *data);
-void ensure_initialized(const soft_constr &sf, soft_constr_data_t &sd);
-void mark_initialized(const soft_constr &sf, soft_constr_data_t &sd);
+void ensure_initialized(const moto::soft_constr &sf, moto::soft_constr::data_map_t &sd);
 void mark_initialized(node_data *data);
 /**
  * @brief finalize the newton step for the soft constraints

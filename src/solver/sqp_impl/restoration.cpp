@@ -39,7 +39,8 @@ void restore_outer_ipm_pairs(const std::vector<ipm_pair_snapshot> &backup) {
 
 } // namespace
 
-ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const iter_info &iter_before, filter_linesearch_data &ls) {
+ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const iter_info &iter_before,
+                                               filter_linesearch_data &ls, size_t update_iter_limit) {
     if (settings.ls.method == linesearch_setting::search_method::merit_backtracking) {
         throw std::runtime_error("restoration mode is incompatible with merit_backtracking");
     }
@@ -55,8 +56,7 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
                    iter_before.num_iter, kkt_before.barrier_objective.augmented_objective, kkt_before.barrier_objective.ls_objective,
                    kkt_before.primal.res_l1, kkt_before.dual.inf_res, kkt_before.primal.inf_comp);
     }
-    settings.in_restoration = true;
-    set_phase_graph_override(resto_graph);
+    scoped_phase_graph_override phase_graph(*this, resto_graph, true);
 
     auto rest_state = result_type{
         .iter = iter_info{
@@ -68,7 +68,7 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
         solver::for_each(solver::par, solver::zip(outer_graph, resto_graph),
                      [&](data *outer, data *resto) {
             solver::restoration::sync_outer_to_restoration_state(*outer, *resto, prox_eps, &settings.mu);
-            resto->for_each_constr([this](const generic_func &c, func_approx_data &fd) {
+            resto->for_each_constr([this](const generic_constr &c, func_approx_data &fd) {
                 c.setup_workspace_data(fd, &settings);
             });
             solver::ineq_soft::bind_and_invalidate(resto);
@@ -88,11 +88,11 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
             solver::restoration::sync_restoration_candidate_to_outer_state(*resto, *outer);
             outer->update_approximation(node_data::update_mode::eval_val, true);
         });
-        clear_phase_graph_override();
+        phase_graph.use_default_graph(false);
         kkt_info outer_trial;
         /// no need update step info because the reference kkt is from outside (Backup)
         update_primal_info(outer_trial, point_value_mask::primal | point_value_mask::barrier_objective);
-        set_phase_graph_override(resto_graph);
+        phase_graph.use_graph(resto_graph, true);
         solver::for_each(solver::par, outer_graph, [](data *d) {
             d->restore_primal_state();
             solver::ineq_soft::restore_trial_state(d);
@@ -117,7 +117,7 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
                 ls_dual_only.dual.merge_from(s.dual);
             }
 
-            std::vector<bool> local_exceed_bound(setting_per_thread.size(), false);
+            std::vector<uint8_t> local_exceed_bound(setting_per_thread.size(), uint8_t{0});
             solver::for_each(solver::par, outer_graph, [&, this](size_t tid, data *d) {
                 d->for_each<ineq_constr_fields>([&](const ineq_constr &c, ineq_constr::data_map_t &id) {
                     c.restoration_commit_dual_step(id, ls_dual_only.dual.alpha_max);
@@ -127,20 +127,19 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
                     if (dual.size() == 0) {
                         continue;
                     }
-                    local_exceed_bound[tid] =
-                        local_exceed_bound[tid] ||
+                    local_exceed_bound[tid] |= static_cast<uint8_t>(
                         dual.cwiseAbs().maxCoeff() >
-                            settings.restoration.bound_mult_reset_threshold;
+                        settings.restoration.bound_mult_reset_threshold);
                 }
             });
             bool reset_bound_multipliers =
-                std::any_of(local_exceed_bound.begin(), local_exceed_bound.end(), [](bool b) { return b; });
+                std::any_of(local_exceed_bound.begin(), local_exceed_bound.end(), [](uint8_t b) { return b != 0; });
 
             if (settings.verbose) {
                 fmt::println("[resto cleanup] reset_bound_multipliers: {}", reset_bound_multipliers);
             }
 
-            clear_phase_graph_override();
+            phase_graph.use_default_graph(false);
             if (reset_bound_multipliers && rebuild_eq_duals) {
                 solver::for_each(solver::par, outer_graph, [](data *d) {
                     d->for_each<ineq_constr_fields>([](const ineq_constr &c, ineq_constr::data_map_t &id) {
@@ -150,7 +149,7 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
             }
 
             if (rebuild_eq_duals) {
-                initialize_equality_multipliers(false);
+                initialize_equality_multipliers(outer_graph, false);
             }
             solver::for_each(solver::par, outer_graph, [reset_bound_multipliers, rebuild_eq_duals](data *d) {
                 if (reset_bound_multipliers && !rebuild_eq_duals) {
@@ -165,12 +164,11 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
             update_stat_info(rest_state);
         } else {
             restore_outer_ipm_pairs(outer_ipm_backup);
-            clear_phase_graph_override();
+            phase_graph.use_default_graph(false);
             solver::for_each(solver::par, outer_graph, [](data *d) {
                 d->update_approximation(node_data::update_mode::eval_val, true);
             });
         }
-        settings.in_restoration = false;
     };
 
     initialize_restoration_problem();
@@ -189,7 +187,7 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
     kkt_info kkt_outer_trial{};
     const size_t max_resto_iters =
         std::min(settings.restoration.max_iter,
-                 settings.max_iter > iter_before.num_iter ? settings.max_iter - iter_before.num_iter : size_t(0));
+                 update_iter_limit > iter_before.num_iter ? update_iter_limit - iter_before.num_iter : size_t(0));
     const scalar_t accepted_outer_prim_res =
         settings.restoration.restoration_improvement_frac * kkt_before.primal.res_l1;
 

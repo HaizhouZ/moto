@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <cstdlib>
 #include <moto/ocp/constr.hpp>
 #include <moto/ocp/cost.hpp>
 #include <moto/ocp/dynamics.hpp>
@@ -9,93 +8,15 @@ namespace moto {
 INIT_UID_(ocp_base);
 
 namespace {
-bool maybe_func_field(field_t f) {
-    return in_field(f, func_fields) || f == __undefined;
-}
-
-bool is_path_state_term(const shared_expr &ex) {
-    if (!ex || !maybe_func_field(ex->field())) {
-        return false;
-    }
-    const auto &func = ex.as<generic_func>();
-    const bool is_supported_field =
-        ex->field() == __eq_x ||
-        ex->field() == __eq_x_soft ||
-        ex->field() == __undefined;
-    if (!is_supported_field) {
-        return false;
-    }
-    bool has_x = false;
-    for (const sym &arg : func.in_args()) {
-        if (arg.field() == __u || arg.field() == __y) {
-            return false;
-        }
-        if (arg.field() == __x) {
-            has_x = true;
+bool has_active_primal_arg(const generic_func &func, const ocp_base *prob) {
+    for (auto p : primal_fields) {
+        if (func.active_num(p, prob) != 0) {
+            return true;
         }
     }
-    return has_x;
+    return false;
 }
 
-bool is_pure_state_cost_term(const shared_expr &ex) {
-    if (!ex || ex->field() != __cost) {
-        return false;
-    }
-    if (ex.as<generic_cost>().terminal_add()) {
-        return false;
-    }
-    const auto &func = ex.as<generic_func>();
-    bool has_x = false;
-    for (const sym &arg : func.in_args()) {
-        if (arg.field() == __u || arg.field() == __y) {
-            return false;
-        }
-        if (arg.field() == __x) {
-            has_x = true;
-        }
-    }
-    return has_x;
-}
-
-shared_expr lower_node_term_for_edge(const shared_expr &ex, const ocp_base &prob) {
-    return ex.as<generic_func>().lower_expr_x_to_y_cached(
-        fmt::format("node term {} during edge compose", ex->name()),
-        prob.uid());
-}
-
-bool is_lowerable_edge_term(const shared_expr &ex) {
-    return is_path_state_term(ex) || is_pure_state_cost_term(ex);
-}
-
-void append_node_terms(const node_ocp_ptr_t &node_prob,
-                       const edge_ocp_ptr_t &edge_prob,
-                       bool lower_path_state_terms,
-                       bool skip_path_state_terms,
-                       bool only_path_state_terms = false) {
-    if (!node_prob) {
-        return;
-    }
-    for (size_t f = 0; f < field::num; ++f) {
-        for (const shared_expr &expr : node_prob->exprs(f)) {
-            const bool is_path_state = is_path_state_term(expr);
-            const bool is_pure_state_cost = is_pure_state_cost_term(expr);
-            const bool is_lowerable_node_term = is_path_state || is_pure_state_cost;
-            if (only_path_state_terms && !is_lowerable_node_term) {
-                continue;
-            }
-            if (is_lowerable_node_term) {
-                if (skip_path_state_terms) {
-                    continue;
-                }
-                if (lower_path_state_terms) {
-                    edge_prob->add(lower_node_term_for_edge(expr, *edge_prob));
-                    continue;
-                }
-            }
-            edge_prob->add(expr);
-        }
-    }
-}
 } // namespace
 
 bool ocp_base::add_impl(expr &ex) {
@@ -115,11 +36,13 @@ bool ocp_base::add_impl(shared_expr ex, bool terminal) {
             "Cannot add expression {} uid {} to problem uid {}: {}",
             ex->name(), ex->uid(), uid_, reason));
     }
-    ex->prepare_add_to_ocp(terminal);
+    if (auto *cost = dynamic_cast<generic_cost *>(ex.get())) {
+        cost->set_terminal_add(terminal);
+    } else if (auto *constr = dynamic_cast<generic_constr *>(ex.get())) {
+        constr->set_terminal_add(terminal);
+    }
     size_t _uid = ex->uid();
-    if (!contains(*ex, false)) { // skip repeated in the current problem only
-        auto *ex_ptr = ex.get();
-        ex_ptr->add_to_ocp_callback(this);
+    if (!contains(*ex)) {
         // add dependencies
         if (!ex->finalize()) {
             throw std::runtime_error(fmt::format("cannot finalize expr {} uid {}", ex->name(), ex->uid()));
@@ -135,13 +58,13 @@ bool ocp_base::add_impl(shared_expr ex, bool terminal) {
                             throw std::runtime_error(
                                 fmt::format("Dynamics {} arg {} uid {} in {} found in dynamics {}. "
                                             "Overlapping state variables in dynamics is not allowed to avoid inconsistency."
-                                            " If you want to allow this, set allow_inconsistent_dynamics to true.",
+                                            " If you want to allow this, call set_allow_inconsistent_dynamics(true).",
                                             ex->name(),
                                             (*it)->name(), (*it)->uid(), f, dyn.name()));
                         }
                     }
             for (expr &arg : dep) {
-                if (!contains(arg, false)) {
+                if (!contains(arg)) {
                     add_impl(arg);
                 }
             }
@@ -154,7 +77,6 @@ bool ocp_base::add_impl(shared_expr ex, bool terminal) {
             disabled_uids_.insert(_uid);
             disabled_expr_[ex->field()].emplace_back(std::move(ex));
         }
-        bump_formulation_version();
         return true;
     }
     return false;
@@ -169,21 +91,13 @@ bool ocp_base::add_terminal_impl(expr &ex) {
     }
     return add_impl(shared_expr(ex), true);
 }
-bool ocp_base::contains(const expr &ex, bool include_sub_prob) const {
+bool ocp_base::contains(const expr &ex) const {
     return uids_.contains(ex.uid()) ||
            disabled_uids_.contains(ex.uid()) ||
-           pruned_uids_.contains(ex.uid()) ||
-           (include_sub_prob &&
-            std::any_of(sub_probs_.begin(),
-                        sub_probs_.end(),
-                        [&](const ocp_base_ptr_t &p) { return p->contains(ex, true); }));
+           pruned_uids_.contains(ex.uid());
 }
-bool ocp_base::is_active(const expr &ex, bool include_sub_prob) const {
-    return uids_.contains(ex.uid()) ||
-           (include_sub_prob &&
-            std::any_of(sub_probs_.begin(),
-                        sub_probs_.end(),
-                        [&](const ocp_base_ptr_t &p) { return p->is_active(ex, true); }));
+bool ocp_base::is_active(const expr &ex) const {
+    return uids_.contains(ex.uid());
 }
 void ocp_base::finalize() {
     static std::mutex finalize_mutex_;
@@ -197,14 +111,14 @@ void ocp_base::finalize() {
 }
 void ocp_base::refresh_after_clone(const active_status_config &config) {
     finalized_ = false;
-    for (auto &p : sub_probs_) {
-        p = p->clone_base(config);
-    }
     if (!config.empty()) {
-        update_active_status(config, false);
+        update_active_status(config);
     }
 }
 void ocp_base::set_dim_and_idx() {
+    flatten_idx_.clear();
+    flatten_tidx_.clear();
+    pos_by_uid_.clear();
     for (size_t i = 0; i < field::num; i++) {
         dim_[i] = 0;
         if (i < field::num_prim)
@@ -233,11 +147,12 @@ void ocp_base::maintain_order() {
         for (const generic_func &dyn : exprs(__dyn)) {
             for (const expr &arg : dyn.in_args(f)) {
                 auto it = std::find(syms.begin(), syms.end(), arg);
-                if (it == syms.end())
+                if (it == syms.end()) {
                     throw std::runtime_error(fmt::format(
                         "order maintenance failure: "
                         "Dynamics {} arg {} uid {} not found in field {}",
                         dyn.name(), arg.name(), arg.uid(), f));
+                }
                 tmp.emplace_back(std::move(*it));
             }
         }
@@ -295,9 +210,6 @@ ocp_ptr_t ocp::clone(const active_status_config &config) const {
     prob->refresh_after_clone(config);
     return prob;
 }
-node_ocp_ptr_t node_ocp::compose(const node_ocp_ptr_t &base_prob) {
-    return base_prob ? base_prob->clone_node() : node_ocp::create();
-}
 node_ocp_ptr_t node_ocp::clone_node(const active_status_config &config) const {
     auto prob = node_ocp_ptr_t(new node_ocp(*this));
     prob->refresh_after_clone(config);
@@ -338,55 +250,11 @@ edge_ocp_ptr_t edge_ocp::clone_edge(const active_status_config &config) const {
     prob->refresh_after_clone(config);
     return prob;
 }
-edge_ocp_ptr_t edge_ocp::compose(const node_ocp_ptr_t &st_node_prob,
-                                 const edge_ocp_ptr_t &edge_prob,
-                                 const node_ocp_ptr_t &lowered_node_prob,
-                                 bool skip_st_path_state_terms) {
-    auto prob = edge_prob ? edge_prob->clone_edge() : edge_ocp::create();
-    prob->bind_nodes(st_node_prob, edge_prob ? edge_prob->ed_node_prob() : node_ocp_ptr_t{});
-    if (edge_prob) {
-        active_status_config config;
-        for (size_t f = 0; f < field::num; ++f) {
-            for (const shared_expr &expr : edge_prob->exprs(f)) {
-                if (is_lowerable_edge_term(expr)) {
-                    config.deactivate_list.emplace_back(*expr);
-                    continue;
-                }
-                if (st_node_prob && f < field::num_prim &&
-                    st_node_prob->contains(*expr, false) && !st_node_prob->is_active(*expr, false)) {
-                    config.deactivate_list.emplace_back(*expr);
-                }
-            }
-        }
-        if (!config.empty()) {
-            prob->update_active_status(config, false);
-        }
-        for (size_t f = 0; f < field::num; ++f) {
-            for (const shared_expr &expr : edge_prob->exprs(f)) {
-                if (!is_lowerable_edge_term(expr)) {
-                    continue;
-                }
-                prob->add(lower_node_term_for_edge(expr, *prob));
-            }
-        }
-    }
-    append_node_terms(st_node_prob, prob, true, skip_st_path_state_terms);
-    append_node_terms(lowered_node_prob, prob, true, false, true);
-    return prob;
-}
 void edge_ocp::bind_nodes(const node_ocp_ptr_t &st, const node_ocp_ptr_t &ed) {
     st_node_prob_ = st;
     ed_node_prob_ = ed;
 }
-edge_ocp_ptr_t edge_ocp::compose() const {
-    return compose(st_node_prob_, clone_edge());
-}
-void ocp_base::update_active_status(const active_status_config &config, bool update_sub_probs) {
-    if (update_sub_probs) {
-        for (auto &p : sub_probs_) {
-            p->update_active_status(config, true);
-        }
-    }
+void ocp_base::update_active_status(const active_status_config &config) {
     auto delete_expr = [&](const expr &ex, bool prune = false) {
         size_t f = ex.field();
         auto &exprs = expr_[f];
@@ -395,11 +263,6 @@ void ocp_base::update_active_status(const active_status_config &config, bool upd
         auto it = std::find_if(exprs.begin(), exprs.end(),
                                [&ex](const shared_expr &e) { return e->uid() == ex.uid(); });
         if (it == exprs.end()) {
-            if (std::ranges::any_of(sub_probs_, [&](const ocp_base_ptr_t &p) {
-                    return p->contains(ex, true);
-                })) {
-                return;
-            }
             throw std::runtime_error(fmt::format(
                 "Cannot deactivate expression {} uid {}, it does not exist in the active problem",
                 ex.name(), ex.uid()));
@@ -451,13 +314,8 @@ ITER_START:
             continue;
         to_re_enable[f].reserve(pruned_expr_[f].size());
         for (const generic_func &e : pruned_expr_[f]) {
-            bool has_active_primal_arg = false;
-            for (auto p : primal_fields) {
-                if (e.active_num(p, this) != 0)
-                    has_active_primal_arg = true;
-            }
             // check if all enable_if_deps are active and all disable_if_deps are inactive
-            bool can_re_enable = has_active_primal_arg;
+            bool can_re_enable = has_active_primal_arg(e, this);
             if (can_re_enable) {
                 can_re_enable = e.check_enable(this);
             }
@@ -472,12 +330,7 @@ ITER_START:
             continue;
         to_delete[f].reserve(expr_[f].size());
         for (const generic_func &e : expr_[f]) {
-            bool has_active_primal_arg = false;
-            for (auto p : primal_fields) {
-                if (e.active_num(p, this) != 0)
-                    has_active_primal_arg = true;
-            }
-            if (!has_active_primal_arg) {
+            if (!has_active_primal_arg(e, this)) {
                 // prune funcs with no active primal args
                 to_delete[f].emplace_back(e);
                 // fmt::print("func {} pruned due to no active primal args\n", e.name());
@@ -513,9 +366,6 @@ ITER_START:
     if (changed)
         goto ITER_START;
     finalized_ = false;
-    if (!config.empty()) {
-        bump_formulation_version();
-    }
 }
 } // namespace moto
 

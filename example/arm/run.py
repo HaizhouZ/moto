@@ -193,7 +193,7 @@ class pinCasadiModel(cpin.Model):
         # return [
         #     moto.cost.create(
         #         "ee_cost_lifted", [ee_lifted, self.W_ee_cost], 0.5 * cs.sumsqr(cs.sqrt(self.W_ee_cost) * ee_lifted)
-        #     ),  # .as_terminal(),
+        #     ),
         #     moto.constr.create("ee_constr_lifted", self.pos_args + [self.r_des, self.quat_des, ee_lifted], ee_lifted - res),
         # ]
 
@@ -222,7 +222,7 @@ class pinCasadiModel(cpin.Model):
             "arm_tq_limit", in_arg, self.tq.sx, -tq_limit, tq_limit
         )
 
-    def get_state_cost(self, terminal: bool = False):
+    def get_state_cost(self):
         q_nom_res = self.q_stack - self.q_nom
         if self.is_floating_based:
             state_cost = (
@@ -237,8 +237,6 @@ class pinCasadiModel(cpin.Model):
         cost = moto.cost.create(
             "arm_state_cost", state_args + [self.q_nom], state_cost
         ).set_diag_hess()
-        if terminal:
-            return cost
         return cost
 
     def get_input_cost(self):
@@ -278,6 +276,9 @@ def build_sqp(display: bool, n_job: int = 4):
     stage_prob.add(model.get_state_cost())
     stage_prob.add(model.get_input_cost())
 
+    edge_prob = moto.edge_ocp.create()
+    edge_prob.add(model.dyn)
+
     terminal_prob = stage_prob.clone()
     terminal_prob.add_terminal(model.make_ee_pos_constr())
 
@@ -287,11 +288,7 @@ def build_sqp(display: bool, n_job: int = 4):
 
     horizon = 50
     sqp = moto.sqp(n_job=n_job)
-    modeled = sqp.create_graph()
-    start_node = modeled.create_node(stage_prob)
-    terminal_node = modeled.create_node(terminal_prob)
-    for edge in modeled.add_path(start_node, terminal_node, horizon):
-        edge.add(model.dyn)
+    sqp.graph.add_path(stage_prob, terminal_prob, edge_prob, horizon)
 
     # cfg = [
     #     [
@@ -336,13 +333,14 @@ def build_sqp(display: bool, n_job: int = 4):
     def set_initial_state(data: moto.sqp.data_type):
         data.value[model.q] = np.array(cfg[1])
         data.value[model.qn] = np.array(cfg[1])
-        if data.prob.dim(moto.field___eq_x) > 0:
+        if data.prob.dim(moto.field.field___eq_x) > 0:
             data.value[model.r_des] = np.array(cfg[0][:3])
             data.value[model.quat_des] = np.array(cfg[0][3:7])
             if hasattr(model, "W_ee_cost"):
                 data.value[model.W_ee_cost] = np.ones(6) * 1e8
 
-    sqp.apply_forward(set_initial_state)
+    for node in sqp.graph.flatten_nodes():
+        set_initial_state(node)
 
     sqp.settings.ipm.mu0 = 0.1
     # sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
@@ -375,7 +373,8 @@ def collect_trajectory(sqp, model, horizon):
         if node_idx >= horizon:
             q_res.append(node.value[model.qn])
 
-    sqp.apply_forward(get_sym)
+    for node in sqp.graph.flatten_nodes():
+        get_sym(node)
     return q_res, dt_res
 
 
@@ -452,9 +451,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# def print_sym(node: moto.sqp.data_type):
-#     node.sym.print()
-#     node.print_residuals()
-
-# sqp.apply_forward(print_sym, early_stop=20)

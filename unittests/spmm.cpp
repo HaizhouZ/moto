@@ -1,7 +1,6 @@
 #include <iostream>
 #include <random>
 
-#define CATCH_CONFIG_MAIN
 #include <catch2/catch_test_macros.hpp>
 
 #include <moto/spmm/impl/binary_op_helper.hpp>
@@ -15,12 +14,17 @@
 
 namespace moto {
 
+std::mt19937 &spmm_test_rng() {
+    static std::mt19937 rng(1);
+    return rng;
+}
+
 auto generate_random_sparse_mat(size_t rows_ = 999, size_t cols_ = 999) -> sparse_mat {
-    std::mt19937 rng0(std::random_device{}());
+    auto &rng = spmm_test_rng();
     std::uniform_int_distribution<size_t> rows_dist(10, 80);
     std::uniform_int_distribution<size_t> cols_dist(10, 80);
     std::uniform_int_distribution<size_t> panels_dist(1, 6);
-    size_t rows = rows_dist(rng0), cols = cols_dist(rng0), num_panels = panels_dist(rng0);
+    size_t rows = rows_dist(rng), cols = cols_dist(rng), num_panels = panels_dist(rng);
     if (rows_ != 999) {
         rows = rows_;
     }
@@ -29,7 +33,6 @@ auto generate_random_sparse_mat(size_t rows_ = 999, size_t cols_ = 999) -> spars
     }
     sparse_mat sm;
     sm.resize(rows, cols);
-    std::mt19937 rng(std::random_device{}());
     std::discrete_distribution<int> sp_dist({1, 10, 10});
     std::uniform_int_distribution<int> sz_dist(1, std::min(rows, cols) / 2 + 1);
     std::uniform_int_distribution<int> pos_dist_row(0, rows - 1);
@@ -111,7 +114,7 @@ other_t make_other(std::string_view name, sparse_mat &sm) {
     constexpr size_t row_ = row_fixed ? out_type::RowsAtCompileTime : 0;
     constexpr bool col_fixed = out_type::ColsAtCompileTime != Eigen::Dynamic;
     constexpr size_t col_ = col_fixed ? out_type::ColsAtCompileTime : 0;
-    std::mt19937 rng(std::random_device{}());
+    auto &rng = spmm_test_rng();
     std::uniform_int_distribution<size_t> dist(10, 80);
     size_t outer_dim = dist(rng);
     size_t inner_dim = _inner_dim(name, sm);
@@ -146,7 +149,7 @@ other_t make_other(std::string_view name, sparse_mat &sm) {
 template <spmm::binary_op_type op, bool add, typename D_type, typename out_type, typename callback>
 // requires std::is_invocable_v<callback, const D_type &, const matrix &>
 void test_binary(std::string_view name,
-                 void (sparse_mat::*func)(const D_type &, out_type &),
+                 void (sparse_mat::*func)(const D_type &, out_type &, sparse_mat::clip_info) const,
                  callback &&ground_truth) {
 
     scalar_t max_err = 0;
@@ -164,7 +167,7 @@ void test_binary(std::string_view name,
         auto [out_rows, out_cols] = out_dim(name, sm, V);
         out_type B = out_type::Zero(out_rows, out_cols);
         out_type B_dense = out_type::Zero(out_rows, out_cols);
-        (sm.*func)(V, B);
+        (sm.*func)(V, B, {});
         if constexpr (std::is_same_v<D_type, sparse_mat>) {
             B_dense.noalias() = ground_truth(V.dense(), dense, std::bool_constant<add>{});
         } else {
@@ -261,8 +264,8 @@ void test_binary(std::string_view name,
     test_unary(#func, &moto::sparse_mat::func, ground_truth)
 
 #define TEST_BINARY_IMPL(func, lhs_type, rhs_type, ground_truth)                                                                                                                          \
-    test_binary<moto::spmm::func, false>(#func, static_cast<void (moto::sparse_mat::*)(const lhs_type &, rhs_type &)>(&moto::sparse_mat::func<false, lhs_type, rhs_type>), ground_truth); \
-    test_binary<moto::spmm::func, true>(#func, static_cast<void (moto::sparse_mat::*)(const lhs_type &, rhs_type &)>(&moto::sparse_mat::func<true, lhs_type, rhs_type>), ground_truth);
+    test_binary<moto::spmm::func, false>(#func, static_cast<void (moto::sparse_mat::*)(const lhs_type &, rhs_type &, moto::sparse_mat::clip_info) const>(&moto::sparse_mat::func<false, lhs_type, rhs_type>), ground_truth); \
+    test_binary<moto::spmm::func, true>(#func, static_cast<void (moto::sparse_mat::*)(const lhs_type &, rhs_type &, moto::sparse_mat::clip_info) const>(&moto::sparse_mat::func<true, lhs_type, rhs_type>), ground_truth);
   // TEST_BINARY_IMPL(func, sparse_mat, matrix, ground_truth);     \
     // TEST_BINARY_IMPL(func, sparse_mat, vector, ground_truth);     \
 

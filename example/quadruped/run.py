@@ -289,7 +289,7 @@ class pinCasadiModel(cpin.Model):
         c.enable_if_all([f])
         return c
 
-    def add_dt_constr_and_cost(self, prob: moto.ocp, dt_nom: moto.var):
+    def add_dt_constr_and_cost(self, prob: moto.node_ocp, dt_nom: moto.var):
         if isinstance(self.dt, cs.SX):
             dt_bound = moto.sym.params(
                 "dt_bound", 2, default_val=np.array([1e-4, 5e-2])
@@ -303,7 +303,7 @@ class pinCasadiModel(cpin.Model):
             )
             prob.add(timing_cost)
 
-    def get_state_cost(self, terminal: bool = False):
+    def get_state_cost(self):
         q_stack = self.q_stack
         v_stack = self.v_stack
         q_nom_res = q_stack - self.q_nom
@@ -315,8 +315,6 @@ class pinCasadiModel(cpin.Model):
         )
         state_args = self.pos_args + self.vel_args
         cost = moto.cost.create("c", state_args + [self.q_nom], state_cost)
-        if terminal:
-            return cost.as_terminal()
         return cost
 
     def get_input_cost(self):
@@ -353,7 +351,7 @@ class pinCasadiModel(cpin.Model):
                 * cs.sumsqr(
                     (self.z_f - self.z_f_lift_d) * (1 - cs.vcat(self.active_foot))
                 ),
-            ).set_gauss_newton()
+            )
             return foot_lift_cost
 
 
@@ -362,9 +360,10 @@ dt_nom = moto.sym.params("dt_nom", 1, default_val=0.02)
 dt = 0.02
 display_env = os.getenv("MOTO_DISPLAY")
 display = display_env != "0" if display_env is not None else True
+profile_sqp = os.getenv("MOTO_PROFILE_SQP") is not None
 if display_env is None and (
     os.getenv("MOTO_SQP_BENCH_RUNS") is not None or
-    os.getenv("MOTO_PROFILE_SQP") is not None
+    profile_sqp
 ):
     display = False
 try:
@@ -389,24 +388,26 @@ model = pinCasadiModel(
     model, dt=dt, q_nom=q_d, dense=True, foot_frames=foot_frames, use_fwd_dyn=True
 )
 
-def build_stage_node_prob(robot: pinCasadiModel):
-    stage_node_prob = moto.node_ocp.create()
+def build_stage_prob(robot: pinCasadiModel):
+    stage_prob = moto.node_ocp.create()
     if full:
-        stage_node_prob.add(robot.fric)
-    stage_node_prob.add(robot.kin_constr)
+        stage_prob.add(robot.fric)
+    stage_prob.add(robot.kin_constr)
     if not full:
-        stage_node_prob.add(robot.kin_cost)
-    robot.add_dt_constr_and_cost(stage_node_prob, dt_nom)
-    stage_node_prob.add(robot.make_joint_limit_constr())
-    stage_node_prob.add(robot.make_tq_limit_constr())
-    stage_node_prob.add(robot.get_state_cost())
-    stage_node_prob.add(robot.get_input_cost())
-    # stage_node_prob.add(robot.make_foot_lift_cost(lifted=True))
-    return stage_node_prob
+        stage_prob.add(robot.kin_cost)
+    robot.add_dt_constr_and_cost(stage_prob, dt_nom)
+    stage_prob.add(robot.make_joint_limit_constr())
+    stage_prob.add(robot.make_tq_limit_constr())
+    stage_prob.add(robot.get_state_cost())
+    stage_prob.add(robot.get_input_cost())
+    # stage_prob.add(robot.make_foot_lift_cost(lifted=True))
+    return stage_prob
 
 
-stage_node_proto = build_stage_node_prob(model)
-terminal_node_proto = stage_node_proto.clone()
+stage_proto = build_stage_prob(model)
+edge_proto = moto.edge_ocp.create()
+edge_proto.add(model.dyn)
+terminal_node_proto = stage_proto.clone()
 
 N_horizon = 100
 
@@ -424,7 +425,6 @@ gait_setting = {
     "hopping": [0, 0, 0, 0],
 }
 sqp = moto.sqp(n_job=10)
-modeled = sqp.create_graph()
 
 
 def create_phase_config(step):
@@ -436,7 +436,7 @@ def create_phase_config(step):
         else:
             if gait_setting[gait][idx]:
                 constr_to_disable.append(model.f_f[f])
-    return moto.ocp.active_status_config(deactivate_list=constr_to_disable)
+    return moto.active_status_config(deactivate_list=constr_to_disable)
 
 
 segment_lengths = [stance_length]
@@ -444,26 +444,18 @@ segment_lengths.extend([nodes_per_step] * steps)
 segment_lengths.append(stance_length)
 
 
-def add_segment(start, end_prob, n_edges):
-    end_node = modeled.create_node(end_prob)
-    edges = modeled.add_path(start, end_node, n_edges)
-    for edge in edges:
-        edge.add(model.dyn)
-    return end_node
-
-
-current_node = modeled.create_node(stage_node_proto.clone())
-segment_end_nodes = [stage_node_proto.clone(create_phase_config(step)) for step in range(1, steps + 1)]
-segment_end_nodes.append(stage_node_proto.clone())
-segment_end_nodes.append(terminal_node_proto)
-for end_prob, n_edges in zip(segment_end_nodes, segment_lengths):
-    current_node = add_segment(current_node, end_prob, n_edges)
+segment_start_nodes = [stage_proto]
+segment_start_nodes.extend(stage_proto.clone(create_phase_config(step)) for step in range(1, steps + 1))
+segment_start_nodes.append(stage_proto.clone())
+segment_end_nodes = segment_start_nodes[1:] + [terminal_node_proto]
+for start_prob, end_prob, n_edges in zip(segment_start_nodes, segment_end_nodes, segment_lengths):
+    sqp.graph.add_path(start_prob, end_prob, edge_proto, n_edges)
 
 if os.getenv("MOTO_DEBUG_SOLVER_PROBS"):
     flat_nodes = sqp.graph.flatten_nodes()
     print("--" * 15)
-    print("Terminal node prototype:")
-    terminal_node_proto.print_summary()
+    print("Stage prototype:")
+    stage_proto.print_summary()
     print("Head solver node problem:")
     flat_nodes[0].prob.print_summary()
     print("Tail solver node problem:")
@@ -474,31 +466,11 @@ if os.getenv("MOTO_DEBUG_GRAPH_LAYOUT"):
     for idx, node in enumerate(sqp.graph.flatten_nodes()):
         prob = node.prob
         print(
-            f"  node[{idx}] uid={prob.uid} "
-            f"x={prob.dim(moto.field___x)} "
-            f"u={prob.dim(moto.field___u)} "
-            f"y={prob.dim(moto.field___y)} "
-            f"dyn={len(prob.exprs(moto.field___dyn))}"
+            f"  node[{idx}] "
+            f"x={prob.dim(moto.field.field___x)} "
+            f"u={prob.dim(moto.field.field___u)} "
+            f"y={prob.dim(moto.field.field___y)}"
         )
-# g.add_edge(n0, n1, N_horizon)
-# print(len(g.flatten_nodes()))
-# names = [[] for _ in range(len(g.flatten_nodes()))]
-# idx = 0
-# def print_node_info(node: moto.sqp.data_type):
-#     global names, idx
-#     names[idx] = []
-#     for c in node.prob.exprs(moto.field___u):
-#         names[idx].append(c.name)
-#     idx += 1
-
-
-# sqp.apply_forward(print_node_info)
-# print("Node variable names:")
-# for i, n in enumerate(g.flatten_nodes()):
-#     print(f"Node {i}: {names[i]}")
-
-# exit(0)
-
 sqp.settings.ipm.mu0 = 1.0
 # sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
 sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.monotonic_decrease
@@ -514,7 +486,7 @@ sqp.settings.restoration.max_iter = 10
 sqp.settings.restoration.rho_eq = 1e-6
 # sqp.settings.scaling.scaling_mode = moto.sqp.scaling_settings.mode_gradient
 sqp.settings.ls.primal_gamma = 1e-4
-sqp.settings.ls.method = moto.ns_sqp.search_method_filter
+sqp.settings.ls.method = moto.sqp.search_method_filter
 
 max_update_iter = int(os.getenv("MOTO_SQP_MAX_ITER", "2"))
 bench_runs = int(os.getenv("MOTO_SQP_BENCH_RUNS", "1"))
@@ -522,7 +494,7 @@ bench_show_last = os.getenv("MOTO_SQP_BENCH_SHOW_LAST", "1") != "0"
 print(f"SQP update iters: {max_update_iter}")
 print(f"SQP benchmark runs: {bench_runs}")
 
-# sqp.settings.ls.backtrack_scheme = moto.ns_sqp.backtrack_scheme_geometric
+# sqp.settings.ls.backtrack_scheme = moto.sqp.backtrack_scheme_geometric
 # cfg = [
 #     [-0.9595959595959596, -0.6161616161616161],
 #     [-0.9595959595959596, 0.31313131313131315],
@@ -578,8 +550,8 @@ def gait_setup(data: moto.sqp.data_type):
     node_idx += 1
 
 
-sqp.apply_forward(gait_setup)
-# exit(0)
+for node in sqp.graph.flatten_nodes():
+    gait_setup(node)
 import time
 
 cnt = 0
@@ -590,14 +562,15 @@ for i in range(bench_runs):
     bench_verbose = os.getenv("MOTO_SQP_BENCH_VERBOSE") is not None or (
         bench_show_last and i + 1 == bench_runs
     )
-    res = sqp.update(max_update_iter, verbose=bench_verbose)
+    res = sqp.update(max_update_iter, verbose=bench_verbose, profile=profile_sqp)
     sqp.settings.ipm.warm_start = True
     cnt += 1
     iters += res.num_iter
 elapsed = time.perf_counter() - start
 
 print(f"sqp.update() took {elapsed / cnt:.3f} seconds")
-print(f"per iteration took {elapsed / iters * 1000:.3f} ms")
+if iters > 0:
+    print(f"per iteration took {elapsed / iters * 1000:.3f} ms")
 
 if os.getenv("MOTO_PROFILE_SQP"):
     report = sqp.get_profile_report()
@@ -641,36 +614,30 @@ def get_sym(node: moto.sqp.data_type):
         q_res.append(node.value[model.qn])
 
 
-sqp.apply_forward(get_sym)
-exit(0)
-if display:
-    import time
+for node in sqp.graph.flatten_nodes():
+    get_sym(node)
+if not display:
+    sys.exit(0)
 
-    viz = go2.viz
+viz = go2.viz
 
+target = mg.Sphere(0.02)
+
+color = [0x00FF00, 0xFF0000]
+for i in range(2):
     target = mg.Sphere(0.02)
+    mcs.point(viz.viewer[f"/target{i}"], color=color[i], radius=0.04)
+    pose = tf.compose_matrix(translate=cfg[i][:2] + [0.3])
+    viz.viewer[f"/target{i}"].set_transform(pose)
+    mcs.frame(viz.viewer[f"/frame{i}"])
+    viz.viewer[f"/frame{i}"].set_transform(pose)
 
-    color = [0x00FF00, 0xFF0000]
-    for i in range(2):
-        target = mg.Sphere(0.02)
-        mcs.point(viz.viewer[f"/target{i}"], color=color[i], radius=0.04)
-        pose = tf.compose_matrix(translate=cfg[i][:2] + [0.3])
-        viz.viewer[f"/target{i}"].set_transform(pose)
-        mcs.frame(viz.viewer[f"/frame{i}"])
-        viz.viewer[f"/frame{i}"].set_transform(pose)
-
-    while True:
-        for i in range(len(q_res)):
-            start = time.perf_counter()
-            go2.display(q_res[i])
-            if i is not N_horizon:
-                dt_ = dt_res[i]
-                while time.perf_counter() - start < dt_:
-                    pass
-        time.sleep(0.5)
-
-# def print_sym(node: moto.sqp.data_type):
-#     node.sym.print()
-#     node.print_residuals()
-
-# sqp.apply_forward(print_sym, early_stop=20)
+while True:
+    for i in range(len(q_res)):
+        start = time.perf_counter()
+        go2.display(q_res[i])
+        if i is not N_horizon:
+            dt_ = dt_res[i]
+            while time.perf_counter() - start < dt_:
+                pass
+    time.sleep(0.5)

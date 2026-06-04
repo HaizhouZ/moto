@@ -6,16 +6,14 @@ namespace moto {
 namespace {
 
 bool graph_has_equality_targets(ns_sqp::storage_type &graph) {
-    bool has_targets = false;
-    solver::for_each(solver::seq, graph, [&](node_data *node) {
+    for (node_data *node : graph.flatten_nodes()) {
         for (auto field : std::array{__dyn, __eq_x, __eq_xu, __eq_x_soft, __eq_xu_soft}) {
             if (node->problem().dim(field) > 0) {
-                has_targets = true;
-                return;
+                return true;
             }
         }
-    });
-    return has_targets;
+    }
+    return false;
 }
 
 struct scoped_eq_init_settings {
@@ -42,55 +40,41 @@ struct scoped_eq_init_settings {
 
 } // namespace
 
-bool ns_sqp::initialize_equality_multipliers(bool refresh_outer_derivatives) {
+bool ns_sqp::initialize_equality_multipliers(storage_type &outer_graph, bool refresh_outer_derivatives) {
     if (!settings.eq_init.enabled) {
         return false;
     }
 
-    auto &outer_graph = active_data();
     if (!graph_has_equality_targets(outer_graph)) {
         return false;
     }
 
     auto &overlay_graph = equality_init_graph();
     scoped_eq_init_settings scoped_settings(settings);
-    const bool was_in_restoration = settings.in_restoration;
-    settings.in_restoration = false;
-    set_phase_graph_override(overlay_graph);
-    try {
-        solver::for_each(solver::par, solver::zip(outer_graph, overlay_graph),
+    scoped_phase_graph_override phase_graph(*this, overlay_graph, false);
+    solver::for_each(solver::par, solver::zip(outer_graph, overlay_graph),
                      [&](data *outer, data *overlay) {
-            solver::equality_init::sync_equality_init_overlay_primal(*outer, *overlay);
-            overlay->for_each_constr([this](const generic_func &c, func_approx_data &fd) { c.setup_workspace_data(fd, &settings); });
-            solver::ineq_soft::bind_and_invalidate(overlay);
-            solver::equality_init::sync_equality_init_overlay_duals(*outer, *overlay);
-            solver::ineq_soft::mark_initialized(overlay);
-            overlay->update_approximation(node_data::update_mode::eval_all, true);
-        });
+                         solver::equality_init::sync_equality_init_overlay_primal(*outer, *overlay);
+                         overlay->for_each_constr([this](const generic_constr &c, func_approx_data &fd) { c.setup_workspace_data(fd, &settings); });
+                         solver::ineq_soft::bind_and_invalidate(overlay);
+                         solver::equality_init::sync_equality_init_overlay_duals(*outer, *overlay);
+                         solver::ineq_soft::mark_initialized(overlay);
+                         overlay->update_approximation(node_data::update_mode::eval_all, true);
+                     });
 
-        kkt_info kkt_overlay;
-        update_primal_info(kkt_overlay, point_value_mask::primal);
-        filter_linesearch_data ls;
-        ls.constr_vio_min = std::max(kkt_overlay.primal.res_l1 * settings.ls.constr_vio_min_frac, settings.prim_tol);
-        sqp_iter(ls, kkt_overlay, /*do_scaling=*/false, /*do_refinement=*/settings.rf.enabled);
+    kkt_info kkt_overlay;
+    update_primal_info(kkt_overlay, point_value_mask::primal);
+    filter_linesearch_data ls;
+    ls.constr_vio_min = std::max(kkt_overlay.primal.res_l1 * settings.ls.constr_vio_min_frac, settings.prim_tol);
+    sqp_iter(ls, kkt_overlay, /*do_scaling=*/false, /*do_refinement=*/settings.rf.enabled);
 
-        solver::for_each(solver::par, solver::zip(outer_graph, overlay_graph),
-                     [&](data *outer, data *overlay) {
-            solver::equality_init::commit_equality_init_overlay_duals(*outer, *overlay);
-        });
-    } catch (...) {
-        settings.in_restoration = was_in_restoration;
-        clear_phase_graph_override();
-        throw;
-    }
-    settings.in_restoration = was_in_restoration;
-    clear_phase_graph_override();
-
-    if (refresh_outer_derivatives) {
-        solver::for_each(solver::par, outer_graph, [](data *d) {
-            d->update_approximation(node_data::update_mode::eval_derivatives, true);
-        });
-    }
+    solver::for_each(solver::par, solver::zip(outer_graph, overlay_graph),
+                     [refresh_outer_derivatives](data *outer, data *overlay) {
+                         solver::equality_init::commit_equality_init_overlay_duals(*outer, *overlay);
+                         if (refresh_outer_derivatives) {
+                             outer->update_approximation(node_data::update_mode::eval_derivatives, true);
+                         }
+                     });
     return true;
 }
 

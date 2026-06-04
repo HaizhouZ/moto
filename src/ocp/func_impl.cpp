@@ -1,10 +1,8 @@
 #include <algorithm>
-#include <condition_variable>
-#include <fmt/ranges.h>
+#include <cstdlib>
 #include <moto/core/external_function.hpp>
 #include <moto/ocp/impl/func.hpp>
 #include <moto/utils/codegen.hpp>
-#include <mutex>
 
 #include <moto/ocp/problem.hpp>
 
@@ -37,29 +35,26 @@ void generic_func::compute_approx(func_approx_data &data,
 }
 
 void generic_func::value_impl(func_approx_data &data) const {
-    try {
-        value(data);
-    } catch (const std::bad_function_call &ex) {
+    if (!value) {
         throw std::runtime_error(fmt::format("Function {} has no value implementation, please implement it or load from shared library", name()));
     }
+    value(data);
 }
 void generic_func::jacobian_impl(func_approx_data &data) const {
-    try {
-        jacobian(data);
-    } catch (const std::bad_function_call &ex) {
+    if (!jacobian) {
         throw std::runtime_error(fmt::format("Function {} has no jacobian implementation, please implement it or load from shared library", name()));
     }
+    jacobian(data);
 }
 
 void generic_func::setup_hess() {
 }
 
 void generic_func::hessian_impl(func_approx_data &data) const {
-    try {
-        hessian(data);
-    } catch (const std::bad_function_call &ex) {
+    if (!hessian) {
         throw std::runtime_error(fmt::format("Function {} has no hessian implementation, please implement it or load from shared library", name()));
     }
+    hessian(data);
 }
 
 void generic_func::load_external_impl(const std::string &path) {
@@ -337,9 +332,6 @@ const bool generic_func::check_enable(ocp_base *prob) const {
             // fmt::print("func {} disabled because {} not active\n", name(), e->name());
             goto CHECK_DONE;
         }
-    }
-    for (auto &sub_prob : prob->sub_probs()) {
-        pass_check &= check_enable(sub_prob.get());
     }
 CHECK_DONE:
     return pass_check;
