@@ -144,7 +144,6 @@ struct server final {
         daemon_ = std::thread([this]() {
             routine(); ///< start the server thread
         });
-        daemon_.detach(); ///< detach the server thread
     }
     ~server() {
         {
@@ -152,8 +151,9 @@ struct server final {
             terminated_ = true;     ///< set the termination flag
             queue_cv_.notify_one(); ///< notify the server to terminate
         }
-        // std::unique_lock<std::mutex> lock(terminate_mtx_);
-        // terminate_cv_.wait(lock, [this] { return terminated_ == false; });
+        if (daemon_.joinable()) {
+            daemon_.join();
+        }
     } ///< destructor to clean up the server thread
     /// daemon to wait for codegen jobs
     void routine();

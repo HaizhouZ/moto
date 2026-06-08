@@ -34,6 +34,7 @@ class dense_dynamics : public generic_dynamics {
     };
 
     using base::base;
+    clone_ptr clone() const override;
 
     func_approx_data_ptr_t create_approx_data(sym_data &primal,
                                               lag_data &raw,
@@ -50,32 +51,12 @@ class dense_dynamics : public generic_dynamics {
     void mark_shared_inputs(const var_inarg_list &args);
 
   private:
-    bool input_shared(const sym &s) const {
-        return shared_inputs_indices_.contains(s.uid());
-    } ///< check if an input variable is shared
-    size_t active_dim_exclusive_inputs(const ocp_base *prob) const;
-    size_t active_dim_shared_inputs(const ocp_base *prob) const;
+    bool input_shared(const sym &s) const;
 
-    struct info : public generic_func::info {
-        size_t num_exclusive_inputs_ = 0; ///< number of exclusive input variables (i.e., not shared)
-        size_t num_shared_inputs_ = 0;    ///< number of shared input variables
-        size_t dim_exclusive_inputs_ = 0; ///< dimension of exclusive input variables
-        size_t dim_shared_inputs_ = 0;    ///< dimension of shared input variables
-        using generic_func::info::info;
-        /// @brief move constructor, leave the reset to default after move
-        info(generic_func::info &&rhs) : generic_func::info(std::move(rhs)) {}
-        /// @note no clone for now
-    };
-    info &get_info() const { return (info &)(info_); } ///< get info
     var_list shared_inputs_;
-    std::set<size_t> shared_inputs_indices_; ///< list of shared input variable uids
-    /// @brief handles shared inputs during finalization
-    /// @details it will compute the num and dim of exclusive/shared inputs
+    std::set<size_t> shared_inputs_indices_;
     void finalize_impl() override;
-    /// @brief override substitute to handle shared inputs
     void substitute(const sym &arg, const sym &rhs) override;
-    /// @brief setup ocpwise info, will compute the num and dim of exclusive/shared inputs for the problem
-    bool setup_ocpwise_info(const ocp_base *prob) const override;
 };
 } // namespace moto
 

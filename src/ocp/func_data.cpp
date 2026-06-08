@@ -4,8 +4,19 @@
 #include <moto/utils/codegen.hpp>
 
 namespace moto {
+void shared_data::add(size_t uid, func_arg_map_ptr_t &&data) { data_.try_emplace(uid, std::move(data)); }
+
+func_arg_map *shared_data::try_get(size_t uid) {
+    auto it = data_.find(uid);
+    return it == data_.end() ? nullptr : it->second.get();
+}
+func_arg_map &shared_data::get(size_t uid) { return *data_.at(uid); }
+func_arg_map &shared_data::operator[](const expr &ex) { return get(ex.uid()); }
+const func_arg_map &shared_data::get(size_t uid) const { return *data_.at(uid); }
+const func_arg_map &shared_data::operator[](const expr &ex) const { return get(ex.uid()); }
+
 func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, const generic_func &f)
-    : func_(f), shared_(shared), sym_uid_idx_(f.sym_uid_idx_), primal_(&primal) {
+    : func_(f), shared_(shared), primal_(&primal) {
     auto &in_args = f.in_args();
     in_args_.reserve(in_args.size());
     for (auto &arg : in_args) {
@@ -16,6 +27,11 @@ func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, const generic_
             in_args_.push_back(empty);
     }
 }
+
+vector_ref func_arg_map::operator[](const sym &in) const { return in_args_[func_.arg_idx(in)]; }
+vector_ref func_arg_map::operator[](size_t i) const { return in_args_.at(i); }
+const std::vector<vector_ref> &func_arg_map::in_arg_data() const { return in_args_; }
+const ocp *func_arg_map::problem() const { return shared_.prob_; }
 
 vector_ref get_value_ref(const generic_func &f, lag_data &raw) {
     if (f.field() == __cost) {
@@ -105,7 +121,7 @@ void func_approx_data::setup_hessian() {
     }
 }
 
-bool func_approx_data::has_jacobian_block(size_t arg_idx) const {
-    return arg_idx < jac_.size() && jac_[arg_idx].size() != 0;
-}
+bool func_approx_data::has_jacobian_block(size_t arg_idx) const { return arg_idx < jac_.size() && jac_[arg_idx].size() != 0; }
+matrix_ref func_approx_data::jac(const sym &in) const { return jac_[func_.arg_idx(in)]; }
+matrix_ref func_approx_data::jac(size_t i) const { return jac_.at(i); }
 } // namespace moto

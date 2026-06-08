@@ -164,6 +164,7 @@ class ineq_constr : public soft_constr {
     func_approx_data_ptr_t create_approx_data(sym_data &primal, lag_data &raw, shared_data &shared) const override {
         return func_approx_data_ptr_t(make_approx<ineq_constr>(primal, raw, shared));
     }
+    clone_ptr clone() const override;
 };
 
 } // namespace moto

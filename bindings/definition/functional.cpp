@@ -130,7 +130,23 @@ void register_submodule_functional(nb::module_ &m) {
         .def("disable_if_any", [](generic_func &self, const expr_inarg_list &args) { self.disable_if_any(args); }, nb::arg("args"))
         .def("enable_if_any", [](generic_func &self, const expr_inarg_list &args) { self.enable_if_any(args); }, nb::arg("args"))
         .def("add_argument", [](generic_func &self, py_var_inarg_wrapper v) { self.add_argument((sym &)v); }, nb::arg("in"))
-        .def("add_arguments", [](generic_func &self, const var_inarg_list &args) { self.add_arguments(args); });
+        .def("add_arguments", [](generic_func &self, const var_inarg_list &args) { self.add_arguments(args); })
+        .def("remap_arguments",
+             [](generic_func &self,
+                const std::vector<std::pair<py_var_inarg_wrapper, py_var_inarg_wrapper>> &remap)
+                 -> std::shared_ptr<generic_func> {
+                 generic_func::symbol_remap cpp_remap;
+                 cpp_remap.reserve(remap.size());
+                 for (const auto &[from, to] : remap) {
+                     cpp_remap.emplace_back(var((sym &)from), var((sym &)to));
+                 }
+                 auto remapped = self.remap_arguments(cpp_remap).cast<generic_func>();
+                 if (remapped->finalized() && !remapped->wait_until_ready()) {
+                     throw std::runtime_error(fmt::format("remapped function {} is not ready", remapped->name()));
+                 }
+                 return remapped;
+             },
+             nb::arg("remap"));
 
     nb::class_<generic_constr, generic_func>(m, "constr")
         .def_static(

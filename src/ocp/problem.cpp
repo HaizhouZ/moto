@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <moto/ocp/constr.hpp>
 #include <moto/ocp/cost.hpp>
 #include <moto/ocp/dynamics.hpp>
@@ -8,9 +9,11 @@ namespace moto {
 INIT_UID_(ocp_base);
 
 namespace {
+constexpr auto status_func_fields = concat_fields(func_fields, custom_func_fields);
+
 bool has_active_primal_arg(const generic_func &func, const ocp_base *prob) {
-    for (auto p : primal_fields) {
-        if (func.active_num(p, prob) != 0) {
+    for (const sym &arg : func.in_args()) {
+        if (in_field(arg.field(), primal_fields) && prob->is_active(arg)) {
             return true;
         }
     }
@@ -19,11 +22,23 @@ bool has_active_primal_arg(const generic_func &func, const ocp_base *prob) {
 
 } // namespace
 
+ocp_base::ocp_base() { uid_.set_inc(); }
+
+ocp_base::ocp_base(const ocp_base &rhs)
+    : field_layout_store<expr_list>(rhs),
+      finalized_(rhs.finalized_),
+      uid_(rhs.uid_),
+      disabled_expr_(rhs.disabled_expr_),
+      pruned_expr_(rhs.pruned_expr_),
+      uids_(rhs.uids_),
+      disabled_uids_(rhs.disabled_uids_),
+      pruned_uids_(rhs.pruned_uids_),
+      allow_inconsistent_dynamics_(rhs.allow_inconsistent_dynamics_),
+      automatic_reorder_primal_(rhs.automatic_reorder_primal_) {}
+
+ocp_base::~ocp_base() = default;
+
 bool ocp_base::add_impl(expr &ex) {
-    // This path intentionally reuses the existing shared owner of `ex`.
-    // If `shared_expr(ex)` throws bad_weak_ptr, the expression was produced
-    // incorrectly and the caller must be fixed; do not replace this with a
-    // clone fallback or it will hide ownership bugs and change expression identity.
     return add_impl(shared_expr(ex));
 }
 bool ocp_base::add_impl(shared_expr ex, bool terminal) {
@@ -43,16 +58,14 @@ bool ocp_base::add_impl(shared_expr ex, bool terminal) {
     }
     size_t _uid = ex->uid();
     if (!contains(*ex)) {
-        // add dependencies
         if (!ex->finalize()) {
             throw std::runtime_error(fmt::format("cannot finalize expr {} uid {}", ex->name(), ex->uid()));
         }
         const auto &dep = ex->dep();
-        if (!dep.empty()) { // this must be done before currect ex
-            // check consistency for dynamics, x and y should not be in dep!
+        if (!dep.empty()) {
             if (ex->field() == __dyn && !allow_inconsistent_dynamics_)
                 for (auto f : {__x, __y})
-                    for (const generic_dynamics &dyn : expr_[__dyn]) {
+                    for (const generic_dynamics &dyn : field_entries(__dyn)) {
                         auto it = std::ranges::find_if(dep, [&](const sym &s) { return dyn.has_arg(s); });
                         if (it != dep.end()) {
                             throw std::runtime_error(
@@ -69,11 +82,11 @@ bool ocp_base::add_impl(shared_expr ex, bool terminal) {
                 }
             }
         }
-        finalized_ = false; // need to reset finalized to allow adding more expr, will be set to true in finalize()
+        finalized_ = false;
         if (ex->default_active_status()) {
             uids_.insert(_uid);
-            expr_[ex->field()].emplace_back(std::move(ex));
-        } else { // add to disabled list
+            append_entry(std::move(ex));
+        } else {
             disabled_uids_.insert(_uid);
             disabled_expr_[ex->field()].emplace_back(std::move(ex));
         }
@@ -83,9 +96,6 @@ bool ocp_base::add_impl(shared_expr ex, bool terminal) {
 }
 bool ocp_base::add_terminal_impl(expr &ex) {
     if (ex.finalized()) {
-        // Re-clone only for terminal insertion semantics after we have recovered
-        // the original shared owner of `ex`. The shared_expr(ex) conversion itself
-        // must stay strict for the same ownership reasons as add_impl(expr&).
         auto ex_terminal = shared_expr(ex).clone();
         return add_impl(std::move(ex_terminal), true);
     }
@@ -96,14 +106,28 @@ bool ocp_base::contains(const expr &ex) const {
            disabled_uids_.contains(ex.uid()) ||
            pruned_uids_.contains(ex.uid());
 }
-bool ocp_base::is_active(const expr &ex) const {
-    return uids_.contains(ex.uid());
+bool ocp_base::is_active(const expr &ex) const { return uids_.contains(ex.uid()); }
+const expr_list &ocp_base::exprs(size_t f) const { return field_entries(f); }
+size_t ocp_base::pos(const expr &ex) const {
+    field_read_guard();
+    return entry_index(ex);
+}
+size_t ocp_base::dim(size_t f) const { field_read_guard(); return field_dim(f); }
+size_t ocp_base::num(size_t f) const { return field_entry_count(f); }
+size_t ocp_base::tdim(size_t f) const { field_read_guard(); return field_tdim(f); }
+size_t ocp_base::get_expr_start(const expr &ex) const {
+    field_read_guard();
+    return field_start(ex);
+}
+size_t ocp_base::get_expr_start_tangent(const expr &ex) const {
+    field_read_guard();
+    return field_tangent_start(ex);
 }
 void ocp_base::finalize() {
     static std::mutex finalize_mutex_;
     std::lock_guard lock(finalize_mutex_);
     if (!finalized_) {
-        if (expr_[__dyn].size() > 0 && automatic_reorder_primal_)
+        if (!field_empty(__dyn) && automatic_reorder_primal_)
             maintain_order();
         this->set_dim_and_idx();
         this->finalized_ = true;
@@ -116,33 +140,12 @@ void ocp_base::refresh_after_clone(const active_status_config &config) {
     }
 }
 void ocp_base::set_dim_and_idx() {
-    flatten_idx_.clear();
-    flatten_tidx_.clear();
-    pos_by_uid_.clear();
-    for (size_t i = 0; i < field::num; i++) {
-        dim_[i] = 0;
-        if (i < field::num_prim)
-            tdim_[i] = 0; // only primal fields have tangent space dimension
-        size_t cur = 0, idx = 0, tcur = 0;
-        // assign data index and position for each expression,
-        // also calculate total dimension for each field
-        for (const expr &ex : expr_[i]) {
-            dim_[i] += ex.dim();
-            flatten_idx_[ex.uid()] = cur;
-            cur += ex.dim();
-            if (i < field::num_prim) {
-                tdim_[i] += ex.tdim();
-                flatten_tidx_[ex.uid()] = tcur;
-                tcur += ex.tdim();
-            }
-            pos_by_uid_[ex.uid()] = idx++;
-        }
-    }
+    rebuild_layout();
 }
 void ocp_base::maintain_order() {
     expr_list tmp;
     for (auto f : {__x, __y}) {
-        auto &syms = expr_[f];
+        auto &syms = field_entries(f);
         tmp.reserve(syms.size());
         for (const generic_func &dyn : exprs(__dyn)) {
             for (const expr &arg : dyn.in_args(f)) {
@@ -156,16 +159,14 @@ void ocp_base::maintain_order() {
                 tmp.emplace_back(std::move(*it));
             }
         }
-        // remove duplicates moved to tmp
         std::erase_if(syms, [&](auto &&e) { return !e; });
         if (!syms.empty()) {
-            // state variables not belonging to any dynamics are forbidden
             throw std::runtime_error(fmt::format(
                 "order maintenance failure: "
                 " field {} has exprs not in dynamics args",
                 f));
         }
-        syms.swap(tmp); // now syms is in the order of dynamics args
+        syms.swap(tmp);
     }
 }
 void ocp_base::print_summary() {
@@ -186,7 +187,7 @@ void ocp_base::print_summary() {
     fmt::print("-------------------------------------------------\n");
 }
 void ocp_base::wait_until_ready() {
-    for (const auto &f : expr_) {
+    for (const auto &f : field_entries()) {
         for (const auto &e : f) {
             if (!e->wait_until_ready()) {
                 throw std::runtime_error(fmt::format(
@@ -254,67 +255,49 @@ void edge_ocp::bind_nodes(const node_ocp_ptr_t &st, const node_ocp_ptr_t &ed) {
     st_node_prob_ = st;
     ed_node_prob_ = ed;
 }
-void ocp_base::update_active_status(const active_status_config &config) {
-    auto delete_expr = [&](const expr &ex, bool prune = false) {
-        size_t f = ex.field();
-        auto &exprs = expr_[f];
-        auto &target_list = prune ? pruned_expr_[f] : disabled_expr_[f];
-        auto &target_uids = prune ? pruned_uids_ : disabled_uids_;
-        auto it = std::find_if(exprs.begin(), exprs.end(),
-                               [&ex](const shared_expr &e) { return e->uid() == ex.uid(); });
-        if (it == exprs.end()) {
-            throw std::runtime_error(fmt::format(
-                "Cannot deactivate expression {} uid {}, it does not exist in the active problem",
-                ex.name(), ex.uid()));
-        }
-        target_list.emplace_back(*it);
-        target_uids.insert(ex.uid());
-        exprs.erase(it);
-        uids_.erase(ex.uid());
-    };
-    /// re-enable previously pruned expressions
-    auto re_enable_expr = [&](const expr &ex, bool from_pruned = false) {
-        size_t f = ex.field();
-        auto &exprs = expr_[f];
-        auto &target_list = from_pruned ? pruned_expr_[f] : disabled_expr_[f];
-        auto &target_uids = from_pruned ? pruned_uids_ : disabled_uids_;
-        auto it = std::find(target_list.begin(), target_list.end(), ex);
-        if (it != target_list.end()) {
-            exprs.emplace_back(*it);
-            uids_.insert(ex.uid());
-            target_list.erase(it);
-            target_uids.erase(ex.uid());
-            return true;
-        }
+void ocp_base::move_active_expr(const expr &ex, bool prune) {
+    const size_t f = ex.field();
+    auto &target_store = prune ? pruned_expr_ : disabled_expr_;
+    auto &target_uids = prune ? pruned_uids_ : disabled_uids_;
+    target_store[f].emplace_back(take_field_entry(ex));
+    target_uids.insert(ex.uid());
+    uids_.erase(ex.uid());
+}
+bool ocp_base::restore_inactive_expr(const expr &ex, bool from_pruned) {
+    const size_t f = ex.field();
+    auto &source_store = from_pruned ? pruned_expr_ : disabled_expr_;
+    auto &source_uids = from_pruned ? pruned_uids_ : disabled_uids_;
+    auto &source_list = source_store[f];
+    if (find_entry(source_list, ex) == source_list.end()) {
         return false;
-    };
+    }
+    append_entry(take_entry(source_list, ex));
+    uids_.insert(ex.uid());
+    source_uids.erase(ex.uid());
+    return true;
+}
+void ocp_base::update_active_status(const active_status_config &config) {
     for (expr &ex : config.activate_list) {
-        if (!re_enable_expr(ex, true) && !re_enable_expr(ex, false)) {
+        if (!restore_inactive_expr(ex, true) && !restore_inactive_expr(ex, false)) {
             throw std::runtime_error(fmt::format("Cannot activate expression {} uid {}, it does not exist in the problem",
                                                  ex.name(), ex.uid()));
         }
     }
-    // disable expressions
     for (const expr &ex : config.deactivate_list) {
-        delete_expr(ex);
+        move_active_expr(ex, false);
     }
-    constexpr auto all_func_fields = concat_fields(func_fields, custom_func_fields);
-    // do lazy pruning
-    // order: the user-defined deactivate_list -> prune_funcs -> check if any pruned funcs can be re-enabled
-    // this should be done iteratively until no more changes (conflict might happen)
     int max_iter = 5;
 ITER_START:
     if (max_iter-- == 0) {
         throw std::runtime_error("ocp::clone failed to converge during pruning");
     }
     bool changed = false;
-    array_type<std::vector<std::reference_wrapper<const expr>>, all_func_fields> to_delete, to_re_enable;
-    for (auto f : all_func_fields) {
+    array_type<std::vector<std::reference_wrapper<const expr>>, status_func_fields> to_delete, to_re_enable;
+    for (auto f : status_func_fields) {
         if (pruned_expr_[f].empty())
             continue;
         to_re_enable[f].reserve(pruned_expr_[f].size());
         for (const generic_func &e : pruned_expr_[f]) {
-            // check if all enable_if_deps are active and all disable_if_deps are inactive
             bool can_re_enable = has_active_primal_arg(e, this);
             if (can_re_enable) {
                 can_re_enable = e.check_enable(this);
@@ -324,29 +307,23 @@ ITER_START:
             }
         }
     }
-    // prune
-    for (auto f : all_func_fields) {
-        if (expr_[f].empty())
+    for (auto f : status_func_fields) {
+        if (field_empty(f))
             continue;
-        to_delete[f].reserve(expr_[f].size());
-        for (const generic_func &e : expr_[f]) {
+        to_delete[f].reserve(field_entry_count(f));
+        for (const generic_func &e : field_entries(f)) {
             if (!has_active_primal_arg(e, this)) {
-                // prune funcs with no active primal args
                 to_delete[f].emplace_back(e);
-                // fmt::print("func {} pruned due to no active primal args\n", e.name());
             } else {
-                // prune disabled funcs
                 if (!e.check_enable(this)) {
                     to_delete[f].emplace_back(e);
-                    // fmt::print("func {} pruned due to enable/disable conditions\n", e.name());
                 }
             }
         }
     }
-    // actually delete and re-enable
-    for (auto f : all_func_fields) {
+    for (auto f : status_func_fields) {
         for (const expr &e : to_delete[f]) {
-            delete_expr(e, true);
+            move_active_expr(e, true);
             if (std::find(config.activate_list.begin(), config.activate_list.end(), e) != config.activate_list.end()) {
                 throw std::runtime_error(fmt::format("func {} uid {} pruned but also in activate_list",
                                                      e.name(), e.uid()));
@@ -354,17 +331,17 @@ ITER_START:
             changed = true;
         }
         for (const expr &e : to_re_enable[f]) {
-            re_enable_expr(e, true);
+            restore_inactive_expr(e, true);
             if (std::find(config.deactivate_list.begin(), config.deactivate_list.end(), e) != config.deactivate_list.end()) {
                 throw std::runtime_error(fmt::format("func {} uid {} re-enabled but also in deactivate_list",
                                                      e.name(), e.uid()));
             }
-            // fmt::print("func {} re-enabled\n", e.name());
             changed = true;
         }
     }
-    if (changed)
+    if (changed) {
         goto ITER_START;
+    }
     finalized_ = false;
 }
 } // namespace moto

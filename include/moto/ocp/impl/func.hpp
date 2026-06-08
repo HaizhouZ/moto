@@ -1,33 +1,40 @@
 #ifndef __MOTO_OCP_IMPL_FUNC_HPP__
 #define __MOTO_OCP_IMPL_FUNC_HPP__
 
+#include <moto/core/field_layout_store.hpp>
 #include <moto/ocp/impl/func_data.hpp>
 #include <moto/utils/movable_ptr.hpp>
-#include <moto/utils/unique.hpp>
+#include <map>
+#include <memory>
 #include <string_view>
+#include <utility>
 
 namespace moto {
 class func_codegen;
 class generic_func;
+class graph_model;
 namespace utils {
 namespace cs_codegen {
 struct task;
 }
 } // namespace utils
 using func = utils::shared<generic_func>; ///< shared pointer type for generic_func
-/**
- * @brief approximation class for generic functions
- * @todo: change to differentiable for precompute
- */
-class generic_func : public expr {
+class generic_func : public expr, protected field_layout_store<var_list> {
   public:
-    // --- All members from impl are now protected in func ---
+    using symbol_remap = std::vector<std::pair<var, var>>;
+
   protected:
+    using remap_key = std::vector<std::pair<size_t, size_t>>;
+    struct normalized_remap {
+        std::map<size_t, std::pair<var, var>> entries;
+        remap_key key;
+        bool empty() const noexcept { return key.empty(); }
+    };
     struct gen_info {
         using task_type = utils::cs_codegen::task;
         movable_ptr<task_type> task_ = nullptr;
-        mutable bool copy_task = true; // if true, *task_ is copied in copy constructor
         gen_info() = default;
+        explicit gen_info(const gen_info &rhs, bool copy_codegen_task);
         gen_info(const gen_info &rhs);
         gen_info(gen_info &&) = default;
         gen_info &operator=(const gen_info &rhs);
@@ -35,52 +42,29 @@ class generic_func : public expr {
         ~gen_info();
     };
     gen_info gen_;
-    bool zero_dim_ = false; // whether the function has zero dimension
+    bool zero_dim_ = false;
     approx_order order_ = approx_order::first;
     var_list in_args_;
-    expr_list enable_if_all_deps_;  // if all these args are active, the function is enabled
-    expr_list disable_if_any_deps_; // if any of these args are active, the function is disabled
-    expr_list enable_if_any_deps_;  // if any of these args are active, the function is enabled
+    expr_list enable_if_all_deps_;
+    expr_list disable_if_any_deps_;
+    expr_list enable_if_any_deps_;
 
-    struct info : public utils::clone_base<info> {
-        array_type<var_list, primal_fields> arg_by_field_;
-        array_type<size_t, primal_fields> arg_dim_;
-        array_type<size_t, primal_fields> arg_tdim_;
-        array_type<size_t, primal_fields> arg_num_;
+    struct remap_cache;
+    std::unique_ptr<remap_cache> remap_cache_;
 
-        DEF_DEFAULT_CLONE(info);
-
-        using holder = utils::unique<info>;
-    };
-
-    info::holder info_; ///< cached info for the function
-
-    using ocpwise_info_map_type = std::unordered_map<size_t, info::holder>;
-    /// @brief ocp-specific info holder, will be setup when accessing active args/dims for the first time
-    /// @note use clone = false so that upon copying, a new unintialized map will be created
-    using ocpwise_info_holder = utils::unique<ocpwise_info_map_type, false>;
-    /// map from ocp uid to ocp-specific info
-    ocpwise_info_holder ocpwise_info_map_;
-
-    /// @brief setup the ocpwise info for a given ocp,
-    /// will be called when accessing active args/dims for the first time
-    /// @return true if the info is setup for the ocp, false if the info already exists
-    virtual bool setup_ocpwise_info(const ocp_base *prob) const;
-
-    std::set<size_t> skip_unused_arg_check_; ///< set of argument uids to skip unused check
-    std::vector<sp_info> jac_sp_;              ///< jacobian sparsity for each arg
-    std::vector<std::vector<sp_info>> hess_sp_; ///< hessian sparsity for each pair of args
+    std::set<size_t> skip_unused_arg_check_;
+    std::vector<sp_info> jac_sp_;
+    std::vector<std::vector<sp_info>> hess_sp_;
 
     sparsity default_hess_sp_ = sparsity::dense;
     bool detect_jacobian_sparsity_ = true;
 
-    std::unordered_map<size_t, size_t> sym_uid_idx_;
-
     friend class func_arg_map;
     friend class func_approx_data;
+    friend class graph_model;
 
-    /// @brief substitute arg with rhs in the function (order preserved)
     virtual void substitute(const sym &arg, const sym &rhs);
+    void substitute_argument(const sym &arg, const sym &rhs);
     void set_from_casadi(const var_inarg_list &in_args, const cs::SX &out);
     virtual void setup_hess();
     void disable_jacobian_sparsity_detection() {
@@ -98,46 +82,49 @@ class generic_func : public expr {
     virtual void jacobian_impl(func_approx_data &data) const;
     virtual void hessian_impl(func_approx_data &data) const;
     virtual void load_external_impl(const std::string &path = "gen");
+    void rebuild_argument_layout();
+    normalized_remap normalize_argument_remap(const symbol_remap &remap) const;
+    void apply_argument_remap(const normalized_remap &remap,
+                              std::string_view context = {},
+                              size_t problem_uid = static_cast<size_t>(-1));
+    shared_expr remap_arguments_cached(const symbol_remap &remap,
+                                       std::string_view context = {},
+                                       size_t problem_uid = static_cast<size_t>(-1));
+    shared_expr lower_expr_x_to_y_cached(std::string_view context = {},
+                                         size_t problem_uid = static_cast<size_t>(-1));
 
-    generic_func(const generic_func &) = default;
-    generic_func &operator=(const generic_func &) = default;
-
-    generic_func() = default;
+    generic_func();
+    generic_func(const generic_func &, bool copy_codegen_task);
+    generic_func(const generic_func &);
+    generic_func &operator=(const generic_func &) = delete;
 
     void field_write_guard(field_t field = __undefined) const {
         assert(!finalized_ && "cannot modify function after finalized");
-    } ///< guard modification to field-based members
+    }
 
     void field_read_guard(field_t field) const {
         assert(finalized_ && "function not finalized");
-        assert(in_field(field, primal_fields) && "field out of range");
-    } ///< guard access to field-based members
-
-  public:
-    generic_func(const std::string &name, approx_order order, size_t dim, field_t field = __undefined)
-        : expr(name, dim, field), order_(order) {}
-    generic_func(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
-                 approx_order order, field_t field = __undefined)
-        : generic_func(name, order, (size_t)out.size1(), field) {
-        assert(out.size2() == 1 && "generic_constr output cols must be 1");
-        set_from_casadi(in_args, out);
+        assert(field < field::num && "field out of range");
     }
 
-    /// @brief get a shared duplicate of the function with different uid
-    /// @param duplicate_args whether to copy the input arguments (with new uid) or just share the same arguments
-    /// @warning make sure the func is finalized before calling this function, otherwise it will block the thread
-    generic_func share(bool copy_args = true, const var_inarg_list &skip_copy_args = {}) const;
+  public:
+    generic_func(const std::string &name, approx_order order, size_t dim, field_t field = __undefined);
+    generic_func(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
+                 approx_order order, field_t field = __undefined);
 
-    generic_func(generic_func &&) = default;
-    generic_func &operator=(generic_func &&) = default;
+    generic_func share(const symbol_remap &remap = {}) const;
+
+    generic_func(generic_func &&) noexcept;
+    generic_func &operator=(generic_func &&) noexcept = delete;
+    ~generic_func() override;
 
     const auto &order() const { return order_; }
     const auto &__get_order() const { return order_; }
     const auto &in_args() const { return in_args_; }
     const auto &in_args(size_t i) const { return in_args_[i]; }
 
-    const auto &jac_sparsity() const { return jac_sp_; }   ///< get the jacobian sparsity patterns
-    const auto &hess_sparsity() const { return hess_sp_; } ///< get the hessian sparsity patterns
+    const auto &jac_sparsity() const { return jac_sp_; }
+    const auto &hess_sparsity() const { return hess_sp_; }
 
     void set_jac_sparsity(const sym &arg, sp_info sp) {
         field_write_guard(arg.field());
@@ -155,116 +142,40 @@ class generic_func : public expr {
         default_hess_sp_ = sp;
     }
 
-    const auto &in_args(field_t field) const {
-        field_read_guard(field);
-        return info_->arg_by_field_[field];
-    } ///< get the input arguments for a given field
+    const var_list &in_args(field_t field) const;
+    size_t arg_num(field_t field) const;
+    size_t arg_dim(field_t field) const;
+    size_t arg_tdim(field_t field) const;
+    bool has_arg(const sym &s) const;
+    size_t arg_idx(const sym &s) const;
+    void add_argument(const sym &in);
+    void add_argument(const var &in);
+    void add_arguments(const var_inarg_list &args);
 
-    /// get the active arguments for a given field
-    const var_list &active_args(field_t f, const ocp_base *prob) const;
-    /// get the dim of active arguments for a given field
-    size_t active_dim(field_t f, const ocp_base *prob) const;
-    /// get the tangent dim of active arguments for a given field
-    size_t active_tdim(field_t f, const ocp_base *prob) const;
-    /// get the num of active arguments for a given field
-    size_t active_num(field_t f, const ocp_base *prob) const;
-
-    auto arg_num(field_t field) const {
-        field_read_guard(field);
-        return info_->arg_by_field_[field].size();
-    } ///< get the number of arguments for a given field
-
-    auto arg_dim(field_t field) const {
-        field_read_guard(field);
-        return info_->arg_dim_[field];
-    } ///< get the dimension of the argument for a given field
-
-    auto arg_tdim(field_t field) const {
-        field_read_guard(field);
-        return info_->arg_tdim_[field];
-    } ///< get the tangent dimension of the argument for a given field
-
-    bool has_arg(const sym &s) const {
-        field_read_guard(s.field());
-        return sym_uid_idx_.contains(s.uid());
-    } ///< check if the function has argument for a given field
-
-    size_t arg_idx(const sym &s) const {
-        field_read_guard(s.field());
-        return sym_uid_idx_.at(s.uid());
-    } ///< get the index of the argument for a given symbol
-
-    /// @brief add a single argument
-    /// @param in argument to add, must be one of var, sym, or shared_expr
-    template <typename T>
-        requires std::is_same_v<var, std::remove_cvref_t<T>> ||
-                 std::is_same_v<sym, std::remove_cvref_t<T>>
-    void add_argument(T &&in) {
-        field_write_guard(((const sym &)in).field());
-        if (std::find(in_args_.begin(), in_args_.end(), in) != in_args_.end())
-            return; // already exists
-        auto &s = in_args_.emplace_back(std::forward<T>(in));
-        add_dep(s);
-    }
-    /// @brief add multiple arguments
-    /// @param args list of arguments to add
-    void add_arguments(const var_inarg_list &args) {
-        for (sym &in : args) {
-            add_argument(in);
-        }
-    }
-
-    /// get the enable_if dependencies
     const bool check_enable(ocp_base *prob) const;
-    /// enable if all of these args are active
     void enable_if_all(const expr_inarg_list &args);
-    /// disable if any of these args is active
     void disable_if_any(const expr_inarg_list &args);
-    /// enable if any of these args is active
     void enable_if_any(const expr_inarg_list &args);
 
     virtual func_approx_data_ptr_t create_approx_data(sym_data &primal,
                                                       lag_data &raw,
                                                       shared_data &shared) const;
-    /// @brief compute the approximation of the function
-    /// @param data approximation data
-    /// @param eval_val whether to evaluate the value
-    /// @param eval_jac whether to evaluate the jacobian
-    /// @param eval_hess whether to evaluate the hessian
     void compute_approx(func_approx_data &data,
                         bool eval_val, bool eval_jac = false, bool eval_hess = false) const;
 
-    auto *get_codegen_task() { return gen_.task_.get(); } ///< get the codegen task
+    auto *get_codegen_task() { return gen_.task_.get(); }
     const auto *get_codegen_task() const { return gen_.task_.get(); }
 
-    /// @brief load external function implementation from shared library
-    /// @param path path to the shared library, default is "gen"
-    void load_external(const std::string &path = "gen") {
-        field_write_guard();
-        load_external_impl(path);
-    }
-    /// --- Callbacks for function evaluation ---
-    /// these functions can be overridden by derived classes
-    std::function<void(func_approx_data &)> value;    ///< value callback
-    std::function<void(func_approx_data &)> jacobian; ///< jacobian callback
-    std::function<void(func_approx_data &)> hessian;  ///< hessian callback
+    void load_external(const std::string &path = "gen");
+    std::function<void(func_approx_data &)> value;
+    std::function<void(func_approx_data &)> jacobian;
+    std::function<void(func_approx_data &)> hessian;
 
     DEF_DEFAULT_CLONE(generic_func)
 
-    /// Explicit modeling-to-solver lowering hook for cloned expressions.
-    void substitute_argument(const sym &arg, const sym &rhs) {
-        field_write_guard();
-        substitute(arg, rhs);
-    }
-
     bool has_u_arg() const;
     bool has_pure_x_primal_args() const;
-    void lower_x_to_y_in_place(std::string_view context = {},
-                               size_t problem_uid = static_cast<size_t>(-1));
-    shared_expr lower_expr_x_to_y_cached(std::string_view context = {},
-                                         size_t problem_uid = static_cast<size_t>(-1));
-
-    func lowered_;
+    shared_expr remap_arguments(const symbol_remap &remap);
 };
 
 } // namespace moto

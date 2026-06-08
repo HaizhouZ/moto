@@ -756,33 +756,30 @@ job_list generate_and_compile(task &_task) {
 // }
 
 void server::routine() {
-    size_t n_threads = omp_get_max_threads();
-    std::mutex thread_mtx_;
-    std::condition_variable thread_cv_;
+    const size_t max_threads = std::max(1, omp_get_max_threads());
     while (true) {
+        job_list jobs;
         std::unique_lock<std::mutex> lock(queue_mtx_);
         queue_cv_.wait(lock, [this] { return !job_buffer_.jobs.empty() || terminated_; });
-        if (terminated_) {
-            terminated_ = false;
+        if (job_buffer_.jobs.empty() && terminated_) {
             break; ///< exit the loop if terminated
         }
-        auto jobs = std::move(job_buffer_.jobs);
+        jobs.jobs = std::move(job_buffer_.jobs);
         job_buffer_.jobs.clear();
         lock.unlock();
-        for (auto &w : jobs) {
-            std::unique_lock<std::mutex> thread_lock(thread_mtx_);
-            thread_cv_.wait(thread_lock, [&n_threads] { return n_threads > 0; });
-            n_threads--;
-            std::thread([&, w = std::move(w)]() mutable {
-                w();
-                std::lock_guard<std::mutex> thread_lock(thread_mtx_);
-                n_threads++;
-                thread_cv_.notify_one(); ///< notify the server that the job is done
-            }).detach();
+
+        size_t next_job = 0;
+        while (next_job < jobs.jobs.size()) {
+            std::vector<std::thread> workers;
+            workers.reserve(std::min(max_threads, jobs.jobs.size() - next_job));
+            for (size_t i = 0; i < max_threads && next_job < jobs.jobs.size(); ++i, ++next_job) {
+                workers.emplace_back(std::move(jobs.jobs[next_job]));
+            }
+            for (auto &worker : workers) {
+                worker.join();
+            }
         }
     }
-    // std::lock_guard<std::mutex> lock(terminate_mtx_);
-    // terminate_cv_.notify_one();
 } ///< daemon to wait for codegen jobs
 } // namespace cs_codegen
 } // namespace utils

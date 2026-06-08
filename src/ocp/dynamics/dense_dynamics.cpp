@@ -4,6 +4,14 @@
 #include <moto/utils/blasfeo_factorizer/blasfeo_lu.hpp>
 namespace moto {
 
+bool dense_dynamics::input_shared(const sym &s) const {
+    return shared_inputs_indices_.contains(s.uid());
+}
+
+dense_dynamics::clone_ptr dense_dynamics::clone() const {
+    return new dense_dynamics(*this);
+}
+
 dense_dynamics::approx_data::~approx_data() {
     if (lu_) {
         delete lu_.get();
@@ -28,15 +36,25 @@ dense_dynamics::approx_data::approx_data(generic_constr::approx_data &&rhs)
     // set up projected f_x
     auto p_x = dyn_proj_->proj_f_x_.insert(f_st, prob.get_expr_start_tangent(first_x_arg), func_.dim(), func_.arg_tdim(__x), sparsity::dense);
     proj_f_x_.reset(p_x);
+    size_t exclusive_u_dim = 0, shared_u_dim = 0;
+    const sym *first_u_arg = nullptr;
+    for (const sym &arg : func_.in_args(__u)) {
+        if (!prob.is_active(arg))
+            continue;
+        first_u_arg = first_u_arg == nullptr ? &arg : first_u_arg;
+        (dyn.input_shared(arg) ? shared_u_dim : exclusive_u_dim) += arg.tdim();
+    }
+    if (first_u_arg == nullptr) {
+        throw std::runtime_error(fmt::format("dense dynamics {} has no active input argument", func_.name()));
+    }
     // setup f_u_exclusive_ and proj_f_u_exclusive_
-    auto &first_u_arg = func_.active_args(__u, &prob)[0];
-    auto jac_u = approx_->jac_[__u].insert(f_st, prob.get_expr_start_tangent(first_u_arg), func_.dim(), dyn.active_dim_exclusive_inputs(&prob), sparsity::dense);
+    auto jac_u = approx_->jac_[__u].insert(f_st, prob.get_expr_start_tangent(*first_u_arg), func_.dim(), exclusive_u_dim, sparsity::dense);
     f_u_exclusive_.reset(jac_u);
-    auto p_u = dyn_proj_->proj_f_u_.insert(f_st, prob.get_expr_start_tangent(first_u_arg), func_.dim(), dyn.active_dim_exclusive_inputs(&prob), sparsity::dense);
+    auto p_u = dyn_proj_->proj_f_u_.insert(f_st, prob.get_expr_start_tangent(*first_u_arg), func_.dim(), exclusive_u_dim, sparsity::dense);
     proj_f_u_exclusive_.reset(p_u);
     // allocate f_u and proj_f_u_
-    f_u_shared_.reserve(dyn.active_dim_shared_inputs(&prob));
-    proj_f_u_shared_.reserve(dyn.active_dim_shared_inputs(&prob));
+    f_u_shared_.reserve(shared_u_dim);
+    proj_f_u_shared_.reserve(shared_u_dim);
     size_t u_col_offset = 0;
     for (const sym &arg : in_args) {
         auto f = arg.field();
@@ -78,7 +96,7 @@ void dense_dynamics::compute_project_jacobians(func_approx_data &data) const {
     d.lu_->compute(d.f_y_);                                // LU decomposition of the dense Jacobian
     d.lu_->solve(d.f_x_, d.proj_f_x_);                     // Solve for the projection of f_x
     d.lu_->solve(d.f_u_exclusive_, d.proj_f_u_exclusive_); // Solve for the projection of exclusive f_u
-    for (size_t i : range(get_info().num_shared_inputs_)) {
+    for (size_t i : range(d.f_u_shared_.size())) {
         d.lu_->solve(d.f_u_shared_[i], d.proj_f_u_shared_[i]); // Solve for the projection of shared f_u
     }
 }
@@ -98,8 +116,6 @@ void dense_dynamics::substitute(const sym &arg, const sym &rhs) {
 }
 
 void dense_dynamics::finalize_impl() {
-    // reset info for recomputating exclusive/shared input counts and dims
-    info_.reset(new info(std::move(*info_)));
     disable_jacobian_sparsity_detection();
     // handle reordering of shared inputs
     var_list tmp; // buffer for args to move
@@ -121,18 +137,14 @@ void dense_dynamics::finalize_impl() {
     generic_dynamics::finalize_impl();
     // some might be pruned
     tmp.clear();
+    shared_inputs_indices_.clear();
     for (var &s : shared_inputs_) {
         if (has_arg(s)) {
-            get_info().dim_shared_inputs_ += s->dim();
-            shared_inputs_indices_.erase(s->uid());
             tmp.emplace_back(std::move(s));
+            shared_inputs_indices_.insert(tmp.back()->uid());
         }
     }
     shared_inputs_.swap(tmp);
-    // set exclusive input counts
-    get_info().num_shared_inputs_ = shared_inputs_.size();
-    get_info().num_exclusive_inputs_ = generic_func::arg_num(__u) - get_info().num_shared_inputs_;
-    get_info().dim_exclusive_inputs_ = generic_func::arg_dim(__u) - get_info().dim_shared_inputs_;
 }
 
 void dense_dynamics::mark_shared_inputs(const var_inarg_list &args) {
@@ -149,39 +161,4 @@ void dense_dynamics::mark_shared_inputs(const var_inarg_list &args) {
     }
 }
 
-#define access_ocp_info(var_name) \
-    field_read_guard(__u);        \
-    setup_ocpwise_info(prob);     \
-    return ((info &)*ocpwise_info_map_->at(prob->uid())).var_name
-
-size_t dense_dynamics::active_dim_exclusive_inputs(const ocp_base *prob) const {
-    access_ocp_info(dim_exclusive_inputs_);
-}
-size_t dense_dynamics::active_dim_shared_inputs(const ocp_base *prob) const {
-    access_ocp_info(dim_shared_inputs_);
-}
-bool dense_dynamics::setup_ocpwise_info(const ocp_base *prob) const {
-    if (generic_func::setup_ocpwise_info(prob)) {
-        auto &_info = ocpwise_info_map_->at(prob->uid()).replace([](generic_func::info &old) {
-            return new info(std::move(old));
-        });
-        // compute the number and dimension of exclusive/shared inputs
-        _info.num_shared_inputs_ = 0;
-        _info.dim_shared_inputs_ = 0;
-        for (const sym &s : shared_inputs_) {
-            if (prob->is_active(s)) {
-                _info.num_shared_inputs_++;
-                _info.dim_shared_inputs_ += s.dim();
-            }
-        }
-        _info.num_exclusive_inputs_ = _info.arg_num_[__u] - _info.num_shared_inputs_;
-        _info.dim_exclusive_inputs_ = _info.arg_dim_[__u] - _info.dim_shared_inputs_;
-        // fmt::println("Setup ocpwise info for dense_dynamics func {} in prob uid {}: num_exclusive_inputs {}, dim_exclusive_inputs {}, num_shared_inputs {}, dim_shared_inputs {}",
-        //              name(), prob->uid(),
-        //              _info.num_exclusive_inputs_, _info.dim_exclusive_inputs_,
-        //              _info.num_shared_inputs_, _info.dim_shared_inputs_);
-        return true;
-    } else
-        return false;
-}
 } // namespace moto

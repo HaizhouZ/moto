@@ -2,12 +2,14 @@
 #define __MOTO_PROBLEM_HPP__
 
 #include <array>
+#include <memory>
 #include <string>
-#include <unordered_map>
+#include <type_traits>
 #include <unordered_set>
 #include <vector>
 
 #include <moto/core/expr.hpp>
+#include <moto/core/field_layout_store.hpp>
 #include <moto/ocp/sym.hpp>
 
 namespace moto {
@@ -21,16 +23,7 @@ class edge_ocp;
 def_ptr(edge_ocp);
 class graph_model;
 
-/// Base container for a stage/transition problem.
-///
-/// `ocp_base` owns the expression lists, activation/pruning state, and the
-/// flattened indexing metadata used by solver-side data structures. The
-/// derived types only add modeling semantics:
-/// - `ocp`: generic problem container used by shared internals
-/// - `node_ocp`: node-wise problem, intended for `(x)` / `(x, u)` terms
-/// - `edge_ocp`: edge-wise problem, intended for transition terms that bind
-///   two nodes together
-class ocp_base {
+class ocp_base : protected field_layout_store<expr_list> {
   public:
     struct active_status_config {
         expr_inarg_list deactivate_list;
@@ -39,27 +32,23 @@ class ocp_base {
     };
 
   protected:
-    ocp_base() { uid_.set_inc(); }
-    ocp_base(const ocp_base &rhs) = default;
+    ocp_base();
+    ocp_base(const ocp_base &rhs);
+    ~ocp_base();
     bool add_impl(expr &);
     bool add_impl(shared_expr, bool terminal = false);
     bool add_terminal_impl(expr &);
     void maintain_order();
     bool finalized_ = false;
     utils::unique_id<ocp_base> uid_;
-    std::array<expr_list, field::num> expr_, disabled_expr_, pruned_expr_;
-    std::unordered_map<size_t, size_t> flatten_idx_;
-    std::unordered_map<size_t, size_t> flatten_tidx_;
-    std::unordered_map<size_t, size_t> pos_by_uid_;
-    std::array<size_t, field::num> dim_{};
-    std::array<size_t, field::num_prim> tdim_{};
+    std::array<expr_list, field::num> disabled_expr_, pruned_expr_;
     std::unordered_set<size_t> uids_, disabled_uids_, pruned_uids_;
 
     void set_dim_and_idx();
     void finalize();
-    /// Refresh clone-local caches and recursively clone sub-problems after a
-    /// copy-construction based clone.
     void refresh_after_clone(const active_status_config &config);
+    void move_active_expr(const expr &ex, bool prune);
+    bool restore_inactive_expr(const expr &ex, bool from_pruned);
     inline void field_read_guard() const {
         assert(finalized_ && "Cannot access before the problem is finalized. Please call finalize() before accessing expressions.");
     }
@@ -69,32 +58,14 @@ class ocp_base {
 
   public:
     const auto &uid() const { return uid_; }
-    /// Expressions active in a given field of the current problem.
-    const auto &exprs(size_t f) const { return expr_[f]; }
-    /// Position of an expression inside its field-local storage.
-    const auto &pos(const expr &ex) const {
-        field_read_guard();
-        return pos_by_uid_.at(ex.uid());
-    }
-    /// Flattened dimension of a field in the current problem.
-    size_t dim(size_t f) const {
-        field_read_guard();
-        return dim_[f];
-    }
-    /// Number of active expressions in a field.
-    size_t num(size_t f) const { return expr_[f].size(); }
-    /// Flattened tangent-space dimension of a primal field.
-    size_t tdim(size_t f) const {
-        field_read_guard();
-        return tdim_[f];
-    }
-    /// Whether an expression is present in this problem.
+    const expr_list &exprs(size_t f) const;
+    size_t pos(const expr &ex) const;
+    size_t dim(size_t f) const;
+    size_t num(size_t f) const;
+    size_t tdim(size_t f) const;
     bool contains(const expr &ex) const;
-    /// Whether an expression is currently active in this problem.
     bool is_active(const expr &ex) const;
-    /// Wait for all expressions to be ready, then finalize the problem.
     void wait_until_ready();
-    /// Print a compact summary grouped by field.
     void print_summary();
 
     vector_ref extract(vector_ref data, const expr &ex) const {
@@ -115,10 +86,6 @@ class ocp_base {
                  std::is_base_of_v<expr, std::remove_reference_t<T>>
     void add(T &&ex) { add_impl(ex); }
 
-    /// Add an expression with terminal semantics.
-    ///
-    /// This keeps the user-facing handle reusable while allowing the problem to
-    /// lower the terminal insertion independently when needed.
     template <typename T>
         requires std::is_base_of_v<shared_expr, std::remove_cvref_t<T>> ||
                  std::is_base_of_v<expr, std::remove_reference_t<T>>
@@ -135,30 +102,10 @@ class ocp_base {
         }
     }
 
-    /// Start offset of an expression in the flattened storage of its field.
-    size_t get_expr_start(const expr &ex) const {
-        field_read_guard();
-        auto it = flatten_idx_.find(ex.uid());
-        if (it == flatten_idx_.end()) {
-            throw std::runtime_error(fmt::format("expr {} uid {} cannot be found", ex.name(), ex.uid()));
-        }
-        return it->second;
-    }
+    size_t get_expr_start(const expr &ex) const;
+    size_t get_expr_start_tangent(const expr &ex) const;
 
-    /// Start offset of an expression in the flattened tangent storage.
-    size_t get_expr_start_tangent(const expr &ex) const {
-        field_read_guard();
-        auto it = flatten_tidx_.find(ex.uid());
-        if (it == flatten_tidx_.end()) {
-            throw std::runtime_error(fmt::format("expr {} uid {} cannot be found", ex.name(), ex.uid()));
-        }
-        return it->second;
-    }
-
-    /// Hook for future node/edge validation. The default implementation accepts
-    /// every term.
     virtual bool accepts_term(const shared_expr &ex, bool terminal = false, std::string *reason = nullptr) const;
-    /// Apply activation/deactivation rules and lazy pruning.
     void update_active_status(const active_status_config &config);
 
   protected:
@@ -179,17 +126,11 @@ class ocp : public ocp_base {
 
   public:
     static auto create() { return std::shared_ptr<ocp>(new ocp()); }
-    /// Clone the generic problem container.
     ocp_ptr_t clone(const active_status_config &config = {}) const;
 
   protected:
 };
 
-/// Node-wise problem wrapper.
-///
-/// This is intentionally thin today: it reuses all storage/finalization logic
-/// from `ocp_base`, but gives the modeling layer a dedicated type to represent
-/// node-local terms and terminal composition.
 class node_ocp : public ocp {
   protected:
     node_ocp() = default;
@@ -197,17 +138,11 @@ class node_ocp : public ocp {
 
   public:
     static auto create() { return std::shared_ptr<node_ocp>(new node_ocp()); }
-    /// Clone a node problem while preserving the concrete type.
     node_ocp_ptr_t clone_node(const active_status_config &config = {}) const;
     bool accepts_term(const shared_expr &ex, bool terminal = false, std::string *reason = nullptr) const override;
 
 };
 
-/// Edge-wise problem wrapper.
-///
-/// An `edge_ocp` may bind a start/end node pair and then compose the start-node
-/// terms together with edge-local terms into the transition problem consumed by
-/// the solver.
 class edge_ocp : public ocp {
     friend class graph_model;
 
@@ -219,13 +154,11 @@ class edge_ocp : public ocp {
     static auto create() { return std::shared_ptr<edge_ocp>(new edge_ocp()); }
 
   private:
-    /// Clone an edge problem while preserving the concrete type.
     edge_ocp_ptr_t clone_edge(const active_status_config &config = {}) const;
 
     node_ocp_ptr_t st_node_prob_;
     node_ocp_ptr_t ed_node_prob_;
 
-    /// Bind the start/end node problems referenced by this edge.
     void bind_nodes(const node_ocp_ptr_t &st, const node_ocp_ptr_t &ed = {});
     const node_ocp_ptr_t &st_node_prob() const { return st_node_prob_; }
     const node_ocp_ptr_t &ed_node_prob() const { return ed_node_prob_; }

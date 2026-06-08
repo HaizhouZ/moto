@@ -15,13 +15,7 @@ struct custom_func : public func {
 class generic_custom_func : public generic_func {
 
   protected:
-    void finalize_impl() override {
-        if (in_field(field_, moto::func_fields) || field_ == __undefined) {
-            throw std::runtime_error(fmt::format("func {} field type {} not qualified as custom function - finalization failed",
-                                                 name_, field::name(field_)));
-        }
-        generic_func::finalize_impl();
-    }
+    void finalize_impl() override;
     using wrapper_type = custom_func;
 
     friend struct custom_func; ///< allow custom_func to access private members
@@ -41,6 +35,7 @@ class generic_custom_func : public generic_func {
     /// @brief callback to make data（for non-approx) @note will not be called in @ref create_approx_data
     /// @brief callback to call a non-approximation function
     std::function<void(func_arg_map &)> custom_call;
+    clone_ptr clone() const override;
 };
 inline generic_custom_func *custom_func::operator->() const {
     return static_cast<generic_custom_func *>(func::operator->());

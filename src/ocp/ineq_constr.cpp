@@ -94,6 +94,10 @@ std::shared_ptr<ineq_constr::box_spec> make_box_spec(const var_inarg_list &args,
 
 } // namespace
 
+ineq_constr::clone_ptr ineq_constr::clone() const {
+    return new ineq_constr(*this);
+}
+
 constr ineq_constr::create(const std::string &name,
                            const var_inarg_list &args,
                            const cs::SX &out,

@@ -3,14 +3,17 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <moto/ocp/constr.hpp>
 #include <moto/ocp/cost.hpp>
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
 #include <moto/ocp/graph_model.hpp>
+#include <moto/ocp/ineq_constr.hpp>
 #include <moto/solver/ns_sqp.hpp>
 
 namespace {
@@ -97,6 +100,190 @@ TEST_CASE("graph_model add_path builds node-stage intervals and lowers pure stat
     REQUIRE(ineq.in_args().front()->field() == __y);
     REQUIRE(cost_x.in_args().front()->field() == __y);
     REQUIRE(cost_u.in_args().front()->field() == __u);
+}
+
+TEST_CASE("graph_model reuses cached lowered function entities across stages") {
+    using namespace moto;
+
+    auto [x, xn] = sym::states("x_reuse_lowered", 1);
+    auto u = sym::inputs("u_reuse_lowered", 1);
+    auto stage = make_stage("reuse_lowered", x, u);
+    auto edge = make_edge("reuse_lowered", x, xn, u);
+
+    ns_sqp sqp;
+    sqp.graph().add_path(stage, stage, edge, 4);
+
+    auto &flat = sqp.solver_nodes();
+    REQUIRE(flat.size() == 4);
+
+    const generic_func *first_lowered = nullptr;
+    for (const auto *node : flat) {
+        const auto &lowered = require_func_named_prefix(node->problem_ptr(), __cost, "cost_x_reuse_lowered");
+        REQUIRE(lowered.in_args().front()->field() == __y);
+        if (first_lowered == nullptr) {
+            first_lowered = &lowered;
+        } else {
+            REQUIRE(&lowered == first_lowered);
+            REQUIRE(lowered.uid() == first_lowered->uid());
+        }
+    }
+}
+
+TEST_CASE("remap cache reuses keyed concrete function clones") {
+    using namespace moto;
+
+    auto [x_a, y_a] = sym::states("x_remap_cache_a", 1);
+    auto y_b = sym::states("x_remap_cache_b", 1).second;
+    auto p = sym::params("p_remap_cache", 1);
+    auto u_remap = sym::inputs("u_remap_cache", 1);
+    auto c = cost(new generic_cost("cost_remap_cache", var_list{x_a, p}, x_a * x_a + p, approx_order::second));
+    REQUIRE(c->finalize(true));
+
+    auto first = c->remap_arguments({{x_a, y_a}});
+    auto second = c->remap_arguments({{x_a, y_a}});
+    auto duplicate = c->remap_arguments({{x_a, y_a}, {x_a, y_a}});
+    auto identity = c->remap_arguments({{x_a, x_a}});
+    auto different = c->remap_arguments({{x_a, y_b}});
+
+    REQUIRE(first.get() == second.get());
+    REQUIRE(first.get() == duplicate.get());
+    REQUIRE(identity.get() == c.get());
+    REQUIRE(first.get() != different.get());
+    REQUIRE(first.as<generic_func>().in_args().front()->uid() == y_a->uid());
+    REQUIRE(first.as<generic_func>().arg_num(__x) == 0);
+    REQUIRE(first.as<generic_func>().arg_num(__y) == 1);
+    REQUIRE(different.as<generic_func>().in_args().front()->uid() == y_b->uid());
+    REQUIRE_THROWS_AS(c->remap_arguments({{x_a, p}}), std::runtime_error);
+    REQUIRE_THROWS_AS(c->remap_arguments({{p, u_remap}}), std::runtime_error);
+    auto y_bad_dim = sym::states("x_remap_bad_dim", 2).second;
+    auto p_bad_dim = sym::params("p_remap_bad_dim", 2);
+    REQUIRE_THROWS_AS(c->remap_arguments({{x_a, y_bad_dim}}), std::runtime_error);
+    REQUIRE_THROWS_AS(c->remap_arguments({{p, p_bad_dim}}), std::runtime_error);
+
+    std::vector<shared_expr> threaded_results(16);
+    std::vector<std::thread> remap_threads;
+    for (size_t i = 0; i < threaded_results.size(); ++i) {
+        remap_threads.emplace_back([&, i]() {
+            threaded_results[i] = c->remap_arguments({{x_a, y_a}});
+        });
+    }
+    for (auto &thread : remap_threads) {
+        thread.join();
+    }
+    for (const auto &result : threaded_results) {
+        REQUIRE(result.get() == first.get());
+    }
+
+    auto [x, y] = sym::states("x_concrete_clone", 1);
+    auto u = sym::inputs("u_concrete_clone", 1);
+    auto dyn = std::make_shared<dense_dynamics>(
+        "dyn_concrete_clone", var_list{x, y, u}, y - x - u, approx_order::second, __dyn);
+    auto ineq = std::make_shared<ineq_constr>(
+        "ineq_concrete_clone", var_list{x}, x, approx_order::first, __ineq_x);
+
+    REQUIRE(dynamic_cast<dense_dynamics *>(shared_expr(dyn).clone().get()) != nullptr);
+
+    REQUIRE(ineq->finalize(true));
+    auto remapped = ineq->remap_arguments({{x, y}});
+    REQUIRE(dynamic_cast<ineq_constr *>(remapped.get()) != nullptr);
+    REQUIRE(remapped.as<generic_func>().in_args().front()->uid() == y->uid());
+}
+
+TEST_CASE("generic_func share applies explicit argument remaps") {
+    using namespace moto;
+
+    auto [x, _] = sym::states("x_share_layout", 1);
+    auto p = sym::params("p_share_layout", 1);
+    auto c = cost(new generic_cost("cost_share_layout", var_list{x, p}, x * x + p, approx_order::second));
+    REQUIRE(c->finalize(true));
+
+    auto x_copy = x->clone("x_share_layout_copy");
+    auto p_copy = p->clone("p_share_layout_copy");
+    auto shared = c->share(generic_func::symbol_remap{{x, x_copy}, {p, p_copy}});
+    REQUIRE(shared.finalized());
+    REQUIRE_FALSE(shared.has_arg(x));
+    REQUIRE_FALSE(shared.has_arg(p));
+    REQUIRE(shared.has_arg(x_copy));
+    REQUIRE(shared.has_arg(p_copy));
+    REQUIRE(shared.in_args().size() == 2);
+    REQUIRE(shared.arg_idx(shared.in_args(0)) == 0);
+    REQUIRE(shared.arg_idx(shared.in_args(1)) == 1);
+    REQUIRE(shared.in_args(__x).front()->uid() == x_copy->uid());
+    REQUIRE(shared.in_args(__p).front()->uid() == p_copy->uid());
+
+    auto x_partial = x->clone("x_share_layout_partial");
+    auto partial = c->share(generic_func::symbol_remap{{x, x_partial}});
+    REQUIRE_FALSE(partial.has_arg(x));
+    REQUIRE(partial.has_arg(x_partial));
+    REQUIRE(partial.has_arg(p));
+    REQUIRE(partial.in_args(__x).front()->uid() == x_partial->uid());
+    REQUIRE(partial.in_args(__p).front()->uid() == p->uid());
+
+    auto same_args = c->share();
+    REQUIRE(same_args.has_arg(x));
+    REQUIRE(same_args.has_arg(p));
+    REQUIRE(same_args.in_args(__x).front()->uid() == x->uid());
+    REQUIRE(same_args.in_args(__p).front()->uid() == p->uid());
+
+    auto y_bad_dim = sym::states("x_share_bad_dim", 2).second;
+    auto p_bad_dim = sym::params("p_share_bad_dim", 2);
+    REQUIRE_THROWS_AS(c->share(generic_func::symbol_remap{{x, y_bad_dim}}), std::runtime_error);
+    REQUIRE_THROWS_AS(c->share(generic_func::symbol_remap{{p, p_bad_dim}}), std::runtime_error);
+}
+
+TEST_CASE("generic_func share is source-read-only for codegen and callback funcs") {
+    using namespace moto;
+
+    auto [x_codegen, _] = sym::states("x_share_codegen_thread", 1);
+    auto p_codegen = sym::params("p_share_codegen_thread", 1);
+    auto codegen = cost(new generic_cost("cost_share_codegen_thread",
+                                         var_list{x_codegen, p_codegen},
+                                         x_codegen * x_codegen + p_codegen,
+                                         approx_order::second));
+    REQUIRE(codegen->finalize(true));
+
+    auto [x_callback, __] = sym::states("x_share_callback_thread", 1);
+    auto p_callback = sym::params("p_share_callback_thread", 1);
+    auto callback = cost(new generic_cost("cost_share_callback_thread", approx_order::first));
+    callback->add_arguments({x_callback, p_callback});
+    callback->value = [](func_approx_data &d) { d.v_.setZero(); };
+    callback->jacobian = [](func_approx_data &d) {
+        for (auto &jac : d.jac_) {
+            if (jac.size() > 0) {
+                jac.setZero();
+            }
+        }
+    };
+    REQUIRE(callback->finalize(true));
+
+    const auto check_concurrent_share = [](const generic_func &func, const var &original_arg) {
+        std::atomic<int> failures{0};
+        std::vector<std::thread> threads;
+        for (size_t tid = 0; tid < 8; ++tid) {
+            threads.emplace_back([&]() {
+                for (size_t iter = 0; iter < 20; ++iter) {
+                    auto replacement = original_arg->clone(original_arg->name() + "_shared");
+                    auto shared = func.share(generic_func::symbol_remap{{original_arg, replacement}});
+                    if (!shared.finalized() || !shared.value || !shared.jacobian) {
+                        ++failures;
+                    }
+                    if (shared.in_args().empty() || shared.has_arg(original_arg) || !shared.has_arg(replacement)) {
+                        ++failures;
+                    }
+                    if (shared.in_args(original_arg->field()).empty()) {
+                        ++failures;
+                    }
+                }
+            });
+        }
+        for (auto &thread : threads) {
+            thread.join();
+        }
+        REQUIRE(failures.load() == 0);
+    };
+
+    check_concurrent_share(*codegen, x_codegen);
+    check_concurrent_share(*callback, x_callback);
 }
 
 TEST_CASE("graph_model add_path appends node-stage segments") {

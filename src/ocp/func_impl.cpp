@@ -1,6 +1,9 @@
 #include <algorithm>
 #include <cstdlib>
+#include <map>
+#include <mutex>
 #include <moto/core/external_function.hpp>
+#include <moto/ocp/impl/custom_func.hpp>
 #include <moto/ocp/impl/func.hpp>
 #include <moto/utils/codegen.hpp>
 
@@ -13,7 +16,56 @@ bool lowering_trace_enabled() {
     static const bool enabled = std::getenv("MOTO_TRACE_COMPOSE") != nullptr;
     return enabled;
 }
+
+bool same_derivative_role(const sym &from, const sym &to) {
+    return in_field(from.field(), primal_fields) == in_field(to.field(), primal_fields);
+}
 } // namespace
+
+struct generic_func::remap_cache {
+    std::mutex mutex;
+    std::map<remap_key, shared_expr> remap_by_key;
+};
+
+generic_func::generic_func() : remap_cache_(std::make_unique<remap_cache>()) {}
+
+generic_func::generic_func(const std::string &name, approx_order order, size_t dim, field_t field)
+    : expr(name, dim, field),
+      order_(order),
+      remap_cache_(std::make_unique<remap_cache>()) {}
+
+generic_func::generic_func(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
+                           approx_order order, field_t field)
+    : generic_func(name, order, (size_t)out.size1(), field) {
+    assert(out.size2() == 1 && "generic_constr output cols must be 1");
+    set_from_casadi(in_args, out);
+}
+
+generic_func::generic_func(const generic_func &rhs, bool copy_codegen_task)
+    : expr(rhs),
+      field_layout_store<var_list>(rhs),
+      gen_(rhs.gen_, copy_codegen_task),
+      zero_dim_(rhs.zero_dim_),
+      order_(rhs.order_),
+      in_args_(rhs.in_args_),
+      enable_if_all_deps_(rhs.enable_if_all_deps_),
+      disable_if_any_deps_(rhs.disable_if_any_deps_),
+      enable_if_any_deps_(rhs.enable_if_any_deps_),
+      skip_unused_arg_check_(rhs.skip_unused_arg_check_),
+      jac_sp_(rhs.jac_sp_),
+      hess_sp_(rhs.hess_sp_),
+      default_hess_sp_(rhs.default_hess_sp_),
+      detect_jacobian_sparsity_(rhs.detect_jacobian_sparsity_),
+      remap_cache_(std::make_unique<remap_cache>()),
+      value(rhs.value),
+      jacobian(rhs.jacobian),
+      hessian(rhs.hessian) {}
+
+generic_func::generic_func(const generic_func &rhs)
+    : generic_func(rhs, true) {}
+
+generic_func::generic_func(generic_func &&) noexcept = default;
+generic_func::~generic_func() = default;
 
 func_approx_data_ptr_t generic_func::create_approx_data(sym_data &primal, lag_data &raw, shared_data &shared) const {
     if (field() - __dyn >= field::num_func)
@@ -48,6 +100,18 @@ void generic_func::jacobian_impl(func_approx_data &data) const {
 }
 
 void generic_func::setup_hess() {
+}
+
+void generic_custom_func::finalize_impl() {
+    if (in_field(field_, moto::func_fields) || field_ == __undefined) {
+        throw std::runtime_error(fmt::format("func {} field type {} not qualified as custom function - finalization failed",
+                                             name_, field::name(field_)));
+    }
+    generic_func::finalize_impl();
+}
+
+generic_custom_func::clone_ptr generic_custom_func::clone() const {
+    return new generic_custom_func(*this);
 }
 
 void generic_func::hessian_impl(func_approx_data &data) const {
@@ -87,6 +151,35 @@ void generic_func::substitute(const sym &arg, const sym &rhs) {
     std::replace(dep_.begin(), dep_.end(), arg, rhs);
 }
 
+void generic_func::substitute_argument(const sym &arg, const sym &rhs) {
+    field_write_guard();
+    substitute(arg, rhs);
+}
+
+void generic_func::add_argument(const sym &in) {
+    field_write_guard(in.field());
+    if (std::find(in_args_.begin(), in_args_.end(), in) != in_args_.end()) {
+        return;
+    }
+    auto &s = in_args_.emplace_back(in);
+    add_dep(s);
+}
+
+void generic_func::add_argument(const var &in) {
+    add_argument(static_cast<const sym &>(in));
+}
+
+void generic_func::add_arguments(const var_inarg_list &args) {
+    for (sym &in : args) {
+        add_argument(in);
+    }
+}
+
+void generic_func::load_external(const std::string &path) {
+    field_write_guard();
+    load_external_impl(path);
+}
+
 bool generic_func::has_u_arg() const {
     return std::any_of(in_args_.begin(), in_args_.end(),
                        [](const sym &arg) { return arg.field() == __u; });
@@ -106,36 +199,98 @@ bool generic_func::has_pure_x_primal_args() const {
     return has_x;
 }
 
-void generic_func::lower_x_to_y_in_place(std::string_view context, size_t problem_uid) {
-    for (const sym &arg : in_args_) {
-        if (arg.field() != __x) {
+generic_func::normalized_remap generic_func::normalize_argument_remap(const symbol_remap &remap) const {
+    normalized_remap normalized;
+    for (const auto &[from, to] : remap) {
+        const auto from_uid = static_cast<size_t>(from->uid());
+        const auto to_uid = static_cast<size_t>(to->uid());
+        if (from_uid == to_uid) {
             continue;
         }
+        if (!same_derivative_role(from, to)) {
+            throw std::runtime_error(fmt::format(
+                "func {} remap failed: cannot remap {} field {} to {} field {}; remap_arguments only supports primal-to-primal or nonprimal-to-nonprimal mappings",
+                name_, from->name(), field::name(from->field()), to->name(), field::name(to->field())));
+        }
+        if (from->dim() != to->dim() || from->tdim() != to->tdim()) {
+            throw std::runtime_error(fmt::format(
+                "func {} remap failed: cannot remap {} dim {} tdim {} to {} dim {} tdim {}; remapped arguments must have matching dimensions",
+                name_, from->name(), from->dim(), from->tdim(), to->name(), to->dim(), to->tdim()));
+        }
+        auto [it, inserted] = normalized.entries.emplace(from_uid, std::pair{from, to});
+        if (!inserted && it->second.second->uid() != to_uid) {
+            throw std::runtime_error(fmt::format(
+                "func {} remap failed: source symbol uid {} maps to multiple targets",
+                name_, from_uid));
+        }
+    }
+
+    normalized.key.reserve(normalized.entries.size());
+    for (const auto &[from_uid, entry] : normalized.entries) {
+        normalized.key.emplace_back(from_uid, static_cast<size_t>(entry.second->uid()));
+    }
+    return normalized;
+}
+
+void generic_func::apply_argument_remap(const normalized_remap &remap,
+                                        std::string_view context,
+                                        size_t problem_uid) {
+    for (const auto &[_, entry] : remap.entries) {
+        const auto &[from, to] = entry;
         if (lowering_trace_enabled()) {
             if (problem_uid == static_cast<size_t>(-1)) {
-                fmt::print("lowering {}: {} -> {} (x -> y)\n",
-                           context, arg.name(), arg.next()->name());
+                fmt::print("remapping {}: {} -> {}\n",
+                           context, from->name(), to->name());
             } else {
-                fmt::print("lowering {} in composed ocp uid {}: {} -> {} (x -> y)\n",
-                           context, problem_uid, arg.name(), arg.next()->name());
+                fmt::print("remapping {} in composed ocp uid {}: {} -> {}\n",
+                           context, problem_uid, from->name(), to->name());
             }
         }
-        substitute_argument(arg, arg.next());
+        substitute_argument(static_cast<const sym &>(from), static_cast<const sym &>(to));
     }
 }
 
-shared_expr generic_func::lower_expr_x_to_y_cached(std::string_view context, size_t problem_uid) {
-    if (lowered_) {
-        return lowered_;
+shared_expr generic_func::remap_arguments_cached(const symbol_remap &remap,
+                                                 std::string_view context,
+                                                 size_t problem_uid) {
+    auto normalized = normalize_argument_remap(remap);
+    if (normalized.empty())
+        return shared_expr(*this);
+
+    {
+        std::lock_guard lock(remap_cache_->mutex);
+        auto &remaps = remap_cache_->remap_by_key;
+        if (auto it = remaps.find(normalized.key); it != remaps.end()) {
+            return it->second;
+        }
     }
 
-    shared_expr lowered_expr(clone());
-    auto *lowered_func = dynamic_cast<generic_func *>(lowered_expr.get());
-    if (lowered_func != nullptr) {
-        lowered_func->lower_x_to_y_in_place(context, problem_uid);
+    shared_expr remapped_expr(clone());
+    auto &remapped_func = remapped_expr.as<generic_func>();
+    remapped_func.apply_argument_remap(normalized, context, problem_uid);
+    if (!remapped_func.finalize()) {
+        throw std::runtime_error(fmt::format("func {} remap failed: remapped clone could not be finalized", name_));
     }
-    lowered_ = lowered_expr;
-    return lowered_;
+
+    std::lock_guard lock(remap_cache_->mutex);
+    auto [it, inserted] = remap_cache_->remap_by_key.emplace(std::move(normalized.key), remapped_expr);
+    static_cast<void>(inserted);
+    return it->second;
+}
+
+shared_expr generic_func::lower_expr_x_to_y_cached(std::string_view context, size_t problem_uid) {
+    symbol_remap remap;
+    remap.reserve(in_args_.size());
+    for (const sym &arg : in_args_) {
+        if (arg.field() == __x) {
+            remap.emplace_back(var(arg), arg.next());
+        }
+    }
+    return remap_arguments_cached(remap, context, problem_uid);
+}
+
+shared_expr generic_func::remap_arguments(const symbol_remap &remap) {
+    return remap_arguments_cached(remap, "remap_arguments");
 }
 
 void generic_func::set_from_casadi(const var_inarg_list &in_args, const cs::SX &out) {
@@ -148,40 +303,24 @@ void generic_func::set_from_casadi(const var_inarg_list &in_args, const cs::SX &
     }
 }
 
-/**
- * @brief Code generation helper for functions
- *
- */
-void make_codegen_task(generic_func *f);
-
-generic_func generic_func::share(bool copy_args, const var_inarg_list &skip_copy_args) const {
+generic_func generic_func::share(const symbol_remap &remap) const {
     if (!wait_until_ready())
         throw std::runtime_error(fmt::format("func {} not ready, cannot share", name()));
-    gen_.copy_task = false;
-    generic_func f(*this);
-    gen_.copy_task = true;
-    f.finalized_ = true; // keep finalized
-    /// @todo make remapping
-    // f.async_ready_status_ = this->async_ready_status_; // share the async status
-    if (copy_args) {
-        bool skip_copy[in_args_.size()] = {false};
-        for (const sym &s : skip_copy_args) {
-            if (has_arg(s)) {
-                skip_copy[sym_uid_idx_.at(s.uid())] = true;
-            }
-        }
-        size_t idx = 0;
-        for (sym &s : in_args_) {
-            if (skip_copy[idx++])
-                continue;
-            auto s_new = s.clone(s.name() + "_copy");
-            if (bool(s.dual()) && has_arg(s.dual())) {
-                skip_copy[sym_uid_idx_.at(s.dual()->uid())] = true;
-            }
-            f.substitute(s, s_new);
-        }
-    }
+    auto normalized = normalize_argument_remap(remap);
+    generic_func f(*this, false);
+    f.apply_argument_remap(normalized, "share");
+    f.rebuild_argument_layout();
+    f.finalized_ = true;
+    f.set_ready_status(true);
     return f;
+}
+
+void generic_func::rebuild_argument_layout() {
+    clear_entries();
+    size_t idx = 0;
+    for (auto &s : in_args_) {
+        append_indexed_entry(s, idx++);
+    }
 }
 
 void generic_func::finalize_impl() {
@@ -199,16 +338,7 @@ void generic_func::finalize_impl() {
             std::erase_if(dep_, [uid](const sym &arg) { return arg.uid() == uid; });
         }
     }
-    for (auto &s : in_args_) {
-        auto f = s->field();
-        if (in_field(f, primal_fields)) {
-            info_->arg_dim_[f] += s->dim();
-            info_->arg_tdim_[f] += s->tdim();
-            info_->arg_num_[f]++;
-            info_->arg_by_field_[f].emplace_back(s);
-        }
-        sym_uid_idx_[s->uid()] = sym_uid_idx_.size();
-    }
+    rebuild_argument_layout();
     if (order_ != approx_order::none && dim_ == dim_tbd && !zero_dim_) {
         throw std::runtime_error(fmt::format("generic_func {} has no dimension set", name_));
     }
@@ -240,15 +370,11 @@ void generic_func::finalize_impl() {
         t.gen_hessian = order_ >= approx_order::second;
         t.append_value = field_ == __cost;
         t.append_jac = field_ == __cost;
-        // t.jac_sp = detect_jacobian_sparsity_ ? &jac_sp_ : nullptr;
         t.jac_sp = nullptr;
         t.hess_sp = &hess_sp_;
         t.verbose = false;
         t.force_recompile = false;
         t.keep_generated_src = true;
-        // constexpr std::string_view debug_compile_flag = "-g -O0 -march=native";
-        // t.jac_compile_flag = debug_compile_flag;
-        // t.hess_compile_flag = debug_compile_flag;
         auto jobs = std::move(utils::cs_codegen::generate_and_compile(t)
                                   .add_finish_callback([this]() {
                                       load_external_impl(); ///< load the generated code
@@ -264,50 +390,17 @@ void generic_func::finalize_impl() {
     }
     finalized_ = true;
 }
-bool generic_func::setup_ocpwise_info(const ocp_base *prob) const {
-    if (ocpwise_info_map_->contains(prob->uid()))
-        return false;
-    auto &tmp = *ocpwise_info_map_->insert(
-                                      {prob->uid(),
-                                       info::holder(std::make_unique<info>())})
-                     .first->second;
-    // fmt::println("Setting up ocpwise info for func {} in prob uid {}", name(), prob->uid());
-    // setup
-    for (auto &arg : in_args_) {
-        auto f = arg->field();
-        if (prob->is_active(arg) && f < field::num_prim) {
-            tmp.arg_by_field_[f].emplace_back(arg);
-            tmp.arg_dim_[f] += arg->dim();
-            tmp.arg_tdim_[f] += arg->tdim();
-            tmp.arg_num_[f]++;
-        }
-    }
-    // fmt::println(" - active args by field:");
-    // for (size_t f : primal_fields) {
-    //     fmt::println("   - field {}: num {}, dim {}, tdim {}, args {}",
-    //                  f, tmp.arg_num_[f], tmp.arg_dim_[f], tmp.arg_tdim_[f], tmp.arg_by_field_[f]);
-    // }
-    return true;
+const var_list &generic_func::in_args(field_t f) const { field_read_guard(f); return field_entries(f); }
+size_t generic_func::arg_num(field_t f) const { field_read_guard(f); return field_entry_count(f); }
+size_t generic_func::arg_dim(field_t f) const { field_read_guard(f); return field_dim(f); }
+size_t generic_func::arg_tdim(field_t f) const { field_read_guard(f); return field_tdim(f); }
+bool generic_func::has_arg(const sym &s) const {
+    field_read_guard(s.field());
+    return has_entry(s);
 }
-const var_list &generic_func::active_args(field_t f, const ocp_base *prob) const {
-    field_read_guard(f);
-    setup_ocpwise_info(prob);
-    return ocpwise_info_map_->at(prob->uid())->arg_by_field_[f];
-}
-size_t generic_func::active_dim(field_t f, const ocp_base *prob) const {
-    field_read_guard(f);
-    setup_ocpwise_info(prob);
-    return ocpwise_info_map_->at(prob->uid())->arg_dim_[f];
-}
-size_t generic_func::active_tdim(field_t f, const ocp_base *prob) const {
-    field_read_guard(f);
-    setup_ocpwise_info(prob);
-    return ocpwise_info_map_->at(prob->uid())->arg_tdim_[f];
-}
-size_t generic_func::active_num(field_t f, const ocp_base *prob) const {
-    field_read_guard(f);
-    setup_ocpwise_info(prob);
-    return ocpwise_info_map_->at(prob->uid())->arg_num_[f];
+size_t generic_func::arg_idx(const sym &s) const {
+    field_read_guard(s.field());
+    return entry_index(s);
 }
 const bool generic_func::check_enable(ocp_base *prob) const {
     if (disable_if_any_deps_.empty() && enable_if_all_deps_.empty() && enable_if_any_deps_.empty())
@@ -322,14 +415,12 @@ const bool generic_func::check_enable(ocp_base *prob) const {
     for (const auto &e : disable_if_any_deps_) {
         if (prob->is_active(e)) {
             pass_check = false;
-            // fmt::print("func {} disabled because {} active\n", name(), e->name());
             goto CHECK_DONE;
         }
     }
     for (const auto &e : enable_if_all_deps_) {
         if (!prob->is_active(e)) {
             pass_check = false;
-            // fmt::print("func {} disabled because {} not active\n", name(), e->name());
             goto CHECK_DONE;
         }
     }
@@ -357,17 +448,22 @@ void generic_func::enable_if_any(const expr_inarg_list &args) {
     }
     enable_if_any_deps_.insert(enable_if_any_deps_.end(), args.begin(), args.end());
 }
-generic_func::gen_info::gen_info(const gen_info &rhs) {
-    if (rhs.task_ && rhs.copy_task) {
+generic_func::gen_info::gen_info(const gen_info &rhs, bool copy_codegen_task) {
+    if (rhs.task_ && copy_codegen_task) {
         task_ = new task_type(*rhs.task_);
     }
 }
+generic_func::gen_info::gen_info(const gen_info &rhs) : gen_info(rhs, true) {}
+
 generic_func::gen_info &generic_func::gen_info::operator=(const gen_info &rhs) {
+    if (this == &rhs) {
+        return *this;
+    }
     if (task_) {
         delete task_.get();
         task_ = nullptr;
     }
-    if (rhs.task_ && rhs.copy_task) {
+    if (rhs.task_) {
         task_ = new task_type(*rhs.task_);
     }
     return *this;
@@ -377,8 +473,5 @@ generic_func::gen_info::~gen_info() {
         delete task_.get();
         task_ = nullptr;
     }
-}
-
-void make_codegen_task(generic_func *f) {
 }
 } // namespace moto
