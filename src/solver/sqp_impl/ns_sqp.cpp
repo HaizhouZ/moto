@@ -26,38 +26,44 @@ ns_sqp::ns_sqp(size_t n_jobs)
 }
 
 template <typename StageBuilder>
-void ns_sqp::realize_runtime(storage_type &runtime, StageBuilder &&stage_builder) {
+void ns_sqp::realize_runtime(storage_type &runtime,
+                             const graph_model::interval_snapshot &snapshot,
+                             StageBuilder &&stage_builder) {
     runtime.clear();
-    const size_t num_edges = model_graph_.edges_.size();
-    if (num_edges == 0) {
-        throw std::runtime_error("graph_model expects a non-empty path");
-    }
-    runtime.reserve(num_edges);
-    for (size_t eid = 0; eid < num_edges; ++eid) {
-        const auto &edge = model_graph_.edges_[eid];
-        if (!edge) {
-            throw std::runtime_error("graph_model found null edge");
-        }
-        const auto stage_ocp = std::static_pointer_cast<ocp>(
-            model_graph_.compose_interval(edge, eid + 1 == num_edges));
+    runtime.reserve(snapshot.intervals->size());
+    for (const auto &stage_ocp : *snapshot.intervals) {
         auto built = stage_builder(stage_ocp);
         if (!built) {
             throw std::runtime_error("ns_sqp::realize_runtime stage_builder returned null stage_ocp");
         }
         runtime.add(node_type(built));
     }
+    runtime.flatten_nodes();
 }
 
 ns_sqp::storage_type &ns_sqp::active_data() {
     if (phase_graph_override_ != nullptr) {
         return *phase_graph_override_;
     }
-    const size_t model_revision = model_graph_.revision_;
-    if (solver_runtime_revision_ != model_revision) {
-        realize_runtime(solver_runtime_, [](const ocp_ptr_t &stage_ocp) { return stage_ocp; });
-        solver_runtime_revision_ = model_revision;
+
+    for (;;) {
+        const size_t model_revision = model_graph_.revision();
+        if (solver_runtime_revision_.load(std::memory_order_acquire) == model_revision) {
+            return solver_runtime_;
+        }
+
+        std::lock_guard<std::mutex> lock(solver_runtime_mutex_);
+        if (solver_runtime_revision_.load(std::memory_order_relaxed) == model_graph_.revision()) {
+            return solver_runtime_;
+        }
+
+        const auto snapshot = model_graph_.composed_intervals();
+        realize_runtime(solver_runtime_, snapshot, [](const ocp_ptr_t &stage_ocp) { return stage_ocp; });
+        if (snapshot.revision == model_graph_.revision()) {
+            solver_runtime_revision_.store(snapshot.revision, std::memory_order_release);
+            return solver_runtime_;
+        }
     }
-    return solver_runtime_;
 }
 
 std::vector<ns_sqp::data *> &ns_sqp::solver_nodes() {
@@ -94,16 +100,17 @@ ns_sqp::storage_type &ns_sqp::restoration_graph() {
         .rho_eq = settings.restoration.rho_eq,
         .rho_ineq = settings.restoration.rho_ineq,
     };
-    const size_t model_revision = model_graph_.revision_;
+    const size_t model_revision = model_graph_.revision();
     const bool needs_rebuild =
         restoration_runtime_revision_ != model_revision ||
         !restoration_cfg_valid_ ||
         !same_restoration_cfg(restoration_cfg_, cfg);
     if (needs_rebuild) {
-        realize_runtime(restoration_runtime_, [&cfg](const ocp_ptr_t &stage_ocp) {
+        const auto snapshot = model_graph_.composed_intervals();
+        realize_runtime(restoration_runtime_, snapshot, [&cfg](const ocp_ptr_t &stage_ocp) {
             return solver::restoration::build_restoration_overlay_problem(stage_ocp, cfg);
         });
-        restoration_runtime_revision_ = model_revision;
+        restoration_runtime_revision_ = snapshot.revision;
         restoration_cfg_ = cfg;
         restoration_cfg_valid_ = true;
     }
@@ -114,16 +121,17 @@ ns_sqp::storage_type &ns_sqp::equality_init_graph() {
     solver::equality_init::equality_init_overlay_settings cfg{
         .rho_eq = settings.eq_init.rho_eq,
     };
-    const size_t model_revision = model_graph_.revision_;
+    const size_t model_revision = model_graph_.revision();
     const bool needs_rebuild =
         equality_init_runtime_revision_ != model_revision ||
         !equality_init_cfg_valid_ ||
         !same_equality_init_cfg(equality_init_cfg_, cfg);
     if (needs_rebuild) {
-        realize_runtime(equality_init_runtime_, [&cfg](const ocp_ptr_t &stage_ocp) {
+        const auto snapshot = model_graph_.composed_intervals();
+        realize_runtime(equality_init_runtime_, snapshot, [&cfg](const ocp_ptr_t &stage_ocp) {
             return solver::equality_init::build_equality_init_overlay_problem(stage_ocp, cfg);
         });
-        equality_init_runtime_revision_ = model_revision;
+        equality_init_runtime_revision_ = snapshot.revision;
         equality_init_cfg_ = cfg;
         equality_init_cfg_valid_ = true;
     }

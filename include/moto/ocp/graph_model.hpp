@@ -1,7 +1,9 @@
 #ifndef MOTO_MODEL_GRAPH_MODEL_HPP
 #define MOTO_MODEL_GRAPH_MODEL_HPP
 
+#include <atomic>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include <moto/ocp/problem.hpp>
@@ -22,11 +24,21 @@ class graph_model {
   private:
     friend struct ns_sqp;
 
-    edge_ocp_ptr_t compose_interval(const edge_ocp_ptr_t &edge_h,
+    struct interval_snapshot {
+        size_t revision;
+        std::shared_ptr<const std::vector<ocp_ptr_t>> intervals;
+    };
+
+    interval_snapshot composed_intervals() const;
+    size_t revision() const noexcept { return revision_.load(std::memory_order_acquire); }
+    edge_ocp_ptr_t compose_interval(const edge_ocp_ptr_t &edge,
                                     bool include_terminal_sink_terms) const;
 
     std::vector<edge_ocp_ptr_t> edges_;
-    size_t revision_ = 1;
+    std::atomic<size_t> revision_ = 1;
+    mutable std::shared_ptr<const std::vector<ocp_ptr_t>> interval_cache_;
+    mutable size_t interval_cache_revision_ = 0;
+    mutable std::mutex graph_state_mutex_;
 };
 
 } // namespace moto

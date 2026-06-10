@@ -1,11 +1,13 @@
 #ifndef __NS_SQP__
 #define __NS_SQP__
 
+#include <atomic>
 #include <array>
 #include <chrono>
 #include <functional>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <moto/ocp/graph_model.hpp>
 #include <moto/ocp/constr.hpp>
 #include <moto/ocp/impl/node_data.hpp>
@@ -341,7 +343,9 @@ struct ns_sqp {
     storage_type &restoration_graph();
     storage_type &equality_init_graph();
     template <typename StageBuilder>
-    void realize_runtime(storage_type &runtime, StageBuilder &&stage_builder);
+    void realize_runtime(storage_type &runtime,
+                         const graph_model::interval_snapshot &snapshot,
+                         StageBuilder &&stage_builder);
     struct scoped_phase_graph_override {
         ns_sqp &owner;
         bool in_restoration_backup;
@@ -356,7 +360,8 @@ struct ns_sqp {
     graph_model model_graph_;
     size_t graph_n_jobs_ = MAX_THREADS;
     storage_type solver_runtime_;
-    size_t solver_runtime_revision_ = 0;
+    std::atomic<size_t> solver_runtime_revision_ = 0;
+    std::mutex solver_runtime_mutex_;
     storage_type restoration_runtime_;
     size_t restoration_runtime_revision_ = 0;
     solver::restoration::restoration_overlay_settings restoration_cfg_{};

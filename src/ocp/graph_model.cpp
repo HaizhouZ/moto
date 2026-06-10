@@ -4,6 +4,8 @@
 #include <moto/ocp/cost.hpp>
 #include <moto/ocp/impl/func.hpp>
 
+#include <iterator>
+
 namespace moto {
 
 namespace {
@@ -61,27 +63,70 @@ void graph_model::add_path(const node_ocp_ptr_t &stage_prob,
     if (!stage_prob || !next_prob || !edge_prob) {
         throw std::invalid_argument("graph_model::add_path expects non-null start node, end node, and edge stages");
     }
-    if (const size_t edge_capacity = edges_.size() + n_edges; edge_capacity > edges_.capacity()) {
-        edges_.reserve(edge_capacity);
-    }
-    ++revision_;
 
+    std::vector<edge_ocp_ptr_t> new_edges;
+    new_edges.reserve(n_edges);
     auto prev = stage_prob->clone_node();
     auto final_node = next_prob->clone_node();
     for (size_t i = 0; i < n_edges; ++i) {
         auto next = (i + 1 == n_edges) ? final_node : stage_prob->clone_node();
         auto edge = edge_prob->clone_edge();
         edge->bind_nodes(prev, next);
-        edges_.emplace_back(edge);
+        new_edges.emplace_back(edge);
         prev = next;
+    }
+
+    std::lock_guard<std::mutex> lock(graph_state_mutex_);
+    if (const size_t edge_capacity = edges_.size() + new_edges.size(); edge_capacity > edges_.capacity()) {
+        edges_.reserve(edge_capacity);
+    }
+    edges_.insert(edges_.end(),
+                  std::make_move_iterator(new_edges.begin()),
+                  std::make_move_iterator(new_edges.end()));
+    interval_cache_.reset();
+    revision_.fetch_add(1, std::memory_order_release);
+}
+
+graph_model::interval_snapshot graph_model::composed_intervals() const {
+    for (;;) {
+        size_t captured_revision = 0;
+        std::vector<edge_ocp_ptr_t> edge_snapshot;
+        {
+            std::lock_guard<std::mutex> lock(graph_state_mutex_);
+            captured_revision = revision();
+            if (interval_cache_revision_ == captured_revision && interval_cache_) {
+                return {captured_revision, interval_cache_};
+            }
+            if (edges_.empty()) {
+                throw std::runtime_error("graph_model expects a non-empty path");
+            }
+            edge_snapshot = edges_;
+        }
+
+        auto intervals = std::make_shared<std::vector<ocp_ptr_t>>();
+        intervals->reserve(edge_snapshot.size());
+        for (size_t eid = 0; eid < edge_snapshot.size(); ++eid) {
+            intervals->emplace_back(compose_interval(edge_snapshot[eid], eid + 1 == edge_snapshot.size()));
+        }
+
+        std::lock_guard<std::mutex> lock(graph_state_mutex_);
+        const size_t current_revision = revision();
+        if (interval_cache_revision_ == current_revision && interval_cache_) {
+            return {current_revision, interval_cache_};
+        }
+        if (current_revision == captured_revision) {
+            interval_cache_ = intervals;
+            interval_cache_revision_ = captured_revision;
+            return {captured_revision, interval_cache_};
+        }
     }
 }
 
-edge_ocp_ptr_t graph_model::compose_interval(const edge_ocp_ptr_t &edge_h,
+edge_ocp_ptr_t graph_model::compose_interval(const edge_ocp_ptr_t &edge,
                                              bool include_terminal_sink_terms) const {
-    edge_h->wait_until_ready();
-    auto start_node_prob = edge_h->st_node_prob();
-    auto end_node_prob = edge_h->ed_node_prob();
+    edge->wait_until_ready();
+    auto start_node_prob = edge->st_node_prob();
+    auto end_node_prob = edge->ed_node_prob();
     if (!start_node_prob || !end_node_prob) {
         throw std::runtime_error("graph_model::compose_interval found edge without bound endpoints");
     }
@@ -100,10 +145,10 @@ edge_ocp_ptr_t graph_model::compose_interval(const edge_ocp_ptr_t &edge_h,
         start_node_prob = start_node_prob->clone_node(config);
     }
 
-    auto composed = edge_h->clone_edge();
+    auto composed = edge->clone_edge();
     config = {};
     for (size_t f = 0; f < field::num_prim; ++f) {
-        for (const shared_expr &expr : edge_h->exprs(f)) {
+        for (const shared_expr &expr : edge->exprs(f)) {
             if (start_node_prob->contains(*expr) &&
                 !start_node_prob->is_active(*expr)) {
                 config.deactivate_list.emplace_back(*expr);

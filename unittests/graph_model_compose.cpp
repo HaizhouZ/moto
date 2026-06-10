@@ -129,6 +129,32 @@ TEST_CASE("graph_model reuses cached lowered function entities across stages") {
     }
 }
 
+TEST_CASE("graph_model realized stages are stable under concurrent readers") {
+    using namespace moto;
+
+    auto [x, xn] = sym::states("x_concurrent_realize", 1);
+    auto u = sym::inputs("u_concurrent_realize", 1);
+    auto stage = make_stage("concurrent_realize", x, u);
+    auto edge = make_edge("concurrent_realize", x, xn, u);
+
+    ns_sqp sqp;
+    sqp.graph().add_path(stage, stage, edge, 4);
+
+    std::atomic<size_t> observed{0};
+    std::vector<std::thread> threads;
+    for (size_t tid = 0; tid < 8; ++tid) {
+        threads.emplace_back([&]() {
+            for (size_t iter = 0; iter < 20; ++iter) {
+                observed.fetch_add(sqp.solver_nodes().size());
+            }
+        });
+    }
+    for (auto &thread : threads) {
+        thread.join();
+    }
+    REQUIRE(observed.load() == 8 * 20 * 4);
+}
+
 TEST_CASE("remap cache reuses keyed concrete function clones") {
     using namespace moto;
 
@@ -178,7 +204,7 @@ TEST_CASE("remap cache reuses keyed concrete function clones") {
     auto u = sym::inputs("u_concrete_clone", 1);
     auto dyn = std::make_shared<dense_dynamics>(
         "dyn_concrete_clone", var_list{x, y, u}, y - x - u, approx_order::second, __dyn);
-    auto ineq = std::make_shared<ineq_constr>(
+    auto ineq = ineq_constr::create(
         "ineq_concrete_clone", var_list{x}, x, approx_order::first, __ineq_x);
 
     REQUIRE(dynamic_cast<dense_dynamics *>(shared_expr(dyn).clone().get()) != nullptr);
@@ -298,6 +324,9 @@ TEST_CASE("graph_model add_path appends node-stage segments") {
     ns_sqp sqp;
     auto &modeled = sqp.graph();
     modeled.add_path(stage_a, stage_b, edge, 1);
+
+    REQUIRE(sqp.solver_nodes().size() == 1);
+
     modeled.add_path(stage_b, stage_b, edge, 2);
 
     auto &flat = sqp.solver_nodes();
