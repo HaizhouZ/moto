@@ -102,6 +102,9 @@ void register_submodule_ns_sqp(nb::module_ &m) {
     moto::export_enum<ns_sqp::linesearch_setting::on_failure_action>(ls_setting);
     moto::export_enum<ns_sqp::linesearch_setting::backtrack_scheme_t>(sqp);
     moto::export_enum<ns_sqp::linesearch_setting::search_method>(sqp);
+    nb::enum_<ns_sqp::initial_state_mode>(sqp, "initial_state_mode")
+        .value("fixed", ns_sqp::initial_state_mode::fixed)
+        .value("optimized", ns_sqp::initial_state_mode::optimized);
     nb::class_<ns_sqp::settings_t>(sqp, "settings_type")
         .def_ro("mu", &ns_sqp::settings_t::mu, "Barrier parameter for the IPM solver")
         .def_rw("ipm_conditional_corrector", &ns_sqp::settings_t::ipm_conditional_corrector, "Whether to use conditional corrector in the IPM solver")
@@ -109,6 +112,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("rf", &ns_sqp::settings_t::rf, "Iterative refinement settings")
         .def_prop_ro("restoration", [](ns_sqp::settings_t &self) -> auto & { return self.restoration; }, "Restoration settings")
         .def_prop_ro("eq_init", [](ns_sqp::settings_t &self) -> auto & { return self.eq_init; }, "Equality multiplier initialization settings")
+        .def_rw("initial_state", &ns_sqp::settings_t::initial_state, "Initial-state treatment: fixed (default) or optimized through an internal virtual stage")
         .def_prop_ro("ls", [](ns_sqp::settings_t &self) -> auto & { return self.ls; }, "Line search settings")
         .def_rw("scaling", &ns_sqp::settings_t::scaling, "Jacobian scaling settings")
         .def_rw("no_except", &ns_sqp::settings_t::no_except, "Whether to suppress exceptions in parallel jobs")

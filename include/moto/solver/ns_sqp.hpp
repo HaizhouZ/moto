@@ -172,6 +172,11 @@ struct ns_sqp {
         }();
     };
 
+    enum class initial_state_mode : size_t {
+        fixed,
+        optimized,
+    };
+
     struct settings_t : public workspace_data_collection<linesearch_setting, ipm_config>,
                         public restoration_settings,
                         public equality_multiplier_init_settings {
@@ -182,6 +187,7 @@ struct ns_sqp {
         ipm_config &ipm;
         restoration_settings &restoration;
         equality_multiplier_init_settings &eq_init;
+        initial_state_mode initial_state = initial_state_mode::fixed;
         double prim_tol = 1e-6; ///< primal feasibility tolerance
         double dual_tol = 1e-4; ///< dual feasibility tolerance
         double comp_tol = 1e-6; ///< complementarity feasibility tolerance
@@ -225,6 +231,7 @@ struct ns_sqp {
         array<scalar_t, field::num_prim> scale_p_{};
         /// whether scaling has been applied (and therefore duals must be unscaled)
         bool scaling_applied_ = false;
+        bool internal_initial_state = false;
     };
 
     enum iter_result_t : size_t {
@@ -317,8 +324,10 @@ struct ns_sqp {
     struct node_type final {
         using data_type = data;
         std::unique_ptr<data_type> data_;
-        explicit node_type(const ocp_ptr_t &formulation)
-            : data_(std::make_unique<data_type>(formulation)) {}
+        explicit node_type(const ocp_ptr_t &formulation, bool internal_initial_state = false)
+            : data_(std::make_unique<data_type>(formulation)) {
+            data_->internal_initial_state = internal_initial_state;
+        }
         data_type &payload() { return *data_; }
         const data_type &payload() const { return *data_; }
         node_type(const node_type &) = delete;
@@ -353,6 +362,8 @@ struct ns_sqp {
     void realize_runtime(storage_type &runtime,
                          const graph_model::interval_snapshot &snapshot,
                          StageBuilder &&stage_builder);
+    ocp_ptr_t build_initial_state_virtual_stage(const ocp_ptr_t &first_stage) const;
+    void sync_initial_state_virtual_stage(storage_type &runtime) const;
     template <typename StageBuilder>
     size_t rebuild_runtime_from_model(storage_type &runtime,
                                       StageBuilder &&stage_builder);
@@ -371,13 +382,16 @@ struct ns_sqp {
     size_t graph_n_jobs_ = MAX_THREADS;
     storage_type solver_runtime_;
     std::atomic<size_t> solver_runtime_revision_ = 0;
+    initial_state_mode solver_runtime_initial_state_mode_ = initial_state_mode::fixed;
     std::mutex solver_runtime_mutex_;
     storage_type restoration_runtime_;
     size_t restoration_runtime_revision_ = 0;
+    initial_state_mode restoration_runtime_initial_state_mode_ = initial_state_mode::fixed;
     solver::restoration::restoration_overlay_settings restoration_cfg_{};
     bool restoration_cfg_valid_ = false;
     storage_type equality_init_runtime_;
     size_t equality_init_runtime_revision_ = 0;
+    initial_state_mode equality_init_runtime_initial_state_mode_ = initial_state_mode::fixed;
     solver::equality_init::equality_init_overlay_settings equality_init_cfg_{};
     bool equality_init_cfg_valid_ = false;
     storage_type *phase_graph_override_ = nullptr;

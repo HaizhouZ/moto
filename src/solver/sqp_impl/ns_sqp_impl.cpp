@@ -173,6 +173,7 @@ ns_sqp::kkt_info ns_sqp::initialize(storage_type &graph) {
     auto total_profile = profile_scope(profile_phase::initialize_total);
     if (settings.verbose)
         fmt::print("Initialization for SQP...\n");
+    sync_initial_state_virtual_stage(graph);
     refresh_problem_flags(graph);
     if (!settings.ipm.warm_start)
         settings.ipm.mu = settings.ipm.mu0; // initialize mu before setting up workspace data, as it may be used in the workspace data setup

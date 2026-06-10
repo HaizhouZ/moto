@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdlib>
 #include <string>
 #include <thread>
@@ -36,6 +37,83 @@ bool contains_name_prefix(const std::vector<std::string> &names, const std::stri
     });
 }
 
+template <typename FuncPtr>
+FuncPtr add_args(FuncPtr f, const moto::var_inarg_list &args) {
+    f->add_arguments(args);
+    return f;
+}
+
+moto::dynamics layout_dynamics(const std::string &name,
+                               const moto::var_inarg_list &args,
+                               size_t dim = 1) {
+    return add_args(moto::dynamics(new moto::dense_dynamics(
+                        name, moto::approx_order::second, dim, moto::__dyn)),
+                    args);
+}
+
+moto::constr layout_constr(const std::string &name,
+                           const moto::var_inarg_list &args,
+                           moto::field_t field,
+                           size_t dim = 1) {
+    return add_args(moto::constr(new moto::generic_constr(
+                        name, moto::approx_order::second, dim, field)),
+                    args);
+}
+
+moto::cost layout_cost(const std::string &name,
+                       const moto::var_inarg_list &args) {
+    return add_args(moto::cost(new moto::generic_cost(
+                        name, moto::approx_order::second)),
+                    args);
+}
+
+size_t expr_dim(const moto::var &v) {
+    return v.as<moto::expr>().dim();
+}
+
+size_t expr_dim(const moto::sym &s) {
+    return static_cast<const moto::expr &>(s).dim();
+}
+
+moto::dynamics callback_linear_dynamics(const std::string &name,
+                                        const moto::var &x,
+                                        const moto::var &y,
+                                        const moto::var &u) {
+    using namespace moto;
+    auto dyn = layout_dynamics(name, var_list{x, y, u}, expr_dim(y));
+    dyn->value = [](func_approx_data &d) {
+        d.v_ = d[1] - d[0] - d[2];
+    };
+    dyn->jacobian = [](func_approx_data &d) {
+        d.jac_[0].setZero();
+        d.jac_[1].setZero();
+        d.jac_[2].setZero();
+        d.jac_[0].diagonal().array() = -1.;
+        d.jac_[1].diagonal().array() = 1.;
+        d.jac_[2].diagonal().array() = -1.;
+    };
+    dyn->hessian = [](func_approx_data &) {};
+    return dyn;
+}
+
+moto::cost callback_quadratic_cost(const std::string &name,
+                                   const moto::var &x,
+                                   moto::scalar_t target = 0.) {
+    using namespace moto;
+    auto c = layout_cost(name, var_list{x});
+    c->value = [target](func_approx_data &d) {
+        const scalar_t r = d[0](0) - target;
+        d.v_(0) += r * r;
+    };
+    c->jacobian = [target](func_approx_data &d) {
+        d.jac_[0](0, 0) += scalar_t(2.) * (d[0](0) - target);
+    };
+    c->hessian = [](func_approx_data &d) {
+        d.lag_hess_[0][0](0, 0) += scalar_t(2.);
+    };
+    return c;
+}
+
 const moto::generic_func &require_func_named_prefix(const moto::ocp_base_ptr_t &prob,
                                                     moto::field_t field,
                                                     const std::string &prefix) {
@@ -54,10 +132,10 @@ moto::stage_ocp_ptr_t make_stage(const std::string &tag,
                                  const moto::sym &u) {
     using namespace moto;
     auto stage = stage_ocp::create();
-    stage->add(*dynamics(new dense_dynamics("dyn_" + tag, var_list{x, y, u}, y - x - u, approx_order::second, __dyn)));
-    stage->add(*constr(new generic_constr("ineq_" + tag, var_list{x}, x, approx_order::second, __ineq_x)));
-    stage->add(*cost(new generic_cost("cost_x_" + tag, var_list{x}, x * x, approx_order::second)));
-    stage->add(*cost(new generic_cost("cost_u_" + tag, var_list{u}, u * u, approx_order::second)));
+    stage->add(*layout_dynamics("dyn_" + tag, var_list{x, y, u}, expr_dim(y)));
+    stage->add(*layout_constr("ineq_" + tag, var_list{x}, __ineq_x, expr_dim(x)));
+    stage->add(*layout_cost("cost_x_" + tag, var_list{x}));
+    stage->add(*layout_cost("cost_u_" + tag, var_list{u}));
     return stage;
 }
 
@@ -69,8 +147,8 @@ TEST_CASE("stage graph maps stage, start-node, and end-node terms to solver fiel
     auto [x, xn] = sym::states("x_edge_stage", 1);
     auto u = sym::inputs("u_edge_stage", 1);
     auto stage = make_stage("node_stage", x, xn, u);
-    stage->st().add(*cost(new generic_cost("cost_st_node_stage", var_list{x}, x, approx_order::second)));
-    stage->ed().add(*cost(new generic_cost("cost_ed_node_stage", var_list{x}, x, approx_order::second)));
+    stage->st().add(*layout_cost("cost_st_node_stage", var_list{x}));
+    stage->ed().add(*layout_cost("cost_ed_node_stage", var_list{x}));
 
     ns_sqp sqp;
     sqp.add_stage(stage, 3);
@@ -95,10 +173,10 @@ TEST_CASE("graph start terms are explicit while stage starts lower through incom
     auto [x, xn] = sym::states("x_graph_start_rule", 1);
     auto u = sym::inputs("u_graph_start_rule", 1);
     auto stage = make_stage("graph_start_rule", x, xn, u);
-    stage->st().add(*cost(new generic_cost("cost_stage_start_graph_start_rule", var_list{x}, x, approx_order::second)));
+    stage->st().add(*layout_cost("cost_stage_start_graph_start_rule", var_list{x}));
 
     ns_sqp sqp;
-    sqp.start_node().add(*cost(new generic_cost("cost_graph_start_rule", var_list{x}, x, approx_order::second)));
+    sqp.start_node().add(*layout_cost("cost_graph_start_rule", var_list{x}));
     sqp.add_stage(stage, 2);
 
     auto &flat = sqp.solver_nodes();
@@ -117,7 +195,7 @@ TEST_CASE("graph_model reuses cached lowered function entities across stages", "
     auto [x, xn] = sym::states("x_reuse_lowered", 1);
     auto u = sym::inputs("u_reuse_lowered", 1);
     auto stage = make_stage("reuse_lowered", x, xn, u);
-    stage->ed().add(*cost(new generic_cost("cost_ed_reuse_lowered", var_list{x}, x * x, approx_order::second)));
+    stage->ed().add(*layout_cost("cost_ed_reuse_lowered", var_list{x}));
 
     ns_sqp sqp;
     sqp.add_stage(stage, 4);
@@ -170,7 +248,7 @@ TEST_CASE("remap cache reuses keyed concrete function clones", "[graph][remap]")
     auto y_b = sym::states("x_remap_cache_b", 1).second;
     auto p = sym::params("p_remap_cache", 1);
     auto u_remap = sym::inputs("u_remap_cache", 1);
-    auto c = cost(new generic_cost("cost_remap_cache", var_list{x_a, p}, x_a * x_a + p, approx_order::second));
+    auto c = layout_cost("cost_remap_cache", var_list{x_a, p});
     REQUIRE(c->finalize(true));
 
     auto first = c->remap_arguments({{x_a, y_a}});
@@ -257,9 +335,9 @@ TEST_CASE("sqp add_stage lowers the next phase start endpoint onto the previous 
     auto u = sym::inputs("u_phase_boundary", 1);
     auto stage_a = make_stage("phase_boundary_a", x, xn, u);
     auto stage_b = make_stage("phase_boundary_b", x, xn, u);
-    stage_a->ed().add(*cost(new generic_cost("cost_ed_phase_boundary_a", var_list{x}, x, approx_order::second)));
-    stage_b->st().add(*cost(new generic_cost("cost_st_phase_boundary_b", var_list{x}, x, approx_order::second)));
-    stage_b->ed().add(*cost(new generic_cost("cost_ed_phase_boundary_b", var_list{x}, x, approx_order::second)));
+    stage_a->ed().add(*layout_cost("cost_ed_phase_boundary_a", var_list{x}));
+    stage_b->st().add(*layout_cost("cost_st_phase_boundary_b", var_list{x}));
+    stage_b->ed().add(*layout_cost("cost_ed_phase_boundary_b", var_list{x}));
 
     ns_sqp sqp;
     sqp.add_stage(stage_a, 2);
@@ -292,14 +370,11 @@ TEST_CASE("phase-boundary endpoint terms survive current-interval inactive argum
     auto u = sym::inputs("u_phase_enable_boundary", 1);
 
     auto stage_a = stage_ocp::create();
-    stage_a->add(*cost(new generic_cost(
-        "cost_phase_enable_a_u", var_list{u}, u, approx_order::second)));
+    stage_a->add(*layout_cost("cost_phase_enable_a_u", var_list{u}));
 
     auto stage_b = stage_ocp::create();
-    stage_b->add(*dynamics(new dense_dynamics(
-        "dyn_phase_enable_b", var_list{x, xn, u}, xn - x - u, approx_order::second, __dyn)));
-    auto enabled_endpoint = constr(new generic_constr(
-        "start_phase_enable_boundary", var_list{x}, x, approx_order::second, __eq_x));
+    stage_b->add(*layout_dynamics("dyn_phase_enable_b", var_list{x, xn, u}, expr_dim(xn)));
+    auto enabled_endpoint = layout_constr("start_phase_enable_boundary", var_list{x}, __eq_x, expr_dim(x));
     enabled_endpoint->enable_if_all({u});
     stage_b->st().add(*enabled_endpoint);
 
@@ -322,7 +397,7 @@ TEST_CASE("sqp add_stages can append from an explicit end-node view", "[graph][p
     auto u = sym::inputs("u_explicit_append", 1);
     auto stage_a = make_stage("explicit_a", x, xn, u);
     auto stage_b = make_stage("explicit_b", x, xn, u);
-    stage_b->st().add(*cost(new generic_cost("cost_st_explicit_b", var_list{x}, x, approx_order::second)));
+    stage_b->st().add(*layout_cost("cost_st_explicit_b", var_list{x}));
     ns_sqp sqp;
     auto first = sqp.add_stage(stage_a, 1);
     sqp.add_stages(first.back()->ed(), stage_b, 2);
@@ -362,8 +437,8 @@ TEST_CASE("sqp add_stages supports multiple explicit successors from one boundar
     auto stage_a = make_stage("multi_successor_a", x, xn, u);
     auto stage_b = make_stage("multi_successor_b", x, xn, u);
     auto stage_c = make_stage("multi_successor_c", x, xn, u);
-    stage_b->st().add(*cost(new generic_cost("cost_st_multi_successor_b", var_list{x}, x, approx_order::second)));
-    stage_c->st().add(*cost(new generic_cost("cost_st_multi_successor_c", var_list{x}, x, approx_order::second)));
+    stage_b->st().add(*layout_cost("cost_st_multi_successor_b", var_list{x}));
+    stage_c->st().add(*layout_cost("cost_st_multi_successor_c", var_list{x}));
 
     ns_sqp sqp;
     auto first = sqp.add_stage(stage_a, 1);
@@ -393,8 +468,7 @@ TEST_CASE("sqp add_stages from explicit graph start preserves start-node terms",
     auto stage_b = make_stage("explicit_graph_start_b", x, xn, u);
 
     ns_sqp sqp;
-    sqp.start_node().add(*cost(new generic_cost(
-        "cost_explicit_graph_start", var_list{x}, x, approx_order::second)));
+    sqp.start_node().add(*layout_cost("cost_explicit_graph_start", var_list{x}));
     sqp.add_stage(stage_a, 1);
     sqp.add_stages(sqp.start_node(), stage_b, 1);
 
@@ -419,7 +493,7 @@ TEST_CASE("returned graph-owned stage handles are mutable and invalidate the run
     auto stages = sqp.add_stage(stage, 1);
     REQUIRE_FALSE(contains_name_prefix(expr_names(sqp.solver_nodes().front()->problem(), __cost), "cost_added_to_owned_stage"));
 
-    stages.front()->ed().add(*cost(new generic_cost("cost_added_to_owned_stage", var_list{x}, x, approx_order::second)));
+    stages.front()->ed().add(*layout_cost("cost_added_to_owned_stage", var_list{x}));
 
     auto &flat = sqp.solver_nodes();
     REQUIRE(flat.size() == 1);
@@ -433,8 +507,7 @@ TEST_CASE("adding an existing expression to a new endpoint role invalidates the 
     auto [x, xn] = sym::states("x_mutable_role", 1);
     auto u = sym::inputs("u_mutable_role", 1);
     auto stage = make_stage("mutable_role", x, xn, u);
-    auto boundary_cost = cost(new generic_cost(
-        "cost_mutable_role_boundary", var_list{x}, x, approx_order::second));
+    auto boundary_cost = layout_cost("cost_mutable_role_boundary", var_list{x});
 
     ns_sqp sqp;
     auto stages = sqp.add_stage(stage, 1);
@@ -466,7 +539,7 @@ TEST_CASE("stage prototype mutation after add_stage does not affect graph-owned 
     auto &flat_first = sqp.solver_nodes();
     REQUIRE_FALSE(contains_name_prefix(expr_names(flat_first.front()->problem(), __cost), "cost_added_after_realize"));
 
-    stage->add(*cost(new generic_cost("cost_added_after_realize", var_list{x}, x, approx_order::second)));
+    stage->add(*layout_cost("cost_added_after_realize", var_list{x}));
 
     auto &flat_after_mutation = sqp.solver_nodes();
     REQUIRE_FALSE(contains_name_prefix(expr_names(flat_after_mutation.front()->problem(), __cost), "cost_added_after_realize"));
@@ -480,8 +553,8 @@ TEST_CASE("stage clone active status is honored during composition", "[graph][mu
     auto ub = sym::inputs("u_stage_drop", 1);
 
     auto stage = stage_ocp::create();
-    stage->add(*dynamics(new dense_dynamics("dyn_stage_active", var_list{x, xn, ua, ub}, xn - x - ua - ub, approx_order::second, __dyn)));
-    stage->add(*cost(new generic_cost("cost_stage_active_u", var_list{ua, ub}, ua * ua + ub * ub, approx_order::second)));
+    stage->add(*layout_dynamics("dyn_stage_active", var_list{x, xn, ua, ub}, expr_dim(xn)));
+    stage->add(*layout_cost("cost_stage_active_u", var_list{ua, ub}));
 
     ns_sqp sqp;
     auto active_stage = stage->clone(ocp::active_status_config{{ub}, {}});
@@ -500,25 +573,25 @@ TEST_CASE("stage and node_view reject invalid endpoint placement", "[graph][vali
     auto u = sym::inputs("node_guard_u", 1);
     auto stage = stage_ocp::create();
 
-    auto x_only = cost(new generic_cost("x_only_cost", var_list{x}, x, approx_order::second));
+    auto x_only = layout_cost("x_only_cost", var_list{x});
     REQUIRE_NOTHROW(stage->add(*x_only));
     REQUIRE_THROWS_WITH(
         stage->ed().add(*x_only),
         Catch::Matchers::ContainsSubstring("both interval and endpoint"));
     REQUIRE_THROWS_WITH(
-        stage->add(*cost(new generic_cost("y_only_cost", var_list{y}, y, approx_order::second))),
+        stage->add(*layout_cost("y_only_cost", var_list{y})),
         Catch::Matchers::ContainsSubstring("pure y-only terms"));
-    REQUIRE_NOTHROW(stage->add(*dynamics(new dense_dynamics("stage_guard_dyn", var_list{x, y, u}, y - x - u, approx_order::second, __dyn))));
-    REQUIRE_NOTHROW(stage->ed().add(*cost(new generic_cost("ed_x_only_cost", var_list{x}, x, approx_order::second))));
+    REQUIRE_NOTHROW(stage->add(*layout_dynamics("stage_guard_dyn", var_list{x, y, u}, expr_dim(y))));
+    REQUIRE_NOTHROW(stage->ed().add(*layout_cost("ed_x_only_cost", var_list{x})));
     REQUIRE_THROWS_WITH(
-        stage->ed().add(*cost(new generic_cost("ed_u_cost", var_list{u}, u, approx_order::second))),
+        stage->ed().add(*layout_cost("ed_u_cost", var_list{u})),
         Catch::Matchers::ContainsSubstring("node_view only accepts terms"));
     REQUIRE_THROWS_WITH(
-        stage->ed().add(*cost(new generic_cost("ed_y_cost", var_list{y}, y, approx_order::second))),
+        stage->ed().add(*layout_cost("ed_y_cost", var_list{y})),
         Catch::Matchers::ContainsSubstring("node_view only accepts terms"));
 
     auto endpoint_stage = stage_ocp::create();
-    auto endpoint_only = cost(new generic_cost("endpoint_only_cost", var_list{x}, x, approx_order::second));
+    auto endpoint_only = layout_cost("endpoint_only_cost", var_list{x});
     REQUIRE_NOTHROW(endpoint_stage->st().add(*endpoint_only));
     REQUIRE_NOTHROW(endpoint_stage->ed().add(*endpoint_only));
     REQUIRE_THROWS_WITH(
@@ -530,7 +603,7 @@ TEST_CASE("ocp active status can reactivate disabled expressions", "[graph][vali
     using namespace moto;
 
     auto x = sym::states("x_active_reactivate", 1).first;
-    auto x_cost = cost(new generic_cost("cost_active_reactivate", var_list{x}, x, approx_order::second));
+    auto x_cost = layout_cost("cost_active_reactivate", var_list{x});
     auto stage = stage_ocp::create();
     stage->add(*x_cost);
 
@@ -538,4 +611,51 @@ TEST_CASE("ocp active status can reactivate disabled expressions", "[graph][vali
     REQUIRE_FALSE(stage->is_active(*x_cost));
     REQUIRE_NOTHROW(stage->update_active_status({{}, {*x_cost}}));
     REQUIRE(stage->is_active(*x_cost));
+}
+
+TEST_CASE("optimized initial state uses an internal virtual stage without exposing it", "[graph][path]") {
+    using namespace moto;
+
+    auto [x, xn] = sym::states("x_initial_state_opt", 1);
+    auto u = sym::inputs("u_initial_state_opt", 1);
+    constexpr scalar_t target = 2.0;
+
+    constexpr size_t n_stages = 3;
+
+    auto configure_solver = [&](ns_sqp &sqp) {
+        auto stage = stage_ocp::create();
+        stage->add(*callback_linear_dynamics("dyn_initial_state_opt", x, xn, u));
+        stage->add(*callback_quadratic_cost("cost_initial_state_input", u));
+        sqp.add_stage(stage, n_stages);
+        sqp.start_node().add(*callback_quadratic_cost("cost_initial_state_target", x, target));
+        sqp.settings.restoration.enabled = false;
+        sqp.settings.prim_tol = 1e-8;
+        sqp.settings.dual_tol = 1e-8;
+        sqp.settings.comp_tol = 1e-8;
+    };
+
+    ns_sqp fixed;
+    configure_solver(fixed);
+    {
+        auto &nodes = fixed.solver_nodes();
+        REQUIRE(nodes.size() == n_stages);
+        nodes.front()->sym_val().value_[__x].setZero();
+        nodes.front()->sym_val().value_[__y].setZero();
+        nodes.front()->sym_val().value_[__u].setZero();
+    }
+    REQUIRE(std::abs(fixed.solver_nodes().front()->sym_val().value_[__x](0)) < 1e-12);
+
+    ns_sqp optimized;
+    configure_solver(optimized);
+    optimized.settings.initial_state = ns_sqp::initial_state_mode::optimized;
+    {
+        auto &nodes = optimized.solver_nodes();
+        REQUIRE(nodes.size() == n_stages);
+        nodes.front()->sym_val().value_[__x].setZero();
+        nodes.front()->sym_val().value_[__y].setZero();
+        nodes.front()->sym_val().value_[__u].setZero();
+    }
+    const auto result = optimized.update(10, false);
+    REQUIRE(result.iter.result == ns_sqp::iter_result_t::success);
+    REQUIRE(std::abs(optimized.solver_nodes().front()->sym_val().value_[__x](0) - target) < 1e-6);
 }
