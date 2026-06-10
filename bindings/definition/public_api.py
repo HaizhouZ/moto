@@ -4,14 +4,14 @@ PUBLIC_BINDINGS = {
     "constr",
     "cost",
     "dense_dynamics",
-    "edge_ocp",
     "expr",
     "field",
     "func",
     "ineq",
-    "node_ocp",
+    "node_view",
     "pmm_constr",
     "quaternion",
+    "stage_ocp",
     "sym",
 }
 

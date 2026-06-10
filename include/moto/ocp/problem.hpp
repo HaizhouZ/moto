@@ -2,9 +2,11 @@
 #define __MOTO_PROBLEM_HPP__
 
 #include <array>
+#include <functional>
 #include <memory>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -17,11 +19,16 @@ class ocp_base;
 def_ptr(ocp_base);
 class ocp;
 def_ptr(ocp);
-class node_ocp;
-def_ptr(node_ocp);
-class edge_ocp;
-def_ptr(edge_ocp);
+class stage_ocp;
+def_ptr(stage_ocp);
+class node_view;
 class graph_model;
+
+enum class stage_expr_role : size_t {
+    interval,
+    start_node,
+    end_node,
+};
 
 class ocp_base : protected field_layout_store<expr_list> {
   public:
@@ -36,15 +43,14 @@ class ocp_base : protected field_layout_store<expr_list> {
     ocp_base(const ocp_base &rhs);
     ~ocp_base();
     bool add_impl(expr &);
-    bool add_impl(shared_expr, bool terminal = false);
-    bool add_terminal_impl(expr &);
+    bool add_impl(shared_expr);
     void maintain_order();
+    virtual void on_modified();
     bool finalized_ = false;
     utils::unique_id<ocp_base> uid_;
     std::array<expr_list, field::num> disabled_expr_, pruned_expr_;
     std::unordered_set<size_t> uids_, disabled_uids_, pruned_uids_;
 
-    void set_dim_and_idx();
     void finalize();
     void refresh_after_clone(const active_status_config &config);
     void move_active_expr(const expr &ex, bool prune);
@@ -86,26 +92,16 @@ class ocp_base : protected field_layout_store<expr_list> {
                  std::is_base_of_v<expr, std::remove_reference_t<T>>
     void add(T &&ex) { add_impl(ex); }
 
-    template <typename T>
-        requires std::is_base_of_v<shared_expr, std::remove_cvref_t<T>> ||
-                 std::is_base_of_v<expr, std::remove_reference_t<T>>
-    void add_terminal(T &&ex) { add_terminal_impl(ex); }
-
     void add(const expr_inarg_list &exprs) {
         for (expr &ex : exprs) {
             add(ex);
-        }
-    }
-    void add_terminal(const expr_inarg_list &exprs) {
-        for (expr &ex : exprs) {
-            add_terminal(ex);
         }
     }
 
     size_t get_expr_start(const expr &ex) const;
     size_t get_expr_start_tangent(const expr &ex) const;
 
-    virtual bool accepts_term(const shared_expr &ex, bool terminal = false, std::string *reason = nullptr) const;
+    virtual bool accepts_term(const shared_expr &ex, std::string *reason = nullptr) const;
     void update_active_status(const active_status_config &config);
 
   protected:
@@ -131,37 +127,88 @@ class ocp : public ocp_base {
   protected:
 };
 
-class node_ocp : public ocp {
-  protected:
-    node_ocp() = default;
-    node_ocp(const node_ocp &rhs) = default;
-
-  public:
-    static auto create() { return std::shared_ptr<node_ocp>(new node_ocp()); }
-    node_ocp_ptr_t clone_node(const active_status_config &config = {}) const;
-    bool accepts_term(const shared_expr &ex, bool terminal = false, std::string *reason = nullptr) const override;
-
-};
-
-class edge_ocp : public ocp {
+class stage_ocp : public ocp, public std::enable_shared_from_this<stage_ocp> {
+    friend class node_view;
     friend class graph_model;
 
   protected:
-    edge_ocp() = default;
-    edge_ocp(const edge_ocp &rhs) = default;
-
-  public:
-    static auto create() { return std::shared_ptr<edge_ocp>(new edge_ocp()); }
+    stage_ocp() = default;
+    stage_ocp(const stage_ocp &rhs);
 
   private:
-    edge_ocp_ptr_t clone_edge(const active_status_config &config = {}) const;
+    std::unordered_map<size_t, unsigned> endpoint_role_mask_by_uid_;
+    std::function<void()> mutation_callback_;
+    bool add_with_role(shared_expr ex, stage_expr_role role);
+    bool validate_stage_term(const shared_expr &ex, std::string *reason) const;
+    bool validate_endpoint_term(const shared_expr &ex, std::string *reason) const;
+    void set_mutation_callback(std::function<void()> callback);
+    bool has_role(const expr &ex, stage_expr_role role) const;
+    void on_modified() override;
 
-    node_ocp_ptr_t st_node_prob_;
-    node_ocp_ptr_t ed_node_prob_;
+  public:
+    static auto create() { return std::shared_ptr<stage_ocp>(new stage_ocp()); }
+    stage_ocp_ptr_t clone(const active_status_config &config = {}) const;
+    bool accepts_term(const shared_expr &ex, std::string *reason = nullptr) const override;
 
-    void bind_nodes(const node_ocp_ptr_t &st, const node_ocp_ptr_t &ed = {});
-    const node_ocp_ptr_t &st_node_prob() const { return st_node_prob_; }
-    const node_ocp_ptr_t &ed_node_prob() const { return ed_node_prob_; }
+    template <typename T>
+        requires std::is_base_of_v<shared_expr, std::remove_cvref_t<T>> ||
+                 std::is_base_of_v<expr, std::remove_reference_t<T>>
+    void add(T &&ex) {
+        add_with_role(shared_expr(ex), stage_expr_role::interval);
+    }
+
+    void add(const expr_inarg_list &exprs) {
+        for (expr &ex : exprs) {
+            add(ex);
+        }
+    }
+
+    node_view st();
+    node_view ed();
+};
+
+class node_view {
+    friend class graph_model;
+
+  public:
+    node_view() = default;
+    node_view(const stage_ocp_ptr_t &stage, stage_expr_role role);
+
+  public:
+    template <typename T>
+        requires std::is_base_of_v<shared_expr, std::remove_cvref_t<T>> ||
+                 std::is_base_of_v<expr, std::remove_reference_t<T>>
+    void add(T &&ex) {
+        auto owner = owner_.lock();
+        if (!owner) {
+            throw std::runtime_error("Cannot add to an expired node_view");
+        }
+        shared_expr shared(ex);
+        if (!shared) {
+            throw std::runtime_error("Cannot add null expression to node_view");
+        }
+        std::string reason;
+        if (!owner->validate_endpoint_term(shared, &reason)) {
+            throw std::runtime_error(fmt::format(
+                "Cannot add expression {} uid {} to node_view: {}",
+                shared->name(), shared->uid(), reason));
+        }
+        owner->add_with_role(std::move(shared), role_);
+    }
+
+    void add(const expr_inarg_list &exprs) {
+        for (expr &ex : exprs) {
+            add(ex);
+        }
+    }
+
+    stage_ocp_ptr_t stage() const { return owner_.lock(); }
+    stage_expr_role role() const { return role_; }
+    bool expired() const { return owner_.expired(); }
+
+  private:
+    std::weak_ptr<stage_ocp> owner_;
+    stage_expr_role role_ = stage_expr_role::start_node;
 };
 
 } // namespace moto

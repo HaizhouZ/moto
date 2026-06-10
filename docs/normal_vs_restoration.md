@@ -73,7 +73,7 @@ Normal uses the main linear solver storage lazily realized from `ns_sqp::model_g
 
 Restoration does **not** mutate the normal runtime storage in place.
 
-It creates separate runtime storage from composed finalized interval `edge_ocp`s
+It creates separate runtime storage from composed finalized interval `stage_ocp`s
 and then builds restoration overlays on top of them.
 
 Therefore normal and restoration do **not** share:

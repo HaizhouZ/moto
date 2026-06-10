@@ -177,19 +177,25 @@ Core function / constraint fields:
 Important convention:
 
 - pure state-only path terms are modeled by the user on `x`
-- terminal pure-`x` terms should be added with `prob.add_terminal(...)`
-- `node_ocp` is now an `x/u`-only prototype layer
-- `edge_ocp` is the only place where `y`-dependent terms and `__dyn` belong
+- terminal pure-`x` terms are added through the final stage endpoint view:
+  `stages[-1].ed.add(term)`
+- `stage_ocp` is the public modeling container
+- `stage_ocp.st` and `stage_ocp.ed` are lightweight endpoint views for pure
+  `x` terms
+- `__dyn`, `u` terms, and mixed interval terms belong on `stage_ocp.add(...)`
 - any required lowering from node semantics to solver storage should happen during graph-aware compose, not during generic expression finalization
 
 Why this is easy to trip over:
 
 - a user may write a stage-local constraint `g(x_k)` and expect it to remain attached to the current `x`
 - any hidden remap changes formulation, so it must be explicit in logs and scoped by graph topology
-- the intended semantics are edge-centric:
-  - `node_k` is the authoring surface for state-local terms at graph point `k`
-  - `edge_k = (node_k -> node_{k+1})` takes its `u`-dependent and other non-pure-`x` node semantics from `node_k`
-  - pure `x` terms authored on `node_{k+1}` lower onto `edge_k` as `y_k`-anchored solver storage
+- the intended semantics are stage-centric:
+  - interval terms stay on the solver interval unchanged
+  - graph-start terms are authored explicitly through `sqp.start_node` and
+    materialize on the first solver `x`
+  - stage start endpoint terms lower onto the incoming interval's solver `y`
+    whenever the stage has a predecessor
+  - end endpoint terms lower by cached `x -> y` remap and materialize on solver `y`
 - this decision cannot be made correctly by a local `finalize()` on a standalone expression or a standalone problem
 
 Useful field groups used throughout the solver:
@@ -226,25 +232,24 @@ Important `ocp` behaviors:
 
 ### Problem Types
 
-There are now three related problem containers that matter in practice:
+There are two related problem containers that matter in practice:
 
 - `ocp`
   - generic container used by C++ solver internals
-  - not a Python modeling entry point; user-facing path construction uses `node_ocp` and `edge_ocp`
-- `node_ocp`
-  - node-local modeling prototype
-  - only `x/u/p`-style terms are accepted
-  - rejects `y`-dependent terms
-  - rejects `__dyn`
-- `edge_ocp`
-  - interval/stage problem consumed by the solver
-  - may contain `x/u/y`
-  - dynamics must live here
+  - not a Python modeling entry point
+- `stage_ocp`
+  - public modeling container
+  - accepts `__dyn`, `u` terms, mixed interval terms, and pure `x` terms
+  - pure `x` terms added with `stage.add(...)` are interval-local and
+    materialize on solver `x`
+  - pure `y` terms are rejected; users should write the expression on `x` and
+    add it with `stage.ed.add(...)`
 
 The key invariant is:
 
-- users model node semantics on `node_ocp`
-- graph compose produces `edge_ocp`
+- users model interval semantics on `stage_ocp`
+- users model endpoint-only state terms through `stage.st` or `stage.ed`
+- graph compose produces internal `ocp` interval problems
 - the SQP solver ultimately consumes composed interval problems
 
 ## Graph Modeling
@@ -257,32 +262,45 @@ Core type:
 
 Intended semantics:
 
-- `node_ocp` holds node-local prototype terms
-- `edge_ocp` holds interval-local terms such as dynamics
-- current compose is strict and edge-centric:
-  - start-node non-pure terms belong to the current edge
-  - end-node pure-`x` terms lower onto the current edge `y`
-- explicit terminal terms added with `add_terminal(...)` must stay explicit and not be silently materialized onto regular edges
+- `stage_ocp.add(...)` holds interval terms such as dynamics, control costs, and
+  mixed constraints
+- `stage_ocp.st.add(...)` holds pure start-state terms
+- `stage_ocp.ed.add(...)` holds pure end-state terms
+- when a new phase is appended, pure `x` terms on the new phase's `stage.st`
+  are part of the same graph node as the previous phase's `stage.ed`; both
+  endpoint sources lower onto the previous interval's solver `y`, and the
+  `stage.st` terms are not duplicated on the new phase's outgoing `x`
+- end-node pure-`x` terms lower onto the current interval's solver `y`
+- terminal terms are ordinary endpoint terms on the last graph-owned stage:
+  `stages[-1].ed.add(term)`
 
 Important compose rules that are now covered by unit tests:
 
-- start-node `u` activity prunes the current edge's primal `u`
-- end-node pure-`x` costs and constraints lower onto the current edge `y`
-- intermediate node pure-`x` terms affect only their incoming edge
-- terminal sink `x`-only terms are merged into the final real edge problem
-- terminal sink terms depending on `u` are invalid for final pure-state terminal semantics and are ignored
+- inactive `u` symbols prune the composed interval's primal `u`
+- `stage.add(x_only)` materializes on solver `x`
+- `sqp.start_node.add(x_only)` materializes on the first solver `x`
+- `stage.st.add(x_only)` lowers onto the previous interval's solver `y` when
+  the stage is connected after a predecessor, including appended phase
+  boundaries
+- `stage.ed.add(x_only)` materializes on solver `y`
+- endpoint pure-`x` costs and constraints lower onto the relevant interval `y`
+- invalid endpoint terms involving `u`, `y`, or `__dyn` are rejected clearly
+- returned graph-owned stage handles are mutable and invalidate solver caches
+- edits to a prototype after `add_stage(...)` do not affect graph-owned clones
 - codegen finalization of lowered/materialized clones must be serialized or uniquely named to avoid `.so` races
 - current implementation chooses serialization plus reuse:
   - finalized clones intentionally share stable generated symbol names
   - same-name codegen is serialized with a per-function mutex in [`src/utils/codegen.cpp`](/home/harper/Documents/moto/src/utils/codegen.cpp)
   - compiled `.so` and `.json` outputs are written through `.tmp` files and renamed atomically
 - graph realization now lives with `graph_model` itself:
-  - `graph_model::compose_interval(...)` handles interval composition and sink-term materialization
+  - `graph_model::compose_stage(...)` handles interval composition and endpoint materialization
   - `ns_sqp::realize_runtime(...)` consumes composed intervals to build internal solver storage
 
 ## SQP Graph Ownership
 
-`ns_sqp` owns a default `graph_model` exposed as `sqp.graph` in Python and `sqp.graph()` in C++. Solver storage is realized lazily from that model.
+`ns_sqp` owns a default `graph_model`, but the public modeling API is exposed
+directly on `sqp` through `start_node()`, `add_stage(...)`, `add_stages(...)`,
+and `flatten_nodes()`. Solver storage is realized lazily from that model.
 
 Current restoration detail:
 
@@ -295,42 +313,46 @@ Current recommended Python flow:
 ```python
 sqp = moto.sqp(n_job=10)
 
-stage_node_proto = moto.node_ocp.create()
-edge_proto = moto.edge_ocp.create()
-edge_proto.add(model.dyn)
-terminal_node_proto = stage_node_proto.clone()
-terminal_node_proto.add_terminal(model.terminal_cost)
+stage = moto.stage_ocp.create()
+stage.add(model.dyn)
+stage.add(path_cost_or_constraint)
 
-sqp.graph.add_path(stage_node_proto, terminal_node_proto, edge_proto, N)
+stages = sqp.add_stage(stage, N)
+stages[-1].ed.add(model.terminal_cost)
 
-flat_nodes = sqp.graph.flatten_nodes()
+flat_nodes = sqp.flatten_nodes()
 ```
 
 Important current path semantics:
 
-- `sqp.graph.add_path(start_node, end_node, edge_proto, N)` means exactly `N` graph edges
+- `sqp.add_stage(stage, N)` appends exactly `N` graph-owned stage clones
+- the first append starts from `sqp.start_node`
+- repeated `add_stage(...)` calls append from the current graph tail
+- `sqp.add_stages(start_node, stage, N)` appends from an explicit node view
 - there is no hidden terminal tail edge anymore
-- each added segment snapshots explicit `start` and `end` prototypes; intermediate nodes clone `start`, so the segment inherits outgoing-edge semantics from `start`
-- if `end` carries terminal `x`-only terms, they are materialized onto the final edge/node realization
-- users should not compensate with `N - 1` just because the sink is terminal
+- returned stages are graph-owned mutable clones
+- endpoint edits on graph-owned stages invalidate solver/runtime caches
 
 Current division of responsibility:
 
-- user edits only `sqp.graph`
+- user edits the `sqp` graph through `add_stage(...)`, `add_stages(...)`, and
+  returned graph-owned stage handles
 - `graph_model` owns path composition and topology realization policy
-- `sqp.graph.flatten_nodes()` returns realized solver stages for initialization and debug inspection
+- `sqp.flatten_nodes()` returns realized solver stages for initialization and debug inspection
 - Python top-level exports only the modeling/solver surface; low-level runtime/data bindings stay behind `moto._moto_pywrap` for debugging
 
 Useful modeling entry points:
 
-- `sqp.graph.add_path(...)`
-- `sqp.graph.flatten_nodes()`
+- `sqp.start_node`
+- `sqp.add_stage(...)`
+- `sqp.add_stages(...)`
+- `sqp.flatten_nodes()`
 
 The design direction is:
 
 - keep linear runtime storage internal
-- let `sqp.graph` be the public modeling surface
-- avoid re-exposing graph-building or realization policy directly on `ns_sqp`
+- keep the Python modeling surface on `sqp`
+- avoid re-exposing low-level runtime graph machinery
 
 ## X-U-Y Triplet Formulation
 
@@ -348,21 +370,19 @@ This is a valid solver formulation, but it mixes two different concerns:
 Today the solver still stores some path-state algebra on `y`, but the modeling interface should stay simpler:
 
 - users write `constr.create(...)` and `cost.create(...)` normally
-- if an expression is terminal, the user writes `prob.add_terminal(...)`
+- if an expression is terminal, the user writes `stages[-1].ed.add(term)`
 - if an expression is a path-state equality that the solver wants on predecessor storage, that should be decided during graph compose, not by hidden mutation of the authored expression
 
 That makes stage-local modeling harder than it needs to be.
 
 Recommended usage:
 
-- define node-local expressions on `node_ocp`
-- create node-local prototypes with `node_ocp`
-- create interval prototypes with `edge_ocp`
-- expand paths with `sqp.graph.add_path(...)`
-- add terminal terms with `prob.add_terminal(...)`
-- put `__dyn` and any `y`-dependent terms only on `edge_ocp`
-- build solver paths through `sqp.graph.add_path(...)`
-- inspect realized stages through `sqp.graph.flatten_nodes()` when needed
+- create a stage prototype with `moto.stage_ocp.create()`
+- add dynamics and interval terms with `stage.add(...)`
+- add start-state-only terms with `stage.st.add(...)`
+- add end-state or terminal state-only terms with `stage.ed.add(...)`
+- build solver paths through `sqp.add_stage(stage, N)`
+- inspect realized stages through `sqp.flatten_nodes()` when needed
 
 ### Best Internal Mental Model
 
@@ -381,43 +401,48 @@ Recent refactor work exposed an important design constraint:
 - `graph_model` is the modeling-side linear path graph
 - `ns_sqp` owns one default `graph_model`
 - linear runtime storage is internal solver traversal machinery, not a public modeling object
-- graph-building APIs should live on `sqp.graph`
+- Python graph-building APIs live on `sqp`
 - graph realization policy should live on `graph_model`
 - `ns_sqp` should consume a realized graph model rather than mirror its topology or lowering API
 
 This matters for lowering:
 
 - lowering is not fundamentally "move a term from one node to another node"
-- it is "assign a node-authored term to the correct solver edge storage"
+- it is "assign an endpoint-authored term to the correct solver interval storage"
 - in the current strict interpretation:
-  - authored non-pure terms on `node_k` stay with outgoing `edge_k`
-  - authored pure-`x` terms on `node_{k+1}` lower to `edge_k` storage as `y_k`
-  - there is no generic predecessor-edge remap beyond this end-node-to-current-edge lowering
+  - interval terms stay on the current composed interval
+  - graph-start pure-`x` terms are authored explicitly through
+    `sqp.start_node` and materialize on the first solver `x`
+  - stage start endpoint pure-`x` terms lower to the incoming interval's solver
+    `y` once the stage is connected after a predecessor
+  - end endpoint pure-`x` terms lower to solver `y`
+  - at a connected boundary, `prev.ed` and `next.st` are two authoring views of
+    the same graph node and their terms are composed onto the predecessor `y`
+  - there is no generic predecessor-edge remap beyond endpoint `x -> y` lowering
 
-Because of that, graph-aware compose should be centered on edges:
+Because of that, graph-aware compose should be centered on stages:
 
-- node remains the authoring surface for local costs and constraints
-- edge is the unit that receives solver-local dynamics, start-node non-pure terms, and end-node pure-`x` terms
+- `stage_ocp` remains the authoring surface for interval costs and constraints
+- endpoint views provide side-specific state-only placement
 - ownership of `u` should stay with the outgoing edge, not with an incoming-edge compatibility convention
 
 Practical implication for future work:
 
 - do not keep adding semantic policy inside `ns_sqp`
-- do not keep adding semantic policy inside `edge_ocp::compose()` alone
 - do not reintroduce finalize-time silent substitution
 - prefer a graph-level lowering/composition pass that:
   - sees the whole modeled graph
-  - strips pure-`x` terms from the start-node contribution to the current edge
-  - lowers eligible end-node pure-`x` terms onto the current edge `y`
-  - leaves terminal terms explicit unless final-edge materialization is requested
+  - keeps interval role terms unchanged
+  - materializes graph-start endpoint terms on `x`
+  - lowers endpoint pure-`x` terms onto `y` when that endpoint is an interval
+    end or an appended phase boundary
   - then materializes solver problems in a form compatible with internal linear solver storage
 
 Current status of the refactor:
 
-- Python uses `node_ocp` / `edge_ocp` directly as modeling prototypes
-- compose-time logging exists for lowering and should remain explicit because it changes formulation
-- `ns_sqp` no longer exposes graph-building helpers like `create_node(...)`
-- Python graph construction goes through `sqp.graph.add_path(...)`
+- Python uses `stage_ocp` directly as the modeling prototype
+- Python graph construction goes through `sqp.add_stage(...)` or `sqp.add_stages(...)`
+- `node_ocp`, `edge_ocp`, and `add_terminal(...)` are no longer public APIs
 - quadruped runs through the modeled composition path and still converges under `MOTO_SQP_MAX_ITER=50`
 
 In short:
@@ -1199,25 +1224,39 @@ That path covers most bugs involving assembly, factorization, rollout, globaliza
 
 ## Current Refactor Status
 
-As of the current working tree, the OCP layer has been partially refactored to introduce:
+As of the current working tree, the OCP graph modeling API has been refactored to:
 
 - `ocp_base` as the shared storage / activation / flattening container
 - `ocp` as the generic internal problem type
-- `node_ocp` as a thin node-local wrapper
-- `edge_ocp` as a thin transition-local wrapper that can bind start/end node problems
+- `stage_ocp` as the public modeling container
+- `node_view` as the lightweight endpoint handle exposed through `stage.st`,
+  `stage.ed`, and `sqp.start_node`
 
 What is already true:
 
-- [`include/moto/ocp/problem.hpp`](/home/harper/Documents/moto/include/moto/ocp/problem.hpp) now documents the intended role split between these types
-- clone logic was deduplicated into `ocp_base::refresh_after_clone(...)`
-- the quadruped example now uses the graph-model construction path directly:
-  - build with `cmake -E env CCACHE_DISABLE=1 cmake --build build -j4`
-  - run with `python example/quadruped/run.py`
-  - current strict-semantics result is convergence in `22` iterations with objective about `1.144e+02`
+- Python exposes `moto.stage_ocp.create()`, `stage.add(...)`, `stage.st.add(...)`,
+  `stage.ed.add(...)`, `sqp.start_node`, `sqp.add_stage(...)`,
+  `sqp.add_stages(...)`, and `sqp.flatten_nodes()`
+- Python no longer exposes `moto.node_ocp`, `moto.edge_ocp`, `sqp.graph`,
+  `sqp.graph.add_path(...)`, `sqp.graph.flatten_nodes(...)`, or
+  `add_terminal(...)`
+- clone logic is shared through `ocp_base::refresh_after_clone(...)`
+- graph-owned stages are cloned on append, mutable, and invalidate solver caches
+- endpoint terms lower through cached `x -> y` remaps, so repeated stages reuse
+  function entities instead of generating per-stage copies
+- current regression checks:
+  - `cmake --build build -j8`
+  - `ctest --test-dir build --output-on-failure`
+  - clean `gen/`, `MOTO_DISPLAY=0 MOTO_SQP_MAX_ITER=50 python example/quadruped/run.py`
+    converges at iteration `22` with `28` generated shared libraries
+  - clean `gen/`, `python example/arm/run.py --max-iter 100 --n-job 4`
+    returns the current restoration result at iteration `87` with `14`
+    generated shared libraries
 
 Recommended next step from here:
 
-1. Keep adding focused compose tests that separate start-node `u/non-pure-x` ownership from end-node pure-`x` lowering
+1. Keep adding focused compose tests only when new topology behavior is added;
+   the current linear append API is already covered by regression tests.
 2. Add debug tooling or golden tests for node/stage initialization so future path-authoring changes can be validated quickly
 3. If incoming-edge authoring is ever needed again, expose it as an explicit modeling helper rather than relying on implicit compose behavior
 

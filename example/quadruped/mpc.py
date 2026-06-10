@@ -266,7 +266,7 @@ class pinCasadiModel(cpin.Model):
         )
         return c
 
-    def add_dt_constr_and_cost(self, prob: moto.node_ocp, dt_nom: moto.var):
+    def add_dt_constr_and_cost(self, prob: moto.stage_ocp, dt_nom: moto.var):
         if isinstance(self.dt, cs.SX):
             dt_bound = moto.sym.params(
                 "dt_bound", 2, default_val=np.array([1e-4, 5e-2])
@@ -350,25 +350,23 @@ foot_frames = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
 model = pinCasadiModel(
     model, dt=dt, q_nom=q_d, dense=True, foot_frames=foot_frames, use_fwd_dyn=True
 )
+model.joint_limit_constr = model.make_joint_limit_constr()
+model.state_cost = model.get_state_cost()
 
-prob = moto.node_ocp.create()
+prob = moto.stage_ocp.create()
+prob.add(model.dyn)
 if full:
     prob.add(model.fric)
-prob.add(model.kin_constr)
+prob.st.add(model.kin_constr)
 if not full:
-    prob.add(model.kin_cost)
+    prob.st.add(model.kin_cost)
 # prob.add(model.zf_constr)
 prob.add(model.make_tq_limit_constr())
-prob.add(model.make_joint_limit_constr())
+prob.st.add(model.joint_limit_constr)
 model.add_dt_constr_and_cost(prob, dt_nom)
-prob.add(model.get_state_cost())
+prob.st.add(model.state_cost)
 prob.add(model.get_input_cost())
 # prob.add(model.make_foot_lift_cost(lifted=True))
-
-prob_term = prob.clone()
-prob_term.add_terminal(model.get_state_cost())
-edge_prob = moto.edge_ocp.create()
-edge_prob.add(model.dyn)
 
 prob.print_summary()
 print("--" * 15)
@@ -382,7 +380,12 @@ gait_setting = {
     "hopping": [0, 0, 0, 0],
 }
 sqp = moto.sqp(n_job=10)
-sqp.graph.add_path(prob, prob_term, edge_prob, N_horizon)
+stages = sqp.add_stage(prob, N_horizon)
+stages[-1].ed.add(model.kin_constr)
+if not full:
+    stages[-1].ed.add(model.kin_cost)
+stages[-1].ed.add(model.joint_limit_constr)
+stages[-1].ed.add(model.state_cost)
 
 sqp.settings.ipm.mu0 = 0.1
 sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
@@ -438,16 +441,18 @@ sqp.settings.ipm.warm_start = False
 # warm start
 node_idx = 0
 current_time = 0.0
-for node in sqp.graph.flatten_nodes():
+for node in sqp.flatten_nodes():
     stance_ref(node)
 # n0.data.value[model.k_f] = 0
-nodes = sqp.graph.flatten_nodes()
+nodes = sqp.flatten_nodes()
 n0 = nodes[0]
 data = go2.model.createData()
 for n in nodes[:10]:
     for f in model.f_f:
         n.value[model.k_f] = 0
+sys.stdout.flush()
 sqp.update(100, verbose=True)
+sys.stdout.flush()
 start = time.perf_counter()
 sqp.settings.ipm.warm_start = True
 control_freq = 10  # Hz
@@ -471,7 +476,7 @@ with mujoco.viewer.launch_passive(mj_model, mj_data) as viewer:
         # Update reference trajectory
         node_idx = 0
         current_time = mj_data.time
-        for node in sqp.graph.flatten_nodes():
+        for node in sqp.flatten_nodes():
             stance_ref(node)
         print(f"Updated reference trajectory for node {node_idx}")
         # Run MPC iteration

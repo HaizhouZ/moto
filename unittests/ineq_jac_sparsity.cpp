@@ -17,7 +17,7 @@ using namespace moto;
 TEST_CASE("inequality jacobians are stored as dense panels") {
     auto [x, y] = sym::states("x_sparse_jac", 3);
     (void)y;
-    auto prob = node_ocp::create();
+    auto prob = stage_ocp::create();
 
     auto eye = ineq_constr::create(
         "eye_box",
@@ -67,7 +67,7 @@ TEST_CASE("inequality jacobians are stored as dense panels") {
 TEST_CASE("manual jacobian sparsity declarations are ignored") {
     auto [x, y] = sym::states("x_manual_sparse_jac", 3);
     (void)y;
-    auto prob = node_ocp::create();
+    auto prob = stage_ocp::create();
 
     auto eye = ineq_constr::create("manual_eye_box", approx_order::first, 3);
     auto &eye_func = dynamic_cast<generic_func &>(*eye);

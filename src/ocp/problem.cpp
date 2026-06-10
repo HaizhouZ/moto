@@ -1,7 +1,5 @@
 #include <algorithm>
 #include <array>
-#include <moto/ocp/constr.hpp>
-#include <moto/ocp/cost.hpp>
 #include <moto/ocp/dynamics.hpp>
 #include <moto/ocp/problem.hpp>
 
@@ -18,6 +16,32 @@ bool has_active_primal_arg(const generic_func &func, const ocp_base *prob) {
         }
     }
     return false;
+}
+
+bool can_be_active_by_status(const generic_func &func, ocp_base *prob) {
+    return has_active_primal_arg(func, prob) && func.check_enable(prob);
+}
+
+const generic_func *as_generic_func(const shared_expr &ex) {
+    return ex ? dynamic_cast<const generic_func *>(ex.get()) : nullptr;
+}
+
+bool is_pure_y_func(const generic_func &func) {
+    bool has_y = false;
+    for (const sym &arg : func.in_args()) {
+        if (!in_field(arg.field(), primal_fields)) {
+            continue;
+        }
+        if (arg.field() != __y) {
+            return false;
+        }
+        has_y = true;
+    }
+    return has_y;
+}
+
+constexpr unsigned role_bit(stage_expr_role role) {
+    return 1u << static_cast<unsigned>(role);
 }
 
 } // namespace
@@ -41,20 +65,18 @@ ocp_base::~ocp_base() = default;
 bool ocp_base::add_impl(expr &ex) {
     return add_impl(shared_expr(ex));
 }
-bool ocp_base::add_impl(shared_expr ex, bool terminal) {
+bool ocp_base::add_impl(shared_expr ex) {
+    if (!ex) {
+        throw std::runtime_error("Cannot add null expression to problem");
+    }
     std::string reason;
-    if (!accepts_term(ex, terminal, &reason)) {
+    if (!accepts_term(ex, &reason)) {
         if (reason.empty()) {
             reason = "expression is incompatible with this problem type";
         }
         throw std::runtime_error(fmt::format(
             "Cannot add expression {} uid {} to problem uid {}: {}",
             ex->name(), ex->uid(), uid_, reason));
-    }
-    if (auto *cost = dynamic_cast<generic_cost *>(ex.get())) {
-        cost->set_terminal_add(terminal);
-    } else if (auto *constr = dynamic_cast<generic_constr *>(ex.get())) {
-        constr->set_terminal_add(terminal);
     }
     size_t _uid = ex->uid();
     if (!contains(*ex)) {
@@ -90,16 +112,10 @@ bool ocp_base::add_impl(shared_expr ex, bool terminal) {
             disabled_uids_.insert(_uid);
             disabled_expr_[ex->field()].emplace_back(std::move(ex));
         }
+        on_modified();
         return true;
     }
     return false;
-}
-bool ocp_base::add_terminal_impl(expr &ex) {
-    if (ex.finalized()) {
-        auto ex_terminal = shared_expr(ex).clone();
-        return add_impl(std::move(ex_terminal), true);
-    }
-    return add_impl(shared_expr(ex), true);
 }
 bool ocp_base::contains(const expr &ex) const {
     return uids_.contains(ex.uid()) ||
@@ -129,7 +145,7 @@ void ocp_base::finalize() {
     if (!finalized_) {
         if (!field_empty(__dyn) && automatic_reorder_primal_)
             maintain_order();
-        this->set_dim_and_idx();
+        rebuild_layout();
         this->finalized_ = true;
     }
 }
@@ -139,9 +155,7 @@ void ocp_base::refresh_after_clone(const active_status_config &config) {
         update_active_status(config);
     }
 }
-void ocp_base::set_dim_and_idx() {
-    rebuild_layout();
-}
+void ocp_base::on_modified() {}
 void ocp_base::maintain_order() {
     expr_list tmp;
     for (auto f : {__x, __y}) {
@@ -198,9 +212,8 @@ void ocp_base::wait_until_ready() {
     }
     finalize();
 }
-bool ocp_base::accepts_term(const shared_expr &ex, bool terminal, std::string *reason) const {
+bool ocp_base::accepts_term(const shared_expr &ex, std::string *reason) const {
     static_cast<void>(ex);
-    static_cast<void>(terminal);
     if (reason != nullptr) {
         reason->clear();
     }
@@ -211,50 +224,124 @@ ocp_ptr_t ocp::clone(const active_status_config &config) const {
     prob->refresh_after_clone(config);
     return prob;
 }
-node_ocp_ptr_t node_ocp::clone_node(const active_status_config &config) const {
-    auto prob = node_ocp_ptr_t(new node_ocp(*this));
+
+stage_ocp::stage_ocp(const stage_ocp &rhs)
+    : ocp(rhs),
+      endpoint_role_mask_by_uid_(rhs.endpoint_role_mask_by_uid_) {}
+
+stage_ocp_ptr_t stage_ocp::clone(const active_status_config &config) const {
+    auto prob = stage_ocp_ptr_t(new stage_ocp(*this));
     prob->refresh_after_clone(config);
     return prob;
 }
-bool node_ocp::accepts_term(const shared_expr &ex, bool terminal, std::string *reason) const {
-    static_cast<void>(terminal);
+bool stage_ocp::add_with_role(shared_expr ex, stage_expr_role role) {
     if (!ex) {
-        if (reason != nullptr) {
-            *reason = "null expression";
+        throw std::runtime_error("Cannot add null expression to stage_ocp");
+    }
+    const size_t uid = ex->uid();
+    const auto existing_it = endpoint_role_mask_by_uid_.find(uid);
+    const bool had_existing = existing_it != endpoint_role_mask_by_uid_.end();
+    const unsigned existing = had_existing ? existing_it->second : 0u;
+    if (role == stage_expr_role::interval) {
+        if (had_existing) {
+            throw std::runtime_error(fmt::format(
+                "Cannot add expression {} uid {} to both interval and endpoint stage roles",
+                ex->name(), uid));
         }
+        return ocp_base::add_impl(std::move(ex));
+    }
+    if (!had_existing && contains(*ex)) {
+        throw std::runtime_error(fmt::format(
+            "Cannot add expression {} uid {} to both interval and endpoint stage roles",
+            ex->name(), uid));
+    }
+    const unsigned updated = existing | role_bit(role);
+    endpoint_role_mask_by_uid_[uid] = updated;
+    try {
+        const bool added = ocp_base::add_impl(std::move(ex));
+        if (!added && updated != existing) {
+            on_modified();
+        }
+        return added;
+    } catch (...) {
+        if (!had_existing) {
+            endpoint_role_mask_by_uid_.erase(uid);
+        } else {
+            endpoint_role_mask_by_uid_[uid] = existing;
+        }
+        throw;
+    }
+}
+bool stage_ocp::validate_stage_term(const shared_expr &ex, std::string *reason) const {
+    if (reason != nullptr) {
+        reason->clear();
+    }
+    if (!ex) {
+        if (reason != nullptr) *reason = "null expression";
         return false;
     }
-    if (ex->field() == __dyn) {
-        if (reason != nullptr) {
-            *reason = "node_ocp only accepts node-local terms; dynamics must be added to an edge_ocp";
-        }
-        return false;
-    }
-    const auto *func = dynamic_cast<const generic_func *>(ex.get());
+    const auto *func = as_generic_func(ex);
     if (func == nullptr) {
         return true;
     }
-    for (const sym &arg : func->in_args()) {
-        if (arg.field() == __y) {
-            if (reason != nullptr) {
-                *reason = fmt::format(
-                    "node_ocp terms may only depend on x/u/p-style node variables; found y argument {}",
-                    arg.name());
-            }
-            return false;
+    if (is_pure_y_func(*func)) {
+        if (reason != nullptr) {
+            *reason = "pure y-only terms should be written on x and added through stage.ed.add(...)";
         }
+        return false;
     }
     return true;
 }
-edge_ocp_ptr_t edge_ocp::clone_edge(const active_status_config &config) const {
-    auto prob = edge_ocp_ptr_t(new edge_ocp(*this));
-    prob->refresh_after_clone(config);
-    return prob;
+bool stage_ocp::validate_endpoint_term(const shared_expr &ex, std::string *reason) const {
+    if (reason != nullptr) {
+        reason->clear();
+    }
+    if (!ex) {
+        if (reason != nullptr) *reason = "null expression";
+        return false;
+    }
+    const auto *func = as_generic_func(ex);
+    if (func == nullptr || ex->field() == __dyn || dynamic_cast<const generic_dynamics *>(ex.get()) != nullptr) {
+        if (reason != nullptr) {
+            *reason = "node_view only accepts pure x cost/constraint terms; dynamics belong to stage.add(...)";
+        }
+        return false;
+    }
+    if (!func->has_pure_x_primal_args()) {
+        if (reason != nullptr) {
+            *reason = "node_view only accepts terms with x/prm-style dependencies and no u or y arguments";
+        }
+        return false;
+    }
+    return true;
 }
-void edge_ocp::bind_nodes(const node_ocp_ptr_t &st, const node_ocp_ptr_t &ed) {
-    st_node_prob_ = st;
-    ed_node_prob_ = ed;
+bool stage_ocp::accepts_term(const shared_expr &ex, std::string *reason) const {
+    return validate_stage_term(ex, reason);
 }
+bool stage_ocp::has_role(const expr &ex, stage_expr_role role) const {
+    if (auto it = endpoint_role_mask_by_uid_.find(ex.uid()); it != endpoint_role_mask_by_uid_.end()) {
+        return (it->second & role_bit(role)) != 0u;
+    }
+    return role == stage_expr_role::interval;
+}
+void stage_ocp::set_mutation_callback(std::function<void()> callback) {
+    mutation_callback_ = std::move(callback);
+}
+void stage_ocp::on_modified() {
+    if (mutation_callback_) {
+        mutation_callback_();
+    }
+}
+node_view stage_ocp::st() {
+    return node_view(shared_from_this(), stage_expr_role::start_node);
+}
+node_view stage_ocp::ed() {
+    return node_view(shared_from_this(), stage_expr_role::end_node);
+}
+
+node_view::node_view(const stage_ocp_ptr_t &stage, stage_expr_role role)
+    : owner_(stage), role_(role) {}
+
 void ocp_base::move_active_expr(const expr &ex, bool prune) {
     const size_t f = ex.field();
     auto &target_store = prune ? pruned_expr_ : disabled_expr_;
@@ -286,63 +373,56 @@ void ocp_base::update_active_status(const active_status_config &config) {
     for (const expr &ex : config.deactivate_list) {
         move_active_expr(ex, false);
     }
-    int max_iter = 5;
-ITER_START:
-    if (max_iter-- == 0) {
-        throw std::runtime_error("ocp::clone failed to converge during pruning");
-    }
-    bool changed = false;
-    array_type<std::vector<std::reference_wrapper<const expr>>, status_func_fields> to_delete, to_re_enable;
-    for (auto f : status_func_fields) {
-        if (pruned_expr_[f].empty())
-            continue;
-        to_re_enable[f].reserve(pruned_expr_[f].size());
-        for (const generic_func &e : pruned_expr_[f]) {
-            bool can_re_enable = has_active_primal_arg(e, this);
-            if (can_re_enable) {
-                can_re_enable = e.check_enable(this);
-            }
-            if (can_re_enable) {
-                to_re_enable[f].emplace_back(e);
+    for (int remaining = 5;; --remaining) {
+        if (remaining == 0) {
+            throw std::runtime_error("ocp::clone failed to converge during pruning");
+        }
+        bool changed = false;
+        array_type<std::vector<std::reference_wrapper<const expr>>, status_func_fields> to_delete, to_re_enable;
+        for (auto f : status_func_fields) {
+            if (pruned_expr_[f].empty())
+                continue;
+            to_re_enable[f].reserve(pruned_expr_[f].size());
+            for (const generic_func &e : pruned_expr_[f]) {
+                if (can_be_active_by_status(e, this)) {
+                    to_re_enable[f].emplace_back(e);
+                }
             }
         }
-    }
-    for (auto f : status_func_fields) {
-        if (field_empty(f))
-            continue;
-        to_delete[f].reserve(field_entry_count(f));
-        for (const generic_func &e : field_entries(f)) {
-            if (!has_active_primal_arg(e, this)) {
-                to_delete[f].emplace_back(e);
-            } else {
-                if (!e.check_enable(this)) {
+        for (auto f : status_func_fields) {
+            if (field_empty(f))
+                continue;
+            to_delete[f].reserve(field_entry_count(f));
+            for (const generic_func &e : field_entries(f)) {
+                if (!can_be_active_by_status(e, this)) {
                     to_delete[f].emplace_back(e);
                 }
             }
         }
-    }
-    for (auto f : status_func_fields) {
-        for (const expr &e : to_delete[f]) {
-            move_active_expr(e, true);
-            if (std::find(config.activate_list.begin(), config.activate_list.end(), e) != config.activate_list.end()) {
-                throw std::runtime_error(fmt::format("func {} uid {} pruned but also in activate_list",
-                                                     e.name(), e.uid()));
+        for (auto f : status_func_fields) {
+            for (const expr &e : to_delete[f]) {
+                move_active_expr(e, true);
+                if (std::find(config.activate_list.begin(), config.activate_list.end(), e) != config.activate_list.end()) {
+                    throw std::runtime_error(fmt::format("func {} uid {} pruned but also in activate_list",
+                                                         e.name(), e.uid()));
+                }
+                changed = true;
             }
-            changed = true;
-        }
-        for (const expr &e : to_re_enable[f]) {
-            restore_inactive_expr(e, true);
-            if (std::find(config.deactivate_list.begin(), config.deactivate_list.end(), e) != config.deactivate_list.end()) {
-                throw std::runtime_error(fmt::format("func {} uid {} re-enabled but also in deactivate_list",
-                                                     e.name(), e.uid()));
+            for (const expr &e : to_re_enable[f]) {
+                restore_inactive_expr(e, true);
+                if (std::find(config.deactivate_list.begin(), config.deactivate_list.end(), e) != config.deactivate_list.end()) {
+                    throw std::runtime_error(fmt::format("func {} uid {} re-enabled but also in deactivate_list",
+                                                         e.name(), e.uid()));
+                }
+                changed = true;
             }
-            changed = true;
         }
-    }
-    if (changed) {
-        goto ITER_START;
+        if (!changed) {
+            break;
+        }
     }
     finalized_ = false;
+    on_modified();
 }
 } // namespace moto
 

@@ -7,6 +7,7 @@
 #include <moto/solver/ipm/ipm_constr.hpp>
 #include <moto/solver/ipm/positivity_step.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
+#include <moto/solver/overlay_common.hpp>
 #include <string_view>
 #include <tuple>
 
@@ -62,47 +63,6 @@ scalar_t rho_value(const ApproxData &d, std::string_view where) {
 
 namespace {
 
-std::string overlay_name(const generic_func &source, std::string_view suffix) {
-    return fmt::format("{}__{}", source.name(), suffix);
-}
-
-template <typename Fn>
-void for_each_source_constr(const ocp_ptr_t &prob, field_t field, Fn &&fn) {
-    for (const shared_expr &expr : prob->exprs(field)) {
-        if (auto source = std::dynamic_pointer_cast<generic_constr>(expr)) {
-            fn(constr(std::move(source)));
-        }
-    }
-}
-
-void copy_source_sparsity(generic_func &dst, const generic_func &src) {
-    const auto &src_args = src.in_args();
-    const auto &src_sp = src.jac_sparsity();
-    for (size_t i = 0; i < src_args.size() && i < src_sp.size(); ++i) {
-        dst.set_jac_sparsity(src_args[i], src_sp[i]);
-    }
-    dst.set_hess_sparsity(src.hess_sparsity());
-}
-
-template <typename Factory, size_t N>
-void add_overlay_group(const ocp_ptr_t &source_prob,
-                       ocp_ptr_t &resto_prob,
-                       const std::array<field_t, N> &fields,
-                       Factory &&factory) {
-    for (auto field : fields) {
-        for_each_source_constr(source_prob, field, [&](const constr &source) {
-            resto_prob->add(*factory(source));
-        });
-    }
-}
-
-template <typename Overlay, typename Fn>
-void for_each_overlay_match(node_data &node, field_t field, Fn &&fn) {
-    node.for_each(field, [&](const Overlay &overlay, typename Overlay::approx_data &d) {
-        fn(overlay, d);
-    });
-}
-
 void fill_sigma_tangent(const sym &arg,
                         vector_ref ref,
                         vector_ref sigma_sq,
@@ -124,12 +84,6 @@ vector compute_tangent_delta(const sym &arg, vector_ref x, vector_ref ref) {
     vector delta(arg.tdim());
     arg.difference(x, ref, delta);
     return delta;
-}
-
-template <typename Overlay>
-void copy_dual_slice(vector_ref dst, const node_data &outer, const Overlay &overlay) {
-    const auto &source_data = outer.data(overlay.source());
-    dst = const_cast<func_approx_data &>(source_data).template as<generic_constr::approx_data>().multiplier_;
 }
 
 template <typename Overlay>
@@ -433,7 +387,9 @@ func_approx_data_ptr_t resto_prox_cost::create_approx_data(sym_data &primal,
 void resto_prox_cost::finalize_impl() {
     generic_cost::finalize_impl();
     for (size_t i = 0; i < in_args().size(); ++i) {
-        hess_sp_[i][i].pattern = sparsity::diag;
+        for (size_t j = 0; j < in_args().size(); ++j) {
+            hess_sp_[i][j].pattern = i == j ? sparsity::diag : sparsity::unknown;
+        }
     }
 }
 
@@ -503,7 +459,7 @@ resto_eq_elastic_constr::resto_eq_elastic_constr(const std::string &name,
     field_hint_.is_soft = true;
     set_default_hess_sparsity(sparsity::dense);
     add_arguments(source_func_->in_args());
-    copy_source_sparsity(*this, *source_func_);
+    solver::overlay::copy_source_sparsity(*this, *source_func_);
 }
 
 void resto_eq_elastic_constr::finalize_impl() {
@@ -689,7 +645,7 @@ resto_ineq_elastic_ipm_constr::resto_ineq_elastic_ipm_constr(const std::string &
     field_hint_.is_eq = false;
     set_default_hess_sparsity(sparsity::dense);
     add_arguments(source_func_->in_args());
-    copy_source_sparsity(*this, *source_func_);
+    solver::overlay::copy_source_sparsity(*this, *source_func_);
     if (const auto *src_ineq = dynamic_cast<const ineq_constr *>(source.get())) {
         if (const auto *box = src_ineq->box_info(); box != nullptr) {
             set_box_info(std::make_shared<box_spec>(*box));
@@ -1076,18 +1032,18 @@ ocp_ptr_t build_restoration_overlay_problem(const ocp_ptr_t &source_prob,
         resto_prob->add(*prox);
     }
 
-    add_overlay_group(source_prob, resto_prob, std::array{__eq_x, __eq_xu, __eq_x_soft, __eq_xu_soft}, [&](const constr &source) {
-        return constr(new resto_eq_elastic_constr(overlay_name(*source, "resto_eq"),
+    solver::overlay::add_constr_overlay_group(source_prob, resto_prob, std::array{__eq_x, __eq_xu, __eq_x_soft, __eq_xu_soft}, [&](const constr &source) {
+        return constr(new resto_eq_elastic_constr(solver::overlay::overlay_name(*source, "resto_eq"),
                                                   source));
     });
 
     if (settings.rho_ineq > scalar_t(0.)) {
-        add_overlay_group(source_prob, resto_prob, std::array{__ineq_x, __ineq_xu},
-                          [&](const constr &source) {
-                              return constr(new resto_ineq_elastic_ipm_constr(
-                                  overlay_name(*source, "resto_ineq"),
-                                  source));
-                          });
+        solver::overlay::add_constr_overlay_group(source_prob, resto_prob, std::array{__ineq_x, __ineq_xu},
+                                                  [&](const constr &source) {
+                                                      return constr(new resto_ineq_elastic_ipm_constr(
+                                                          solver::overlay::overlay_name(*source, "resto_ineq"),
+                                                          source));
+                                                  });
     }
 
     resto_prob->wait_until_ready();
@@ -1098,29 +1054,15 @@ void sync_outer_to_restoration_state(node_data &outer,
                                      node_data &resto,
                                      scalar_t prox_eps,
                                      scalar_t *mu) {
-    for (auto field : primal_fields) {
-        resto.sym_val().value_[field] = outer.sym_val().value_[field];
-    }
-    resto.sym_val().value_[__p] = outer.sym_val().value_[__p];
+    solver::overlay::copy_primal_and_params(outer, resto);
 
-    for (auto field : hard_constr_fields) {
-        if (resto.dense().dual_[field].size() == 0 || outer.dense().dual_[field].size() == 0) {
-            continue;
-        }
-        resto.dense().dual_[field] = outer.dense().dual_[field];
-    }
-    for (auto field : std::array{__eq_x_soft, __eq_xu_soft}) {
-        for_each_overlay_match<resto_eq_elastic_constr>(resto, field, [&](const resto_eq_elastic_constr &overlay, resto_eq_elastic_constr::approx_data &d) {
-            copy_dual_slice(d.multiplier_, outer, overlay);
+    solver::overlay::copy_dense_duals_if_present(outer, resto, hard_constr_fields);
+    solver::overlay::copy_source_multipliers<resto_eq_elastic_constr>(outer, resto, std::array{__eq_x_soft, __eq_xu_soft});
+    solver::overlay::for_each_overlay_field<resto_ineq_elastic_ipm_constr>(
+        resto, std::array{__ineq_x, __ineq_xu}, [&](const resto_ineq_elastic_ipm_constr &overlay, resto_ineq_elastic_ipm_constr::approx_data &d) {
+            solver::overlay::copy_source_multiplier(d.multiplier_, outer, overlay);
+            copy_ineq_side_init(d.slack_init, d.multiplier_init, outer, overlay);
         });
-    }
-    for (auto field : std::array{__ineq_x, __ineq_xu}) {
-        for_each_overlay_match<resto_ineq_elastic_ipm_constr>(
-            resto, field, [&](const resto_ineq_elastic_ipm_constr &overlay, resto_ineq_elastic_ipm_constr::approx_data &d) {
-                copy_dual_slice(d.multiplier_, outer, overlay);
-                copy_ineq_side_init(d.slack_init, d.multiplier_init, outer, overlay);
-            });
-    }
 
     resto.for_each(__cost, [&](const resto_prox_cost &c, resto_prox_cost::approx_data &d) {
         d.u_ref = d.primal_->value_[__u];
@@ -1151,105 +1093,94 @@ namespace {
 
 void copy_restoration_primal_to_outer(node_data &resto,
                                       node_data &outer) {
-    for (auto field : primal_fields) {
-        outer.sym_val().value_[field] = resto.sym_val().value_[field];
+    solver::overlay::copy_primal_and_params(resto, outer);
+}
+
+struct outer_boxed_ipm_view {
+    solver::ipm_constr::ipm_data &data;
+    const ineq_constr::box_spec &box;
+};
+
+outer_boxed_ipm_view outer_boxed_ipm(node_data &outer,
+                                     const resto_ineq_elastic_ipm_constr &overlay,
+                                     std::string_view where) {
+    auto &outer_ipm = outer.data(overlay.source()).as<solver::ipm_constr::ipm_data>();
+    const auto *outer_constr = dynamic_cast<const ineq_constr *>(&outer_ipm.func_);
+    const auto *box = outer_constr != nullptr ? outer_constr->box_info() : nullptr;
+    if (box == nullptr) {
+        throw std::runtime_error(fmt::format("boxed ipm missing box_info in {}", where));
     }
-    outer.sym_val().value_[__p] = resto.sym_val().value_[__p];
+    return {outer_ipm, *box};
 }
 
 void copy_restoration_candidate_slack_to_outer(node_data &resto,
                                                node_data &outer) {
-    for (auto field : std::array{__ineq_x, __ineq_xu}) {
-        for_each_overlay_match<resto_ineq_elastic_ipm_constr>(
-            resto, field, [&](const resto_ineq_elastic_ipm_constr &overlay, resto_ineq_elastic_ipm_constr::approx_data &overlay_data) {
-                auto &outer_ipm = outer.data(overlay.source()).as<solver::ipm_constr::ipm_data>();
-                const auto *constr = dynamic_cast<const ineq_constr *>(&outer_ipm.func_);
-                const auto *box = constr != nullptr ? constr->box_info() : nullptr;
-                if (box == nullptr) {
-                    throw std::runtime_error("boxed ipm missing box_info in restoration candidate sync");
-                }
-                for (auto side : box_sides) if (box->has_side[side]) {
-                    auto &outer_pair = *outer_ipm.box_side_[side];
-                    const auto &resto_side = overlay_data.elastic.side[side];
-                    const auto &mask = box->present_mask[side];
-                    outer_pair.slack =
-                        mask.select(resto_side.value[detail::slot_t].array(), scalar_t(0)).matrix();
-                    outer_pair.slack_backup = outer_pair.slack;
-                    outer_pair.multiplier_backup = outer_pair.multiplier;
-                    outer_pair.d_slack.setZero();
-                    outer_pair.d_multiplier.setZero();
-                }
-            });
-    }
+    solver::overlay::for_each_overlay_field<resto_ineq_elastic_ipm_constr>(
+        resto, std::array{__ineq_x, __ineq_xu}, [&](const resto_ineq_elastic_ipm_constr &overlay, resto_ineq_elastic_ipm_constr::approx_data &overlay_data) {
+            auto [outer_ipm, box] = outer_boxed_ipm(outer, overlay, "restoration candidate sync");
+            for (auto side : box_sides) if (box.has_side[side]) {
+                auto &outer_pair = *outer_ipm.box_side_[side];
+                const auto &resto_side = overlay_data.elastic.side[side];
+                const auto &mask = box.present_mask[side];
+                outer_pair.slack =
+                    mask.select(resto_side.value[detail::slot_t].array(), scalar_t(0)).matrix();
+                outer_pair.slack_backup = outer_pair.slack;
+                outer_pair.multiplier_backup = outer_pair.multiplier;
+                outer_pair.d_slack.setZero();
+                outer_pair.d_multiplier.setZero();
+            }
+        });
 }
 
 void copy_restoration_equality_duals_to_outer(node_data &resto,
                                               node_data &outer) {
-    for (auto field : hard_constr_fields) {
-        if (resto.dense().dual_[field].size() > 0 && outer.dense().dual_[field].size() > 0) {
-            outer.dense().dual_[field] = resto.dense().dual_[field];
-        }
-    }
-
-    for (auto field : std::array{__eq_x_soft, __eq_xu_soft}) {
-        for_each_overlay_match<resto_eq_elastic_constr>(
-            resto, field,
-            [&](const resto_eq_elastic_constr &overlay, resto_eq_elastic_constr::approx_data &d) {
-                outer.data(overlay.source()).as<generic_constr::approx_data>().multiplier_ = d.multiplier_;
-            });
-    }
+    solver::overlay::copy_dense_duals_if_present(resto, outer, hard_constr_fields);
+    solver::overlay::commit_source_multipliers<resto_eq_elastic_constr>(outer, resto, std::array{__eq_x_soft, __eq_xu_soft});
 }
 
 void copy_restoration_ineq_commit_to_outer(node_data &resto,
                                            node_data &outer) {
-    for (auto field : std::array{__ineq_x, __ineq_xu}) {
-        for_each_overlay_match<resto_ineq_elastic_ipm_constr>(
-            resto, field, [&](const resto_ineq_elastic_ipm_constr &overlay, resto_ineq_elastic_ipm_constr::approx_data &overlay_data) {
-                auto &outer_ipm = outer.data(overlay.source()).as<solver::ipm_constr::ipm_data>();
-                const auto *constr = dynamic_cast<const ineq_constr *>(&outer_ipm.func_);
-                const auto *box = constr != nullptr ? constr->box_info() : nullptr;
-                if (box == nullptr) {
-                    throw std::runtime_error("boxed ipm missing box_info in restoration sync");
-                }
-                outer_ipm.multiplier_.setZero();
-                outer_ipm.d_multiplier_.setZero();
-                outer_ipm.comp_.setZero();
-                outer_ipm.v_.setConstant(-std::numeric_limits<scalar_t>::infinity());
-                for (auto side : box_sides) if (box->has_side[side]) {
-                    auto &outer_pair = *outer_ipm.box_side_[side];
-                    const auto &resto_side = overlay_data.elastic.side[side];
-                    const auto &mask = box->present_mask[side];
-                    const auto target_slack = resto_side.value[detail::slot_t].array();
-                    const scalar_t mu = overlay_data.ipm_cfg->mu;
-                    outer_pair.d_slack =
-                        mask.select(target_slack - outer_pair.slack.array(), scalar_t(0)).matrix();
-                    outer_pair.d_multiplier =
-                        mask.select((mu - outer_pair.multiplier.array() * outer_pair.d_slack.array()) /
-                                        target_slack -
-                                        outer_pair.multiplier.array(),
-                                    scalar_t(0))
-                            .matrix();
-                    outer_pair.slack = mask.select(target_slack, scalar_t(0)).matrix();
-                    outer_pair.slack_backup = outer_pair.slack;
-                    outer_pair.multiplier_backup = outer_pair.multiplier;
-                    static_cast<solver::ipm_constr::approx_data::side_data &>(outer_pair).r_s =
-                        mask.select(outer_pair.multiplier.array() * outer_pair.slack.array(), scalar_t(0)).matrix();
-                    const scalar_t dual_sign = side == box_side::ub ? scalar_t(1) : scalar_t(-1);
-                    outer_ipm.multiplier_.array() +=
-                        dual_sign * mask.select(outer_pair.multiplier.array(), scalar_t(0));
-                    outer_ipm.d_multiplier_.array() +=
-                        dual_sign * mask.select(outer_pair.d_multiplier.array(), scalar_t(0));
-                    outer_ipm.v_ =
-                        mask.select(outer_ipm.v_.cwiseMax(resto_side.r_d).array(), outer_ipm.v_.array())
-                            .matrix();
-                    outer_ipm.comp_ =
-                        mask.select((outer_pair.multiplier.array() * outer_pair.slack.array()).abs()
-                                        .max(outer_ipm.comp_.array()),
-                                    outer_ipm.comp_.array())
-                            .matrix();
-                }
-            });
-    }
+    solver::overlay::for_each_overlay_field<resto_ineq_elastic_ipm_constr>(
+        resto, std::array{__ineq_x, __ineq_xu}, [&](const resto_ineq_elastic_ipm_constr &overlay, resto_ineq_elastic_ipm_constr::approx_data &overlay_data) {
+            auto [outer_ipm, box] = outer_boxed_ipm(outer, overlay, "restoration sync");
+            outer_ipm.multiplier_.setZero();
+            outer_ipm.d_multiplier_.setZero();
+            outer_ipm.comp_.setZero();
+            outer_ipm.v_.setConstant(-std::numeric_limits<scalar_t>::infinity());
+            for (auto side : box_sides) if (box.has_side[side]) {
+                auto &outer_pair = *outer_ipm.box_side_[side];
+                const auto &resto_side = overlay_data.elastic.side[side];
+                const auto &mask = box.present_mask[side];
+                const auto target_slack = resto_side.value[detail::slot_t].array();
+                const scalar_t mu = overlay_data.ipm_cfg->mu;
+                outer_pair.d_slack =
+                    mask.select(target_slack - outer_pair.slack.array(), scalar_t(0)).matrix();
+                outer_pair.d_multiplier =
+                    mask.select((mu - outer_pair.multiplier.array() * outer_pair.d_slack.array()) /
+                                    target_slack -
+                                    outer_pair.multiplier.array(),
+                                scalar_t(0))
+                        .matrix();
+                outer_pair.slack = mask.select(target_slack, scalar_t(0)).matrix();
+                outer_pair.slack_backup = outer_pair.slack;
+                outer_pair.multiplier_backup = outer_pair.multiplier;
+                static_cast<solver::ipm_constr::approx_data::side_data &>(outer_pair).r_s =
+                    mask.select(outer_pair.multiplier.array() * outer_pair.slack.array(), scalar_t(0)).matrix();
+                const scalar_t dual_sign = side == box_side::ub ? scalar_t(1) : scalar_t(-1);
+                outer_ipm.multiplier_.array() +=
+                    dual_sign * mask.select(outer_pair.multiplier.array(), scalar_t(0));
+                outer_ipm.d_multiplier_.array() +=
+                    dual_sign * mask.select(outer_pair.d_multiplier.array(), scalar_t(0));
+                outer_ipm.v_ =
+                    mask.select(outer_ipm.v_.cwiseMax(resto_side.r_d).array(), outer_ipm.v_.array())
+                        .matrix();
+                outer_ipm.comp_ =
+                    mask.select((outer_pair.multiplier.array() * outer_pair.slack.array()).abs()
+                                    .max(outer_ipm.comp_.array()),
+                                outer_ipm.comp_.array())
+                        .matrix();
+            }
+        });
 }
 
 } // namespace

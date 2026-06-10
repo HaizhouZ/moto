@@ -6,6 +6,8 @@
 #include <moto/solver/ns_sqp.hpp>
 #include <moto/utils/field_conversion.hpp>
 
+#include <cstdio>
+
 // #define ENABLE_TIMED_BLOCK
 #define SHOW_DETAIL_TIMING
 #include <moto/utils/timed_block.hpp>
@@ -749,6 +751,9 @@ ns_sqp::result_type ns_sqp::update(size_t n_iter, bool verbose, bool profile) {
     }
     profiler_.finish_update(profile_report_);
     profiler_.enabled = false;
+    if (verbose) {
+        std::fflush(stdout);
+    }
     result_type result;
     static_cast<kkt_info &>(result) = kkt_last;
     result.iter = iter_last;

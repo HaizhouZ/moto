@@ -269,26 +269,25 @@ def build_sqp(display: bool, n_job: int = 4):
     model = pin.buildModelFromUrdf(ur5.urdf)
     np.set_printoptions(precision=3, suppress=True, linewidth=200)
     model = pinCasadiModel(model, dt=dt, q_nom=q_d, dense=True, use_fwd_dyn=False)
+    joint_limit_constr = model.make_joint_limit_constr()
+    state_cost = model.get_state_cost()
 
-    stage_prob = moto.node_ocp.create()
+    stage_prob = moto.stage_ocp.create()
+    stage_prob.add(model.dyn)
     stage_prob.add(model.make_tq_limit_constr())
-    stage_prob.add(model.make_joint_limit_constr())
-    stage_prob.add(model.get_state_cost())
+    stage_prob.st.add(joint_limit_constr)
+    stage_prob.st.add(state_cost)
     stage_prob.add(model.get_input_cost())
 
-    edge_prob = moto.edge_ocp.create()
-    edge_prob.add(model.dyn)
-
-    terminal_prob = stage_prob.clone()
-    terminal_prob.add_terminal(model.make_ee_pos_constr())
-
     stage_prob.print_summary()
-    terminal_prob.print_summary()
     print("--" * 15)
 
     horizon = 50
     sqp = moto.sqp(n_job=n_job)
-    sqp.graph.add_path(stage_prob, terminal_prob, edge_prob, horizon)
+    stages = sqp.add_stage(stage_prob, horizon)
+    stages[-1].ed.add(joint_limit_constr)
+    stages[-1].ed.add(state_cost)
+    stages[-1].ed.add(model.make_ee_pos_constr())
 
     # cfg = [
     #     [
@@ -339,7 +338,7 @@ def build_sqp(display: bool, n_job: int = 4):
             if hasattr(model, "W_ee_cost"):
                 data.value[model.W_ee_cost] = np.ones(6) * 1e8
 
-    for node in sqp.graph.flatten_nodes():
+    for node in sqp.flatten_nodes():
         set_initial_state(node)
 
     sqp.settings.ipm.mu0 = 0.1
@@ -373,7 +372,7 @@ def collect_trajectory(sqp, model, horizon):
         if node_idx >= horizon:
             q_res.append(node.value[model.qn])
 
-    for node in sqp.graph.flatten_nodes():
+    for node in sqp.flatten_nodes():
         get_sym(node)
     return q_res, dt_res
 
@@ -426,8 +425,10 @@ def main():
 
     import time
 
+    sys.stdout.flush()
     start = time.perf_counter()
     kkt = sqp.update(args.max_iter)
+    sys.stdout.flush()
     print(f"sqp.update({args.max_iter}) took {time.perf_counter() - start:.3f} seconds")
     print(f"result       : {kkt.result}")
     print(f"num_iter     : {kkt.num_iter}")

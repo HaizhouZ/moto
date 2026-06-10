@@ -246,19 +246,15 @@ q_d = np.copy(ur5.q0)
 model = pin.buildModelFromUrdf(ur5.urdf)
 np.set_printoptions(precision=3, suppress=True, linewidth=200)
 model = pinCasadiModel(model, dt=dt, q_nom=q_d, dense=True, use_fwd_dyn=True)
+joint_limit_constr = model.make_joint_limit_constr()
+state_cost = model.get_state_cost()
 
-prob = moto.node_ocp.create()
+prob = moto.stage_ocp.create()
+prob.add(model.dyn)
 prob.add(model.make_tq_limit_constr())
-prob.add(model.make_joint_limit_constr())
-prob.add(model.get_state_cost())
+prob.st.add(joint_limit_constr)
+prob.st.add(state_cost)
 prob.add(model.get_input_cost())
-
-edge_prob = moto.edge_ocp.create()
-edge_prob.add(model.dyn)
-
-prob_term = prob.clone()
-prob_term.add_terminal(model.make_ee_pos_constr(soft=args.soft, cost=args.cost))
-prob_term.add_terminal(model.get_state_cost())
 
 prob.print_summary()
 print("--" * 15)
@@ -276,8 +272,11 @@ import time
 
 for idx_cfg, cfg in tqdm(enumerate(config), total=len(config)):
     sqp = moto.sqp(n_job=4)
-    sqp.graph.add_path(prob, prob_term, edge_prob, N_horizon)
-    nodes = sqp.graph.flatten_nodes()
+    stages = sqp.add_stage(prob, N_horizon)
+    stages[-1].ed.add(joint_limit_constr)
+    stages[-1].ed.add(model.make_ee_pos_constr(soft=args.soft, cost=args.cost))
+    stages[-1].ed.add(state_cost)
+    nodes = sqp.flatten_nodes()
 
     nodes[-1].value[model.r_des] = np.array(cfg[0][:3])
     nodes[-1].value[model.quat_des] = np.array(cfg[0][3:7])

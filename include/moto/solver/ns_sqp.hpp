@@ -332,8 +332,15 @@ struct ns_sqp {
     ~ns_sqp() = default;
     using storage_type = linear_runtime_graph<node_type>;
 
-    graph_model &graph() noexcept { return model_graph_; }
-    const graph_model &graph() const noexcept { return model_graph_; }
+    node_view start_node() const { return model_graph_.start_node(); }
+    std::vector<stage_ocp_ptr_t> add_stage(const stage_ocp_ptr_t &stage, size_t n_stages) {
+        return model_graph_.add_stage(stage, n_stages);
+    }
+    std::vector<stage_ocp_ptr_t> add_stages(const node_view &start_node,
+                                            const stage_ocp_ptr_t &stage,
+                                            size_t n_stages) {
+        return model_graph_.add_stages(start_node, stage, n_stages);
+    }
     std::vector<data *> &solver_nodes();
 
   private:
@@ -346,6 +353,9 @@ struct ns_sqp {
     void realize_runtime(storage_type &runtime,
                          const graph_model::interval_snapshot &snapshot,
                          StageBuilder &&stage_builder);
+    template <typename StageBuilder>
+    size_t rebuild_runtime_from_model(storage_type &runtime,
+                                      StageBuilder &&stage_builder);
     struct scoped_phase_graph_override {
         ns_sqp &owner;
         bool in_restoration_backup;

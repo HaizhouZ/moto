@@ -52,16 +52,12 @@ class generic_constr : public generic_func {
         utils::optional_bool is_eq = true; ///< true if equality constraint, false if inequality constraint, default is true
         bool is_soft = false;              ///< true if soft constraint, false if hard constraint, default is false
     } field_hint_;                         ///< type hint for the constraint
-    bool terminal_add_ = false;
-    void set_terminal_add(bool terminal) { terminal_add_ = terminal; }
 
     /// @brief finalize the constraint, will be called upon added to a problem
     /// @note will set the field (if unset) based on the field hint
     void finalize_impl() override;
 
   public:
-    friend class ocp_base;
-    bool terminal_add() const noexcept { return terminal_add_; }
     virtual void setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const {
         data.as<approx_data>().ls_cfg = &ws_data->as<solver::linesearch_config>();
     }

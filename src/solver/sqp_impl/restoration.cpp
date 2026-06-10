@@ -37,6 +37,28 @@ void restore_outer_ipm_pairs(const std::vector<ipm_pair_snapshot> &backup) {
     }
 }
 
+void reset_restoration_bound_multipliers(node_data *node) {
+    node->for_each<ineq_constr_fields>([](const ineq_constr &c, ineq_constr::data_map_t &id) {
+        c.restoration_reset_bound_multipliers(id);
+    });
+}
+
+void commit_restoration_dual_step(node_data *node, scalar_t alpha_dual) {
+    node->for_each<ineq_constr_fields>([&](const ineq_constr &c, ineq_constr::data_map_t &id) {
+        c.restoration_commit_dual_step(id, alpha_dual);
+    });
+}
+
+bool exceeds_restoration_dual_bound(const node_data *node, scalar_t threshold) {
+    for (auto field : ineq_constr_fields) {
+        const auto &dual = node->dense().dual_[field];
+        if (dual.size() > 0 && dual.cwiseAbs().maxCoeff() > threshold) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const iter_info &iter_before,
@@ -99,75 +121,82 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
         });
         return outer_trial;
     };
+
+    const auto reset_outer_bound_multipliers = [&]() {
+        solver::for_each(solver::par, outer_graph, reset_restoration_bound_multipliers);
+    };
+
+    const auto commit_restoration_state_and_get_dual_alpha = [&]() {
+        reset_ls_workers();
+        solver::for_each(solver::par, solver::zip(resto_graph, outer_graph),
+                         [&](size_t tid, data *resto, data *outer) {
+                             solver::restoration::commit_restoration_to_outer_state(*resto, *outer);
+                             if (settings.has_ineq_soft) {
+                                 solver::ineq_soft::update_ls_bounds(outer, &setting_per_thread[tid]);
+                             }
+                         });
+        solver::linesearch_config ls_dual_only;
+        for (solver::linesearch_config &s : setting_per_thread) {
+            ls_dual_only.dual.merge_from(s.dual);
+        }
+        return ls_dual_only.dual.alpha_max;
+    };
+
+    const auto commit_restoration_dual_step_and_check_reset = [&](scalar_t alpha_dual) {
+        std::vector<uint8_t> local_exceed_bound(setting_per_thread.size(), uint8_t{0});
+        solver::for_each(solver::par, outer_graph, [&, this](size_t tid, data *d) {
+            commit_restoration_dual_step(d, alpha_dual);
+            local_exceed_bound[tid] = static_cast<uint8_t>(
+                exceeds_restoration_dual_bound(d, settings.restoration.bound_mult_reset_threshold));
+        });
+        return std::any_of(local_exceed_bound.begin(), local_exceed_bound.end(), [](uint8_t b) { return b != 0; });
+    };
+
+    const auto update_outer_after_restoration = [&](bool reset_bound_multipliers, bool rebuild_eq_duals) {
+        solver::for_each(solver::par, outer_graph, [=](data *d) {
+            if (reset_bound_multipliers && !rebuild_eq_duals) {
+                reset_restoration_bound_multipliers(d);
+            }
+            d->update_approximation(node_data::update_mode::eval_all, true);
+        });
+    };
+
+    const auto finish_successful_restoration = [&]() {
+        const bool rebuild_eq_duals =
+            settings.eq_init.enabled && settings.eq_init.rebuild_after_restoration_exit;
+        const scalar_t alpha_dual = commit_restoration_state_and_get_dual_alpha();
+        const bool reset_bound_multipliers = commit_restoration_dual_step_and_check_reset(alpha_dual);
+
+        if (settings.verbose) {
+            fmt::println("[resto cleanup] reset_bound_multipliers: {}", reset_bound_multipliers);
+        }
+
+        phase_graph.use_default_graph(false);
+        if (reset_bound_multipliers && rebuild_eq_duals) {
+            reset_outer_bound_multipliers();
+        }
+
+        if (rebuild_eq_duals) {
+            initialize_equality_multipliers(outer_graph, false);
+        }
+        update_outer_after_restoration(reset_bound_multipliers, rebuild_eq_duals);
+        update_primal_info(rest_state, point_value_mask::primal | point_value_mask::barrier_objective);
+        update_stat_info(rest_state);
+    };
+
+    const auto restore_failed_restoration = [&]() {
+        restore_outer_ipm_pairs(outer_ipm_backup);
+        phase_graph.use_default_graph(false);
+        solver::for_each(solver::par, outer_graph, [](data *d) {
+            d->update_approximation(node_data::update_mode::eval_val, true);
+        });
+    };
+
     const auto finish_restoration = [&](bool success) {
         if (success) {
-            const bool rebuild_eq_duals =
-                settings.eq_init.enabled && settings.eq_init.rebuild_after_restoration_exit;
-
-            reset_ls_workers();
-            solver::for_each(solver::par, solver::zip(resto_graph, outer_graph),
-                         [&](size_t tid, data *resto, data *outer) {
-                solver::restoration::commit_restoration_to_outer_state(*resto, *outer);
-                if (settings.has_ineq_soft) {
-                    solver::ineq_soft::update_ls_bounds(outer, &setting_per_thread[tid]);
-                }
-            });
-            solver::linesearch_config ls_dual_only;
-            for (solver::linesearch_config &s : setting_per_thread) {
-                ls_dual_only.dual.merge_from(s.dual);
-            }
-
-            std::vector<uint8_t> local_exceed_bound(setting_per_thread.size(), uint8_t{0});
-            solver::for_each(solver::par, outer_graph, [&, this](size_t tid, data *d) {
-                d->for_each<ineq_constr_fields>([&](const ineq_constr &c, ineq_constr::data_map_t &id) {
-                    c.restoration_commit_dual_step(id, ls_dual_only.dual.alpha_max);
-                });
-                for (auto field : ineq_constr_fields) {
-                    const auto &dual = d->dense().dual_[field];
-                    if (dual.size() == 0) {
-                        continue;
-                    }
-                    local_exceed_bound[tid] |= static_cast<uint8_t>(
-                        dual.cwiseAbs().maxCoeff() >
-                        settings.restoration.bound_mult_reset_threshold);
-                }
-            });
-            bool reset_bound_multipliers =
-                std::any_of(local_exceed_bound.begin(), local_exceed_bound.end(), [](uint8_t b) { return b != 0; });
-
-            if (settings.verbose) {
-                fmt::println("[resto cleanup] reset_bound_multipliers: {}", reset_bound_multipliers);
-            }
-
-            phase_graph.use_default_graph(false);
-            if (reset_bound_multipliers && rebuild_eq_duals) {
-                solver::for_each(solver::par, outer_graph, [](data *d) {
-                    d->for_each<ineq_constr_fields>([](const ineq_constr &c, ineq_constr::data_map_t &id) {
-                        c.restoration_reset_bound_multipliers(id);
-                    });
-                });
-            }
-
-            if (rebuild_eq_duals) {
-                initialize_equality_multipliers(outer_graph, false);
-            }
-            solver::for_each(solver::par, outer_graph, [reset_bound_multipliers, rebuild_eq_duals](data *d) {
-                if (reset_bound_multipliers && !rebuild_eq_duals) {
-                    d->for_each<ineq_constr_fields>([](const ineq_constr &c, ineq_constr::data_map_t &id) {
-                        c.restoration_reset_bound_multipliers(id);
-                    });
-                }
-                d->update_approximation(node_data::update_mode::eval_all, true);
-            });
-            // update the result with the final solution
-            update_primal_info(rest_state, point_value_mask::primal | point_value_mask::barrier_objective);
-            update_stat_info(rest_state);
+            finish_successful_restoration();
         } else {
-            restore_outer_ipm_pairs(outer_ipm_backup);
-            phase_graph.use_default_graph(false);
-            solver::for_each(solver::par, outer_graph, [](data *d) {
-                d->update_approximation(node_data::update_mode::eval_val, true);
-            });
+            restore_failed_restoration();
         }
     };
 

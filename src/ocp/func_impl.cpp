@@ -41,10 +41,10 @@ generic_func::generic_func(const std::string &name, const var_inarg_list &in_arg
     set_from_casadi(in_args, out);
 }
 
-generic_func::generic_func(const generic_func &rhs, bool copy_codegen_task)
+generic_func::generic_func(const generic_func &rhs)
     : expr(rhs),
       field_layout_store<var_list>(rhs),
-      gen_(rhs.gen_, copy_codegen_task),
+      gen_(rhs.gen_),
       zero_dim_(rhs.zero_dim_),
       order_(rhs.order_),
       in_args_(rhs.in_args_),
@@ -60,9 +60,6 @@ generic_func::generic_func(const generic_func &rhs, bool copy_codegen_task)
       value(rhs.value),
       jacobian(rhs.jacobian),
       hessian(rhs.hessian) {}
-
-generic_func::generic_func(const generic_func &rhs)
-    : generic_func(rhs, true) {}
 
 generic_func::generic_func(generic_func &&) noexcept = default;
 generic_func::~generic_func() = default;
@@ -257,12 +254,10 @@ shared_expr generic_func::remap_arguments_cached(const symbol_remap &remap,
     if (normalized.empty())
         return shared_expr(*this);
 
-    {
-        std::lock_guard lock(remap_cache_->mutex);
-        auto &remaps = remap_cache_->remap_by_key;
-        if (auto it = remaps.find(normalized.key); it != remaps.end()) {
-            return it->second;
-        }
+    std::lock_guard lock(remap_cache_->mutex);
+    auto &remaps = remap_cache_->remap_by_key;
+    if (auto it = remaps.find(normalized.key); it != remaps.end()) {
+        return it->second;
     }
 
     shared_expr remapped_expr(clone());
@@ -272,8 +267,7 @@ shared_expr generic_func::remap_arguments_cached(const symbol_remap &remap,
         throw std::runtime_error(fmt::format("func {} remap failed: remapped clone could not be finalized", name_));
     }
 
-    std::lock_guard lock(remap_cache_->mutex);
-    auto [it, inserted] = remap_cache_->remap_by_key.emplace(std::move(normalized.key), remapped_expr);
+    auto [it, inserted] = remaps.emplace(std::move(normalized.key), remapped_expr);
     static_cast<void>(inserted);
     return it->second;
 }
@@ -301,18 +295,6 @@ void generic_func::set_from_casadi(const var_inarg_list &in_args, const cs::SX &
         gen_.task_ = new gen_info::task_type();
         gen_.task_->sx_output = out;
     }
-}
-
-generic_func generic_func::share(const symbol_remap &remap) const {
-    if (!wait_until_ready())
-        throw std::runtime_error(fmt::format("func {} not ready, cannot share", name()));
-    auto normalized = normalize_argument_remap(remap);
-    generic_func f(*this, false);
-    f.apply_argument_remap(normalized, "share");
-    f.rebuild_argument_layout();
-    f.finalized_ = true;
-    f.set_ready_status(true);
-    return f;
 }
 
 void generic_func::rebuild_argument_layout() {
@@ -448,12 +430,11 @@ void generic_func::enable_if_any(const expr_inarg_list &args) {
     }
     enable_if_any_deps_.insert(enable_if_any_deps_.end(), args.begin(), args.end());
 }
-generic_func::gen_info::gen_info(const gen_info &rhs, bool copy_codegen_task) {
-    if (rhs.task_ && copy_codegen_task) {
+generic_func::gen_info::gen_info(const gen_info &rhs) {
+    if (rhs.task_) {
         task_ = new task_type(*rhs.task_);
     }
 }
-generic_func::gen_info::gen_info(const gen_info &rhs) : gen_info(rhs, true) {}
 
 generic_func::gen_info &generic_func::gen_info::operator=(const gen_info &rhs) {
     if (this == &rhs) {

@@ -12,18 +12,14 @@ using cost = utils::shared<generic_cost>;
  */
 class generic_cost : public generic_func {
   protected:
-    bool terminal_add_ = false;
     bool use_gauss_newton_ = false;
 
     void finalize_impl() override;
-    void set_terminal_add(bool terminal) { terminal_add_ = terminal; }
     var gn_weight_; ///< weight for gauss-newton cost
 
   public:
-    friend class ocp_base;
     using base = generic_func;
     using base::base; ///< inherit base constructor
-    bool terminal_add() const noexcept { return terminal_add_; }
 
     generic_cost(const std::string &name, approx_order order = approx_order::second);
     generic_cost(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,

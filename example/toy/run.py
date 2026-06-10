@@ -60,19 +60,15 @@ u_box = moto.ineq.create(
 def build_sqp():
     sqp = moto.sqp(n_job=1)
 
-    stage_prob = moto.node_ocp.create()
+    stage_prob = moto.stage_ocp.create()
+    stage_prob.add(dyn)
     stage_prob.add(running_cost)
     stage_prob.add(u_box)
 
-    edge_prob = moto.edge_ocp.create()
-    edge_prob.add(dyn)
+    stages = sqp.add_stage(stage_prob, N)
+    stages[-1].ed.add(terminal_cost)
 
-    terminal_node_prob = moto.node_ocp.create()
-    terminal_node_prob.add_terminal(terminal_cost)
-
-    sqp.graph.add_path(stage_prob, terminal_node_prob, edge_prob, N)
-
-    flat_nodes = sqp.graph.flatten_nodes()
+    flat_nodes = sqp.flatten_nodes()
     print("Stage problem")
     flat_nodes[0].prob.print_summary()
     print("Terminal problem")
@@ -83,7 +79,7 @@ def build_sqp():
         if node.prob.dim(moto.field.field___y) > 0:
             node.value[xn] = x0.copy()
 
-    for node in sqp.graph.flatten_nodes():
+    for node in sqp.flatten_nodes():
         init(node)
     sqp.settings.prim_tol = 1e-8
     sqp.settings.dual_tol = 1e-8
@@ -93,7 +89,9 @@ def build_sqp():
 
 def main():
     sqp = build_sqp()
+    sys.stdout.flush()
     kkt = sqp.update(50, verbose=True)
+    sys.stdout.flush()
 
     values = {"x": [], "u": []}
 
@@ -101,7 +99,7 @@ def main():
         values["x"].append(np.asarray(node.value[x], dtype=float).reshape(-1))
         values["u"].append(np.asarray(node.value[u], dtype=float).reshape(-1))
 
-    for node in sqp.graph.flatten_nodes():
+    for node in sqp.flatten_nodes():
         grab(node)
 
     print(f"result   : {kkt.result}")

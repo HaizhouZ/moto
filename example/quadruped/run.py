@@ -289,7 +289,7 @@ class pinCasadiModel(cpin.Model):
         c.enable_if_all([f])
         return c
 
-    def add_dt_constr_and_cost(self, prob: moto.node_ocp, dt_nom: moto.var):
+    def add_dt_constr_and_cost(self, prob: moto.stage_ocp, dt_nom: moto.var):
         if isinstance(self.dt, cs.SX):
             dt_bound = moto.sym.params(
                 "dt_bound", 2, default_val=np.array([1e-4, 5e-2])
@@ -387,27 +387,35 @@ foot_frames = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
 model = pinCasadiModel(
     model, dt=dt, q_nom=q_d, dense=True, foot_frames=foot_frames, use_fwd_dyn=True
 )
+model.joint_limit_constr = model.make_joint_limit_constr()
+model.state_cost = model.get_state_cost()
 
 def build_stage_prob(robot: pinCasadiModel):
-    stage_prob = moto.node_ocp.create()
+    stage_prob = moto.stage_ocp.create()
+    stage_prob.add(robot.dyn)
     if full:
         stage_prob.add(robot.fric)
-    stage_prob.add(robot.kin_constr)
+    stage_prob.st.add(robot.kin_constr)
     if not full:
-        stage_prob.add(robot.kin_cost)
+        stage_prob.st.add(robot.kin_cost)
     robot.add_dt_constr_and_cost(stage_prob, dt_nom)
-    stage_prob.add(robot.make_joint_limit_constr())
+    stage_prob.st.add(robot.joint_limit_constr)
     stage_prob.add(robot.make_tq_limit_constr())
-    stage_prob.add(robot.get_state_cost())
+    stage_prob.st.add(robot.state_cost)
     stage_prob.add(robot.get_input_cost())
     # stage_prob.add(robot.make_foot_lift_cost(lifted=True))
     return stage_prob
 
 
+def add_end_node_terms(node, robot: pinCasadiModel):
+    node.add(robot.kin_constr)
+    if not full:
+        node.add(robot.kin_cost)
+    node.add(robot.joint_limit_constr)
+    node.add(robot.state_cost)
+
+
 stage_proto = build_stage_prob(model)
-edge_proto = moto.edge_ocp.create()
-edge_proto.add(model.dyn)
-terminal_node_proto = stage_proto.clone()
 
 N_horizon = 100
 
@@ -447,12 +455,14 @@ segment_lengths.append(stance_length)
 segment_start_nodes = [stage_proto]
 segment_start_nodes.extend(stage_proto.clone(create_phase_config(step)) for step in range(1, steps + 1))
 segment_start_nodes.append(stage_proto.clone())
-segment_end_nodes = segment_start_nodes[1:] + [terminal_node_proto]
-for start_prob, end_prob, n_edges in zip(segment_start_nodes, segment_end_nodes, segment_lengths):
-    sqp.graph.add_path(start_prob, end_prob, edge_proto, n_edges)
+graph_stages = []
+for start_prob, n_edges in zip(segment_start_nodes, segment_lengths):
+    graph_stages.extend(sqp.add_stage(start_prob, n_edges))
+
+add_end_node_terms(graph_stages[-1].ed, model)
 
 if os.getenv("MOTO_DEBUG_SOLVER_PROBS"):
-    flat_nodes = sqp.graph.flatten_nodes()
+    flat_nodes = sqp.flatten_nodes()
     print("--" * 15)
     print("Stage prototype:")
     stage_proto.print_summary()
@@ -463,7 +473,7 @@ if os.getenv("MOTO_DEBUG_SOLVER_PROBS"):
 
 if os.getenv("MOTO_DEBUG_GRAPH_LAYOUT"):
     print("Flattened solver graph layout:")
-    for idx, node in enumerate(sqp.graph.flatten_nodes()):
+    for idx, node in enumerate(sqp.flatten_nodes()):
         prob = node.prob
         print(
             f"  node[{idx}] "
@@ -517,6 +527,7 @@ step = 0
 node_idx = 0
 
 print("")
+sys.stdout.flush()
 def gait_setup(data: moto.sqp.data_type):
     global step, node_idx
     ref_node_idx = min(node_idx + 1, N_horizon)
@@ -550,7 +561,7 @@ def gait_setup(data: moto.sqp.data_type):
     node_idx += 1
 
 
-for node in sqp.graph.flatten_nodes():
+for node in sqp.flatten_nodes():
     gait_setup(node)
 import time
 
@@ -568,6 +579,7 @@ for i in range(bench_runs):
     iters += res.num_iter
 elapsed = time.perf_counter() - start
 
+sys.stdout.flush()
 print(f"sqp.update() took {elapsed / cnt:.3f} seconds")
 if iters > 0:
     print(f"per iteration took {elapsed / iters * 1000:.3f} ms")
@@ -614,7 +626,7 @@ def get_sym(node: moto.sqp.data_type):
         q_res.append(node.value[model.qn])
 
 
-for node in sqp.graph.flatten_nodes():
+for node in sqp.flatten_nodes():
     get_sym(node)
 if not display:
     sys.exit(0)

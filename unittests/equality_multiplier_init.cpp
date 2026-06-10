@@ -113,7 +113,8 @@ void configure_solver(ns_sqp &sqp, bool enable_eq_init, size_t n_edges) {
     const var_inarg_list dyn_args = var_list{x, y, u};
     auto dyn = dynamics(new dense_dynamics("dyn_eq_init", dyn_args, y - x - u, approx_order::second, __dyn));
 
-    auto stage_prob = node_ocp::create();
+    auto stage_prob = stage_ocp::create();
+    stage_prob->add(*dyn);
     stage_prob->add(*make_stage_cost("stage_cost_eq_init", x, u));
     stage_prob->add(*make_hard_eq_x("hard_eq_x_eq_init", x, scalar_t(0.25)));
     stage_prob->add(*make_hard_eq_xu("hard_eq_xu_eq_init", x, u, scalar_t(-0.1)));
@@ -122,18 +123,13 @@ void configure_solver(ns_sqp &sqp, bool enable_eq_init, size_t n_edges) {
     stage_prob->add(*make_ineq_xu("ineq_xu_eq_init", x, u, scalar_t(-0.3)));
     stage_prob->add(*make_box_ineq_xu("ineq_box_xu_eq_init", x, u, scalar_t(0.1)));
 
-    auto terminal_prob = node_ocp::create();
-    terminal_prob->add_terminal(*cost(new generic_cost("terminal_cost_eq_init", var_list{x}, x * x, approx_order::second)));
-
     sqp.settings.no_except = false;
     sqp.settings.restoration.enabled = false;
     sqp.settings.eq_init.enabled = enable_eq_init;
     sqp.settings.eq_init.rho_eq = 10.0;
 
-    auto &modeled = sqp.graph();
-    auto edge_prob = edge_ocp::create();
-    edge_prob->add(*dyn);
-    modeled.add_path(stage_prob, terminal_prob, edge_prob, n_edges);
+    auto stages = sqp.add_stage(stage_prob, n_edges);
+    stages.back()->ed().add(*cost(new generic_cost("terminal_cost_eq_init", var_list{x}, x * x, approx_order::second)));
 
     seed_primal_state(sqp, n_edges);
 }

@@ -34,7 +34,6 @@ class generic_func : public expr, protected field_layout_store<var_list> {
         using task_type = utils::cs_codegen::task;
         movable_ptr<task_type> task_ = nullptr;
         gen_info() = default;
-        explicit gen_info(const gen_info &rhs, bool copy_codegen_task);
         gen_info(const gen_info &rhs);
         gen_info(gen_info &&) = default;
         gen_info &operator=(const gen_info &rhs);
@@ -94,7 +93,6 @@ class generic_func : public expr, protected field_layout_store<var_list> {
                                          size_t problem_uid = static_cast<size_t>(-1));
 
     generic_func();
-    generic_func(const generic_func &, bool copy_codegen_task);
     generic_func(const generic_func &);
     generic_func &operator=(const generic_func &) = delete;
 
@@ -111,8 +109,6 @@ class generic_func : public expr, protected field_layout_store<var_list> {
     generic_func(const std::string &name, approx_order order, size_t dim, field_t field = __undefined);
     generic_func(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
                  approx_order order, field_t field = __undefined);
-
-    generic_func share(const symbol_remap &remap = {}) const;
 
     generic_func(generic_func &&) noexcept;
     generic_func &operator=(generic_func &&) noexcept = delete;

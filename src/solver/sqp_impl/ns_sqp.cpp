@@ -1,6 +1,7 @@
 #include <Eigen/Core>
 #include <moto/solver/ns_riccati/generic_solver.hpp>
 #include <moto/solver/ns_sqp.hpp>
+#include <utility>
 namespace moto {
 namespace {
 bool same_restoration_cfg(const solver::restoration::restoration_overlay_settings &lhs,
@@ -41,6 +42,14 @@ void ns_sqp::realize_runtime(storage_type &runtime,
     runtime.flatten_nodes();
 }
 
+template <typename StageBuilder>
+size_t ns_sqp::rebuild_runtime_from_model(storage_type &runtime,
+                                          StageBuilder &&stage_builder) {
+    const auto snapshot = model_graph_.composed_intervals();
+    realize_runtime(runtime, snapshot, std::forward<StageBuilder>(stage_builder));
+    return snapshot.revision;
+}
+
 ns_sqp::storage_type &ns_sqp::active_data() {
     if (phase_graph_override_ != nullptr) {
         return *phase_graph_override_;
@@ -57,10 +66,11 @@ ns_sqp::storage_type &ns_sqp::active_data() {
             return solver_runtime_;
         }
 
-        const auto snapshot = model_graph_.composed_intervals();
-        realize_runtime(solver_runtime_, snapshot, [](const ocp_ptr_t &stage_ocp) { return stage_ocp; });
-        if (snapshot.revision == model_graph_.revision()) {
-            solver_runtime_revision_.store(snapshot.revision, std::memory_order_release);
+        const size_t built_revision = rebuild_runtime_from_model(
+            solver_runtime_,
+            [](const ocp_ptr_t &stage_ocp) { return stage_ocp; });
+        if (built_revision == model_graph_.revision()) {
+            solver_runtime_revision_.store(built_revision, std::memory_order_release);
             return solver_runtime_;
         }
     }
@@ -106,11 +116,11 @@ ns_sqp::storage_type &ns_sqp::restoration_graph() {
         !restoration_cfg_valid_ ||
         !same_restoration_cfg(restoration_cfg_, cfg);
     if (needs_rebuild) {
-        const auto snapshot = model_graph_.composed_intervals();
-        realize_runtime(restoration_runtime_, snapshot, [&cfg](const ocp_ptr_t &stage_ocp) {
-            return solver::restoration::build_restoration_overlay_problem(stage_ocp, cfg);
-        });
-        restoration_runtime_revision_ = snapshot.revision;
+        restoration_runtime_revision_ = rebuild_runtime_from_model(
+            restoration_runtime_,
+            [&cfg](const ocp_ptr_t &stage_ocp) {
+                return solver::restoration::build_restoration_overlay_problem(stage_ocp, cfg);
+            });
         restoration_cfg_ = cfg;
         restoration_cfg_valid_ = true;
     }
@@ -127,11 +137,11 @@ ns_sqp::storage_type &ns_sqp::equality_init_graph() {
         !equality_init_cfg_valid_ ||
         !same_equality_init_cfg(equality_init_cfg_, cfg);
     if (needs_rebuild) {
-        const auto snapshot = model_graph_.composed_intervals();
-        realize_runtime(equality_init_runtime_, snapshot, [&cfg](const ocp_ptr_t &stage_ocp) {
-            return solver::equality_init::build_equality_init_overlay_problem(stage_ocp, cfg);
-        });
-        equality_init_runtime_revision_ = snapshot.revision;
+        equality_init_runtime_revision_ = rebuild_runtime_from_model(
+            equality_init_runtime_,
+            [&cfg](const ocp_ptr_t &stage_ocp) {
+                return solver::equality_init::build_equality_init_overlay_problem(stage_ocp, cfg);
+            });
         equality_init_cfg_ = cfg;
         equality_init_cfg_valid_ = true;
     }

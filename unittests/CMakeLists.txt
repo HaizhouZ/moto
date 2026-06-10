@@ -54,7 +54,26 @@ endfunction()
 
 add_moto_test(sym_test)
 add_moto_test(ineq_jac_sparsity)
-add_moto_test(graph_model_compose)
 add_moto_test(equality_multiplier_init)
 add_moto_test(restoration)
 add_moto_test(spmm --rng-seed 1)
+
+add_executable(graph_model_compose_test graph_model_compose.cpp)
+target_include_directories(graph_model_compose_test PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(graph_model_compose_test PRIVATE moto Catch2::Catch2WithMain)
+set_target_properties(graph_model_compose_test PROPERTIES
+    BUILD_RPATH "\$ORIGIN/.."
+)
+
+foreach(graph_shard IN ITEMS mapping remap path mutation validation concurrency)
+    add_test(
+        NAME graph_model_compose_${graph_shard}_test
+        COMMAND graph_model_compose_test "[graph][${graph_shard}]"
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    )
+    set_tests_properties(
+        graph_model_compose_${graph_shard}_test
+        PROPERTIES
+        ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}:$ENV{LD_LIBRARY_PATH}"
+    )
+endforeach()
