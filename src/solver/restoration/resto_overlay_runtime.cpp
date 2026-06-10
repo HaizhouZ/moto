@@ -10,6 +10,7 @@
 #include <moto/solver/overlay_common.hpp>
 #include <string_view>
 #include <tuple>
+#include <utility>
 
 namespace moto::solver::restoration {
 
@@ -17,15 +18,6 @@ namespace {
 constexpr std::array k_pair_slots{detail::slot_p, detail::slot_n};
 constexpr std::array<scalar_t, 2> k_pair_signs{scalar_t(-1.), scalar_t(1.)};
 constexpr std::array k_triplet_slots{detail::slot_t, detail::slot_p, detail::slot_n};
-
-template <typename ApproxData>
-constexpr auto active_slots() {
-    if constexpr (std::is_same_v<ApproxData, resto_eq_elastic_constr::approx_data>) {
-        return k_pair_slots;
-    } else {
-        return k_triplet_slots;
-    }
-}
 
 constexpr scalar_t side_jac_sign(box_side::side_t side) {
     return side == box_side::ub ? scalar_t(1.) : scalar_t(-1.);
@@ -48,10 +40,6 @@ void require_local_state_initialized(const LocalState &state, Eigen::Index expec
     }
 }
 
-scalar_t max_abs_or_zero(const vector &v) {
-    return v.size() > 0 ? v.cwiseAbs().maxCoeff() : scalar_t(0.);
-}
-
 template <typename ApproxData>
 scalar_t rho_value(const ApproxData &d, std::string_view where) {
     if (d.rho == nullptr) {
@@ -59,9 +47,26 @@ scalar_t rho_value(const ApproxData &d, std::string_view where) {
     }
     return *d.rho;
 }
-} // namespace
 
-namespace {
+template <typename Elastic, typename Fn>
+void for_each_active_ineq_side(Elastic &&elastic,
+                               const ineq_constr::box_spec &box,
+                               Fn &&fn) {
+    for (auto side : box_sides) if (box.has_side[side]) {
+        fn(side, elastic.side[side], box.present_mask[side]);
+    }
+}
+
+template <typename Elastic, typename Fn>
+void for_each_active_ineq_side_slot(Elastic &&elastic,
+                                    const ineq_constr::box_spec &box,
+                                    Fn &&fn) {
+    for_each_active_ineq_side(std::forward<Elastic>(elastic), box, [&](auto side, auto &side_state, const auto &mask) {
+        for (auto slot : k_triplet_slots) {
+            fn(side, slot, side_state, mask);
+        }
+    });
+}
 
 void fill_sigma_tangent(const sym &arg,
                         vector_ref ref,
@@ -71,13 +76,7 @@ void fill_sigma_tangent(const sym &arg,
     if (sigma_sq.size() == 0) {
         return;
     }
-    // if (arg.tdim() == arg.dim()) {
     sigma_sq = weight * ref.array().abs().max(eps).inverse().square().min(1.);
-    return;
-    // }
-    // const scalar_t scale_ref = ref.size() > 0 ? ref.cwiseAbs().maxCoeff() : scalar_t(0.);
-    // const scalar_t sigma = std::min(weight / std::pow(std::max(scale_ref, eps), 2), scalar_t(1.));
-    // sigma_sq.setConstant(sigma);
 }
 
 vector compute_tangent_delta(const sym &arg, vector_ref x, vector_ref ref) {
@@ -114,7 +113,7 @@ void update_ineq_side_residuals(resto_ineq_elastic_ipm_constr::approx_data &d) {
     const auto &box = d.require_box_spec("update_ineq_side_residuals");
     d.elastic.present_mask = box.present_mask;
     ineq_constr::box_side_array<vector> bound_eval;
-    for (auto side : box_sides) if (box.has_side[side]) {
+    for_each_active_ineq_side(d.elastic, box, [&](auto side, auto &side_state, const auto &mask) {
         if (box.bound_source[side] == ineq_constr::box_bound_source::constant) {
             bound_eval[side] = d.box_const_[side];
         } else if (box.bound_source[side] == ineq_constr::box_bound_source::in_arg) {
@@ -122,11 +121,10 @@ void update_ineq_side_residuals(resto_ineq_elastic_ipm_constr::approx_data &d) {
         } else {
             bound_eval[side].setZero(d.base_residual.size());
         }
-        d.elastic.side[side].residual =
-            box.present_mask[side]
-                .select(side_jac_sign(side) * (d.base_residual.array() - bound_eval[side].array()), scalar_t(0))
+        side_state.residual =
+            mask.select(side_jac_sign(side) * (d.base_residual.array() - bound_eval[side].array()), scalar_t(0))
                 .matrix();
-    }
+    });
 }
 
 void sync_ineq_overlay_views(resto_ineq_elastic_ipm_constr::approx_data &d) {
@@ -135,18 +133,28 @@ void sync_ineq_overlay_views(resto_ineq_elastic_ipm_constr::approx_data &d) {
     d.multiplier_.setZero();
     d.d_multiplier_.setZero();
     d.comp_.setZero();
-    for (auto side : box_sides) if (box.has_side[side]) {
-        const auto &side_state = d.elastic.side[side];
+    for_each_active_ineq_side(d.elastic, box, [&](auto side, const auto &side_state, const auto &mask) {
         const scalar_t dual_sign = side == box_side::ub ? scalar_t(1) : scalar_t(-1);
         d.multiplier_.array() +=
-            dual_sign * box.present_mask[side].select(side_state.dual[detail::slot_t].array(), scalar_t(0));
+            dual_sign * mask.select(side_state.dual[detail::slot_t].array(), scalar_t(0));
         d.d_multiplier_.array() +=
-            dual_sign * box.present_mask[side].select(side_state.d_dual[detail::slot_t].array(), scalar_t(0));
-    }
+            dual_sign * mask.select(side_state.d_dual[detail::slot_t].array(), scalar_t(0));
+    });
 }
 
-template <typename ApproxData>
-void finalize_predictor_pairs_like_ipm(ApproxData &d,
+using ineq_corrector_view = detail::elastic_side_array<detail::elastic_triplet_array<vector>>;
+
+void refresh_ineq_local_model(resto_ineq_elastic_ipm_constr::approx_data &d,
+                              const ineq_constr::box_spec &box,
+                              std::string_view where,
+                              scalar_t mu,
+                              const ineq_corrector_view *corrector = nullptr) {
+    update_ineq_side_residuals(d);
+    resto_ineq_elastic_ipm_constr::compute_local_model(d.elastic, box, rho_value(d, where), mu, corrector);
+    sync_ineq_overlay_views(d);
+}
+
+void finalize_predictor_pairs_like_ipm(resto_eq_elastic_constr::approx_data &d,
                                        workspace_data *cfg) {
     auto &worker = cfg->as<solver::ipm_config::worker_type>();
     auto &ls = cfg->as<linesearch_config>();
@@ -155,7 +163,7 @@ void finalize_predictor_pairs_like_ipm(ApproxData &d,
            "ipm affine step computation not started but affine step is requested");
     const scalar_t alpha_primal = ls.alpha_primal;
     const scalar_t alpha_dual = ls.alpha_dual;
-    for (auto slot : active_slots<ApproxData>()) {
+    for (auto slot : k_pair_slots) {
         const auto &value = d.elastic.value[slot];
         if (value.size() == 0) {
             continue;
@@ -166,28 +174,26 @@ void finalize_predictor_pairs_like_ipm(ApproxData &d,
             (d.elastic.dual[slot] + alpha_dual * d.elastic.d_dual[slot])
                 .dot(value + alpha_primal * d.elastic.d_value[slot]);
     }
-    for (auto slot : active_slots<ApproxData>()) {
+    for (auto slot : k_pair_slots) {
         d.elastic.corrector[slot].array() =
             ls.alpha_dual * d.elastic.d_dual[slot].array() * ls.alpha_primal *
             d.elastic.d_value[slot].array();
     }
 }
 
-template <typename ApproxData>
-void apply_corrector_pairs_like_ipm(ApproxData &d) {
+void apply_corrector_pairs_like_ipm(resto_eq_elastic_constr::approx_data &d) {
     if (d.ipm_cfg == nullptr) {
         throw std::runtime_error("apply_corrector_pairs_like_ipm requires ipm_cfg");
     }
     require_local_state_initialized(d.elastic, d.func_.dim(), "apply_corrector_pairs_like_ipm");
     if (!d.ipm_cfg->ipm_accept_corrector()) {
-        for (auto slot : active_slots<ApproxData>()) {
+        for (auto slot : k_pair_slots) {
             d.elastic.corrector[slot].setZero();
         }
     }
 }
 
-template <typename ApproxData>
-void finalize_pair_newton_step(ApproxData &d) {
+void finalize_pair_newton_step(resto_eq_elastic_constr::approx_data &d) {
     require_local_state_initialized(d.elastic, d.func_.dim(), "finalize_pair_newton_step");
     d.jac_step.setZero(d.func_.dim());
     size_t arg_idx = 0;
@@ -198,125 +204,65 @@ void finalize_pair_newton_step(ApproxData &d) {
         }
         ++arg_idx;
     }
-    if constexpr (std::is_same_v<ApproxData, resto_eq_elastic_constr::approx_data>) {
-        const scalar_t eps = 1e-16;
-        d.elastic.d_multiplier = d.elastic.schur_inv_diag.array() * (d.jac_step.array() + d.elastic.condensed_rhs.array());
-        for (size_t k : range(k_pair_slots.size())) {
-            const auto slot = k_pair_slots[k];
-            const scalar_t sign = k_pair_signs[k];
-            const auto scale = d.elastic.value[slot].array() / d.elastic.dual[slot].array().max(eps);
-            d.elastic.d_value[slot] = -sign * scale * d.elastic.d_multiplier.array() - d.elastic.backsub_rhs[slot].array();
-            d.elastic.d_dual[slot] = d.elastic.r_stat[slot].array() + sign * d.elastic.d_multiplier.array();
-        }
-    } else {
-        d.elastic.d_dual[detail::slot_t] = d.elastic.schur_inv_diag.array() * (d.jac_step.array() + d.elastic.condensed_rhs.array());
-        d.elastic.d_value[detail::slot_t] =
-            -(d.elastic.value[detail::slot_t].array() / d.elastic.dual[detail::slot_t].array()) *
-                d.elastic.d_dual[detail::slot_t].array() -
-            d.elastic.backsub_rhs[detail::slot_t].array();
-        for (size_t k : range(k_pair_slots.size())) {
-            const auto slot = k_pair_slots[k];
-            const scalar_t sign = k_pair_signs[k];
-            d.elastic.d_value[slot] =
-                -sign * (d.elastic.value[slot].array() / d.elastic.dual[slot].array()) * d.elastic.d_dual[detail::slot_t].array() -
-                d.elastic.backsub_rhs[slot].array();
-            d.elastic.d_dual[slot] = d.elastic.r_stat[slot].array() + sign * d.elastic.d_dual[detail::slot_t].array();
-        }
+    const scalar_t eps = 1e-16;
+    d.elastic.d_multiplier = d.elastic.schur_inv_diag.array() * (d.jac_step.array() + d.elastic.condensed_rhs.array());
+    for (size_t k : range(k_pair_slots.size())) {
+        const auto slot = k_pair_slots[k];
+        const scalar_t sign = k_pair_signs[k];
+        const auto scale = d.elastic.value[slot].array() / d.elastic.dual[slot].array().max(eps);
+        d.elastic.d_value[slot] = -sign * scale * d.elastic.d_multiplier.array() - d.elastic.backsub_rhs[slot].array();
+        d.elastic.d_dual[slot] = d.elastic.r_stat[slot].array() + sign * d.elastic.d_multiplier.array();
     }
-    if constexpr (std::is_same_v<ApproxData, resto_ineq_elastic_ipm_constr::approx_data>) {
-        d.d_multiplier_ = d.elastic.d_dual[detail::slot_t];
-    } else if constexpr (requires { d.elastic.d_multiplier; }) {
-        d.d_multiplier_ = d.elastic.d_multiplier;
-    } else {
-        d.d_multiplier_.setZero();
-    }
+    d.d_multiplier_ = d.elastic.d_multiplier;
 }
 
-template <typename ApproxData, typename InitFn>
-void initialize_pair_overlay(ApproxData &d, InitFn &&init_fn) {
-    for (Eigen::Index i = 0; i < d.base_residual.size(); ++i) {
-        const auto init = init_fn(i);
-        d.elastic.value[detail::slot_p](i) = init.p;
-        d.elastic.value[detail::slot_n](i) = init.n;
-        if constexpr (requires { init.nu_p; }) {
-            d.elastic.dual[detail::slot_p](i) = init.nu_p;
-            d.elastic.dual[detail::slot_n](i) = init.nu_n;
-        } else {
-            d.elastic.dual[detail::slot_p](i) = init.z_p;
-            d.elastic.dual[detail::slot_n](i) = init.z_n;
-        }
-        if constexpr (std::is_same_v<ApproxData, resto_ineq_elastic_ipm_constr::approx_data>) {
-            d.elastic.value[detail::slot_t](i) = init.t;
-            d.elastic.dual[detail::slot_t](i) = init.nu_t;
-            d.multiplier_(i) = init.nu_t;
-        } else {
-            d.multiplier_(i) = init.lambda;
-        }
-    }
-    d.multiplier_backup = d.multiplier_;
-}
-
-template <typename ApproxData>
-void apply_affine_pairs_like_ipm(ApproxData &d,
+void apply_affine_pairs_like_ipm(resto_eq_elastic_constr::approx_data &d,
                                  workspace_data *cfg,
                                  scalar_t multiplier_dual_alpha,
                                  scalar_t pair_dual_alpha) {
     auto &ls = cfg->as<linesearch_config>();
     assert(d.ipm_cfg != nullptr);
     assert(!d.ipm_cfg->ipm_computing_affine_step() && "ipm affine step computation not ended");
-    for (auto slot : active_slots<ApproxData>()) {
+    for (auto slot : k_pair_slots) {
         positivity::apply_pair_step(d.elastic.value[slot], d.elastic.d_value[slot],
                                     ls.alpha_primal, d.elastic.dual[slot], d.elastic.d_dual[slot],
                                     pair_dual_alpha);
     }
-    if constexpr (std::is_same_v<ApproxData, resto_ineq_elastic_ipm_constr::approx_data>) {
-        d.multiplier_ = d.elastic.dual[detail::slot_t];
-    } else {
-        d.multiplier_.noalias() += multiplier_dual_alpha * d.d_multiplier_;
-    }
+    d.multiplier_.noalias() += multiplier_dual_alpha * d.d_multiplier_;
     if (d.ipm_cfg->ipm_accept_corrector()) {
-        for (auto slot : active_slots<ApproxData>()) {
+        for (auto slot : k_pair_slots) {
             d.elastic.value[slot] = d.elastic.value[slot].array().max(1e-20);
             d.elastic.dual[slot] = d.elastic.dual[slot].array().max(1e-20);
-        }
-        if constexpr (std::is_same_v<ApproxData, resto_ineq_elastic_ipm_constr::approx_data>) {
-            d.multiplier_ = d.elastic.dual[detail::slot_t];
         }
     }
 }
 
-template <typename ApproxData>
-void update_pair_ls_bounds_like_ipm(ApproxData &d,
-                                    workspace_data *cfg,
-                                    std::string_view kind,
-                                    std::string_view name) {
+void update_pair_ls_bounds_like_ipm(resto_eq_elastic_constr::approx_data &d,
+                                    workspace_data *cfg) {
     auto &ls = cfg->as<linesearch_config>();
-    for (auto slot : active_slots<ApproxData>()) {
+    for (auto slot : k_pair_slots) {
         positivity::update_pair_bounds(ls, d.elastic.value[slot], d.elastic.d_value[slot],
                                        d.elastic.dual[slot], d.elastic.d_dual[slot]);
     }
 }
 
-template <typename ApproxData>
-void backup_trial_pairs_like_ipm(ApproxData &d) {
-    for (auto slot : active_slots<ApproxData>()) {
+void backup_trial_pairs_like_ipm(resto_eq_elastic_constr::approx_data &d) {
+    for (auto slot : k_pair_slots) {
         positivity::backup_pair(d.elastic.value[slot], d.elastic.value_backup[slot],
                                 d.elastic.dual[slot], d.elastic.dual_backup[slot]);
     }
     d.multiplier_backup = d.multiplier_;
 }
 
-template <typename ApproxData>
-void restore_trial_pairs_like_ipm(ApproxData &d) {
-    for (auto slot : active_slots<ApproxData>()) {
+void restore_trial_pairs_like_ipm(resto_eq_elastic_constr::approx_data &d) {
+    for (auto slot : k_pair_slots) {
         positivity::restore_pair(d.elastic.value[slot], d.elastic.value_backup[slot],
                                  d.elastic.dual[slot], d.elastic.dual_backup[slot]);
     }
     d.multiplier_ = d.multiplier_backup;
 }
 
-template <typename ApproxData>
-scalar_t objective_penalty_from_pairs(const ApproxData &d) {
+scalar_t objective_penalty_from_pairs(const resto_eq_elastic_constr::approx_data &d) {
     scalar_t sum = 0.;
     for (auto slot : k_pair_slots) {
         sum += d.elastic.value[slot].sum();
@@ -324,8 +270,7 @@ scalar_t objective_penalty_from_pairs(const ApproxData &d) {
     return rho_value(d, "objective_penalty_from_pairs") * sum;
 }
 
-template <typename ApproxData>
-scalar_t objective_penalty_dir_deriv_from_pairs(const ApproxData &d) {
+scalar_t objective_penalty_dir_deriv_from_pairs(const resto_eq_elastic_constr::approx_data &d) {
     scalar_t sum = 0.;
     for (auto slot : k_pair_slots) {
         sum += d.elastic.d_value[slot].sum();
@@ -333,25 +278,23 @@ scalar_t objective_penalty_dir_deriv_from_pairs(const ApproxData &d) {
     return rho_value(d, "objective_penalty_dir_deriv_from_pairs") * sum;
 }
 
-template <typename ApproxData>
-scalar_t search_penalty_from_pairs(const ApproxData &d) {
+scalar_t search_penalty_from_pairs(const resto_eq_elastic_constr::approx_data &d) {
     if (d.ipm_cfg == nullptr) {
         return 0.;
     }
     scalar_t sum = 0.;
-    for (auto slot : active_slots<ApproxData>()) {
+    for (auto slot : k_pair_slots) {
         sum += d.elastic.value[slot].array().max(scalar_t(1e-16)).log().sum();
     }
     return d.ipm_cfg->mu * sum;
 }
 
-template <typename ApproxData>
-scalar_t search_penalty_dir_deriv_from_pairs(const ApproxData &d) {
+scalar_t search_penalty_dir_deriv_from_pairs(const resto_eq_elastic_constr::approx_data &d) {
     if (d.ipm_cfg == nullptr) {
         return 0.;
     }
     scalar_t sum = 0.;
-    for (auto slot : active_slots<ApproxData>()) {
+    for (auto slot : k_pair_slots) {
         sum += (d.elastic.d_value[slot].array() /
                 d.elastic.value_backup[slot].array().max(scalar_t(1e-16)))
                    .sum();
@@ -462,10 +405,6 @@ resto_eq_elastic_constr::resto_eq_elastic_constr(const std::string &name,
     solver::overlay::copy_source_sparsity(*this, *source_func_);
 }
 
-void resto_eq_elastic_constr::finalize_impl() {
-    soft_constr::finalize_impl();
-}
-
 void resto_eq_elastic_constr::setup_workspace_data(func_arg_map &data, workspace_data *ws_data) const {
     soft_constr::setup_workspace_data(data, ws_data);
     auto &d = data.as<approx_data>();
@@ -548,7 +487,6 @@ void resto_eq_elastic_constr::initialize(data_map_t &data) const {
         const scalar_t n_clamped = std::max(n, scalar_t(1e-16));
         const scalar_t z_p = mu_bar / p_clamped;
         const scalar_t z_n = mu_bar / n_clamped;
-        const scalar_t lambda = rho - z_p;
 
         d.elastic.value[detail::slot_p](i) = p_clamped;
         d.elastic.value[detail::slot_n](i) = n_clamped;
@@ -593,7 +531,7 @@ void resto_eq_elastic_constr::apply_affine_step(data_map_t &data, workspace_data
 
 void resto_eq_elastic_constr::update_ls_bounds(data_map_t &data, workspace_data *cfg) const {
     auto &d = data.as<approx_data>();
-    update_pair_ls_bounds_like_ipm(d, cfg, "eq", name());
+    update_pair_ls_bounds_like_ipm(d, cfg);
 }
 
 void resto_eq_elastic_constr::backup_trial_state(data_map_t &data) const {
@@ -671,11 +609,6 @@ func_approx_data_ptr_t resto_ineq_elastic_ipm_constr::create_approx_data(sym_dat
     return std::make_unique<approx_data>(std::move(*base_d));
 }
 
-local_residual_summary resto_ineq_elastic_ipm_constr::current_local_residuals(const approx_data &data) const {
-    require_local_state_initialized(data.elastic, data.func_.dim(), "resto_ineq_elastic_ipm_constr::current_local_residuals");
-    return resto_ineq_elastic_ipm_constr::current_local_residuals(data.elastic);
-}
-
 void resto_ineq_elastic_ipm_constr::value_impl(func_approx_data &data) const {
     source_func_->value(data);
     auto &d = data.as<approx_data>();
@@ -695,13 +628,8 @@ void resto_ineq_elastic_ipm_constr::value_impl(func_approx_data &data) const {
     if (d.ipm_cfg == nullptr) {
         throw std::runtime_error("resto_ineq_elastic_ipm_constr::value_impl requires ipm_cfg");
     }
-    update_ineq_side_residuals(d);
-    resto_ineq_elastic_ipm_constr::compute_local_model(
-        d.elastic,
-        d.require_box_spec("resto_ineq_elastic_ipm_constr::value_impl"),
-        rho_value(d, "resto_ineq_elastic_ipm_constr::value_impl"),
-        d.ipm_cfg->mu);
-    sync_ineq_overlay_views(d);
+    refresh_ineq_local_model(d, d.require_box_spec("resto_ineq_elastic_ipm_constr::value_impl"),
+                             "resto_ineq_elastic_ipm_constr::value_impl", d.ipm_cfg->mu);
 }
 
 void resto_ineq_elastic_ipm_constr::jacobian_impl(func_approx_data &data) const {
@@ -715,13 +643,8 @@ void resto_ineq_elastic_ipm_constr::jacobian_impl(func_approx_data &data) const 
         return;
     }
     const scalar_t target_mu = d.ipm_cfg->ipm_enable_affine_step() ? scalar_t(0.) : d.ipm_cfg->mu;
-    update_ineq_side_residuals(d);
-    resto_ineq_elastic_ipm_constr::compute_local_model(
-        d.elastic,
-        d.require_box_spec("resto_ineq_elastic_ipm_constr::jacobian_impl"),
-        rho_value(d, "resto_ineq_elastic_ipm_constr::jacobian_impl"),
-        target_mu);
-    sync_ineq_overlay_views(d);
+    refresh_ineq_local_model(d, d.require_box_spec("resto_ineq_elastic_ipm_constr::jacobian_impl"),
+                             "resto_ineq_elastic_ipm_constr::jacobian_impl", target_mu);
     propagate_jacobian(d, d.elastic.schur_rhs_net);
     propagate_hessian(d, d.elastic.schur_inv_diag_sum);
 }
@@ -748,10 +671,9 @@ void resto_ineq_elastic_ipm_constr::initialize(data_map_t &data) const {
         throw std::runtime_error("resto_ineq_elastic_ipm_constr::initialize requires mu > 0");
     }
     update_ineq_side_residuals(d);
-    for (auto side : box_sides) if (box.has_side[side]) {
-        auto &side_state = d.elastic.side[side];
+    for_each_active_ineq_side(d.elastic, box, [&](auto side, auto &side_state, const auto &mask) {
         for (Eigen::Index i = 0; i < d.base_residual.size(); ++i) {
-            if (!box.present_mask[side](i)) {
+            if (!mask(i)) {
                 continue;
             }
             const scalar_t t0 = d.slack_init[side](i);
@@ -774,7 +696,7 @@ void resto_ineq_elastic_ipm_constr::initialize(data_map_t &data) const {
             side_state.dual[detail::slot_p](i) = mu_bar / p;
             side_state.dual[detail::slot_n](i) = mu_bar / n;
         }
-    }
+    });
     d.multiplier_backup = d.multiplier_;
     resto_ineq_elastic_ipm_constr::compute_local_model(d.elastic, box, rho, mu_bar);
     sync_ineq_overlay_views(d);
@@ -794,10 +716,9 @@ void resto_ineq_elastic_ipm_constr::finalize_newton_step(data_map_t &data) const
         ++arg_idx;
     }
     const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::finalize_newton_step");
-    for (auto side : box_sides) if (box.has_side[side]) {
-        auto &side_state = d.elastic.side[side];
+    for_each_active_ineq_side(d.elastic, box, [&](auto side, auto &side_state, const auto &mask) {
         const auto masked_delta =
-            box.present_mask[side].select(side_jac_sign(side) * d.d_multiplier_.array(), scalar_t(0)).matrix();
+            mask.select(side_jac_sign(side) * d.d_multiplier_.array(), scalar_t(0)).matrix();
         side_state.d_dual[detail::slot_t] =
             side_state.schur_inv_diag.array() * (masked_delta.array() + side_state.condensed_rhs.array());
         side_state.d_value[detail::slot_t] =
@@ -813,7 +734,7 @@ void resto_ineq_elastic_ipm_constr::finalize_newton_step(data_map_t &data) const
                 side_state.backsub_rhs[slot].array();
             side_state.d_dual[slot] = side_state.r_stat[slot].array() + sign * side_state.d_dual[detail::slot_t].array();
         }
-    }
+    });
     sync_ineq_overlay_views(d);
 }
 
@@ -825,22 +746,18 @@ void resto_ineq_elastic_ipm_constr::finalize_predictor_step(data_map_t &data, wo
     assert(d.ipm_cfg != nullptr);
     assert(d.ipm_cfg->ipm_computing_affine_step() &&
            "ipm affine step computation not started but affine step is requested");
-    for (auto side : box_sides) if (box.has_side[side]) {
-        auto &side_state = d.elastic.side[side];
-        for (auto slot : k_triplet_slots) {
-            worker.n_ipm_cstr += static_cast<size_t>(box.present_mask[side].count());
-            worker.prev_aff_comp +=
-                box.present_mask[side].select(side_state.dual[slot].array() * side_state.value[slot].array(), scalar_t(0)).sum();
-            side_state.corrector[slot].array() =
-                ls.alpha_dual * side_state.d_dual[slot].array() * ls.alpha_primal * side_state.d_value[slot].array();
-            worker.post_aff_comp +=
-                box.present_mask[side]
-                    .select((side_state.dual[slot] + ls.alpha_dual * side_state.d_dual[slot]).array() *
-                                (side_state.value[slot] + ls.alpha_primal * side_state.d_value[slot]).array(),
-                            scalar_t(0))
-                    .sum();
-        }
-    }
+    for_each_active_ineq_side_slot(d.elastic, box, [&](auto, auto slot, auto &side_state, const auto &mask) {
+        worker.n_ipm_cstr += static_cast<size_t>(mask.count());
+        worker.prev_aff_comp +=
+            mask.select(side_state.dual[slot].array() * side_state.value[slot].array(), scalar_t(0)).sum();
+        side_state.corrector[slot].array() =
+            ls.alpha_dual * side_state.d_dual[slot].array() * ls.alpha_primal * side_state.d_value[slot].array();
+        worker.post_aff_comp +=
+            mask.select((side_state.dual[slot] + ls.alpha_dual * side_state.d_dual[slot]).array() *
+                            (side_state.value[slot] + ls.alpha_primal * side_state.d_value[slot]).array(),
+                        scalar_t(0))
+                .sum();
+    });
 }
 
 void resto_ineq_elastic_ipm_constr::apply_corrector_step(data_map_t &data) const {
@@ -850,28 +767,18 @@ void resto_ineq_elastic_ipm_constr::apply_corrector_step(data_map_t &data) const
     }
     const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::apply_corrector_step");
     if (!d.ipm_cfg->ipm_accept_corrector()) {
-        for (auto side : box_sides) if (box.has_side[side]) {
-            auto &side_state = d.elastic.side[side];
-            for (auto slot : k_triplet_slots) {
-                side_state.corrector[slot].setZero();
-            }
-        }
+        for_each_active_ineq_side_slot(d.elastic, box, [](auto, auto slot, auto &side_state, const auto &) {
+            side_state.corrector[slot].setZero();
+        });
     }
-    update_ineq_side_residuals(d);
     detail::elastic_side_array<detail::elastic_triplet_array<vector>> corrector;
     const auto *corrector_ptr = d.ipm_cfg->ipm_accept_corrector() ? &corrector : nullptr;
     if (corrector_ptr != nullptr) {
-        for (auto side : box_sides) if (box.has_side[side]) {
-            corrector[side] = d.elastic.side[side].corrector;
-        }
+        for_each_active_ineq_side(d.elastic, box, [&](auto side, const auto &side_state, const auto &) {
+            corrector[side] = side_state.corrector;
+        });
     }
-    resto_ineq_elastic_ipm_constr::compute_local_model(
-        d.elastic,
-        box,
-        rho_value(d, "resto_ineq_elastic_ipm_constr::apply_corrector_step"),
-        d.ipm_cfg->mu,
-        corrector_ptr);
-    sync_ineq_overlay_views(d);
+    refresh_ineq_local_model(d, box, "resto_ineq_elastic_ipm_constr::apply_corrector_step", d.ipm_cfg->mu, corrector_ptr);
     propagate_jacobian(d, d.elastic.schur_rhs_net);
 }
 
@@ -879,79 +786,56 @@ void resto_ineq_elastic_ipm_constr::apply_affine_step(data_map_t &data, workspac
     auto &d = data.as<approx_data>();
     auto &ls = cfg->as<linesearch_config>();
     const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::apply_affine_step");
-    for (auto side : box_sides) if (box.has_side[side]) {
-        auto &side_state = d.elastic.side[side];
-        for (auto slot : k_triplet_slots) {
-            positivity::apply_pair_step(side_state.value[slot], side_state.d_value[slot], ls.alpha_primal,
-                                        side_state.dual[slot], side_state.d_dual[slot], ls.dual_alpha_for_ineq());
-            side_state.value[slot] =
-                box.present_mask[side].select(side_state.value[slot].array().max(1e-20), scalar_t(0)).matrix();
-            side_state.dual[slot] =
-                box.present_mask[side].select(side_state.dual[slot].array().max(1e-20), scalar_t(0)).matrix();
-        }
-    }
-    update_ineq_side_residuals(d);
-    resto_ineq_elastic_ipm_constr::compute_local_model(
-        d.elastic,
-        box,
-        rho_value(d, "resto_ineq_elastic_ipm_constr::apply_affine_step"),
-        d.ipm_cfg != nullptr ? d.ipm_cfg->mu : scalar_t(0));
-    sync_ineq_overlay_views(d);
+    for_each_active_ineq_side_slot(d.elastic, box, [&](auto, auto slot, auto &side_state, const auto &mask) {
+        positivity::apply_pair_step(side_state.value[slot], side_state.d_value[slot], ls.alpha_primal,
+                                    side_state.dual[slot], side_state.d_dual[slot], ls.dual_alpha_for_ineq());
+        side_state.value[slot] =
+            mask.select(side_state.value[slot].array().max(1e-20), scalar_t(0)).matrix();
+        side_state.dual[slot] =
+            mask.select(side_state.dual[slot].array().max(1e-20), scalar_t(0)).matrix();
+    });
+    refresh_ineq_local_model(d, box, "resto_ineq_elastic_ipm_constr::apply_affine_step",
+                             d.ipm_cfg != nullptr ? d.ipm_cfg->mu : scalar_t(0));
 }
 
 void resto_ineq_elastic_ipm_constr::update_ls_bounds(data_map_t &data, workspace_data *cfg) const {
     auto &d = data.as<approx_data>();
     auto &ls = cfg->as<linesearch_config>();
     const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::update_ls_bounds");
-    for (auto side : box_sides) if (box.has_side[side]) {
-        auto &side_state = d.elastic.side[side];
-        for (auto slot : k_triplet_slots) {
-            positivity::update_pair_bounds(ls, side_state.value[slot], side_state.d_value[slot],
-                                           side_state.dual[slot], side_state.d_dual[slot]);
-        }
-    }
+    for_each_active_ineq_side_slot(d.elastic, box, [&](auto, auto slot, auto &side_state, const auto &) {
+        positivity::update_pair_bounds(ls, side_state.value[slot], side_state.d_value[slot],
+                                       side_state.dual[slot], side_state.d_dual[slot]);
+    });
 }
 
 void resto_ineq_elastic_ipm_constr::backup_trial_state(data_map_t &data) const {
     auto &d = data.as<approx_data>();
     const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::backup_trial_state");
-    for (auto side : box_sides) if (box.has_side[side]) {
-        auto &side_state = d.elastic.side[side];
-        for (auto slot : k_triplet_slots) {
-            positivity::backup_pair(side_state.value[slot], side_state.value_backup[slot],
-                                    side_state.dual[slot], side_state.dual_backup[slot]);
-        }
-    }
+    for_each_active_ineq_side_slot(d.elastic, box, [](auto, auto slot, auto &side_state, const auto &) {
+        positivity::backup_pair(side_state.value[slot], side_state.value_backup[slot],
+                                side_state.dual[slot], side_state.dual_backup[slot]);
+    });
     d.multiplier_backup = d.multiplier_;
 }
 
 void resto_ineq_elastic_ipm_constr::restore_trial_state(data_map_t &data) const {
     auto &d = data.as<approx_data>();
     const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::restore_trial_state");
-    for (auto side : box_sides) if (box.has_side[side]) {
-        auto &side_state = d.elastic.side[side];
-        for (auto slot : k_triplet_slots) {
-            positivity::restore_pair(side_state.value[slot], side_state.value_backup[slot],
-                                     side_state.dual[slot], side_state.dual_backup[slot]);
-        }
-    }
-    update_ineq_side_residuals(d);
-    resto_ineq_elastic_ipm_constr::compute_local_model(
-        d.elastic,
-        box,
-        rho_value(d, "resto_ineq_elastic_ipm_constr::restore_trial_state"),
-        d.ipm_cfg != nullptr ? d.ipm_cfg->mu : scalar_t(0));
-    sync_ineq_overlay_views(d);
+    for_each_active_ineq_side_slot(d.elastic, box, [](auto, auto slot, auto &side_state, const auto &) {
+        positivity::restore_pair(side_state.value[slot], side_state.value_backup[slot],
+                                 side_state.dual[slot], side_state.dual_backup[slot]);
+    });
+    refresh_ineq_local_model(d, box, "resto_ineq_elastic_ipm_constr::restore_trial_state",
+                             d.ipm_cfg != nullptr ? d.ipm_cfg->mu : scalar_t(0));
 }
 
 scalar_t resto_ineq_elastic_ipm_constr::objective_penalty(const func_approx_data &data) const {
     const auto &d = static_cast<const approx_data &>(data);
     scalar_t sum = 0.;
     const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::objective_penalty");
-    for (auto side : box_sides) if (box.has_side[side]) {
-        sum += d.elastic.side[side].value[detail::slot_p].sum();
-        sum += d.elastic.side[side].value[detail::slot_n].sum();
-    }
+    for_each_active_ineq_side(d.elastic, box, [&](auto, const auto &side_state, const auto &) {
+        sum += side_state.value[detail::slot_p].sum() + side_state.value[detail::slot_n].sum();
+    });
     return rho_value(d, "resto_ineq_elastic_ipm_constr::objective_penalty") * sum;
 }
 
@@ -959,10 +843,9 @@ scalar_t resto_ineq_elastic_ipm_constr::objective_penalty_dir_deriv(const func_a
     const auto &d = static_cast<const approx_data &>(data);
     scalar_t sum = 0.;
     const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::objective_penalty_dir_deriv");
-    for (auto side : box_sides) if (box.has_side[side]) {
-        sum += d.elastic.side[side].d_value[detail::slot_p].sum();
-        sum += d.elastic.side[side].d_value[detail::slot_n].sum();
-    }
+    for_each_active_ineq_side(d.elastic, box, [&](auto, const auto &side_state, const auto &) {
+        sum += side_state.d_value[detail::slot_p].sum() + side_state.d_value[detail::slot_n].sum();
+    });
     return rho_value(d, "resto_ineq_elastic_ipm_constr::objective_penalty_dir_deriv") * sum;
 }
 
@@ -973,12 +856,10 @@ scalar_t resto_ineq_elastic_ipm_constr::search_penalty(const func_approx_data &d
     }
     const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::search_penalty");
     scalar_t sum = 0.;
-    for (auto side : box_sides) if (box.has_side[side]) {
-        for (auto slot : k_triplet_slots) {
-            const auto safe = box.present_mask[side].select(d.elastic.side[side].value[slot].array(), scalar_t(1));
-            sum += box.present_mask[side].select(safe.log(), scalar_t(0)).sum();
-        }
-    }
+    for_each_active_ineq_side_slot(d.elastic, box, [&](auto, auto slot, const auto &side_state, const auto &mask) {
+        const auto safe = mask.select(side_state.value[slot].array(), scalar_t(1));
+        sum += mask.select(safe.log(), scalar_t(0)).sum();
+    });
     return d.ipm_cfg->mu * sum;
 }
 
@@ -989,24 +870,25 @@ scalar_t resto_ineq_elastic_ipm_constr::search_penalty_dir_deriv(const func_appr
     }
     const auto &box = d.require_box_spec("resto_ineq_elastic_ipm_constr::search_penalty_dir_deriv");
     scalar_t sum = 0.;
-    for (auto side : box_sides) if (box.has_side[side]) {
-        for (auto slot : k_triplet_slots) {
-            const auto safe =
-                box.present_mask[side].select(d.elastic.side[side].value_backup[slot].array(), scalar_t(1));
-            sum += box.present_mask[side].select(d.elastic.side[side].d_value[slot].array() / safe, scalar_t(0)).sum();
-        }
-    }
+    for_each_active_ineq_side_slot(d.elastic, box, [&](auto, auto slot, const auto &side_state, const auto &mask) {
+        const auto safe = mask.select(side_state.value_backup[slot].array(), scalar_t(1));
+        sum += mask.select(side_state.d_value[slot].array() / safe, scalar_t(0)).sum();
+    });
     return d.ipm_cfg->mu * sum;
 }
 
 scalar_t resto_ineq_elastic_ipm_constr::local_stat_residual_inf(const func_approx_data &data) const {
     // Inequality-elastic local stationarity:
     // max(||rho - nu_t - nu_p||_inf, ||rho + nu_t - nu_n||_inf).
-    return current_local_residuals(static_cast<const approx_data &>(data)).inf_stat;
+    const auto &d = static_cast<const approx_data &>(data);
+    require_local_state_initialized(d.elastic, d.func_.dim(), "resto_ineq_elastic_ipm_constr::local_stat_residual_inf");
+    return current_local_residuals(d.elastic).inf_stat;
 }
 
 scalar_t resto_ineq_elastic_ipm_constr::local_comp_residual_inf(const func_approx_data &data) const {
-    return current_local_residuals(static_cast<const approx_data &>(data)).inf_comp;
+    const auto &d = static_cast<const approx_data &>(data);
+    require_local_state_initialized(d.elastic, d.func_.dim(), "resto_ineq_elastic_ipm_constr::local_comp_residual_inf");
+    return current_local_residuals(d.elastic).inf_comp;
 }
 
 ocp_ptr_t build_restoration_overlay_problem(const ocp_ptr_t &source_prob,
@@ -1113,22 +995,33 @@ outer_boxed_ipm_view outer_boxed_ipm(node_data &outer,
     return {outer_ipm, *box};
 }
 
-void copy_restoration_candidate_slack_to_outer(node_data &resto,
-                                               node_data &outer) {
+template <typename BeginFn, typename SideFn>
+void for_each_restoration_ineq_side(node_data &resto,
+                                    node_data &outer,
+                                    std::string_view where,
+                                    BeginFn &&begin_fn,
+                                    SideFn &&side_fn) {
     solver::overlay::for_each_overlay_field<resto_ineq_elastic_ipm_constr>(
         resto, std::array{__ineq_x, __ineq_xu}, [&](const resto_ineq_elastic_ipm_constr &overlay, resto_ineq_elastic_ipm_constr::approx_data &overlay_data) {
-            auto [outer_ipm, box] = outer_boxed_ipm(outer, overlay, "restoration candidate sync");
-            for (auto side : box_sides) if (box.has_side[side]) {
-                auto &outer_pair = *outer_ipm.box_side_[side];
-                const auto &resto_side = overlay_data.elastic.side[side];
-                const auto &mask = box.present_mask[side];
-                outer_pair.slack =
-                    mask.select(resto_side.value[detail::slot_t].array(), scalar_t(0)).matrix();
-                outer_pair.slack_backup = outer_pair.slack;
-                outer_pair.multiplier_backup = outer_pair.multiplier;
-                outer_pair.d_slack.setZero();
-                outer_pair.d_multiplier.setZero();
-            }
+            auto outer_view = outer_boxed_ipm(outer, overlay, where);
+            begin_fn(outer_view.data, overlay_data);
+            for_each_active_ineq_side(overlay_data.elastic, outer_view.box, [&](auto side, const auto &resto_side, const auto &mask) {
+                side_fn(outer_view.data, *outer_view.data.box_side_[side], side, resto_side, mask, overlay_data);
+            });
+        });
+}
+
+void copy_restoration_candidate_slack_to_outer(node_data &resto,
+                                               node_data &outer) {
+    for_each_restoration_ineq_side(resto, outer, "restoration candidate sync",
+        [](auto &, const auto &) {},
+        [](auto &, auto &outer_pair, auto, const auto &resto_side, const auto &mask, const auto &) {
+            outer_pair.slack =
+                mask.select(resto_side.value[detail::slot_t].array(), scalar_t(0)).matrix();
+            outer_pair.slack_backup = outer_pair.slack;
+            outer_pair.multiplier_backup = outer_pair.multiplier;
+            outer_pair.d_slack.setZero();
+            outer_pair.d_multiplier.setZero();
         });
 }
 
@@ -1140,46 +1033,42 @@ void copy_restoration_equality_duals_to_outer(node_data &resto,
 
 void copy_restoration_ineq_commit_to_outer(node_data &resto,
                                            node_data &outer) {
-    solver::overlay::for_each_overlay_field<resto_ineq_elastic_ipm_constr>(
-        resto, std::array{__ineq_x, __ineq_xu}, [&](const resto_ineq_elastic_ipm_constr &overlay, resto_ineq_elastic_ipm_constr::approx_data &overlay_data) {
-            auto [outer_ipm, box] = outer_boxed_ipm(outer, overlay, "restoration sync");
+    for_each_restoration_ineq_side(resto, outer, "restoration sync",
+        [](auto &outer_ipm, const auto &) {
             outer_ipm.multiplier_.setZero();
             outer_ipm.d_multiplier_.setZero();
             outer_ipm.comp_.setZero();
             outer_ipm.v_.setConstant(-std::numeric_limits<scalar_t>::infinity());
-            for (auto side : box_sides) if (box.has_side[side]) {
-                auto &outer_pair = *outer_ipm.box_side_[side];
-                const auto &resto_side = overlay_data.elastic.side[side];
-                const auto &mask = box.present_mask[side];
-                const auto target_slack = resto_side.value[detail::slot_t].array();
-                const scalar_t mu = overlay_data.ipm_cfg->mu;
-                outer_pair.d_slack =
-                    mask.select(target_slack - outer_pair.slack.array(), scalar_t(0)).matrix();
-                outer_pair.d_multiplier =
-                    mask.select((mu - outer_pair.multiplier.array() * outer_pair.d_slack.array()) /
-                                    target_slack -
-                                    outer_pair.multiplier.array(),
-                                scalar_t(0))
-                        .matrix();
-                outer_pair.slack = mask.select(target_slack, scalar_t(0)).matrix();
-                outer_pair.slack_backup = outer_pair.slack;
-                outer_pair.multiplier_backup = outer_pair.multiplier;
-                static_cast<solver::ipm_constr::approx_data::side_data &>(outer_pair).r_s =
-                    mask.select(outer_pair.multiplier.array() * outer_pair.slack.array(), scalar_t(0)).matrix();
-                const scalar_t dual_sign = side == box_side::ub ? scalar_t(1) : scalar_t(-1);
-                outer_ipm.multiplier_.array() +=
-                    dual_sign * mask.select(outer_pair.multiplier.array(), scalar_t(0));
-                outer_ipm.d_multiplier_.array() +=
-                    dual_sign * mask.select(outer_pair.d_multiplier.array(), scalar_t(0));
-                outer_ipm.v_ =
-                    mask.select(outer_ipm.v_.cwiseMax(resto_side.r_d).array(), outer_ipm.v_.array())
-                        .matrix();
-                outer_ipm.comp_ =
-                    mask.select((outer_pair.multiplier.array() * outer_pair.slack.array()).abs()
-                                    .max(outer_ipm.comp_.array()),
-                                outer_ipm.comp_.array())
-                        .matrix();
-            }
+        },
+        [](auto &outer_ipm, auto &outer_pair, auto side, const auto &resto_side, const auto &mask, const auto &overlay_data) {
+            const auto target_slack = resto_side.value[detail::slot_t].array();
+            const scalar_t mu = overlay_data.ipm_cfg->mu;
+            outer_pair.d_slack =
+                mask.select(target_slack - outer_pair.slack.array(), scalar_t(0)).matrix();
+            outer_pair.d_multiplier =
+                mask.select((mu - outer_pair.multiplier.array() * outer_pair.d_slack.array()) /
+                                target_slack -
+                                outer_pair.multiplier.array(),
+                            scalar_t(0))
+                    .matrix();
+            outer_pair.slack = mask.select(target_slack, scalar_t(0)).matrix();
+            outer_pair.slack_backup = outer_pair.slack;
+            outer_pair.multiplier_backup = outer_pair.multiplier;
+            static_cast<solver::ipm_constr::approx_data::side_data &>(outer_pair).r_s =
+                mask.select(outer_pair.multiplier.array() * outer_pair.slack.array(), scalar_t(0)).matrix();
+            const scalar_t dual_sign = side == box_side::ub ? scalar_t(1) : scalar_t(-1);
+            outer_ipm.multiplier_.array() +=
+                dual_sign * mask.select(outer_pair.multiplier.array(), scalar_t(0));
+            outer_ipm.d_multiplier_.array() +=
+                dual_sign * mask.select(outer_pair.d_multiplier.array(), scalar_t(0));
+            outer_ipm.v_ =
+                mask.select(outer_ipm.v_.cwiseMax(resto_side.r_d).array(), outer_ipm.v_.array())
+                    .matrix();
+            outer_ipm.comp_ =
+                mask.select((outer_pair.multiplier.array() * outer_pair.slack.array()).abs()
+                                .max(outer_ipm.comp_.array()),
+                            outer_ipm.comp_.array())
+                    .matrix();
         });
 }
 

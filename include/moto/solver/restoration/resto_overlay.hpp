@@ -146,7 +146,7 @@ class resto_eq_elastic_constr final : public soft_constr {
         vector jac_step_tmp;
         vector multiplier_backup;
         detail::eq_local_state elastic;
-      scalar_t *rho = nullptr;
+        scalar_t *rho = nullptr;
 
         explicit approx_data(soft_constr::approx_data &&rhs)
             : soft_constr::approx_data(std::move(rhs)) {}
@@ -160,7 +160,6 @@ class resto_eq_elastic_constr final : public soft_constr {
                                               lag_data &raw,
                                               shared_data &shared) const override;
 
-    void finalize_impl() override;
     void value_impl(func_approx_data &data) const override;
     void jacobian_impl(func_approx_data &data) const override;
     void hessian_impl(func_approx_data &data) const override;
@@ -256,7 +255,6 @@ class resto_ineq_elastic_ipm_constr final : public ineq_constr {
 
   private:
     static void resize_local_state(detail::ineq_local_state &state, size_t nx_dim, size_t nu_dim);
-    local_residual_summary current_local_residuals(const approx_data &data) const;
 
     constr source_;
     const generic_func *source_func_ = nullptr;
