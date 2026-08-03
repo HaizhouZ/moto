@@ -16,6 +16,7 @@
 #include <numeric>
 #include <sstream>
 #include <unordered_map>
+#include <Eigen/LU>
 
 namespace moto::linear_backend {
 namespace {
@@ -126,6 +127,184 @@ void *compile_source(const std::string &source,
 }
 
 } // namespace
+
+solve_profile analyze_solve_profile(std::span<const matrix> samples,
+                                    scalar_t relative_tolerance) {
+  if (samples.empty() || samples.front().rows() != samples.front().cols())
+    throw std::invalid_argument("solve profile requires square matrix samples");
+  const size_t n = samples.front().rows();
+  std::vector<unsigned char> pattern(n * n), inverse_pattern(n * n);
+  const matrix identity = matrix::Identity(n, n);
+  for (const matrix &sample : samples) {
+    if (sample.rows() != static_cast<Eigen::Index>(n) ||
+        sample.cols() != static_cast<Eigen::Index>(n))
+      throw std::invalid_argument("solve profile sample dimensions differ");
+    const scalar_t a_tol = relative_tolerance * std::max<scalar_t>(1., sample.cwiseAbs().maxCoeff());
+    for (size_t col = 0; col < n; ++col)
+      for (size_t row = 0; row < n; ++row)
+        pattern[row + col * n] |= std::abs(sample(row, col)) > a_tol;
+    Eigen::PartialPivLU<matrix> lu(sample);
+    const matrix inverse = lu.solve(identity);
+    if (!inverse.allFinite() ||
+        !(sample * inverse).isApprox(identity, 100 * relative_tolerance))
+      throw std::runtime_error("singular matrix while detecting solve profile");
+    const scalar_t i_tol = relative_tolerance * std::max<scalar_t>(1., inverse.cwiseAbs().maxCoeff());
+    for (size_t col = 0; col < n; ++col)
+      for (size_t row = 0; row < n; ++row)
+        inverse_pattern[row + col * n] |= std::abs(inverse(row, col)) > i_tol;
+  }
+
+  // Tarjan SCC on the matrix dependency graph. Each component is one dense LU
+  // block; edges between components define the branch-free substitution order.
+  std::vector<int> index(n, -1), low(n), stack;
+  std::vector<unsigned char> on_stack(n);
+  std::vector<std::vector<size_t>> components;
+  int next_index = 0;
+  std::function<void(size_t)> visit = [&](size_t row) {
+    index[row] = low[row] = next_index++;
+    stack.push_back(static_cast<int>(row));
+    on_stack[row] = 1;
+    for (size_t col = 0; col < n; ++col) {
+      if (row == col || !pattern[row + col * n])
+        continue;
+      if (index[col] < 0) {
+        visit(col);
+        low[row] = std::min(low[row], low[col]);
+      } else if (on_stack[col]) {
+        low[row] = std::min(low[row], index[col]);
+      }
+    }
+    if (low[row] != index[row])
+      return;
+    auto &component = components.emplace_back();
+    for (;;) {
+      const size_t node = stack.back();
+      stack.pop_back();
+      on_stack[node] = 0;
+      component.push_back(node);
+      if (node == row)
+        break;
+    }
+    std::sort(component.begin(), component.end());
+  };
+  for (size_t i = 0; i < n; ++i)
+    if (index[i] < 0)
+      visit(i);
+
+  solve_profile result{.dimension = n,
+                       .inverse_nonzeros = std::move(inverse_pattern)};
+  std::vector<size_t> component_of(n);
+  for (size_t c = 0; c < components.size(); ++c) {
+    const auto &nodes = components[c];
+    if (nodes.back() - nodes.front() + 1 != nodes.size()) {
+      result.dense_fallback = true;
+      result.order = {{0, n, {}}};
+      return result;
+    }
+    for (size_t node : nodes)
+      component_of[node] = c;
+  }
+  std::vector<std::vector<size_t>> deps(components.size());
+  for (size_t row = 0; row < n; ++row)
+    for (size_t col = 0; col < n; ++col) {
+      const size_t r = component_of[row], c = component_of[col];
+      if (r != c && pattern[row + col * n] &&
+          std::find(deps[r].begin(), deps[r].end(), c) == deps[r].end())
+        deps[r].push_back(c);
+    }
+  std::vector<unsigned char> emitted(components.size()), active(components.size());
+  std::function<void(size_t)> emit = [&](size_t block) {
+    if (emitted[block])
+      return;
+    if (active[block])
+      throw std::runtime_error("invalid cyclic solve condensation graph");
+    active[block] = 1;
+    for (size_t dep : deps[block])
+      emit(dep);
+    active[block] = 0;
+    emitted[block] = 1;
+    const auto &nodes = components[block];
+    solve_block out{nodes.front(), nodes.size(), {}};
+    for (size_t dep : deps[block])
+      out.dependencies.push_back(components[dep].front());
+    result.order.push_back(std::move(out));
+  };
+  for (size_t block = 0; block < components.size(); ++block)
+    emit(block);
+  return result;
+}
+
+std::string emit_multi_solve_source(const solve_profile &profile,
+                                    std::span<const size_t> rhs_cols,
+                                    bool transpose) {
+  if (profile.dimension == 0 || rhs_cols.empty() ||
+      std::ranges::any_of(rhs_cols, [](size_t n) { return n == 0; }))
+    throw std::invalid_argument("multi-solve dimensions must be nonzero");
+  std::ostringstream out;
+  out << "#include <Eigen/Core>\n#include <Eigen/LU>\n"
+         "extern \"C\" __attribute__((visibility(\"default\"))) void "
+      << symbol_name << "(double* const* p) {\n"
+      << "using M=Eigen::Matrix<double,Eigen::Dynamic,Eigen::Dynamic,Eigen::ColMajor>;\n"
+      << "Eigen::Map<const M> A(p[0]," << profile.dimension << ','
+      << profile.dimension << ");\n"
+      << (transpose ? "auto At=A.transpose();\n" : "auto& At=A;\n");
+  for (size_t i = 0; i < rhs_cols.size(); ++i)
+    out << "Eigen::Map<const M> B" << i << "(p[" << 1 + 2 * i << "],"
+        << profile.dimension << ',' << rhs_cols[i] << ");"
+        << "Eigen::Map<M> X" << i << "(p[" << 2 + 2 * i << "],"
+        << profile.dimension << ',' << rhs_cols[i] << ");X" << i << "=B"
+        << i << ";\n";
+  if (profile.dense_fallback) {
+    out << "Eigen::PartialPivLU<M> lu(At);\n";
+    for (size_t i = 0; i < rhs_cols.size(); ++i)
+      out << "X" << i << "=lu.solve(X" << i << ").eval();\n";
+  } else {
+    std::map<size_t, size_t> sizes;
+    for (const auto &block : profile.order)
+      sizes[block.offset] = block.size;
+    size_t block_index = 0;
+    for (const auto &block : profile.order) {
+      if (block.size > 1)
+        out << "auto lu" << block_index << "=At.block(" << block.offset << ','
+            << block.offset << ',' << block.size << ',' << block.size
+            << ").eval().partialPivLu();\n";
+      for (size_t i = 0; i < rhs_cols.size(); ++i) {
+        for (size_t dependency : block.dependencies)
+          out << "X" << i << ".middleRows(" << block.offset << ','
+              << block.size << ").noalias()-=At.block(" << block.offset << ','
+              << dependency << ',' << block.size << ',' << sizes.at(dependency)
+              << ")*X" << i << ".middleRows(" << dependency << ','
+              << sizes.at(dependency) << ");\n";
+        if (block.size == 1)
+          out << "X" << i << ".row(" << block.offset << ")/=At("
+              << block.offset << ',' << block.offset << ");\n";
+        else
+          out << "X" << i << ".middleRows(" << block.offset << ','
+              << block.size << ")=lu" << block_index << ".solve(X" << i
+              << ".middleRows(" << block.offset << ',' << block.size
+              << ")).eval();\n";
+      }
+      ++block_index;
+    }
+  }
+  out << "}\n";
+  return out.str();
+}
+
+multi_solve_kernel compile_multi_solve(solve_profile profile,
+                                       std::vector<size_t> rhs_cols,
+                                       bool transpose,
+                                       const std::filesystem::path &cache_dir) {
+  auto *function = reinterpret_cast<multi_solve_kernel::function_type>(
+      compile_source(emit_multi_solve_source(profile, rhs_cols, transpose), cache_dir));
+  return {std::move(profile), std::move(rhs_cols), function};
+}
+
+void multi_solve_kernel::operator()(std::span<scalar_t *> pointers) const {
+  if (!function_ || pointers.size() != pointer_count())
+    throw std::invalid_argument("multi-solve pointer count differs from profile");
+  function_(pointers.data());
+}
 
 extern "C" __attribute__((visibility("default"))) void
 moto_linear_dense_times(const double *a, size_t ar, size_t ac, const double *b,

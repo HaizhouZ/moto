@@ -4,6 +4,7 @@
 #include <moto/core/sparse_matrix.hpp>
 
 #include <cstdint>
+#include <Eigen/LU>
 
 namespace moto::linear_backend {
 namespace {
@@ -130,6 +131,49 @@ TEST_CASE("JIT panel products match dense algebra") {
   matrix left_t = matrix::Random(8, 4);
   check(product_op::right_transpose_times, left_t, left_t.transpose() * dense,
         1.);
+}
+
+TEST_CASE("numeric Eigen LU analysis emits a branch-free semi-implicit solve") {
+  constexpr size_t nv = 18, nx = 2 * nv;
+  matrix fy = matrix::Identity(nx, nx);
+  fy.block(3, 3, 3, 3) = matrix::Random(3, 3);
+  fy.block(3, 3, 3, 3).diagonal().array() += 3.;
+  fy.block(0, nv, nv, nv).diagonal() =
+      vector::LinSpaced(nv, -.03, -.01);
+  fy.block(3, nv + 3, 3, 3) = .02 * matrix::Random(3, 3);
+  matrix fy_second = fy;
+  fy_second.block(3, 3, 3, 3) += .1 * matrix::Random(3, 3);
+
+  const std::array samples{fy, fy_second};
+  const auto profile = analyze_solve_profile(samples);
+  REQUIRE_FALSE(profile.dense_fallback);
+  REQUIRE(profile.inverse_nonzeros.size() == nx * nx);
+  const std::array<size_t, 1> one_rhs{31};
+  const auto source = emit_multi_solve_source(profile, one_rhs);
+  REQUIRE(source.find("if (") == std::string::npos);
+  REQUIRE(source.find("partialPivLu") != std::string::npos);
+
+  matrix rhs = matrix::Random(nx, 31), result(nx, 31);
+  auto kernel = compile_multi_solve(profile, {31});
+  std::vector<scalar_t *> one{fy.data(), rhs.data(), result.data()};
+  kernel(one);
+  REQUIRE(result.isApprox(fy.partialPivLu().solve(rhs), 1e-12));
+  REQUIRE((fy * result).isApprox(rhs, 1e-12));
+
+  matrix rhs2 = matrix::Random(nx, 7), result2(nx, 7);
+  std::array transpose_samples{matrix(fy.transpose()), matrix(fy_second.transpose())};
+  auto transpose_kernel = compile_multi_solve(analyze_solve_profile(transpose_samples),
+                                              {7}, true);
+  std::vector<scalar_t *> transpose_ptrs{fy.data(), rhs2.data(), result2.data()};
+  transpose_kernel(transpose_ptrs);
+  REQUIRE((fy.transpose() * result2).isApprox(rhs2, 1e-12));
+
+  auto multi = compile_multi_solve(profile, {31, 7});
+  std::vector<scalar_t *> pointers{
+      fy.data(), rhs.data(), result.data(), rhs2.data(), result2.data()};
+  multi(pointers);
+  REQUIRE((fy * result).isApprox(rhs, 1e-12));
+  REQUIRE((fy * result2).isApprox(rhs2, 1e-12));
 }
 
 TEST_CASE("sparse_matrix dispatches dense operands through JIT") {

@@ -10,6 +10,7 @@
 #include <nanobind/stl/variant.h>
 
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
+#include <moto/ocp/dynamics/sparse_dynamics.hpp>
 
 #include <enum_export.hpp>
 
@@ -294,4 +295,14 @@ void register_submodule_functional(nb::module_ &m) {
             },
             nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd)
         .def("mark_shared_inputs", &dense_dynamics::mark_shared_inputs, nb::arg("shared_inputs"));
+
+    nb::class_<sparse_dynamics, dense_dynamics>(m, "sparse_dynamics")
+        .def_static(
+            "create",
+            [](const std::string &name, const cs::SX &out,
+               approx_order order) {
+                return std::make_shared<sparse_dynamics>(name, out, order);
+            },
+            nb::arg("name"), nb::arg("out"),
+            nb::arg("order") = approx_order::first);
 }

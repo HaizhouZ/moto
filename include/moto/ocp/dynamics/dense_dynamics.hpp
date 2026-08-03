@@ -52,7 +52,7 @@ class dense_dynamics : public generic_dynamics {
     /// @note should be called before finalization
     void mark_shared_inputs(const var_inarg_list &args);
 
-  private:
+  protected:
     bool input_shared(const sym &s) const;
 
     var_list shared_inputs_;

@@ -5,6 +5,7 @@ PUBLIC_BINDINGS = {
     "cost",
     "casadi_manifold",
     "dense_dynamics",
+    "sparse_dynamics",
     "expr",
     "field",
     "func",

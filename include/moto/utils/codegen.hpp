@@ -25,6 +25,9 @@ std::string compute_md5_from_bytes(std::string_view content);
 
 namespace cs_codegen {
 
+cs::SX tangent_map(const sym &input);
+cs::SX tangent_jacobian(const cs::SX &output, const sym &input);
+
 struct job_list {
     using job_type = std::function<void()>;
     std::vector<job_type> jobs;

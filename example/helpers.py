@@ -56,6 +56,13 @@ def pinocchio_states(model, name, default=None):
     return q, qn, v, vn
 
 
+def semi_implicit_dynamics(name, q, v, qn, vn, velocity_residual, dt):
+    """Create manifold semi-implicit Euler dynamics without exposing Pinocchio ops."""
+    q_next = q.symbolic_integrate(q.sx, vn * dt)
+    residual = cs.vcat([q.symbolic_difference(qn.sx, q_next), velocity_residual])
+    return moto.sparse_dynamics.create(name, residual)
+
+
 class PinocchioCasadiModel(cpin.Model):
     """CasADi Pinocchio model with common kinematics/dynamics operations."""
 
@@ -286,20 +293,9 @@ class ContactRobotModel(PinocchioCasadiModel):
                 self.contacts.generalized_impulse,
             )
 
-        if configuration_velocity == "next":
-            integration_velocity = self.vn
-        elif configuration_velocity == "predicted":
-            integration_velocity = (
-                self.v + self.aba if use_forward_dynamics else self.vn
-            )
-        else:
+        if configuration_velocity not in ("next", "predicted"):
             raise ValueError("configuration_velocity must be 'next' or 'predicted'")
-        q_next = self.q.symbolic_integrate(
-            self.q.sx, integration_velocity * dt
-        )
-        self.configuration_residual = self.q.symbolic_difference(
-            self.qn.sx, q_next
-        )
+        self.configuration_velocity = configuration_velocity
         self.dyn = self._make_contact_dynamics()
 
         self.q_nom = moto.sym.params(
@@ -315,9 +311,14 @@ class ContactRobotModel(PinocchioCasadiModel):
         else:
             velocity_residual = self.rnea - self.generalized_torque(self.tq) * self.dt
             name = f"{self.name}_id"
-        return moto.dense_dynamics.create(
-            name,
-            cs.vcat([self.configuration_residual, velocity_residual]),
+        if self.configuration_velocity == "next":
+            return semi_implicit_dynamics(
+                name, self.q, self.v, self.qn, self.vn, velocity_residual, self.dt
+            )
+        integration_velocity = self.v + self.aba if self.use_fwd_dyn else self.vn
+        q_next = self.q.symbolic_integrate(self.q.sx, integration_velocity * self.dt)
+        return moto.sparse_dynamics.create(
+            name, cs.vcat([self.q.symbolic_difference(self.qn.sx, q_next), velocity_residual])
         )
 
     def input_cost(self, *, torque_weight=1e-6, contact_weight=1e-3, name="c_u"):

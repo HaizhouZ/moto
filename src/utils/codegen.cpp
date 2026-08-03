@@ -15,6 +15,19 @@ namespace fs = std::filesystem;
 using json = nlohmann::json;
 namespace cs_codegen {
 
+cs::SX tangent_map(const sym &input) {
+    auto step = cs::SX::sym(input.name() + "_step", input.tdim());
+    return cs::SX::substitute(
+        cs::SX::jacobian(input.symbolic_integrate(input, step), step), step,
+        cs::SX::zeros(input.tdim(), 1));
+}
+
+cs::SX tangent_jacobian(const cs::SX &output, const sym &input) {
+    if (!input.has_non_trivial_integration())
+        return cs::SX::jacobian(output, input);
+    return cs::SX::mtimes(cs::SX::jacobian(output, input), tangent_map(input));
+}
+
 void job_list::wait_until_finished() {
     for (auto &w : jobs) {
         w();
@@ -663,13 +676,6 @@ void task::finalize(job_list &jobs_) {
         merit_jac_for_hess = true;
     }
 
-    auto get_dstep_ds = [](const sym &s) -> cs::SX {
-        auto step = cs::SX::sym(s.name() + "_step", s.tdim());
-        return cs::SX::substitute(
-            cs::SX::jacobian(s.symbolic_integrate(s, step), step), step,
-            cs::SX::zeros(s.tdim(), 1));
-    };
-
     std::vector<cs::SX> jacs;
     std::vector<cs::SX> jacs_copy;
     // generate jacobian
@@ -680,13 +686,7 @@ void task::finalize(job_list &jobs_) {
                     jacs.push_back(external_jac[s.uid()]);
                     continue;
                 }
-                if (s.has_non_trivial_integration()) {
-                    // get jacobian wrt step (variation)
-                    auto j = cs::SX::mtimes(cs::SX::jacobian(sx_output, s), get_dstep_ds(s));
-                    jacs.push_back(j);
-                } else {
-                    jacs.push_back(cs::SX::jacobian(sx_output, s));
-                }
+                jacs.push_back(tangent_jacobian(sx_output, s));
             } else
                 jacs.push_back(cs::SX());
         }
@@ -813,7 +813,7 @@ void task::finalize(job_list &jobs_) {
                         (*hess_sp)[idx_i][idx_j].pattern = sparsity::unknown; // no hessian
                     continue;
                 } else if (!tangent_hessian && j.has_non_trivial_integration()) {
-                    hess[idx_i][idx_j] = cs::SX::mtimes(hess[idx_i][idx_j], get_dstep_ds(j));
+                    hess[idx_i][idx_j] = cs::SX::mtimes(hess[idx_i][idx_j], tangent_map(j));
                 }
                 if (hess_panels != nullptr) {
                     auto pieces = split_hessian_blocks(hess[idx_i][idx_j]);
