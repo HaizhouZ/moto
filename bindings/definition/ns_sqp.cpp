@@ -37,6 +37,8 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         }, nb::arg("n_iter") = 1, nb::arg("verbose") = true, nb::arg("profile") = false,
            "Update the SQP solver for a given number of iterations")
         .def("get_profile_report", &ns_sqp::profile, "Get the latest SQP wall-clock profile report")
+        .def_prop_ro("n_job", &ns_sqp::n_jobs,
+                     "Effective maximum number of SQP worker threads")
         .def_ro("settings", &ns_sqp::settings, "Get the settings of the SQP solver");
 
     nb::class_<ns_sqp::ipm_config>(sqp, "ipm_config")
@@ -217,8 +219,8 @@ void register_submodule_ns_sqp(nb::module_ &m) {
 
     nb::class_<ns_sqp::data, node_data>(sqp, "data_type");
 
-    sqp.def("flatten_nodes",
-            [](ns_sqp &self) -> auto & { return self.solver_nodes(); },
-            nb::rv_policy::reference_internal,
-            "Get the ordered solver nodes");
+    sqp.def_prop_ro("nodes",
+                    [](ns_sqp &self) -> auto & { return self.solver_nodes(); },
+                    nb::rv_policy::reference_internal,
+                    "Ordered solver-node list");
 }

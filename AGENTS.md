@@ -167,7 +167,7 @@ stage.add(dynamics)
 stage.add(interval_cost)
 stages = sqp.add_stage(stage, horizon)
 stages[-1].ed.add(terminal_cost)
-nodes = sqp.flatten_nodes()
+nodes = sqp.nodes
 ```
 
 Placement rules:
@@ -187,8 +187,9 @@ tail. `sqp.add_stages(node, stage, N)` appends from an explicit graph boundary.
 Returned stages are mutable graph-owned copies; editing them invalidates cached
 realization. Editing the original prototype later does not mutate those copies.
 
-`flatten_nodes()` realizes solver stages for initialization and debugging. It
-is not the modeling API and should not absorb graph semantic policy.
+`sqp.nodes` realizes and returns the ordered solver-stage list for initialization
+and debugging. It is not the modeling API and should not absorb graph semantic
+policy.
 
 ## Graph Composition
 
@@ -435,7 +436,8 @@ and cleanup behavior.
 
 ## Runtime Traversal And Threading
 
-`linear_runtime_graph` is internal contiguous solver storage. It provides
+`linear_runtime_graph` is internal contiguous solver storage. Its `nodes()`
+accessor returns the ordered list directly; there is no flattening operation. It provides
 forward, backward, adjacent, zipped, sequential, and parallel views. It is not
 a public modeling graph.
 
@@ -466,6 +468,10 @@ When changing a public enum, constructor, setting, or return type:
 
 For external libraries that do not recognize the derived `moto.var`, pass
 `var.sx`. Prefer helpers for Pinocchio manifold operations.
+
+Robot example visualization uses `viser` and `viser.extras.ViserUrdf` through
+the shared `ViserRobot` helper in `example/helpers.py`. Do not reintroduce
+MeshCat or initialize an `example_robot_data` viewer during model construction.
 
 ## Editing Checklist
 

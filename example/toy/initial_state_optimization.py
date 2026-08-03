@@ -11,7 +11,7 @@ import casadi as cs
 import moto
 import numpy as np
 
-from example.helpers import solver_nodes, visit_nodes
+from example.helpers import visit_nodes
 
 N = 3
 TARGET = 2.0
@@ -45,7 +45,7 @@ def solve(mode, *, optimize):
     sqp.settings.dual_tol = 1e-9
     sqp.settings.comp_tol = 1e-9
 
-    nodes = solver_nodes(sqp)
+    nodes = sqp.nodes
 
     def initialize(node, _):
         node.value[x] = np.zeros(1)

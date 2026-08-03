@@ -16,13 +16,14 @@ import pinocchio as pin
 from example.helpers import (
     ContactRobotModel,
     GO2_FOOT_FRAMES,
+    ViserRobot,
     add_stage_segments,
     add_terms,
     add_time_step_regularization,
+    animate_trajectory,
     build_floating_base_model,
     collect_state_trajectory,
     print_graph_layout,
-    solver_nodes,
     visit_nodes,
 )
 from example_robot_data import load
@@ -119,15 +120,7 @@ def main():
     if display is None:
         display = display_env != "0" if display_env is not None else False
     profile_sqp = args.profile
-    try:
-        go2 = load("go2", display=display, verbose=True)
-    except Exception as exc:
-        if display:
-            print(f"viewer init failed, retrying with display disabled: {exc}")
-            display = False
-            go2 = load("go2", display=False, verbose=True)
-        else:
-            raise
+    go2 = load("go2", display=False, verbose=True)
     q_d = np.copy(go2.q0)
     model = build_floating_base_model(go2.urdf)
     np.set_printoptions(precision=3, suppress=True, linewidth=200)
@@ -218,7 +211,7 @@ def main():
     graph_stages = add_stage_segments(sqp, segment_start_nodes, segment_lengths)
 
     add_end_node_terms(graph_stages[-1].ed, model)
-    nodes = solver_nodes(sqp)
+    nodes = sqp.nodes
 
     if os.getenv("MOTO_DEBUG_SOLVER_PROBS"):
         print("--" * 15)
@@ -330,29 +323,13 @@ def main():
     if not display:
         return
 
-    import meshcat.transformations as tf
-    import meshcat_shapes as mcs
-
-    viz = go2.viz
-
-    color = [0x00FF00, 0xFF0000]
-    for i in range(2):
-        mcs.point(viz.viewer[f"/target{i}"], color=color[i], radius=0.04)
-        pose = tf.compose_matrix(translate=cfg[i][:2] + [0.3])
-        viz.viewer[f"/target{i}"].set_transform(pose)
-        mcs.frame(viz.viewer[f"/frame{i}"])
-        viz.viewer[f"/frame{i}"].set_transform(pose)
-
-    while True:
-        for i in range(len(q_res)):
-            start = time.perf_counter()
-            go2.display(q_res[i])
-            if i != N_horizon:
-                dt_ = dt_res[i]
-                remaining = dt_ - (time.perf_counter() - start)
-                if remaining > 0:
-                    time.sleep(remaining)
-        time.sleep(0.5)
+    viewer = ViserRobot(go2.urdf, floating_base=True)
+    colors = [(0, 255, 0), (255, 0, 0)]
+    for index, target in enumerate(cfg):
+        viewer.add_target(
+            str(index), np.r_[target[:2], 0.3], color=colors[index]
+        )
+    animate_trajectory(viewer, q_res, dt_res)
 
 
 if __name__ == "__main__":

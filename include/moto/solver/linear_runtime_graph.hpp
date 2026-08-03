@@ -55,7 +55,7 @@ class linear_runtime_graph {
         order_dirty_ = true;
     }
 
-    auto &flatten_nodes() {
+    auto &nodes() {
         ensure_order();
         return ordered_;
     }
@@ -90,7 +90,7 @@ inline constexpr par_t par{};
 namespace graph_detail {
 
 template <typename T>
-concept graph_like = requires(T &g) { typename T::data_type; g.flatten_nodes(); g.n_jobs(); g.no_except(); };
+concept graph_like = requires(T &g) { typename T::data_type; g.nodes(); g.n_jobs(); g.no_except(); };
 
 template <typename Callback, typename... Ptrs>
 void invoke(Callback &&callback, size_t tid, Ptrs... ptrs) {
@@ -114,7 +114,7 @@ template <typename GraphA, typename GraphB>
 struct zip_range {
     using data_type = typename GraphA::data_type;
     zip_range(GraphA &a, GraphB &b)
-        : a_(&a.flatten_nodes()), b_(&b.flatten_nodes()),
+        : a_(&a.nodes()), b_(&b.nodes()),
           n_jobs_(a.n_jobs()), no_except_(a.no_except()) {
         if (a_->size() != b_->size()) {
             throw std::runtime_error("zip range size mismatch");
@@ -139,7 +139,7 @@ template <bool Forward, typename Graph>
 struct adjacent_range {
     using data_type = typename Graph::data_type;
     explicit adjacent_range(Graph &graph)
-        : ordered_(&graph.flatten_nodes()), n_jobs_(graph.n_jobs()),
+        : ordered_(&graph.nodes()), n_jobs_(graph.n_jobs()),
           no_except_(graph.no_except()) {}
     size_t size() const { return ordered_->size(); }
     auto at(size_t i) const noexcept {
@@ -187,7 +187,7 @@ void for_each(par_t, const Range &range, Callback &&callback) {
 
 template <graph_detail::graph_like Graph, typename Callback>
 void for_each(seq_t, Graph &graph, Callback &&callback) {
-    auto &nodes = graph.flatten_nodes();
+    auto &nodes = graph.nodes();
     for (auto *node : nodes) {
         graph_detail::invoke(callback, 0, node);
     }
@@ -195,7 +195,7 @@ void for_each(seq_t, Graph &graph, Callback &&callback) {
 
 template <graph_detail::graph_like Graph, typename Callback>
 void for_each(par_t, Graph &graph, Callback &&callback) {
-    auto &nodes = graph.flatten_nodes();
+    auto &nodes = graph.nodes();
     parallel_for(0, nodes.size(),
                  [&](size_t tid, size_t i) { graph_detail::invoke(callback, tid, nodes[i]); },
                  graph.n_jobs(), graph.no_except());

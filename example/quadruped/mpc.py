@@ -19,7 +19,6 @@ from example.helpers import (
     add_time_step_regularization,
     build_floating_base_model,
     numeric_frame_linear_kinematics,
-    solver_nodes,
     visit_nodes,
 )
 from example_robot_data import load
@@ -153,7 +152,7 @@ def main():
 
     # warm start
     current_time = 0.0
-    nodes = solver_nodes(sqp)
+    nodes = sqp.nodes
     visit_nodes(nodes, stance_ref)
     control_freq = args.control_frequency
     update_interval = max(1, round(1 / (control_freq * model.dt)))

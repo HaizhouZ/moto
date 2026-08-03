@@ -6,6 +6,8 @@ discrete impulse conventions out of the individual OCP examples.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import casadi as cs
 import numpy as np
 import pinocchio as pin
@@ -371,8 +373,10 @@ class ContactRobotModel(PinocchioCasadiModel):
         acceleration_weight=1e-3,
         torque_weight=1e-6,
         contact_weight=1e-3,
-        name="c_u",
+        name=None,
     ):
+        mode = "acceleration" if self.acceleration_control else "contact"
+        name = name or f"{self.name}_{mode}_input_cost"
         if self.acceleration_control:
             return moto.cost.from_vector(
                 name, self.a, weight=2 * acceleration_weight
@@ -384,11 +388,6 @@ class ContactRobotModel(PinocchioCasadiModel):
             np.full(impulses.numel(), 2 * contact_weight),
         ]
         return moto.cost.from_vector(name, residual, weight=weight)
-
-
-def solver_nodes(sqp):
-    """Materialize solver nodes once for reuse by an example."""
-    return list(sqp.flatten_nodes())
 
 
 def add_terms(container, *terms):
@@ -474,6 +473,63 @@ def print_graph_layout(nodes):
             f"u={prob.dim(moto.field.field___u)} "
             f"y={prob.dim(moto.field.field___y)}"
         )
+
+
+class ViserRobot:
+    """Small Viser URDF wrapper for fixed- and floating-base trajectories."""
+
+    def __init__(self, urdf, *, floating_base=False, root="/robot", port=8080):
+        import viser
+        from viser.extras import ViserUrdf
+
+        self.server = viser.ViserServer(port=port)
+        self.server.scene.set_up_direction("+z")
+        self.server.scene.add_grid("/ground", infinite_grid=True)
+        self.root = self.server.scene.add_frame(root, show_axes=False)
+        self.robot = ViserUrdf(
+            self.server, Path(urdf), root_node_name=root
+        )
+        self.floating_base = floating_base
+        self.joint_count = len(self.robot.get_actuated_joint_names())
+
+    def update(self, configuration):
+        q = np.asarray(configuration)
+        with self.server.atomic():
+            if self.floating_base:
+                self.root.position = q[:3]
+                self.root.wxyz = q[[6, 3, 4, 5]]
+            self.robot.update_cfg(q[-self.joint_count :])
+
+    def add_target(self, name, position, *, xyzw=None, color=(0, 255, 0)):
+        position = np.asarray(position)
+        path = f"/targets/{name}"
+        self.server.scene.add_icosphere(
+            f"{path}/point", radius=0.025, color=color, position=position
+        )
+        return self.server.scene.add_frame(
+            f"{path}/frame",
+            position=position,
+            wxyz=(1.0, 0.0, 0.0, 0.0)
+            if xyzw is None
+            else np.asarray(xyzw)[[3, 0, 1, 2]],
+            axes_length=0.12,
+            axes_radius=0.006,
+        )
+
+
+def animate_trajectory(viewer, configurations, time_steps):
+    """Replay a trajectory continuously on a Viser server."""
+    import time
+
+    while True:
+        for index, configuration in enumerate(configurations):
+            start = time.perf_counter()
+            viewer.update(configuration)
+            if index < len(time_steps):
+                remaining = time_steps[index] - (time.perf_counter() - start)
+                if remaining > 0:
+                    time.sleep(remaining)
+        time.sleep(0.5)
 
 
 def frame_placement(model: pin.Model, q, frame_id: int):

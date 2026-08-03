@@ -391,7 +391,7 @@ for gait, (idx_cfg, cfg) in tqdm(
         # data.value[model.q_nom][0] = node_idx / N_horizon * 2.0
         node_idx += 1
 
-    for node in sqp.flatten_nodes():
+    for node in sqp.nodes:
         gait_setup(node)
 
     benchmark.run(sqp, gait, idx_cfg, cfg)

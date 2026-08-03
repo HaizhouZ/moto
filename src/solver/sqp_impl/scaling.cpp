@@ -26,7 +26,7 @@ namespace moto {
 
 void ns_sqp::reset_scaling() {
     auto &graph = active_data();
-    for (data *d : graph.flatten_nodes()) {
+    for (data *d : graph.nodes()) {
         for (field_t cf : constr_fields)
             d->scale_c_[cf].resize(0);
         d->scale_p_.fill(1.);
@@ -49,7 +49,7 @@ void ns_sqp::compute_and_apply_scaling(const kkt_info &info) {
     bool needs_recompute = (info.step.inf_prim_step >= 1. / sc.update_ratio_threshold);
     // Also recompute if no cached scales exist yet (first call after reset)
     if (!needs_recompute) {
-        for (const data *d : graph.flatten_nodes()) {
+        for (const data *d : graph.nodes()) {
             for (field_t cf : hard_constr_fields_non_dyn) {
                 if (d->dense().approx_[cf].v_.size() > 0 && d->scale_c_[cf].size() == 0) {
                     needs_recompute = true;

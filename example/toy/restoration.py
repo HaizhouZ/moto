@@ -11,9 +11,6 @@ import casadi as cs
 import moto
 import numpy as np
 
-from example.helpers import solver_nodes
-
-
 def main():
     x, xn = moto.sym.states("restoration_demo_x", 1)
     u = moto.sym.inputs("restoration_demo_u", 1)
@@ -33,7 +30,7 @@ def main():
     stages = sqp.add_stage(stage, 2)
     stages[-1].ed.add(target)
 
-    nodes = solver_nodes(sqp)
+    nodes = sqp.nodes
     for index, node in enumerate(nodes):
         node.value[x] = np.full(1, 0.0 if index == 0 else 2.0)
         node.value[xn] = np.full(1, 2.0)

@@ -19,9 +19,10 @@ static sparse linear operations use precompiled Eigen-based kernels.
 
 ```bash
 conda create -n moto python=3.11 casadi eigen magic_enum fmt re2 nanobind \
-  nlohmann_json pinocchio meshcat-python meshcat-shapes example-robot-data \
+  nlohmann_json pinocchio example-robot-data \
   example-robot-data-loaders mujoco libblasfeo -c conda-forge
 conda activate moto
+python -m pip install "viser[urdf]"
 
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
 export LIBRARY_PATH="$CONDA_PREFIX/lib"
@@ -41,32 +42,59 @@ For representative performance, use a Release build with
 Moto, CasADi, Pinocchio, and BLASFEO. GCC 13.2+ is recommended for Zen 4
 AVX-512.
 
-## Modeling
+## SQP Tutorial
 
 The public model is stage-centric: users author `x_k`, `u_k`, and terminal
 `x_N`; the solver lowers this graph to its internal `x/u/y` representation.
+This complete double-integrator example builds a 12-stage OCP, initializes it,
+solves it, and reads the result:
 
 ```python
 import casadi as cs
 import moto
+import numpy as np
 
 x, xn = moto.sym.states("x", 2)
 u = moto.sym.inputs("u", 1)
 
-dyn = moto.dense_dynamics.create("dyn", xn.sx - x.sx - cs.vertcat(u.sx, 0))
-running = moto.cost.from_vector("running", cs.vertcat(x.sx, u.sx))
+A = np.array([[1.0, 0.1], [0.0, 1.0]])
+B = np.array([[0.0], [0.1]])
+x0 = np.array([1.0, 0.0])
+
+dyn = moto.dense_dynamics.create("dyn", xn.sx - A @ x.sx - B @ u.sx)
+running = moto.cost.from_vector(
+    "running", cs.vertcat(x.sx, u.sx), weight=[1.0, 1.0, 0.1]
+)
 terminal = moto.cost.from_vector("terminal", x, weight=10.0)
-u_box = moto.ineq.bounds("u_box", u, -1.0, 1.0)
+u_box = moto.ineq.bounds("u_box", u, -0.5, 0.5)
 
 stage = moto.stage()
 stage.add(dyn)
 stage.add(running)
 stage.add(u_box)
 
-sqp = moto.sqp(n_job=1)
-stages = sqp.add_stage(stage, 20)
+sqp = moto.sqp(n_job=4)
+stages = sqp.add_stage(stage, 12)
 stages[-1].ed.add(terminal)
-nodes = sqp.flatten_nodes()
+
+# Accessing nodes realizes the graph. Finish editing stages before this point.
+nodes = sqp.nodes
+for node in nodes:
+    node.value[x] = x0
+    if node.prob.dim(moto.field.field___y):
+        node.value[xn] = x0
+
+sqp.settings.prim_tol = 1e-8
+sqp.settings.dual_tol = 1e-8
+sqp.settings.comp_tol = 1e-8
+
+result = sqp.update(50, verbose=True)
+assert result.solved, result.result
+
+x_trajectory = [np.asarray(node.value[x]).reshape(-1) for node in nodes]
+x_trajectory.append(np.asarray(nodes[-1].value[xn]).reshape(-1))
+u_trajectory = [np.asarray(node.value[u]).reshape(-1) for node in nodes]
+print(result.num_iter, result.inf_prim_res, result.inf_dual_res)
 ```
 
 Use `sqp.start_node.add(...)` for initial-state terms, `stage.st.add(...)` for
@@ -77,6 +105,69 @@ state terms. Interval dynamics, controls, and mixed terms belong on
 Costs support explicit scalar- and vector-valued construction through
 `cost.from_scalar(...)` and `cost.from_vector(...)`. Inequality boxes use
 `ineq.bounds(...)`, including bounds on only a selected symbol or subvector.
+
+### SQP workers: which setting wins?
+
+Pass the desired solver worker count to the constructor. It is fixed for that
+solver instance:
+
+```python
+sqp = moto.sqp(n_job=6)
+print(sqp.n_job)  # effective constructor-time cap, after OpenMP normalization
+```
+
+There are three limits. For a parallel loop with `work_items` stages, Moto
+requests:
+
+```text
+worker_count = min(n_job, OpenMP maximum threads, work_items)
+```
+
+In other words, neither setting wins alone:
+
+- `n_job` is the per-SQP worker ceiling and is the setting application code
+  should use.
+- `OMP_NUM_THREADS` controls the OpenMP process ceiling observed when the SQP
+  is constructed. If it is lower than `n_job`, Moto clamps `sqp.n_job` to it.
+- A loop cannot use more workers than it has stages/items. The OpenMP runtime
+  can reduce the team further when dynamic teams or `OMP_THREAD_LIMIT` apply.
+
+Set the environment before starting Python, and disable dynamic team sizing
+when a reproducible worker count matters:
+
+```bash
+OMP_NUM_THREADS=6 \
+OMP_DYNAMIC=FALSE \
+OPENBLAS_NUM_THREADS=1 \
+MKL_NUM_THREADS=1 \
+python example/arm/run.py --n-job 6
+```
+
+Examples of the resulting SQP cap:
+
+| `OMP_NUM_THREADS` | `moto.sqp(n_job=...)` | `sqp.n_job` |
+|---:|---:|---:|
+| 8 | 6 | 6 |
+| 4 | 6 | 4 |
+| 8 | 1 | 1 |
+
+`ns_sqp` explicitly sets Eigen's internal thread count to one, so Eigen does
+not create a second thread team inside Moto's stage-parallel regions.
+`OPENBLAS_NUM_THREADS` and `MKL_NUM_THREADS` likewise prevent nested threading
+in those libraries when they are present. These variables do not choose the
+SQP worker count.
+
+Two similarly named controls are independent of solver execution:
+
+- `cmake --build build -j6` selects build-system compilation concurrency.
+- generated-function compilation currently uses the OpenMP maximum, not the
+  particular SQP object's `n_job`; `n_job` controls runtime OCP traversal.
+
+For small horizons, `n_job=1` is often fastest because worker dispatch costs
+more than the available stage work. For arm and quadruped problems, benchmark
+`1`, the number of physical cores, and a few intermediate values using the
+same Release build and warm-start state. Do not compare first-run codegen or
+Viser URDF loading with hot `sqp.update(...)` time.
 
 ## Euler Dynamics
 
@@ -102,16 +193,6 @@ inverse is supplied.
 
 ## Run
 
-Set the OpenMP worker count explicitly; keep Eigen/BLAS internal threading at
-one when profiling solver parallelism:
-
-```bash
-export KMP_AFFINITY='noverbose,granularity=fine,scatter'
-export OMP_NUM_THREADS=6
-export OPENBLAS_NUM_THREADS=1
-export MKL_NUM_THREADS=1
-```
-
 Run the maintained examples:
 
 ```bash
@@ -123,6 +204,9 @@ python example/quadruped/run.py
 python example/quadruped/run.py --acceleration-control  # acceleration-only gait
 python example/quadruped/mpc.py
 ```
+
+`--display` starts a Viser server and replays the optimized URDF trajectory in
+the browser. MeshCat is not used.
 
 ## Pinocchio Interop
 
@@ -138,3 +222,22 @@ For the standard Pinocchio workflow, prefer the state and dynamics helpers in
 `example/helpers.py`; they provide manifold-aware state creation, velocity
 generation, integration, and difference without exposing those calls at each
 modeling site.
+
+## Citation
+
+If you use Moto, please cite the Hippo paper published in IEEE Robotics and
+Automation Letters ([IEEE DOI: 10.1109/LRA.2026.3682524](https://doi.org/10.1109/LRA.2026.3682524)):
+
+```bibtex
+@article{zhao2026hippo,
+  author  = {Haizhou Zhao and Ludovic Righetti and Majid Khadiv},
+  title   = {Hippo: High-Performance Interior-Point and Projection-Based Solver
+             for Generic Constrained Trajectory Optimization},
+  journal = {IEEE Robotics and Automation Letters},
+  year    = {2026},
+  volume  = {11},
+  number  = {6},
+  pages   = {6752--6759},
+  doi     = {10.1109/LRA.2026.3682524}
+}
+```

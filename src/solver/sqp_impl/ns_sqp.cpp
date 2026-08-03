@@ -52,7 +52,7 @@ void ns_sqp::realize_runtime(storage_type &runtime,
         }
         runtime.add(node_type(built));
     }
-    runtime.flatten_nodes();
+    runtime.nodes();
 }
 
 ocp_ptr_t ns_sqp::build_initial_state_virtual_stage(const ocp_ptr_t &first_stage) const {
@@ -94,7 +94,7 @@ ocp_ptr_t ns_sqp::build_initial_state_virtual_stage(const ocp_ptr_t &first_stage
 }
 
 void ns_sqp::sync_initial_state_virtual_stage(storage_type &runtime) const {
-    auto &nodes = runtime.flatten_nodes();
+    auto &nodes = runtime.nodes();
     if (nodes.size() < 2 || !nodes.front()->internal_initial_state) {
         return;
     }
@@ -150,7 +150,7 @@ size_t ns_sqp::reconcile_solver_runtime_from_model() {
             }
             return node_type(wanted.formulation);
         });
-    solver_runtime_.flatten_nodes();
+    solver_runtime_.nodes();
     return snapshot.revision;
 }
 
@@ -183,7 +183,7 @@ ns_sqp::storage_type &ns_sqp::active_data() {
 }
 
 std::vector<ns_sqp::data *> &ns_sqp::solver_nodes() {
-    auto &nodes = active_data().flatten_nodes();
+    auto &nodes = active_data().nodes();
     thread_local std::unordered_map<const ns_sqp *, std::vector<data *>> public_nodes_by_solver;
     auto &public_solver_nodes_ = public_nodes_by_solver[this];
     public_solver_nodes_.clear();
