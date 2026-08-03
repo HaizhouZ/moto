@@ -25,7 +25,6 @@ conda activate moto
 python -m pip install "viser[urdf]"
 
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
-export LIBRARY_PATH="$CONDA_PREFIX/lib"
 
 cmake -S . -B build \
   -DCMAKE_BUILD_TYPE=Release \
@@ -36,10 +35,42 @@ cmake --install build
 ctest --test-dir build --output-on-failure -j6
 ```
 
-BLASFEO is discovered automatically from its CMake config or from the active
-conda environment's `include/` and `lib/` directories. For a non-standard
-installation without a config package, pass `-DBLASFEO_ROOT=/path/to/blasfeo`;
-`BLASFEO_LIB_DIR` is no longer needed.
+### BLASFEO discovery
+
+The conda setup above installs BLASFEO with:
+
+```bash
+conda install -c conda-forge libblasfeo
+```
+
+No BLASFEO path variable is needed for an activated conda environment. Moto
+first consumes BLASFEO's own CMake config target and otherwise searches for
+`blasfeo.h` and `libblasfeo` under `$CONDA_PREFIX/include` and
+`$CONDA_PREFIX/lib`. A successful configure prints either:
+
+```text
+-- Found BLASFEO via config target: blasfeo
+```
+
+or the fallback library path:
+
+```text
+-- Found BLASFEO: .../lib/libblasfeo.so
+```
+
+For a BLASFEO installation outside conda and the standard system prefixes,
+pass its installation root—not the library file or library directory:
+
+```bash
+cmake -S . -B build \
+  -DBLASFEO_ROOT=/opt/blasfeo \
+  -DCMAKE_BUILD_TYPE=Release
+```
+
+That root must contain `include/blasfeo.h` and either `lib/libblasfeo.so` or
+`lib/libblasfeo.a`. The old `BLASFEO_LIB_DIR` environment variable is removed.
+Installed Moto packages also ship the same finder, so downstream CMake users
+can use `find_package(moto REQUIRED)` without recreating BLASFEO lookup logic.
 
 For representative performance, use a Release build with
 `WITH_NATIVE_OPT=ON`. Compiler architecture flags should be consistent across
