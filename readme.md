@@ -26,7 +26,6 @@ python -m pip install "viser[urdf]"
 
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
 export LIBRARY_PATH="$CONDA_PREFIX/lib"
-export BLASFEO_LIB_DIR=/absolute/path/to/blasfeo/lib
 
 cmake -S . -B build \
   -DCMAKE_BUILD_TYPE=Release \
@@ -36,6 +35,11 @@ cmake --build build -j6
 cmake --install build
 ctest --test-dir build --output-on-failure -j6
 ```
+
+BLASFEO is discovered automatically from its CMake config or from the active
+conda environment's `include/` and `lib/` directories. For a non-standard
+installation without a config package, pass `-DBLASFEO_ROOT=/path/to/blasfeo`;
+`BLASFEO_LIB_DIR` is no longer needed.
 
 For representative performance, use a Release build with
 `WITH_NATIVE_OPT=ON`. Compiler architecture flags should be consistent across

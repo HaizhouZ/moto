@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.10.0)
 project(moto)
 
+list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
 if(POLICY CMP0148)
   cmake_policy(SET CMP0148 OLD)
 endif()
@@ -16,7 +18,7 @@ add_project_dependency(CASADI REQUIRED)
 add_project_dependency(re2 REQUIRED)
 add_project_dependency(nlohmann_json REQUIRED)
 add_project_dependency(OpenSSL REQUIRED)
-add_project_dependency(blasfeo REQUIRED)
+add_project_dependency(BLASFEO REQUIRED MODULE)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(MOTO_COMPILE_OPTS -fPIC -Wno-interference-size)
@@ -52,15 +54,9 @@ set(INCLUDE_DIRS
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-if(NOT DEFINED ENV{BLASFEO_LIB_DIR})
-    set(BLASFEO_LIB_DIR "/usr/local/blasfeo/lib/libblasfeo.a")
-else()
-    set(BLASFEO_LIB_DIR $ENV{BLASFEO_LIB_DIR})
-endif()
-message("blasfeo directory: ${BLASFEO_LIB_DIR}")
 list(APPEND MOTO_DEP_LIBS
     # OpenBLAS::OpenBLAS 
-    ${BLASFEO_LIB_DIR}
+    BLASFEO::BLASFEO
     casadi::casadi
     Eigen3::Eigen
     magic_enum::magic_enum
