@@ -916,6 +916,61 @@ compile_batch_product(batch_product_spec spec,
   return batch_kernels.emplace(key, kernel).first->second;
 }
 
+spgemm_kernel compile_spgemm(const casadi::Sparsity &lhs,
+                             const casadi::Sparsity &rhs,
+                             const std::filesystem::path &cache_dir) {
+  if (lhs.size2() != rhs.size1() || !lhs.nnz() || !rhs.nnz())
+    throw std::invalid_argument("invalid CasADi SpGEMM sparsity");
+  const casadi::SX a = casadi::SX::sym("a", lhs);
+  const casadi::SX b = casadi::SX::sym("b", rhs);
+  const casadi::SX product = casadi::SX::mtimes(a, b);
+  const casadi::Function function("moto_casadi_spgemm", {a, b}, {product});
+  casadi::Dict options;
+  options["casadi_real"] = "double";
+  casadi::CodeGenerator generator("moto_casadi_spgemm.c", options);
+  generator.add(function);
+  std::string source = generator.dump();
+  source += fmt::format(
+      "\nextern \"C\" __attribute__((visibility(\"default\"))) void {}"
+      "(double *const *p){{const casadi_real* a[2]={{p[0],p[1]}};"
+      "casadi_real* r[1]={{p[2]}};casadi_int iw[{}];casadi_real w[{}];"
+      "moto_casadi_spgemm(a,r,iw,w,0);}}\n",
+      symbol_name, std::max<size_t>(1, function.sz_iw()),
+      std::max<size_t>(1, function.sz_w()));
+  const auto &sp = product.sparsity();
+  ccs_layout output{static_cast<size_t>(sp.size1()),
+                    static_cast<size_t>(sp.size2())};
+  for (const auto value : sp.get_colind())
+    output.colind.push_back(static_cast<size_t>(value));
+  for (const auto value : sp.get_row())
+    output.row.push_back(static_cast<size_t>(value));
+  std::vector<casadi_int> row_permutation, col_permutation, row_blocks,
+      col_blocks, coarse_rows, coarse_cols;
+  sp.btf(row_permutation, col_permutation, row_blocks, col_blocks,
+         coarse_rows, coarse_cols);
+  const auto copy_index = [](const auto &source, auto &destination) {
+    for (const auto value : source)
+      destination.push_back(static_cast<size_t>(value));
+  };
+  copy_index(row_permutation, output.row_permutation);
+  copy_index(col_permutation, output.col_permutation);
+  copy_index(row_blocks, output.row_blocks);
+  copy_index(col_blocks, output.col_blocks);
+  auto compiled = reinterpret_cast<spgemm_kernel::function_type>(
+      compile_source(source, cache_dir));
+  return {static_cast<size_t>(lhs.nnz()), static_cast<size_t>(rhs.nnz()),
+          std::move(output), compiled};
+}
+
+void spgemm_kernel::operator()(const scalar_t *lhs, const scalar_t *rhs,
+                               scalar_t *output) const {
+  if (!function_ || !lhs || !rhs || !output)
+    throw std::invalid_argument("invalid CasADi SpGEMM invocation");
+  scalar_t *p[]{const_cast<scalar_t *>(lhs), const_cast<scalar_t *>(rhs),
+                output};
+  function_(p);
+}
+
 struct cached_product {
   product_op op;
   scalar_t sign;

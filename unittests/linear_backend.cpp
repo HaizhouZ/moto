@@ -3,6 +3,7 @@
 #include <moto/core/linear_backend.hpp>
 #include <moto/core/sparse_matrix.hpp>
 
+#include <casadi/casadi.hpp>
 #include <cstdint>
 
 namespace moto::linear_backend {
@@ -130,6 +131,58 @@ TEST_CASE("JIT panel products match dense algebra") {
   matrix left_t = matrix::Random(8, 4);
   check(product_op::right_transpose_times, left_t, left_t.transpose() * dense,
         1.);
+}
+
+TEST_CASE("CasADi-profiled SpGEMM matches a quadruped-sized product") {
+  constexpr casadi_int n = 36, m = 30;
+  std::vector<casadi_int> pr, pc, fr, fc;
+  const auto add = [](auto &rows, auto &cols, casadi_int r0, casadi_int c0,
+                      casadi_int nr, casadi_int nc) {
+    for (casadi_int c = 0; c < nc; ++c)
+      for (casadi_int r = 0; r < nr; ++r) {
+        rows.push_back(r0 + r);
+        cols.push_back(c0 + c);
+      }
+  };
+  for (casadi_int i = 0; i < n; ++i) {
+    pr.push_back(i);
+    pc.push_back(i);
+  }
+  for (casadi_int i = 0; i < 18; ++i) {
+    pr.push_back(i);
+    pc.push_back(18 + i);
+  }
+  add(pr, pc, 3, 3, 3, 3);
+  add(pr, pc, 3, 21, 3, 3);
+  for (casadi_int i = 0; i < 18; ++i) {
+    fr.push_back(i);
+    fc.push_back(i);
+  }
+  add(fr, fc, 18, 0, 18, m);
+  const auto psp = casadi::Sparsity::triplet(n, n, pr, pc);
+  const auto fsp = casadi::Sparsity::triplet(n, m, fr, fc);
+  auto kernel = compile_spgemm(psp, fsp);
+  REQUIRE(kernel.output_layout().nnz() ==
+          static_cast<size_t>(casadi::Sparsity::mtimes(psp, fsp).nnz()));
+  REQUIRE_FALSE(kernel.output_layout().row_blocks.empty());
+  REQUIRE_FALSE(kernel.output_layout().col_blocks.empty());
+
+  vector pv = vector::Random(psp.nnz()), fv = vector::Random(fsp.nnz());
+  vector out(kernel.output_layout().nnz());
+  kernel(pv.data(), fv.data(), out.data());
+  const auto dense = [](const auto &sp, const vector &values) {
+    matrix result = matrix::Zero(sp.size1(), sp.size2());
+    for (casadi_int c = 0; c < sp.size2(); ++c)
+      for (casadi_int k = sp.colind(c); k < sp.colind(c + 1); ++k)
+        result(sp.row(k), c) = values[k];
+    return result;
+  };
+  matrix actual = matrix::Zero(n, m);
+  const auto &layout = kernel.output_layout();
+  for (size_t c = 0; c < layout.cols; ++c)
+    for (size_t k = layout.colind[c]; k < layout.colind[c + 1]; ++k)
+      actual(layout.row[k], c) = out[k];
+  REQUIRE(actual.isApprox(dense(psp, pv) * dense(fsp, fv), 1e-12));
 }
 
 TEST_CASE("sparse_matrix dispatches dense operands through JIT") {

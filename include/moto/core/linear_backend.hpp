@@ -6,6 +6,8 @@
 #include <filesystem>
 #include <span>
 
+namespace casadi { class Sparsity; }
+
 namespace moto::linear_backend {
 
 enum class product_op {
@@ -86,6 +88,37 @@ compile_product(product_spec spec,
 batch_product_kernel compile_batch_product(
     batch_product_spec spec,
     const std::filesystem::path &cache_dir = "gen/linear_backend");
+
+struct ccs_layout {
+  size_t rows = 0, cols = 0;
+  std::vector<size_t> colind, row;
+  std::vector<size_t> row_permutation, col_permutation;
+  std::vector<size_t> row_blocks, col_blocks;
+  size_t nnz() const { return row.size(); }
+};
+
+class spgemm_kernel {
+public:
+  using function_type = void (*)(scalar_t *const *);
+  spgemm_kernel() = default;
+  spgemm_kernel(size_t lhs_nnz, size_t rhs_nnz, ccs_layout output,
+                function_type function)
+      : lhs_nnz_(lhs_nnz), rhs_nnz_(rhs_nnz), output_(std::move(output)),
+        function_(function) {}
+  void operator()(const scalar_t *lhs, const scalar_t *rhs,
+                  scalar_t *output) const;
+  const ccs_layout &output_layout() const { return output_; }
+
+private:
+  size_t lhs_nnz_ = 0, rhs_nnz_ = 0;
+  ccs_layout output_;
+  function_type function_ = nullptr;
+};
+
+spgemm_kernel compile_spgemm(
+    const casadi::Sparsity &lhs, const casadi::Sparsity &rhs,
+    const std::filesystem::path &cache_dir = "gen/linear_backend");
+
 matrix_layout describe(const ::moto::sparse_matrix &sparse);
 std::vector<scalar_t *> panel_pointers(const ::moto::sparse_matrix &sparse);
 void run_product(const ::moto::sparse_matrix &sparse, product_op op,
