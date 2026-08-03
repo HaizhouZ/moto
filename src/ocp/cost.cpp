@@ -3,6 +3,46 @@
 #include <moto/utils/codegen.hpp>
 
 namespace moto {
+cost generic_cost::make_tracking(const std::string &name,
+                                 const var_inarg_list &args,
+                                 const cs::SX &value,
+                                 tracking_param weight_arg,
+                                 tracking_param reference_arg) {
+    const auto dim = static_cast<size_t>(value.numel());
+    const auto resolve = [dim](const std::string &param_name,
+                               tracking_param param) -> var {
+        if (auto *symbol = std::get_if<var>(&param)) {
+            if ((*symbol)->field() != __p)
+                throw std::runtime_error(fmt::format(
+                    "cost parameter {} must have parameter field, got {}",
+                    param_name, field::name((*symbol)->field())));
+            if ((*symbol)->dim() != dim)
+                throw std::runtime_error(fmt::format(
+                    "cost parameter {} has dim {}, expected {}", param_name,
+                    (*symbol)->dim(), dim));
+            return std::move(*symbol);
+        }
+        if (auto *scalar = std::get_if<scalar_t>(&param))
+            return sym::params(param_name, dim, *scalar);
+        return sym::params(param_name, dim, std::move(std::get<vector>(param)));
+    };
+    auto weight = resolve(name + "_weight", std::move(weight_arg));
+    auto reference = resolve(name + "_reference", std::move(reference_arg));
+    var_inarg_list all_args = args;
+    all_args.emplace_back(*weight);
+    all_args.emplace_back(*reference);
+    const cs::SX residual = cs::SX::reshape(value, dim, 1) - reference;
+    const cs::SX output = dim == 1
+        ? scalar_t(0.5) * cs::SX::dot(residual, residual * weight)
+        : residual;
+    auto result = cost(new generic_cost(name, all_args, output));
+    result->weight_ = std::move(weight);
+    result->reference_ = std::move(reference);
+    if (dim > 1)
+        result->gn_weight_ = result->weight_;
+    return result;
+}
+
 void generic_cost::finalize_impl() {
     if (use_gauss_newton_) {
         if (!gn_weight_) {
@@ -43,15 +83,39 @@ generic_cost::generic_cost(const std::string &name, const var_inarg_list &in_arg
     }
 }
 
-generic_cost *generic_cost::set_diag_hess() {
-    set_default_hess_sparsity(sparsity::diag);
-    return this;
+void generic_cost::substitute(const sym &arg, const sym &rhs) {
+    generic_func::substitute(arg, rhs);
+    if (bool(weight_) && *weight_ == arg)
+        weight_ = expr_cast<sym>(rhs.handle());
+    if (bool(reference_) && *reference_ == arg)
+        reference_ = expr_cast<sym>(rhs.handle());
+    if (bool(gn_weight_) && *gn_weight_ == arg)
+        gn_weight_ = expr_cast<sym>(rhs.handle());
 }
 
-generic_cost *generic_cost::set_gauss_newton(const var &weight) {
-    gn_weight_ = weight;
-    use_gauss_newton_ = true;
-    return this;
+cost generic_cost::from_scalar(const std::string &name,
+                               const var_inarg_list &args,
+                               const cs::SX &value,
+                               tracking_param weight,
+                               tracking_param reference) {
+    if (!value.is_scalar())
+        throw std::runtime_error(fmt::format(
+            "cost.from_scalar {} expected one value, got {}", name, value.numel()));
+    return make_tracking(name, args, value, std::move(weight),
+                         std::move(reference));
+}
+
+cost generic_cost::from_vector(const std::string &name,
+                               const var_inarg_list &args,
+                               const cs::SX &value,
+                               tracking_param weight,
+                               tracking_param reference) {
+    if (value.numel() < 2)
+        throw std::runtime_error(fmt::format(
+            "cost.from_vector {} expected at least two values, got {}; use from_scalar for scalar output",
+            name, value.numel()));
+    return make_tracking(name, args, value, std::move(weight),
+                         std::move(reference));
 }
 
 } // namespace moto

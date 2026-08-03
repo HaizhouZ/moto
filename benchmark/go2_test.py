@@ -207,10 +207,9 @@ class pinCasadiModel(cpin.Model):
         return c.cast_ineq() if soft else c
 
     def make_foot_kin_cost(self, i: int):
-        pos_cost = moto.cost.create(
-            f"kin_pos_cost_{self.foot_frames[i]}", self.pos_args, self.z_f[i]
-        ).set_gauss_newton(
-            moto.sym.params(f"W_kin_{self.foot_frames[i]}", 1, default_val=1e3)
+        pos_cost = moto.cost.from_scalar(
+            f"kin_pos_cost_{self.foot_frames[i]}", self.pos_args, self.z_f[i],
+            weight=1e3,
         )
         pos_cost.enable_if_all([self.f_f[i]])
         return pos_cost
@@ -266,28 +265,34 @@ class pinCasadiModel(cpin.Model):
             ).cast_ineq()
             # dt_constr = moto.constr("dt_fix", [self.dt], self.dt - 2e-2)
             prob.add(dt_constr)
-            W_dt = moto.sym.params("W_dt", 1, default_val=1e8)
-            timing_cost = moto.cost.create(
-                "c_t", [self.dt, dt_nom, W_dt], W_dt * cs.sumsqr(self.dt - dt_nom)
+            timing_cost = moto.cost.from_scalar(
+                "c_t", [self.dt, dt_nom], self.dt - dt_nom, weight=2e8
             )
             prob.add(timing_cost)
 
     def get_state_cost(self):
         q_nom_res = self.q_stack - self.q_nom
-        state_cost = (
-            100.0 * cs.sumsqr(q_nom_res[: self.nqb])
-            + 1 * cs.sumsqr(q_nom_res[self.nqb :])
-            + 1.0 * cs.sumsqr(self.v_stack[:6])
-            + 0.01 * cs.sumsqr(self.v_stack[6:])
-        )
+        residual = cs.vcat([q_nom_res, self.v_stack])
+        weight = np.r_[
+            np.full(self.nqb, 200.0),
+            np.full(q_nom_res.numel() - self.nqb, 2.0),
+            np.full(6, 2.0),
+            np.full(self.v_stack.numel() - 6, 0.02),
+        ]
         state_args = self.pos_args + self.vel_args
-        cost = moto.cost.create("c", state_args + [self.q_nom], state_cost)
+        cost = moto.cost.from_vector(
+            "c", state_args + [self.q_nom], residual, weight=weight
+        )
         return cost
 
     def get_input_cost(self):
         input_args = self.acc_args + [*self.f_f]
-        input_cost = 1e-6 * cs.sumsqr(self.tq) + 1e-3 * cs.sumsqr(cs.vcat(self.f_f))
-        return moto.cost.create("c_u", input_args, input_cost)
+        forces = cs.vcat(self.f_f)
+        return moto.cost.from_vector(
+            "c_u", input_args, cs.vcat([self.tq, forces]),
+            weight=np.r_[np.full(self.tq.numel(), 2e-6),
+                         np.full(forces.numel(), 2e-3)],
+        )
 
     def make_foot_lift_cost(self, lifted: bool = True):
         self.z_f_lift_d = moto.sym.params(
@@ -302,22 +307,18 @@ class pinCasadiModel(cpin.Model):
                 self.pos_args + [self.z_f_d],
                 (self.z_f - self.z_f_d),
             )
-            foot_lift_cost = moto.cost.create(
-                "c_z",
-                [self.z_f_d, self.z_f_lift_d],
-                100 * cs.sumsqr((self.z_f_d - self.z_f_lift_d)),
+            foot_lift_cost = moto.cost.from_vector(
+                "c_z", [self.z_f_d, self.z_f_lift_d],
+                self.z_f_d - self.z_f_lift_d, weight=200.0,
             )
             foot_lift_constr.disable_if([*self.f_f])
             foot_lift_cost.disable_if([*self.f_f])
             return [foot_lift_constr, foot_lift_cost]
         else:
-            foot_lift_cost = moto.cost(
-                "c_z",
-                self.pos_args + [self.z_f_lift_d, *self.active_foot],
-                100
-                * cs.sumsqr(
-                    (self.z_f - self.z_f_lift_d) * (1 - cs.vcat(self.active_foot))
-                ),
+            foot_lift_cost = moto.cost.from_vector(
+                "c_z", self.pos_args + [self.z_f_lift_d, *self.active_foot],
+                (self.z_f - self.z_f_lift_d)
+                * (1 - cs.vcat(self.active_foot)), weight=200.0,
             )
             return foot_lift_cost
 

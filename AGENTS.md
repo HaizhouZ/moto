@@ -369,7 +369,8 @@ This is a valid solver formulation, but it mixes two different concerns:
 
 Today the solver still stores some path-state algebra on `y`, but the modeling interface should stay simpler:
 
-- users write `constr.create(...)` and `cost.create(...)` normally
+- users write `constr.create(...)` and choose `cost.from_scalar(...)` or
+  `cost.from_vector(...)` according to the cost output shape
 - if an expression is terminal, the user writes `stages[-1].ed.add(term)`
 - if an expression is a path-state equality that the solver wants on predecessor storage, that should be decided during graph compose, not by hidden mutation of the authored expression
 

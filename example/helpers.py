@@ -134,7 +134,7 @@ class PinocchioCasadiModel(cpin.Model):
     def torque_limit_constraint(self, torque, *, name="tq_limit"):
         """Create the standard actuated joint torque box constraint."""
         limit = self.fmodel.effortLimit[-self.nj :]
-        return moto.ineq.create(name, [torque], torque.sx, -limit, limit)
+        return moto.ineq.bounds(name, torque, -limit, limit)
 
 
 class ContactModel:
@@ -315,10 +315,15 @@ class ContactRobotModel(PinocchioCasadiModel):
         )
 
     def input_cost(self, *, torque_weight=1e-6, contact_weight=1e-3, name="c_u"):
-        residual = torque_weight * cs.sumsqr(self.tq) + contact_weight * cs.sumsqr(
-            cs.vcat(self.contacts.impulses)
+        impulses = cs.vcat(self.contacts.impulses)
+        residual = cs.vcat([self.tq, impulses])
+        weight = np.r_[
+            np.full(self.tq.numel(), 2 * torque_weight),
+            np.full(impulses.numel(), 2 * contact_weight),
+        ]
+        return moto.cost.from_vector(
+            name, self.acc_args + self.contacts.impulses, residual, weight=weight
         )
-        return moto.cost.create(name, self.acc_args + self.contacts.impulses, residual)
 
 
 def solver_nodes(sqp):
@@ -356,14 +361,11 @@ def add_time_step_regularization(
     if not isinstance(dt, cs.SX):
         return
     bounds = moto.sym.params("dt_bound", 2, default_val=np.array([lower, upper]))
-    weight_symbol = moto.sym.params("W_dt", 1, default_val=weight)
     add_terms(
         stage,
         moto.ineq.create("dt", [dt, bounds], dt.sx, bounds[0], bounds[1]),
-        moto.cost.create(
-            "c_t",
-            [dt, nominal_dt, weight_symbol],
-            weight_symbol * cs.sumsqr(dt - nominal_dt),
+        moto.cost.from_scalar(
+            "c_t", [dt, nominal_dt], dt - nominal_dt, weight=2 * weight
         ),
     )
 

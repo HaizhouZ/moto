@@ -38,6 +38,8 @@ moto::ineq_constr::box_bound_t cast_box_bound(const nb::handle &h) {
     if (nb::isinstance<nb::float_>(h) || nb::isinstance<nb::int_>(h)) {
         return nb::cast<scalar_t>(h);
     }
+    if (nb::isinstance<sym>(h) || nb::hasattr(h, "__sym__"))
+        return static_cast<const cs::SX &>(*get_var_handle(h));
     if (nb::hasattr(h, "this")) {
         return nb::cast<cs::SX>(h);
     }
@@ -49,6 +51,23 @@ moto::ineq_constr::box_bound_t cast_box_bound(const nb::handle &h) {
         for (size_t i = 0; i < values.size(); ++i) {
             out(static_cast<Eigen::Index>(i)) = values[i];
         }
+        return out;
+    }
+}
+
+moto::generic_cost::tracking_param cast_tracking_param(const nb::handle &h) {
+    using namespace moto;
+    if (nb::isinstance<sym>(h) || nb::hasattr(h, "__sym__"))
+        return get_var_handle(h);
+    if (nb::isinstance<nb::float_>(h) || nb::isinstance<nb::int_>(h))
+        return nb::cast<scalar_t>(h);
+    try {
+        return nb::cast<vector>(h);
+    } catch (const nb::cast_error &) {
+        auto values = nb::cast<std::vector<scalar_t>>(h);
+        vector out(values.size());
+        for (size_t i = 0; i < values.size(); ++i)
+            out(static_cast<Eigen::Index>(i)) = values[i];
         return out;
     }
 }
@@ -209,28 +228,78 @@ void register_submodule_functional(nb::module_ &m) {
                     ineq_constr::create(name, args, out, cast_box_bound(lb), cast_box_bound(ub), order, field));
             },
             nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("lb"), nb::arg("ub"),
-            nb::arg("order") = approx_order::first, nb::arg("field") = field_t::__undefined);
+            nb::arg("order") = approx_order::first, nb::arg("field") = field_t::__undefined)
+        .def_static(
+            "bounds",
+            [](const std::string &name,
+               const py_var_inarg_wrapper &value,
+               const nb::handle &lb,
+               const nb::handle &ub,
+               approx_order order,
+               field_t field) {
+                var v((sym &)value);
+                var_inarg_list args{*v};
+                for (const nb::handle &bound : {lb, ub}) {
+                    if (nb::isinstance<sym>(bound) || nb::hasattr(bound, "__sym__"))
+                        args.emplace_back(*get_var_handle(bound));
+                }
+                return std::shared_ptr<generic_constr>(ineq_constr::create(
+                    name, args, v, cast_box_bound(lb), cast_box_bound(ub), order, field));
+            },
+            nb::arg("name"), nb::arg("value"), nb::arg("lb"), nb::arg("ub"),
+            nb::arg("order") = approx_order::first, nb::arg("field") = field_t::__undefined,
+            "Create scalar or vector bounds directly on a variable");
 
     nb::class_<moto::pmm_constr, generic_constr>(m, "pmm_constr")
         .def_rw("rho", &moto::pmm_constr::rho, "Dual penalty weight for the proximal multiplier method");
 
     nb::class_<generic_cost, generic_func>(m, "cost")
         .def_static(
-            "create",
-            [](const std::string &name, const var_inarg_list &args, const cs::SX &out, approx_order order) {
-                return std::make_shared<generic_cost>(name, args, out, order);
+            "from_vector",
+            [](const std::string &name, const var_inarg_list &args,
+               const cs::SX &value, const nb::handle &weight,
+               const nb::handle &reference) {
+                return std::shared_ptr<generic_cost>(generic_cost::from_vector(
+                    name, args, value, cast_tracking_param(weight),
+                    cast_tracking_param(reference)));
             },
-            nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("order") = approx_order::second)
+            nb::arg("name"), nb::arg("in_args"), nb::arg("value"),
+            nb::arg("weight") = 1.0, nb::arg("reference") = 0.0)
         .def_static(
-            "create",
-            [](const std::string &name, approx_order order) {
-                return std::make_shared<generic_cost>(name, order);
+            "from_vector",
+            [](const std::string &name, const py_var_inarg_wrapper &value,
+               const nb::handle &weight, const nb::handle &reference) {
+                var v((sym &)value);
+                return std::shared_ptr<generic_cost>(generic_cost::from_vector(
+                    name, var_inarg_list{*v}, v, cast_tracking_param(weight),
+                    cast_tracking_param(reference)));
             },
-            nb::arg("name"), nb::arg("order") = approx_order::second)
-        .def("set_diag_hess",
-             [](generic_cost &self) { return self.set_diag_hess(); })
-        .def("set_gauss_newton",
-             [](generic_cost &self, const py_var_inarg_wrapper &v) { return self.set_gauss_newton(var((sym &)v)); });
+            nb::arg("name"), nb::arg("value"), nb::arg("weight") = 1.0,
+            nb::arg("reference") = 0.0)
+        .def_static(
+            "from_scalar",
+            [](const std::string &name, const var_inarg_list &args,
+               const cs::SX &value, const nb::handle &weight,
+               const nb::handle &reference) {
+                return std::shared_ptr<generic_cost>(generic_cost::from_scalar(
+                    name, args, value, cast_tracking_param(weight),
+                    cast_tracking_param(reference)));
+            },
+            nb::arg("name"), nb::arg("in_args"), nb::arg("value"),
+            nb::arg("weight") = 1.0, nb::arg("reference") = 0.0)
+        .def_static(
+            "from_scalar",
+            [](const std::string &name, const py_var_inarg_wrapper &value,
+               const nb::handle &weight, const nb::handle &reference) {
+                var v((sym &)value);
+                return std::shared_ptr<generic_cost>(generic_cost::from_scalar(
+                    name, var_inarg_list{*v}, v, cast_tracking_param(weight),
+                    cast_tracking_param(reference)));
+            },
+            nb::arg("name"), nb::arg("value"), nb::arg("weight") = 1.0,
+            nb::arg("reference") = 0.0)
+        .def_prop_ro("weight", &generic_cost::weight)
+        .def_prop_ro("reference", &generic_cost::reference);
 
     nb::class_<dense_dynamics, generic_constr>(m, "dense_dynamics")
         .def_static(

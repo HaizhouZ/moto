@@ -168,18 +168,12 @@ class pinCasadiModel(cpin.Model):
         ee_pos = self.data.oMf[self.ee_id]
         res = cpin.log6(ee_des.inverse() * ee_pos).np
         if cost:
-            if not hasattr(self, "W_ee_cost"):
-                self.W_ee_cost = moto.sym.params(
-                    "W_ee_cost",
-                    6,
-                    default_val=np.array([40.0, 40.0, 40.0, 0.0, 0.0, 0.0]),
-                )
-            return (
-                moto.cost.create(
-                    "ee_cost", self.pos_args + [self.r_des, self.quat_des], res
-                )
-                .set_gauss_newton(self.W_ee_cost)
+            result = moto.cost.from_vector(
+                "ee_cost", self.pos_args + [self.r_des, self.quat_des], res,
+                weight=np.array([40.0, 40.0, 40.0, 0.0, 0.0, 0.0]),
             )
+            self.W_ee_cost = result.weight
+            return result
         if not soft:
             return moto.constr.create(
                 "ee_constr", self.pos_args + [self.r_des, self.quat_des], res
@@ -217,24 +211,24 @@ class pinCasadiModel(cpin.Model):
     def get_state_cost(self):
         q_nom_res = self.q_stack - self.q_nom
         if self.is_floating_based:
-            state_cost = (
-                100.0 * cs.sumsqr(q_nom_res[: self.nqb])
-                + 1 * cs.sumsqr(q_nom_res[self.nqb :])
-                + 1.0 * cs.sumsqr(self.v_stack[:6])
-                + 0.01 * cs.sumsqr(self.v_stack[6:])
-            )
+            weight = np.r_[
+                np.full(self.nqb, 200.0),
+                np.full(q_nom_res.numel() - self.nqb, 2.0),
+                np.full(6, 2.0),
+                np.full(self.v_stack.numel() - 6, 0.02),
+            ]
         else:
-            state_cost = 0.1 * cs.sumsqr(q_nom_res) + 0.1 * cs.sumsqr(self.v_stack)
+            weight = np.full(q_nom_res.numel() + self.v_stack.numel(), 0.2)
         state_args = self.pos_args + self.vel_args
-        cost = moto.cost.create(
-            "c", state_args + [self.q_nom], state_cost
-        ).set_diag_hess()
+        cost = moto.cost.from_vector(
+            "c", state_args + [self.q_nom], cs.vcat([q_nom_res, self.v_stack]),
+            weight=weight,
+        )
         return cost
 
     def get_input_cost(self):
         input_args = self.acc_args
-        input_cost = 1e-4 * cs.sumsqr(self.tq)
-        return moto.cost.create("c_u", input_args, input_cost).set_diag_hess()
+        return moto.cost.from_vector("c_u", input_args, self.tq, weight=2e-4)
 
 
 # dt = moto.sym.inputs("dt", 1, default_val=0.02)

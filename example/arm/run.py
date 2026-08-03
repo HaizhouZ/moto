@@ -110,36 +110,35 @@ class ArmModel(PinocchioCasadiModel):
     def get_state_cost(self):
         q_nom_res = self.q_stack - self.q_nom
         if self.is_floating_based:
-            state_cost = (
-                100.0 * cs.sumsqr(q_nom_res[: self.nqb])
-                + 1 * cs.sumsqr(q_nom_res[self.nqb :])
-                + 1.0 * cs.sumsqr(self.v_stack[:6])
-                + 0.01 * cs.sumsqr(self.v_stack[6:])
-            )
+            weight = np.r_[
+                np.full(self.nqb, 200.0),
+                np.full(q_nom_res.numel() - self.nqb, 2.0),
+                np.full(6, 2.0),
+                np.full(self.v_stack.numel() - 6, 0.02),
+            ]
         else:
-            state_cost = 0.1 * cs.sumsqr(q_nom_res) + 0.1 * cs.sumsqr(self.v_stack)
+            weight = np.full(q_nom_res.numel() + self.v_stack.numel(), 0.2)
         state_args = self.pos_args + self.vel_args
-        cost = moto.cost.create(
-            "arm_state_cost", state_args + [self.q_nom], state_cost
-        ).set_diag_hess()
+        cost = moto.cost.from_vector(
+            "arm_state_cost", state_args + [self.q_nom],
+            cs.vcat([q_nom_res, self.v_stack]), weight=weight
+        )
         return cost
 
     def get_input_cost(self):
         input_args = self.acc_args
-        input_cost = 1e-4 * cs.sumsqr(self.tq)
-        return moto.cost.create(
-            "arm_input_cost", input_args, input_cost
-        ).set_diag_hess()
+        return moto.cost.from_vector(
+            "arm_input_cost", input_args, self.tq, weight=2e-4
+        )
 
     def get_dt_reg(self, dt_nom):
         if not isinstance(self.dt, cs.SX):
             raise ValueError("dt is not a symbolic variable")
-        W_dt = moto.sym.params("W_dt", 1, default_val=1e3)
         return [
-            moto.cost.create(
-                "arm_dt_reg", [self.dt, dt_nom, W_dt], W_dt * (self.dt - dt_nom) ** 2
+            moto.cost.from_scalar(
+                "arm_dt_reg", [self.dt, dt_nom], self.dt - dt_nom, weight=2e3
             ),
-            moto.ineq.create("arm_dt_bound", [self.dt], self.dt.sx, 1e-2, 0.1),
+            moto.ineq.bounds("arm_dt_bound", self.dt, 1e-2, 0.1),
         ]
 
 

@@ -31,26 +31,21 @@ dyn = moto.dense_dynamics.create(
     xn.sx - A @ x.sx - B @ u.sx,
 )
 
-running_cost = moto.cost.create(
+running_cost = moto.cost.from_vector(
     "toy_base_running_cost",
     [x, u],
-    0.5 * cs.sumsqr(x.sx) + 0.05 * cs.sumsqr(u.sx),
-).set_diag_hess()
+    cs.vertcat(x.sx, u.sx),
+    weight=np.array([1.0, 1.0, 0.1]),
+)
 
-terminal_cost = moto.cost.create(
+terminal_cost = moto.cost.from_vector(
     "toy_base_terminal_cost",
-    [x],
-    5.0 * cs.sumsqr(x.sx),
-).set_diag_hess()
+    x,
+    weight=10.0,
+)
 
 u_limit = 0.5
-u_box = moto.ineq.create(
-    "toy_base_u_box",
-    [u],
-    u.sx,
-    np.full(nu, -u_limit),
-    np.full(nu, u_limit),
-)
+u_box = moto.ineq.bounds("toy_base_u_box", u, -u_limit, u_limit)
 
 
 def build_sqp():

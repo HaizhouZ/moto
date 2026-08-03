@@ -24,16 +24,12 @@ dynamics = moto.dense_dynamics.create(
     [x, xn, u],
     xn.sx - x.sx - u.sx,
 )
-control_cost = moto.cost.create(
-    "initial_state_demo_control_cost",
-    [u],
-    cs.sumsqr(u.sx),
-).set_diag_hess()
-initial_cost = moto.cost.create(
-    "initial_state_demo_target_cost",
-    [x],
-    cs.sumsqr(x.sx - TARGET),
-).set_diag_hess()
+control_cost = moto.cost.from_scalar(
+    "initial_state_demo_control_cost", u, weight=2.0
+)
+initial_cost = moto.cost.from_scalar(
+    "initial_state_demo_target_cost", x, weight=2.0, reference=TARGET
+)
 
 
 def solve(mode, *, optimize):

@@ -147,6 +147,14 @@ class ineq_constr : public soft_constr {
                          const cs::SX &out,
                          approx_order order = approx_order::first,
                          field_t field = field_t::__undefined);
+    static constr bounds(const std::string &name,
+                         const var &value,
+                         const box_bound_t &lb,
+                         const box_bound_t &ub,
+                         approx_order order = approx_order::first,
+                         field_t field = field_t::__undefined) {
+        return create(name, var_inarg_list{*value}, value, lb, ub, order, field);
+    }
     static constr create(const std::string &name,
                          approx_order order = approx_order::first,
                          size_t dim = dim_tbd,

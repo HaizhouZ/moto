@@ -19,17 +19,13 @@ def main():
     p_ub = moto.sym.params("p_ub", 4)
 
     boxes = [
-        moto.ineq.create(
-            "x_box_numeric",
-            [x],
-            x.sx,
+        moto.ineq.bounds(
+            "x_box_numeric", x,
             np.array([-1.0, 0.0, -2.0, 1.0]),
             np.array([2.0, 3.0, 4.0, 5.0]),
         ),
-        moto.ineq.create(
-            "x_box_mixed",
-            [x],
-            x.sx,
+        moto.ineq.bounds(
+            "x_box_mixed", x,
             np.array([-np.inf, 0.5, -1.0, -np.inf]),
             np.array([2.0, np.inf, 3.0, 4.0]),
         ),
@@ -39,10 +35,37 @@ def main():
     boxes.append(
         moto.ineq.create("g_box", [x], g, np.array([-1.0, -0.2]), np.array([1.0, 0.8]))
     )
-    boxes.append(
-        moto.ineq.create("x_box_symbolic", [x, p_lb, p_ub], x.sx, p_lb.sx, p_ub.sx)
+    boxes.append(moto.ineq.bounds("x_box_symbolic", x, p_lb, p_ub))
+    boxes.append(moto.ineq.bounds("dt_box_scalar", dt, 1e-3, 0.1))
+
+    scalar_weight = moto.sym.params("scalar_weight", 1, default_val=2.0)
+    scalar_reference = moto.sym.params("scalar_reference", 1, default_val=0.5)
+    vector_weight = moto.sym.params(
+        "vector_weight", 4, default_val=np.arange(1.0, 5.0)
     )
-    boxes.append(moto.ineq.create("dt_box_scalar", [dt], dt.sx, 1e-3, 0.1))
+    vector_reference = moto.sym.params(
+        "vector_reference", 4, default_val=np.zeros(4)
+    )
+    scalar_cost = moto.cost.from_scalar(
+        "scalar_tracking", [x, dt], x[0] + dt,
+        weight=scalar_weight, reference=scalar_reference,
+    )
+    vector_cost = moto.cost.from_vector(
+        "vector_tracking", [x], x.sx,
+        weight=vector_weight, reference=vector_reference,
+    )
+    numeric_vector_cost = moto.cost.from_vector(
+        "numeric_vector_tracking", [x], x.sx,
+        weight=np.arange(1.0, 5.0), reference=np.zeros(4),
+    )
+    assert scalar_cost.weight.dim == scalar_cost.reference.dim == 1
+    assert vector_cost.weight.dim == vector_cost.reference.dim == 4
+    assert scalar_cost.weight.uid == scalar_weight.uid
+    assert scalar_cost.reference.uid == scalar_reference.uid
+    assert vector_cost.weight.uid == vector_weight.uid
+    assert vector_cost.reference.uid == vector_reference.uid
+    assert numeric_vector_cost.weight.dim == numeric_vector_cost.reference.dim == 4
+    assert not hasattr(moto.cost, "create")
 
     sel = cs.vertcat(x.sx[0], x.sx[3])
     boxes.append(
@@ -54,6 +77,9 @@ def main():
     print("native box inequality examples")
     for box in boxes:
         print(f"  {box.name:<16} dim={box.dim}")
+    print("explicit cost factories")
+    print(f"  {scalar_cost.name:<16} output=scalar args={len(scalar_cost.in_args)}")
+    print(f"  {vector_cost.name:<16} output=vector args={len(vector_cost.in_args)}")
 
     try:
         moto.ineq.create("bad_primal_bound", [x], x.sx, x.sx - 1.0, x.sx + 1.0)

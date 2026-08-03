@@ -24,9 +24,9 @@ def main():
     target = moto.constr.create(
         "restoration_demo_target", [x], x.sx - 1.0
     )
-    tracking = moto.cost.create(
-        "restoration_demo_tracking", [u], 25.0 * cs.sumsqr(u.sx - 0.5)
-    ).set_diag_hess()
+    tracking = moto.cost.from_scalar(
+        "restoration_demo_tracking", u, weight=50.0, reference=0.5
+    )
 
     sqp = moto.sqp(n_job=1)
     stage = moto.stage()

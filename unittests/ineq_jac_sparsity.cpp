@@ -109,12 +109,18 @@ TEST_CASE("OCP finalize fuses structured blocks across callbacks") {
     auto c1 = ineq_constr::create("profile_box_1", var_inarg_list(var_list{x1}),
                                   static_cast<const cs::SX &>(x1), lb, ub,
                                   approx_order::first);
-    auto q0 = cost(new generic_cost("profile_cost_0", var_inarg_list(var_list{x0}),
-                                    cs::SX::dot(x0, x0), approx_order::second));
-    auto q1 = cost(new generic_cost("profile_cost_1", var_inarg_list(var_list{x1}),
-                                    cs::SX::dot(x1, x1), approx_order::second));
-    q0->set_diag_hess();
-    q1->set_diag_hess();
+    auto q0 = generic_cost::from_vector(
+        "profile_cost_0", var_inarg_list(var_list{x0}), x0);
+    auto w1 = sym::params("profile_cost_1_weight_manual", 3,
+                          vector::Constant(3, 2.));
+    auto r1 = sym::params("profile_cost_1_reference_manual", 3,
+                          vector::Zero(3));
+    auto q1 = generic_cost::from_vector(
+        "profile_cost_1", var_inarg_list(var_list{x1}), x1, w1, r1);
+    REQUIRE(q0->weight()->default_value().isOnes());
+    REQUIRE(q0->reference()->default_value().isZero());
+    REQUIRE(q1->weight()->uid() == w1->uid());
+    REQUIRE(q1->reference()->uid() == r1->uid());
     prob->add(*c0); prob->add(*c1); prob->add(*q0); prob->add(*q1);
     prob->wait_until_ready();
     node_data data(prob);
