@@ -109,6 +109,8 @@ MOTO_SYNC_CODEGEN=1 ./build/unittests/semi_implicit_euler_test
 python example/toy/initial_state_optimization.py
 python example/toy/restoration.py
 python example/quadruped/quaternion_test.py
+python example/quadruped/run.py --no-display --acceleration-control \
+  --horizon 4 --steps 1 --nodes-per-step 2 --max-iter 1
 ```
 
 Quadruped smoke test with controlled threading:

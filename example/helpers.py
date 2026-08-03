@@ -76,14 +76,24 @@ class PinocchioCasadiModel(cpin.Model):
         self.nj = self.nv - 6 if self.is_floating_based else self.nv
         self.nqb = 7 if self.nq - self.nv == 1 else 6 if self.is_floating_based else 0
 
-    def create_trajectory_variables(self, dt, q_nom=None):
-        """Create the standard q/v state pair and actuated torque input."""
+    def create_trajectory_variables(
+        self, dt, q_nom=None, *, acceleration_control=False
+    ):
+        """Create q/v states and either acceleration or torque input."""
         self.dt = dt
         self.q, self.qn, self.v, self.vn = pinocchio_states(
             self, self.name, q_nom
         )
-        self.a = (self.vn - self.v) / dt
-        self.tq = moto.sym.inputs(f"{self.name}_tq", self.nj)
+        self.a = (
+            moto.sym.inputs(f"{self.name}_a", self.nv)
+            if acceleration_control
+            else (self.vn - self.v) / dt
+        )
+        self.tq = (
+            None
+            if acceleration_control
+            else moto.sym.inputs(f"{self.name}_tq", self.nj)
+        )
 
         self.q_stack = self.q.sx
         self.v_stack = self.v.sx
@@ -179,6 +189,7 @@ class ContactModel:
         force_default=(0.0, 0.0, 0.5),
         kinematic_gain=100.0,
         friction_coefficient=0.7,
+        with_impulses=True,
     ):
         self.robot = robot
         self.q = q
@@ -188,14 +199,21 @@ class ContactModel:
 
         robot.update_kinematics(q.sx, v.sx)
         self.jacobians = robot.frame_translational_jacobians(self.frame_ids)
-        self.impulses = [
-            moto.sym.inputs(
-                f"{force_prefix}_{name}", 3, default_val=np.asarray(force_default)
-            )
-            for name in self.frame_names
-        ]
+        self.impulses = (
+            [
+                moto.sym.inputs(
+                    f"{force_prefix}_{name}",
+                    3,
+                    default_val=np.asarray(force_default),
+                )
+                for name in self.frame_names
+            ]
+            if with_impulses
+            else []
+        )
         self.generalized_impulses = [
-            jacobian.T @ force for jacobian, force in zip(self.jacobians, self.impulses)
+            jacobian.T @ force
+            for jacobian, force in zip(self.jacobians, self.impulses)
         ]
         self.generalized_impulse = sum(self.generalized_impulses, cs.SX.zeros(robot.nv))
         self.velocities, self.heights = robot.frame_linear_kinematics(
@@ -203,8 +221,10 @@ class ContactModel:
         )
 
         self.kinematic_gain = moto.sym.params("k_f", default_val=kinematic_gain)
-        self.friction_coefficient = moto.sym.params(
-            "mu", default_val=friction_coefficient
+        self.friction_coefficient = (
+            moto.sym.params("mu", default_val=friction_coefficient)
+            if self.impulses
+            else None
         )
         self.kinematic_constraints = [
             self._make_kinematic_constraint(index)
@@ -212,7 +232,7 @@ class ContactModel:
         ]
         self.friction_constraints = [
             self._make_friction_constraint(index)
-            for index in range(len(self.frame_names))
+            for index in range(len(self.impulses))
         ]
 
     def _make_kinematic_constraint(self, index):
@@ -227,7 +247,8 @@ class ContactModel:
             f"kin_{self.frame_names[index]}",
             residual,
         )
-        constraint.enable_if_all([self.impulses[index]])
+        if self.impulses:
+            constraint.enable_if_all([self.impulses[index]])
         return constraint
 
     def _make_friction_constraint(self, index):
@@ -247,7 +268,8 @@ class ContactModel:
 
     def add_to_stage(self, stage):
         """Add interval friction and start-node contact kinematics."""
-        stage.add(self.friction_constraints)
+        if self.friction_constraints:
+            stage.add(self.friction_constraints)
         stage.st.add(self.kinematic_constraints)
 
     def add_to_endpoint(self, endpoint):
@@ -258,7 +280,7 @@ class ContactModel:
 
 
 class ContactRobotModel(PinocchioCasadiModel):
-    """Ready-to-use q/v/torque/contact dynamics model for OCP examples."""
+    """Ready-to-use contact or acceleration-controlled robot model."""
 
     def __init__(
         self,
@@ -270,13 +292,33 @@ class ContactRobotModel(PinocchioCasadiModel):
         contact_frames=GO2_FOOT_FRAMES,
         use_forward_dynamics=True,
         configuration_velocity="next",
+        acceleration_control=False,
     ):
         super().__init__(model, name)
         self.use_fwd_dyn = use_forward_dynamics
-        self.create_trajectory_variables(dt, q_nom)
-        self.contacts = ContactModel(self, self.q, self.v, contact_frames)
+        self.acceleration_control = acceleration_control
+        self.create_trajectory_variables(
+            dt, q_nom, acceleration_control=acceleration_control
+        )
+        self.contacts = ContactModel(
+            self,
+            self.q,
+            self.v,
+            contact_frames,
+            with_impulses=not acceleration_control,
+        )
 
-        if use_forward_dynamics:
+        if acceleration_control:
+            self.dyn = semi_implicit_dynamics(
+                f"{self.name}_acceleration",
+                self.q,
+                self.v,
+                self.qn,
+                self.vn,
+                self.vn - self.v - self.a * dt,
+                dt,
+            )
+        elif use_forward_dynamics:
             self.aba = self.forward_dynamics_step(
                 self.q_stack,
                 self.v_stack,
@@ -296,7 +338,8 @@ class ContactRobotModel(PinocchioCasadiModel):
         if configuration_velocity not in ("next", "predicted"):
             raise ValueError("configuration_velocity must be 'next' or 'predicted'")
         self.configuration_velocity = configuration_velocity
-        self.dyn = self._make_contact_dynamics()
+        if not acceleration_control:
+            self.dyn = self._make_contact_dynamics()
 
         self.q_nom = moto.sym.params(
             "q_nom",
@@ -322,7 +365,18 @@ class ContactRobotModel(PinocchioCasadiModel):
             name, cs.vcat([self.q.symbolic_difference(self.qn.sx, q_next), velocity_residual])
         )
 
-    def input_cost(self, *, torque_weight=1e-6, contact_weight=1e-3, name="c_u"):
+    def input_cost(
+        self,
+        *,
+        acceleration_weight=1e-3,
+        torque_weight=1e-6,
+        contact_weight=1e-3,
+        name="c_u",
+    ):
+        if self.acceleration_control:
+            return moto.cost.from_vector(
+                name, self.a, weight=2 * acceleration_weight
+            )
         impulses = cs.vcat(self.contacts.impulses)
         residual = cs.vcat([self.tq, impulses])
         weight = np.r_[

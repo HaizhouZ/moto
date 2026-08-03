@@ -120,6 +120,7 @@ python example/toy/initial_state_optimization.py
 python example/toy/restoration.py
 python example/arm/run.py
 python example/quadruped/run.py
+python example/quadruped/run.py --acceleration-control  # acceleration-only gait
 python example/quadruped/mpc.py
 ```
 
