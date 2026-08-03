@@ -2,6 +2,7 @@
 #define __MOTO_PROBLEM_HPP__
 
 #include <array>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <string>
@@ -23,6 +24,7 @@ class stage_ocp;
 def_ptr(stage_ocp);
 class node_view;
 class graph_model;
+class graph_composer;
 
 enum class stage_expr_role : size_t {
     interval,
@@ -110,9 +112,19 @@ class ocp_base : protected field_layout_store<expr_list> {
 
   public:
     bool allow_inconsistent_dynamics() const { return allow_inconsistent_dynamics_; }
-    void set_allow_inconsistent_dynamics(bool value) { allow_inconsistent_dynamics_ = value; }
+    void set_allow_inconsistent_dynamics(bool value) {
+        if (allow_inconsistent_dynamics_ != value) {
+            allow_inconsistent_dynamics_ = value;
+            on_modified();
+        }
+    }
     bool automatic_reorder_primal() const { return automatic_reorder_primal_; }
-    void set_automatic_reorder_primal(bool value) { automatic_reorder_primal_ = value; }
+    void set_automatic_reorder_primal(bool value) {
+        if (automatic_reorder_primal_ != value) {
+            automatic_reorder_primal_ = value;
+            on_modified();
+        }
+    }
 };
 
 class ocp : public ocp_base {
@@ -130,6 +142,7 @@ class ocp : public ocp_base {
 class stage_ocp : public ocp, public std::enable_shared_from_this<stage_ocp> {
     friend class node_view;
     friend class graph_model;
+    friend class graph_composer;
 
   protected:
     stage_ocp() = default;
@@ -138,10 +151,14 @@ class stage_ocp : public ocp, public std::enable_shared_from_this<stage_ocp> {
   private:
     std::unordered_map<size_t, unsigned> endpoint_role_mask_by_uid_;
     std::function<void()> mutation_callback_;
+    std::atomic<size_t> mutation_revision_{1};
     bool add_with_role(shared_expr ex, stage_expr_role role);
     bool validate_stage_term(const shared_expr &ex, std::string *reason) const;
     bool validate_endpoint_term(const shared_expr &ex, std::string *reason) const;
     void set_mutation_callback(std::function<void()> callback);
+    size_t mutation_revision() const noexcept {
+        return mutation_revision_.load(std::memory_order_acquire);
+    }
     bool has_role(const expr &ex, stage_expr_role role) const;
     void on_modified() override;
 

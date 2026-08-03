@@ -60,7 +60,7 @@ class generic_func : public expr, protected field_layout_store<var_list> {
 
     friend class func_arg_map;
     friend class func_approx_data;
-    friend class graph_model;
+    friend class graph_composer;
 
     virtual void substitute(const sym &arg, const sym &rhs);
     void substitute_argument(const sym &arg, const sym &rhs);

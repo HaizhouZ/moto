@@ -2,6 +2,7 @@
 #include <type_cast.hpp>
 
 #include <nanobind/stl/vector.h>
+#include <nanobind/stl/pair.h>
 
 #include <enum_export.hpp>
 using namespace moto;
@@ -15,7 +16,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
                  return self.add_stage(stage, n_stages);
              },
              nb::arg("stage"),
-             nb::arg("n_stages"))
+             nb::arg("n_stages") = 1)
         .def("add_stages",
              [](ns_sqp &self, const node_view &start_node, const stage_ocp_ptr_t &stage, size_t n_stages) {
                  return self.add_stages(start_node, stage, n_stages);
@@ -23,6 +24,12 @@ void register_submodule_ns_sqp(nb::module_ &m) {
              nb::arg("start_node"),
              nb::arg("stage"),
              nb::arg("n_stages"))
+        .def("add_phases",
+             [](ns_sqp &self, const std::vector<graph_model::phase> &phases) {
+                 return self.add_phases(phases);
+             },
+             nb::arg("phases"),
+             "Append (stage, count) phases in one graph transaction")
         .def_prop_ro("start_node", [](ns_sqp &self) { return self.start_node(); }, "Initial graph node")
         .def("update", [](ns_sqp &self, size_t n_iter, bool verbose, bool profile) {
             nb::gil_scoped_release rel;

@@ -1,64 +1,8 @@
 #include <moto/ocp/graph_model.hpp>
 
-#include <moto/ocp/impl/func.hpp>
-
 #include <iterator>
 
 namespace moto {
-
-namespace {
-void deactivate_inactive_primal_args_from_source(const stage_ocp_ptr_t &source,
-                                                 const ocp_ptr_t &target) {
-    if (!source) {
-        return;
-    }
-    ocp::active_status_config config;
-    for (field_t f : primal_fields) {
-        for (const shared_expr &expr : target->exprs(f)) {
-            if (source->contains(*expr) && !source->is_active(*expr)) {
-                config.deactivate_list.emplace_back(*expr);
-            }
-        }
-    }
-    if (!config.empty()) {
-        target->update_active_status(config);
-    }
-}
-} // namespace
-
-void graph_model::append_role_terms(const stage_ocp_ptr_t &source,
-                                    stage_expr_role role,
-                                    const ocp_ptr_t &target,
-                                    term_placement placement) const {
-    if (!source) {
-        return;
-    }
-    for (field_t f : func_fields) {
-        for (const shared_expr &expr : source->exprs(f)) {
-            if (!source->has_role(*expr, role)) {
-                continue;
-            }
-            if (placement == term_placement::direct) {
-                target->add(expr);
-            } else {
-                target->add(expr.as<generic_func>().lower_expr_x_to_y_cached(
-                    fmt::format("stage endpoint term {} materialization", expr->name()),
-                    target->uid()));
-            }
-        }
-    }
-}
-
-void graph_model::append_node_terms(const node_view &node,
-                                    const ocp_ptr_t &target,
-                                    term_placement placement) const {
-    const auto source = node.stage();
-    if (!source) {
-        return;
-    }
-    source->wait_until_ready();
-    append_role_terms(source, node.role(), target, placement);
-}
 
 void graph_model::add_end_boundary_view(interval_record &record, const node_view &node) const {
     if (node.expired()) {
@@ -140,6 +84,42 @@ std::vector<stage_ocp_ptr_t> graph_model::add_stages(const node_view &start_node
     return commit_stage_chain(std::move(chain), incoming_boundary_index, advances_tail);
 }
 
+std::vector<std::vector<stage_ocp_ptr_t>>
+graph_model::add_phases(const std::vector<phase> &phases) {
+    if (phases.empty()) {
+        throw std::invalid_argument("graph_model::add_phases expects at least one phase");
+    }
+    for (const auto &[stage, count] : phases) {
+        if (!stage || count == 0) {
+            throw std::invalid_argument("graph_model::add_phases expects non-null stages and counts >= 1");
+        }
+    }
+    std::lock_guard<std::mutex> lock(graph_state_mutex_);
+    const node_view start_node = tail_node_;
+    const auto incoming_boundary_index = find_incoming_boundary_index(
+        start_node, "graph_model tail node is not connected to an interval boundary");
+
+    stage_chain combined;
+    std::vector<std::vector<stage_ocp_ptr_t>> result;
+    result.reserve(phases.size());
+    node_view cursor = start_node;
+    for (const auto &[stage, count] : phases) {
+        auto chain = build_stage_chain(cursor, stage, count);
+        if (!combined.records.empty()) {
+            add_end_boundary_view(combined.records.back(), chain.records.front().stage->st());
+        }
+        result.push_back(chain.stages);
+        combined.records.insert(combined.records.end(),
+                                std::make_move_iterator(chain.records.begin()),
+                                std::make_move_iterator(chain.records.end()));
+        combined.stages.insert(combined.stages.end(), chain.stages.begin(), chain.stages.end());
+        combined.tail = chain.tail;
+        cursor = chain.tail;
+    }
+    commit_stage_chain(std::move(combined), incoming_boundary_index, true);
+    return result;
+}
+
 void graph_model::validate_stage_chain_input(const node_view &start_node,
                                              const stage_ocp_ptr_t &stage,
                                              size_t n_stages) const {
@@ -203,71 +183,20 @@ std::vector<stage_ocp_ptr_t> graph_model::commit_stage_chain(stage_chain &&chain
         tail_node_ = chain.tail;
     }
     auto stages = std::move(chain.stages);
-    interval_cache_.reset();
+    topology_cache_.reset();
     invalidate();
     return stages;
 }
 
-graph_model::interval_snapshot graph_model::composed_intervals() const {
-    for (;;) {
-        size_t captured_revision = 0;
-        std::vector<interval_record> interval_snapshot;
-        {
-            std::lock_guard<std::mutex> lock(graph_state_mutex_);
-            captured_revision = revision();
-            if (interval_cache_revision_ == captured_revision && interval_cache_) {
-                return {captured_revision, interval_cache_};
-            }
-            if (intervals_.empty()) {
-                throw std::runtime_error("graph_model expects a non-empty path");
-            }
-            interval_snapshot = intervals_;
-        }
-
-        auto intervals = std::make_shared<std::vector<ocp_ptr_t>>();
-        intervals->reserve(interval_snapshot.size());
-        for (const auto &record : interval_snapshot) {
-            intervals->emplace_back(compose_stage(record));
-        }
-
-        std::lock_guard<std::mutex> lock(graph_state_mutex_);
-        const size_t current_revision = revision();
-        if (interval_cache_revision_ == current_revision && interval_cache_) {
-            return {current_revision, interval_cache_};
-        }
-        if (current_revision == captured_revision) {
-            interval_cache_ = intervals;
-            interval_cache_revision_ = captured_revision;
-            return {captured_revision, interval_cache_};
-        }
+graph_model::topology_snapshot graph_model::snapshot() const {
+    std::lock_guard<std::mutex> lock(graph_state_mutex_);
+    if (intervals_.empty()) {
+        throw std::runtime_error("graph_model expects a non-empty path");
     }
-}
-
-ocp_ptr_t graph_model::compose_stage(const interval_record &record) const {
-    if (!record.stage) {
-        throw std::runtime_error("graph_model found null stage");
+    if (!topology_cache_) {
+        topology_cache_ = std::make_shared<const std::vector<interval_record>>(intervals_);
     }
-    record.stage->wait_until_ready();
-
-    auto composed = ocp::create();
-    composed->set_allow_inconsistent_dynamics(record.stage->allow_inconsistent_dynamics());
-    composed->set_automatic_reorder_primal(record.stage->automatic_reorder_primal());
-
-    append_role_terms(record.stage, stage_expr_role::interval, composed, term_placement::direct);
-    if (!record.start_boundary_view.expired()) {
-        append_node_terms(record.start_boundary_view, composed, term_placement::direct);
-    }
-
-    deactivate_inactive_primal_args_from_source(record.stage, composed);
-    if (!record.start_boundary_view.expired()) {
-        deactivate_inactive_primal_args_from_source(record.start_boundary_view.stage(), composed);
-    }
-
-    for (const node_view &view : record.end_boundary_views) {
-        append_node_terms(view, composed, term_placement::lower_x_to_y);
-    }
-    composed->wait_until_ready();
-    return composed;
+    return {revision(), topology_cache_};
 }
 
 } // namespace moto

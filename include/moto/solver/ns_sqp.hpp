@@ -8,6 +8,8 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <moto/ocp/graph_composer.hpp>
 #include <moto/ocp/graph_model.hpp>
 #include <moto/ocp/constr.hpp>
 #include <moto/ocp/impl/node_data.hpp>
@@ -324,8 +326,12 @@ struct ns_sqp {
     struct node_type final {
         using data_type = data;
         std::unique_ptr<data_type> data_;
-        explicit node_type(const ocp_ptr_t &formulation, bool internal_initial_state = false)
-            : data_(std::make_unique<data_type>(formulation)) {
+        ocp_ptr_t source_formulation_;
+        explicit node_type(const ocp_ptr_t &formulation,
+                           bool internal_initial_state = false,
+                           ocp_ptr_t source_formulation = {})
+            : data_(std::make_unique<data_type>(formulation)),
+              source_formulation_(source_formulation ? std::move(source_formulation) : formulation) {
             data_->internal_initial_state = internal_initial_state;
         }
         data_type &payload() { return *data_; }
@@ -350,6 +356,10 @@ struct ns_sqp {
                                             size_t n_stages) {
         return model_graph_.add_stages(start_node, stage, n_stages);
     }
+    std::vector<std::vector<stage_ocp_ptr_t>> add_phases(
+        const std::vector<graph_model::phase> &phases) {
+        return model_graph_.add_phases(phases);
+    }
     std::vector<data *> &solver_nodes();
 
   private:
@@ -360,13 +370,14 @@ struct ns_sqp {
     storage_type &equality_init_graph();
     template <typename StageBuilder>
     void realize_runtime(storage_type &runtime,
-                         const graph_model::interval_snapshot &snapshot,
+                         const graph_composer::interval_snapshot &snapshot,
                          StageBuilder &&stage_builder);
     ocp_ptr_t build_initial_state_virtual_stage(const ocp_ptr_t &first_stage) const;
     void sync_initial_state_virtual_stage(storage_type &runtime) const;
     template <typename StageBuilder>
     size_t rebuild_runtime_from_model(storage_type &runtime,
                                       StageBuilder &&stage_builder);
+    size_t reconcile_solver_runtime_from_model();
     struct scoped_phase_graph_override {
         ns_sqp &owner;
         bool in_restoration_backup;
@@ -379,21 +390,34 @@ struct ns_sqp {
     };
     solver_type riccati_solver_;
     graph_model model_graph_;
+    graph_composer graph_composer_;
     size_t graph_n_jobs_ = MAX_THREADS;
     storage_type solver_runtime_;
     std::atomic<size_t> solver_runtime_revision_ = 0;
     initial_state_mode solver_runtime_initial_state_mode_ = initial_state_mode::fixed;
     std::mutex solver_runtime_mutex_;
+    template <typename Config>
+    struct overlay_cache_state {
+        size_t revision = 0;
+        initial_state_mode initial_state = initial_state_mode::fixed;
+        std::optional<Config> config;
+
+        template <typename Equal>
+        bool matches(size_t model_revision, initial_state_mode mode,
+                     const Config &candidate, Equal equal) const {
+            return revision == model_revision && initial_state == mode && config &&
+                   equal(*config, candidate);
+        }
+        void update(size_t model_revision, initial_state_mode mode, Config candidate) {
+            revision = model_revision;
+            initial_state = mode;
+            config = std::move(candidate);
+        }
+    };
     storage_type restoration_runtime_;
-    size_t restoration_runtime_revision_ = 0;
-    initial_state_mode restoration_runtime_initial_state_mode_ = initial_state_mode::fixed;
-    solver::restoration::restoration_overlay_settings restoration_cfg_{};
-    bool restoration_cfg_valid_ = false;
+    overlay_cache_state<solver::restoration::restoration_overlay_settings> restoration_cache_;
     storage_type equality_init_runtime_;
-    size_t equality_init_runtime_revision_ = 0;
-    initial_state_mode equality_init_runtime_initial_state_mode_ = initial_state_mode::fixed;
-    solver::equality_init::equality_init_overlay_settings equality_init_cfg_{};
-    bool equality_init_cfg_valid_ = false;
+    overlay_cache_state<solver::equality_init::equality_init_overlay_settings> equality_init_cache_;
     storage_type *phase_graph_override_ = nullptr;
 
     template <typename worker_type>

@@ -30,7 +30,7 @@ ns_sqp::ns_sqp(size_t n_jobs)
 
 template <typename StageBuilder>
 void ns_sqp::realize_runtime(storage_type &runtime,
-                             const graph_model::interval_snapshot &snapshot,
+                             const graph_composer::interval_snapshot &snapshot,
                              StageBuilder &&stage_builder) {
     runtime.clear();
     const bool add_virtual_initial_state = settings.initial_state == initial_state_mode::optimized;
@@ -112,8 +112,45 @@ void ns_sqp::sync_initial_state_virtual_stage(storage_type &runtime) const {
 template <typename StageBuilder>
 size_t ns_sqp::rebuild_runtime_from_model(storage_type &runtime,
                                           StageBuilder &&stage_builder) {
-    const auto snapshot = model_graph_.composed_intervals();
+    const auto snapshot = graph_composer_.compose(model_graph_);
     realize_runtime(runtime, snapshot, std::forward<StageBuilder>(stage_builder));
+    return snapshot.revision;
+}
+
+size_t ns_sqp::reconcile_solver_runtime_from_model() {
+    const auto snapshot = graph_composer_.compose(model_graph_);
+    struct desired_node {
+        ocp_ptr_t formulation;
+        bool internal_initial_state = false;
+    };
+    std::vector<desired_node> desired;
+    const bool optimize_initial_state = settings.initial_state == initial_state_mode::optimized;
+    desired.reserve(snapshot.intervals->size() + static_cast<size_t>(optimize_initial_state));
+    if (optimize_initial_state) {
+        if (snapshot.intervals->empty()) {
+            throw std::runtime_error("initial state optimization requires at least one solver stage");
+        }
+        desired.push_back({snapshot.intervals->front(), true});
+    }
+    for (const ocp_ptr_t &stage : *snapshot.intervals) {
+        desired.push_back({stage, false});
+    }
+
+    solver_runtime_.reconcile(
+        desired,
+        [](const node_type &existing, const desired_node &wanted) {
+            return existing.source_formulation_.get() == wanted.formulation.get() &&
+                   existing.payload().internal_initial_state == wanted.internal_initial_state;
+        },
+        [this](const desired_node &wanted) {
+            if (wanted.internal_initial_state) {
+                return node_type(build_initial_state_virtual_stage(wanted.formulation),
+                                 true,
+                                 wanted.formulation);
+            }
+            return node_type(wanted.formulation);
+        });
+    solver_runtime_.flatten_nodes();
     return snapshot.revision;
 }
 
@@ -136,9 +173,7 @@ ns_sqp::storage_type &ns_sqp::active_data() {
             return solver_runtime_;
         }
 
-        const size_t built_revision = rebuild_runtime_from_model(
-            solver_runtime_,
-            [](const ocp_ptr_t &stage_ocp) { return stage_ocp; });
+        const size_t built_revision = reconcile_solver_runtime_from_model();
         if (built_revision == model_graph_.revision()) {
             solver_runtime_initial_state_mode_ = settings.initial_state;
             solver_runtime_revision_.store(built_revision, std::memory_order_release);
@@ -192,20 +227,14 @@ ns_sqp::storage_type &ns_sqp::restoration_graph() {
         .rho_ineq = settings.restoration.rho_ineq,
     };
     const size_t model_revision = model_graph_.revision();
-    const bool needs_rebuild =
-        restoration_runtime_revision_ != model_revision ||
-        restoration_runtime_initial_state_mode_ != settings.initial_state ||
-        !restoration_cfg_valid_ ||
-        !same_restoration_cfg(restoration_cfg_, cfg);
-    if (needs_rebuild) {
-        restoration_runtime_revision_ = rebuild_runtime_from_model(
+    if (!restoration_cache_.matches(model_revision, settings.initial_state, cfg,
+                                    same_restoration_cfg)) {
+        const size_t built_revision = rebuild_runtime_from_model(
             restoration_runtime_,
             [&cfg](const ocp_ptr_t &stage_ocp) {
                 return solver::restoration::build_restoration_overlay_problem(stage_ocp, cfg);
             });
-        restoration_cfg_ = cfg;
-        restoration_runtime_initial_state_mode_ = settings.initial_state;
-        restoration_cfg_valid_ = true;
+        restoration_cache_.update(built_revision, settings.initial_state, cfg);
     }
     return restoration_runtime_;
 }
@@ -215,20 +244,14 @@ ns_sqp::storage_type &ns_sqp::equality_init_graph() {
         .rho_eq = settings.eq_init.rho_eq,
     };
     const size_t model_revision = model_graph_.revision();
-    const bool needs_rebuild =
-        equality_init_runtime_revision_ != model_revision ||
-        equality_init_runtime_initial_state_mode_ != settings.initial_state ||
-        !equality_init_cfg_valid_ ||
-        !same_equality_init_cfg(equality_init_cfg_, cfg);
-    if (needs_rebuild) {
-        equality_init_runtime_revision_ = rebuild_runtime_from_model(
+    if (!equality_init_cache_.matches(model_revision, settings.initial_state, cfg,
+                                     same_equality_init_cfg)) {
+        const size_t built_revision = rebuild_runtime_from_model(
             equality_init_runtime_,
             [&cfg](const ocp_ptr_t &stage_ocp) {
                 return solver::equality_init::build_equality_init_overlay_problem(stage_ocp, cfg);
             });
-        equality_init_cfg_ = cfg;
-        equality_init_runtime_initial_state_mode_ = settings.initial_state;
-        equality_init_cfg_valid_ = true;
+        equality_init_cache_.update(built_revision, settings.initial_state, cfg);
     }
     return equality_init_runtime_;
 }

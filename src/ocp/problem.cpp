@@ -227,7 +227,8 @@ ocp_ptr_t ocp::clone(const active_status_config &config) const {
 
 stage_ocp::stage_ocp(const stage_ocp &rhs)
     : ocp(rhs),
-      endpoint_role_mask_by_uid_(rhs.endpoint_role_mask_by_uid_) {}
+      endpoint_role_mask_by_uid_(rhs.endpoint_role_mask_by_uid_),
+      mutation_revision_(rhs.mutation_revision()) {}
 
 stage_ocp_ptr_t stage_ocp::clone(const active_status_config &config) const {
     auto prob = stage_ocp_ptr_t(new stage_ocp(*this));
@@ -328,6 +329,7 @@ void stage_ocp::set_mutation_callback(std::function<void()> callback) {
     mutation_callback_ = std::move(callback);
 }
 void stage_ocp::on_modified() {
+    mutation_revision_.fetch_add(1, std::memory_order_release);
     if (mutation_callback_) {
         mutation_callback_();
     }

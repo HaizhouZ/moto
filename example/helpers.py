@@ -339,10 +339,8 @@ def add_stage_segments(sqp, stage_prototypes, lengths):
     lengths = tuple(lengths)
     if len(stage_prototypes) != len(lengths):
         raise ValueError("stage_prototypes and lengths must have the same size")
-    stages = []
-    for stage, length in zip(stage_prototypes, lengths):
-        stages.extend(sqp.add_stage(stage, length))
-    return stages
+    phases = list(zip(stage_prototypes, lengths))
+    return [stage for phase in sqp.add_phases(phases) for stage in phase]
 
 
 def add_time_step_regularization(

@@ -328,6 +328,33 @@ TEST_CASE("sqp add_stage appends repeated stage segments from the graph tail", "
     REQUIRE(stage_cost.in_args().front()->field() == __x);
 }
 
+TEST_CASE("sqp add_phases builds one linear transaction and preserves unchanged runtime nodes", "[graph][path][cache]") {
+    using namespace moto;
+
+    auto [x, xn] = sym::states("x_add_phases", 1);
+    auto u = sym::inputs("u_add_phases", 1);
+    auto stage_a = make_stage("phases_a", x, xn, u);
+    auto stage_b = make_stage("phases_b", x, xn, u);
+
+    ns_sqp sqp;
+    auto phases = sqp.add_phases({{stage_a, 2}, {stage_b, 1}});
+    REQUIRE(phases.size() == 2);
+    REQUIRE(phases[0].size() == 2);
+    REQUIRE(phases[1].size() == 1);
+
+    auto &initial = sqp.solver_nodes();
+    REQUIRE(initial.size() == 3);
+    auto *unchanged = initial.front();
+    unchanged->sym_val().value_[__x].setConstant(3.0);
+
+    phases.back().back()->ed().add(*layout_cost("cost_phases_terminal", var_list{x}));
+    auto &updated = sqp.solver_nodes();
+    REQUIRE(updated.front() == unchanged);
+    REQUIRE(updated.front()->sym_val().value_[__x](0) == 3.0);
+    REQUIRE(contains_name_prefix(expr_names(updated.back()->problem(), __cost),
+                                 "cost_phases_terminal"));
+}
+
 TEST_CASE("sqp add_stage lowers the next phase start endpoint onto the previous tail", "[graph][mapping]") {
     using namespace moto;
 

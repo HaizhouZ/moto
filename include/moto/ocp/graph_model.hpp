@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include <moto/ocp/problem.hpp>
@@ -12,9 +13,12 @@
 namespace moto {
 
 struct ns_sqp;
+class graph_composer;
 
 class graph_model {
   public:
+    using phase = std::pair<stage_ocp_ptr_t, size_t>;
+
     graph_model();
 
     node_view start_node() const;
@@ -23,9 +27,11 @@ class graph_model {
     std::vector<stage_ocp_ptr_t> add_stages(const node_view &start_node,
                                             const stage_ocp_ptr_t &stage,
                                             size_t n_stages);
+    std::vector<std::vector<stage_ocp_ptr_t>> add_phases(const std::vector<phase> &phases);
 
   private:
     friend struct ns_sqp;
+    friend class graph_composer;
 
     struct revision_state {
         std::atomic<size_t> revision = 1;
@@ -37,9 +43,9 @@ class graph_model {
         std::vector<node_view> end_boundary_views;
     };
 
-    struct interval_snapshot {
+    struct topology_snapshot {
         size_t revision;
-        std::shared_ptr<const std::vector<ocp_ptr_t>> intervals;
+        std::shared_ptr<const std::vector<interval_record>> intervals;
     };
 
     struct stage_chain {
@@ -48,20 +54,8 @@ class graph_model {
         node_view tail;
     };
 
-    interval_snapshot composed_intervals() const;
+    topology_snapshot snapshot() const;
     size_t revision() const noexcept { return revision_state_->revision.load(std::memory_order_acquire); }
-    ocp_ptr_t compose_stage(const interval_record &record) const;
-    enum class term_placement {
-        direct,
-        lower_x_to_y,
-    };
-    void append_role_terms(const stage_ocp_ptr_t &source,
-                           stage_expr_role role,
-                           const ocp_ptr_t &target,
-                           term_placement placement) const;
-    void append_node_terms(const node_view &node,
-                           const ocp_ptr_t &target,
-                           term_placement placement) const;
     stage_chain build_stage_chain(const node_view &start_node,
                                   const stage_ocp_ptr_t &stage,
                                   size_t n_stages);
@@ -82,8 +76,7 @@ class graph_model {
     stage_ocp_ptr_t start_stage_ = stage_ocp::create();
     node_view tail_node_ = start_stage_->st();
     std::vector<interval_record> intervals_;
-    mutable std::shared_ptr<const std::vector<ocp_ptr_t>> interval_cache_;
-    mutable size_t interval_cache_revision_ = 0;
+    mutable std::shared_ptr<const std::vector<interval_record>> topology_cache_;
     mutable std::mutex graph_state_mutex_;
 };
 

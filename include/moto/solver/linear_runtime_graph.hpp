@@ -40,6 +40,21 @@ class linear_runtime_graph {
         return nodes_.back();
     }
 
+    template <typename DesiredRange, typename Matches, typename Factory>
+    void reconcile(const DesiredRange &desired, Matches &&matches, Factory &&factory) {
+        std::vector<node> next;
+        next.reserve(desired.size());
+        for (size_t i = 0; i < desired.size(); ++i) {
+            if (i < nodes_.size() && std::invoke(matches, nodes_[i], desired[i])) {
+                next.emplace_back(std::move(nodes_[i]));
+            } else {
+                next.emplace_back(std::invoke(factory, desired[i]));
+            }
+        }
+        nodes_ = std::move(next);
+        order_dirty_ = true;
+    }
+
     auto &flatten_nodes() {
         ensure_order();
         return ordered_;
