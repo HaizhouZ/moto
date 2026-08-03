@@ -60,7 +60,7 @@ def semi_implicit_dynamics(name, q, v, qn, vn, velocity_residual, dt):
     """Create manifold semi-implicit Euler dynamics without exposing Pinocchio ops."""
     q_next = q.symbolic_integrate(q.sx, vn * dt)
     residual = cs.vcat([q.symbolic_difference(qn.sx, q_next), velocity_residual])
-    return moto.sparse_dynamics.create(name, residual)
+    return moto.semi_implicit_euler.create(name, residual)
 
 
 class PinocchioCasadiModel(cpin.Model):
@@ -315,9 +315,10 @@ class ContactRobotModel(PinocchioCasadiModel):
             return semi_implicit_dynamics(
                 name, self.q, self.v, self.qn, self.vn, velocity_residual, self.dt
             )
+        name += "_predicted"
         integration_velocity = self.v + self.aba if self.use_fwd_dyn else self.vn
         q_next = self.q.symbolic_integrate(self.q.sx, integration_velocity * self.dt)
-        return moto.sparse_dynamics.create(
+        return moto.dense_dynamics.create(
             name, cs.vcat([self.q.symbolic_difference(self.qn.sx, q_next), velocity_residual])
         )
 

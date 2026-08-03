@@ -10,7 +10,7 @@
 #include <nanobind/stl/variant.h>
 
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
-#include <moto/ocp/dynamics/sparse_dynamics.hpp>
+#include <moto/ocp/dynamics/semi_implicit_euler.hpp>
 
 #include <enum_export.hpp>
 
@@ -296,15 +296,15 @@ void register_submodule_functional(nb::module_ &m) {
             nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd)
         .def("mark_shared_inputs", &dense_dynamics::mark_shared_inputs, nb::arg("shared_inputs"));
 
-    nb::class_<sparse_dynamics, generic_constr>(m, "sparse_dynamics")
+    nb::class_<semi_implicit_euler, generic_constr>(m, "semi_implicit_euler")
         .def_static(
             "create",
             [](const std::string &name, const cs::SX &out,
                approx_order order) {
-                return std::make_shared<sparse_dynamics>(name, out, order);
+                return std::make_shared<semi_implicit_euler>(name, out, order);
             },
             nb::arg("name"), nb::arg("out"),
             nb::arg("order") = approx_order::first)
-        .def("mark_shared_inputs", &sparse_dynamics::mark_shared_inputs,
+        .def("mark_shared_inputs", &semi_implicit_euler::mark_shared_inputs,
              nb::arg("shared_inputs"));
 }

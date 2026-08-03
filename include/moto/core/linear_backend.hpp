@@ -136,50 +136,6 @@ private:
   function_type function_ = nullptr;
 };
 
-struct solve_block {
-  size_t offset = 0;
-  size_t size = 0;
-  std::vector<size_t> dependencies;
-};
-
-/// Static block-triangular solve profile detected from representative numeric
-/// matrices. inverse_nonzeros is the union of numerically observed inverse
-/// entries and is retained for validation/profile diagnostics.
-struct solve_profile {
-  size_t dimension = 0;
-  matrix_layout lhs;
-  std::vector<solve_block> order;
-  std::vector<unsigned char> inverse_nonzeros;
-  bool dense_fallback = false;
-};
-
-solve_profile analyze_solve_profile(std::span<const matrix> samples,
-                                    scalar_t relative_tolerance = 1e-12);
-
-class multi_solve_kernel {
-public:
-  using function_type = void (*)(scalar_t *const *);
-  multi_solve_kernel() = default;
-  multi_solve_kernel(solve_profile profile, std::vector<size_t> rhs_cols,
-                     function_type function)
-      : profile_(std::move(profile)), rhs_cols_(std::move(rhs_cols)),
-        function_(function) {}
-  void operator()(std::span<scalar_t *> pointers) const;
-  size_t pointer_count() const { return profile_.lhs.panels.size() + 2 * rhs_cols_.size(); }
-
-private:
-  solve_profile profile_;
-  std::vector<size_t> rhs_cols_;
-  function_type function_ = nullptr;
-};
-
-std::string emit_multi_solve_source(const solve_profile &profile,
-                                    std::span<const size_t> rhs_cols,
-                                    bool transpose = false);
-multi_solve_kernel compile_multi_solve(
-    solve_profile profile, std::vector<size_t> rhs_cols, bool transpose = false,
-    const std::filesystem::path &cache_dir = "gen/linear_backend");
-
 struct rowwise_kernels {
   rowwise_kernel scale, inf_norm, scaled_inf_norm;
 };
