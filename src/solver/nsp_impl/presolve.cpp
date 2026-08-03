@@ -1,5 +1,6 @@
 #define MOTO_NS_RICCATI_IMPL
 #include <moto/solver/ns_riccati/generic_solver.hpp>
+#include <moto/core/linear_backend.hpp>
 
 // #define ENABLE_TIMED_BLOCK
 #include <moto/utils/timed_block.hpp>
@@ -23,8 +24,8 @@ void generic_solver::ns_factorization_correction(ns_riccati_data *cur) {
 
     if (d.rank_status_ == rank_status::unconstrained) {
         nsp.z_0_k = nsp.u_0_p_k;
-        d.Q_yx.right_T_times<false>(d.F_0, d.Q_x);
-        d.Q_yx_mod.right_T_times<false>(d.F_0, d.Q_x);
+        linear_backend::right_transpose_multiply(d.F_0, d.Q_yx, d.Q_x, -1.);
+        linear_backend::right_transpose_multiply(d.F_0, d.Q_yx_mod, d.Q_x, -1.);
         return;
     }
 
@@ -37,7 +38,7 @@ void generic_solver::ns_factorization_correction(ns_riccati_data *cur) {
     if (constr_s) {
         nsp.s_0_p_k.conservativeResize(constr_s);
         nsp.s_0_p_k.noalias() = _approx[__eq_x].v_;
-        d.s_y.times<false>(d.F_0, nsp.s_0_p_k);
+        linear_backend::multiply(d.s_y, d.F_0, nsp.s_0_p_k, -1.);
         nsp.s_c_stacked_0_k.head(constr_s) = nsp.s_0_p_k;
     }
     if (constr_c) {
@@ -50,8 +51,8 @@ void generic_solver::ns_factorization_correction(ns_riccati_data *cur) {
     timed_block_end("precompute_u_y");
 
     timed_block_start("precompute_u0p");
-    d.Q_uu.times<false>(nsp.u_y_k, nsp.u_0_p_k);
-    d.Q_uu_mod.times<false>(nsp.u_y_k, nsp.u_0_p_k);
+    linear_backend::multiply(d.Q_uu, nsp.u_y_k, nsp.u_0_p_k, -1.);
+    linear_backend::multiply(d.Q_uu_mod, nsp.u_y_k, nsp.u_0_p_k, -1.);
     timed_block_end("precompute_u0p");
 
     timed_block_start("precompute_z0");
@@ -61,14 +62,14 @@ void generic_solver::ns_factorization_correction(ns_riccati_data *cur) {
     timed_block_end("precompute_z0");
 
     timed_block_start("precompute_y_y");
-    d.F_u.times<false>(nsp.u_y_k, nsp.y_y_k);
+    linear_backend::multiply(d.F_u, nsp.u_y_k, nsp.y_y_k, -1.);
     timed_block_end("precompute_y_y");
 
     d.Q_x.noalias() -= nsp.u_0_p_k.transpose() * nsp.u_y_K;
-    d.Q_ux.right_T_times<false>(nsp.u_y_k, d.Q_x);
-    d.Q_ux_mod.right_T_times<false>(nsp.u_y_k, d.Q_x);
-    d.Q_yx.right_T_times<false>(nsp.y_y_k, d.Q_x);
-    d.Q_yx_mod.right_T_times<false>(nsp.y_y_k, d.Q_x);
+    linear_backend::right_transpose_multiply(nsp.u_y_k, d.Q_ux, d.Q_x, -1.);
+    linear_backend::right_transpose_multiply(nsp.u_y_k, d.Q_ux_mod, d.Q_x, -1.);
+    linear_backend::right_transpose_multiply(nsp.y_y_k, d.Q_yx, d.Q_x, -1.);
+    linear_backend::right_transpose_multiply(nsp.y_y_k, d.Q_yx_mod, d.Q_x, -1.);
 
     if (d.rank_status_ == rank_status::fully_constrained) {
         d.d_u.k = -nsp.u_y_k;
@@ -85,17 +86,17 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
     timed_block_end("update_projected_dynamics");
 
     nsp.u_0_p_K.setZero();
-    d.Q_ux.dump_into(nsp.u_0_p_K);
-    d.Q_ux_mod.dump_into(nsp.u_0_p_K);
+    linear_backend::write_dense(d.Q_ux, nsp.u_0_p_K);
+    linear_backend::write_dense(d.Q_ux_mod, nsp.u_0_p_K);
     nsp.y_0_p_K.setZero();
-    d.Q_yx.dump_into(nsp.y_0_p_K);
-    d.Q_yx_mod.dump_into(nsp.y_0_p_K);
+    linear_backend::write_dense(d.Q_yx, nsp.y_0_p_K);
+    linear_backend::write_dense(d.Q_yx_mod, nsp.y_0_p_K);
     d.V_xx.setZero();
-    d.Q_xx.dump_into(d.V_xx);
-    d.Q_xx_mod.dump_into(d.V_xx);
+    linear_backend::write_dense(d.Q_xx, d.V_xx);
+    linear_backend::write_dense(d.Q_xx_mod, d.V_xx);
     d.V_yy.setZero();
-    d.Q_yy.dump_into(d.V_yy);
-    d.Q_yy_mod.dump_into(d.V_yy);
+    linear_backend::write_dense(d.Q_yy, d.V_yy);
+    linear_backend::write_dense(d.Q_yy_mod, d.V_yy);
 
     d.rank_status_ = rank_status::unconstrained;
 
@@ -107,11 +108,11 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
         nsp.z_0_K.conservativeResize(d.nu, d.nx);
         nsp.Q_zz.conservativeResize(d.nu, d.nu);
         nsp.Q_zz.setZero();
-        d.Q_uu.dump_into(nsp.Q_zz);
-        d.Q_uu_mod.dump_into(nsp.Q_zz);
+        linear_backend::write_dense(d.Q_uu, nsp.Q_zz);
+        linear_backend::write_dense(d.Q_uu_mod, nsp.Q_zz);
         nsp.z_0_K = nsp.u_0_p_K;
-        d.F_x.T_times<false>(d.Q_yx, d.V_xx);
-        d.F_x.T_times<false>(d.Q_yx_mod, d.V_xx);
+        linear_backend::transpose_multiply(d.F_x, d.Q_yx, d.V_xx, -1.);
+        linear_backend::transpose_multiply(d.F_x, d.Q_yx_mod, d.V_xx, -1.);
     };
 
     auto activate_gradient_corrections = [&]() {
@@ -139,11 +140,11 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
     timed_block_start("copy_lhs_derivatives");
     if (constr_s) {
         nsp.s_u.setZero();
-        d.s_y.times<false>(d.F_u, nsp.s_u);
+        linear_backend::multiply(d.s_y, d.F_u, nsp.s_u, -1.);
         nsp.s_c_stacked.topRows(constr_s) = nsp.s_u;
     }
     if (constr_c) {
-        d.c_u.dump_into(nsp.s_c_stacked.bottomRows(d.nc), spmm::dump_config{.overwrite = true});
+        linear_backend::write_dense(d.c_u, nsp.s_c_stacked.bottomRows(d.nc), {.overwrite = true});
     }
     timed_block_end("copy_lhs_derivatives");
 
@@ -158,12 +159,12 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
     if (constr_s) {
         nsp.s_0_p_K.conservativeResize(constr_s, Eigen::NoChange);
         nsp.s_0_p_K.setZero();
-        d.s_x.dump_into(nsp.s_0_p_K);
-        d.s_y.times<false>(d.F_x, nsp.s_0_p_K);
+        linear_backend::write_dense(d.s_x, nsp.s_0_p_K);
+        linear_backend::multiply(d.s_y, d.F_x, nsp.s_0_p_K, -1.);
         nsp.s_c_stacked_0_K.topRows(constr_s) = nsp.s_0_p_K;
     }
     if (constr_c) {
-        d.c_x.dump_into(nsp.s_c_stacked_0_K.bottomRows(d.nc));
+        linear_backend::write_dense(d.c_x, nsp.s_c_stacked_0_K.bottomRows(d.nc));
     }
 
     auto &rank = nsp.rank;
@@ -185,7 +186,7 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
         timed_block_start("compute_Zy");
         nsp.Z_y.resize(d.ny, nsp.Z_u.cols());
         nsp.Z_y.setZero();
-        d.F_u.times<false>(nsp.Z_u, nsp.Z_y);
+        linear_backend::multiply(d.F_u, nsp.Z_u, nsp.Z_y, -1.);
         timed_block_end("compute_Zy");
 
         d.rank_status_ = rank_status::constrained;
@@ -194,8 +195,8 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
         thread_local moto::utils::buffer_tpl<matrix> buf;
         buf.resize(d.nu, nsp.Z_u.cols());
         buf.data_.setZero();
-        d.Q_uu.times(nsp.Z_u, buf.data_);
-        d.Q_uu_mod.times(nsp.Z_u, buf.data_);
+        linear_backend::multiply(d.Q_uu, nsp.Z_u, buf.data_);
+        linear_backend::multiply(d.Q_uu_mod, nsp.Z_u, buf.data_);
         nsp.Q_zz.noalias() = nsp.Z_u.transpose() * buf.data_;
         timed_block_end("compute_Qzz");
 
@@ -211,8 +212,8 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
         timed_block_end("precompute_u_y");
 
         timed_block_start("precompute_u0p");
-        d.Q_uu.times<false>(nsp.u_y_K, nsp.u_0_p_K);
-        d.Q_uu_mod.times<false>(nsp.u_y_K, nsp.u_0_p_K);
+        linear_backend::multiply(d.Q_uu, nsp.u_y_K, nsp.u_0_p_K, -1.);
+        linear_backend::multiply(d.Q_uu_mod, nsp.u_y_K, nsp.u_0_p_K, -1.);
         timed_block_end("precompute_u0p");
 
         timed_block_start("precompute_z0");
@@ -223,16 +224,16 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
 
         timed_block_start("precompute_y_y");
         nsp.y_y_K.setZero();
-        d.F_x.dump_into(nsp.y_y_K);
-        d.F_u.times<false>(nsp.u_y_K, nsp.y_y_K);
+        linear_backend::write_dense(d.F_x, nsp.y_y_K);
+        linear_backend::multiply(d.F_u, nsp.u_y_K, nsp.y_y_K, -1.);
         timed_block_end("precompute_y_y");
 
         timed_block_start("update_value_derivative");
         d.V_xx.noalias() -= nsp.u_0_p_K.transpose() * nsp.u_y_K;
-        d.Q_ux.right_T_times<false>(nsp.u_y_K, d.V_xx);
-        d.Q_ux_mod.right_T_times<false>(nsp.u_y_K, d.V_xx);
-        d.Q_yx.right_T_times<false>(nsp.y_y_K, d.V_xx);
-        d.Q_yx_mod.right_T_times<false>(nsp.y_y_K, d.V_xx);
+        linear_backend::right_transpose_multiply(nsp.u_y_K, d.Q_ux, d.V_xx, -1.);
+        linear_backend::right_transpose_multiply(nsp.u_y_K, d.Q_ux_mod, d.V_xx, -1.);
+        linear_backend::right_transpose_multiply(nsp.y_y_K, d.Q_yx, d.V_xx, -1.);
+        linear_backend::right_transpose_multiply(nsp.y_y_K, d.Q_yx_mod, d.V_xx, -1.);
         timed_block_end("update_value_derivative");
     }
 

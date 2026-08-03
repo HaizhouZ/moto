@@ -851,12 +851,8 @@ TEST_CASE("boxed outer ipm runtime matches equivalent stacked one-sided rows") {
     outer_box.trial_prim_step[__u] << 0.2, -0.15;
     outer_stacked.trial_prim_step[__u] = outer_box.trial_prim_step[__u];
 
-    outer_box.for_each(__ineq_xu, [&](const solver::ipm_constr &ipm, solver::ipm_constr::approx_data &d) {
-        ipm.finalize_newton_step(d);
-    });
-    outer_stacked.for_each(__ineq_xu, [&](const solver::ipm_constr &ipm, solver::ipm_constr::approx_data &d) {
-        ipm.finalize_newton_step(d);
-    });
+    solver::ineq_soft::finalize_newton_step(&outer_box);
+    solver::ineq_soft::finalize_newton_step(&outer_stacked);
 
     outer_box.for_each(__ineq_xu, [&](const solver::ipm_constr &box_ipm, solver::ipm_constr::approx_data &d) {
         const auto &ub = *d.box_side_[box_side::ub];
@@ -1066,12 +1062,12 @@ TEST_CASE("boxed outer ipm predictor-corrector matches equivalent stacked one-si
 
     ws_box.ipm_start_predictor_computation();
     ws_stacked.ipm_start_predictor_computation();
+    solver::ineq_soft::finalize_newton_step(&outer_box);
+    solver::ineq_soft::finalize_newton_step(&outer_stacked);
     outer_box.for_each(__ineq_xu, [&](const solver::ipm_constr &ipm, solver::ipm_constr::approx_data &d) {
-        ipm.finalize_newton_step(d);
         ipm.finalize_predictor_step(d, &worker_box);
     });
     outer_stacked.for_each(__ineq_xu, [&](const solver::ipm_constr &ipm, solver::ipm_constr::approx_data &d) {
-        ipm.finalize_newton_step(d);
         ipm.finalize_predictor_step(d, &worker_stacked);
     });
     ws_box.ipm_end_predictor_computation();
@@ -1570,12 +1566,8 @@ TEST_CASE("restoration boxed inequality runtime matches equivalent stacked rows 
             d.elastic, d.require_box_spec("test"), scalar_t(20.0), ws.mu);
     });
 
-    resto_box.for_each(__ineq_xu, [&](const resto_ineq_elastic_ipm_constr &overlay, resto_ineq_elastic_ipm_constr::approx_data &d) {
-        overlay.finalize_newton_step(d);
-    });
-    resto_stacked.for_each(__ineq_xu, [&](const resto_ineq_elastic_ipm_constr &overlay, resto_ineq_elastic_ipm_constr::approx_data &d) {
-        overlay.finalize_newton_step(d);
-    });
+    solver::ineq_soft::finalize_newton_step(&resto_box);
+    solver::ineq_soft::finalize_newton_step(&resto_stacked);
 
     resto_box.for_each(__ineq_xu, [&](const resto_ineq_elastic_ipm_constr &, resto_ineq_elastic_ipm_constr::approx_data &d) {
         const auto &ub = d.elastic.side[box_side::ub];

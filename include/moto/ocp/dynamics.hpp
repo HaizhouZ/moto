@@ -2,7 +2,7 @@
 #define MOTO_OCP_DYNAMICS_HPP
 
 #include <moto/ocp/constr.hpp>
-#include <moto/spmm/sparse_mat.hpp>
+#include <moto/core/sparse_matrix.hpp>
 
 namespace moto {
 class generic_dynamics;                           ///< forward declaration

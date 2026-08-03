@@ -17,19 +17,19 @@
  * evaluation of the full KKT residuals is in original (physical) units.
  */
 #include <moto/solver/ns_sqp.hpp>
-#include <moto/spmm/sparse_mat.hpp>
+#include <moto/core/sparse_matrix.hpp>
 
 namespace moto {
 
 // ────────────────────────────────────────────────────────────────────────────
-// Helpers for efficient in-place row-/column-scaling of sparse_mat panels
+// Helpers for efficient in-place row-/column-scaling of sparse_matrix panels
 // ────────────────────────────────────────────────────────────────────────────
 
 namespace {
 
-/// Row-scale a sparse_mat in-place: row i ← s[i] * row i.
+/// Row-scale a sparse_matrix in-place: row i ← s[i] * row i.
 /// Avoids dense materialisation by iterating over stored panels.
-void row_scale_inplace(sparse_mat &mat, const vector &s) {
+void row_scale_inplace(sparse_matrix &mat, const vector &s) {
     // dense panels
     for (auto &panel : mat.dense_panels_) {
         for (int local_r = 0; local_r < panel.rows_; ++local_r) {
@@ -56,9 +56,9 @@ void row_scale_inplace(sparse_mat &mat, const vector &s) {
     }
 }
 
-/// Update the per-row inf-norms of a sparse_mat *into* norms[row_st..row_ed),
+/// Update the per-row inf-norms of a sparse_matrix *into* norms[row_st..row_ed),
 /// using norms(row) = max(norms(row), |panel entry|).
-void accumulate_row_infnorms(const sparse_mat &mat, Eigen::Ref<vector> norms) {
+void accumulate_row_infnorms(const sparse_matrix &mat, Eigen::Ref<vector> norms) {
     for (const auto &panel : mat.dense_panels_) {
         for (int local_r = 0; local_r < panel.rows_; ++local_r) {
             int glob_r = panel.row_st_ + local_r;

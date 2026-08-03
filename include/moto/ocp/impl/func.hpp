@@ -129,6 +129,11 @@ class generic_func : public expr, protected field_layout_store<var_list> {
     void set_jac_sparsity(const sym &arg, sparsity sp) {
         set_jac_sparsity(arg, {sp, 0, 0});
     }
+    void set_jac_sparsity(std::vector<sp_info> sp) {
+        field_write_guard();
+        jac_sp_ = std::move(sp);
+        detect_jacobian_sparsity_ = false;
+    }
     void set_hess_sparsity(const std::vector<std::vector<sp_info>> &sp) {
         field_write_guard();
         hess_sp_ = sp;

@@ -9,13 +9,19 @@ struct data_base;
 }
 /**
  * @brief soft constraint interface class
- * @warning lagrangian gradient correction should be added to @ approx_data::lag_jac_corr_
+ * @warning lagrangian gradient correction should be added to @
+ * approx_data::lag_jac_corr_
  */
 class soft_constr : public generic_constr {
   private:
     using base = generic_constr;
 
   public:
+  struct condensation_view {
+    std::vector<const scalar_t *> residuals;
+    std::vector<const scalar_t *> weights;
+    std::vector<scalar_t> residual_signs;
+  };
     /**
      * @brief soft constraint data, contains:
      * 1. additional primal step data for splitting post-rollout operation
@@ -38,27 +44,19 @@ class soft_constr : public generic_constr {
 
     };
 
-    /// public type alias for @ref approx_data to ensure common interface of all soft constraints
+    /// public type alias for @ref approx_data to ensure common interface of all
+  /// soft constraints
     using data_map_t = approx_data;
 
   protected:
     bool skip_field_check = false; ///< skip field check in finalize_impl
-    /// @brief accumulate soft-constraint Jacobian correction: lag_jac += scale * residual^T * jac
-    void propagate_jacobian(func_approx_data &data, const vector_const_ref &residual, scalar_t scale = 1.) const;
-
-    /// @brief accumulate soft-constraint Hessian correction from diagonal scaling:
-    /// H += scale * J^T * diag_scaling * J
-    void propagate_hessian(func_approx_data &data, const vector_const_ref &diag_scaling, scalar_t scale = 1.) const;
-
-    /// @brief accumulate soft-constraint Hessian correction with isotropic diagonal scaling:
-    /// H += scale * J^T * J
-    void propagate_hessian(func_approx_data &data, scalar_t scale) const;
-
-    /// @brief finalize the soft constraint, will be called upon added to a problem
+    /// @brief finalize the soft constraint, will be called upon added to a
+  /// problem
     void finalize_impl() override;
     /// @brief setup hessian sparsity for soft/ineq constraints
     void setup_hess() override;
-    /// @brief load external implementation and then run hessian setup for soft constraints
+    /// @brief load external implementation and then run hessian setup for soft
+  /// constraints
     void load_external_impl(const std::string &path = "gen") override;
 
   public:
@@ -79,8 +77,16 @@ class soft_constr : public generic_constr {
     /// @param data data map
     /// @param worker_cfg workspace data pointer to the config to be finalized
     virtual void finalize_predictor_step(data_map_t &data, workspace_data *worker_cfg) const {};
-    /// first order correction of the Lagrangian gradient. lag_jac_corr_ must be reset to zero before calling this
+    /// first order correction of the Lagrangian gradient. lag_jac_corr_ must be
+  /// reset to zero before calling this
     virtual void apply_corrector_step(data_map_t &data) const {};
+  virtual condensation_view condensation(data_map_t &data, bool hessian) const {
+    return {};
+  }
+  virtual vector_ref jacobian_step(data_map_t &data) const {
+    static vector empty;
+    return empty;
+  }
     /// @brief line search step for the soft constraint
     /// @param data data map
     /// @param worker_cfg workspace data pointer to the config to be used
@@ -96,23 +102,29 @@ class soft_constr : public generic_constr {
     /// @param data data map
     virtual void restore_trial_state(data_map_t &data) const {}
 
-    /// @brief contribution to the phase original objective (for example exact penalties)
+    /// @brief contribution to the phase original objective (for example exact
+  /// penalties)
     virtual scalar_t objective_penalty(const func_approx_data &data) const { return 0.; }
-    /// @brief directional derivative of @ref objective_penalty along the current trial step
+    /// @brief directional derivative of @ref objective_penalty along the current
+  /// trial step
     virtual scalar_t objective_penalty_dir_deriv(const func_approx_data &data) const { return 0.; }
     /// @brief contribution to the phase search barrier / penalization objective
     virtual scalar_t search_penalty(const func_approx_data &data) const { return 0.; }
-    /// @brief directional derivative of @ref search_penalty along the current trial step
+    /// @brief directional derivative of @ref search_penalty along the current
+  /// trial step
     virtual scalar_t search_penalty_dir_deriv(const func_approx_data &data) const { return 0.; }
-    /// @brief optional local stationarity residual summary owned by the constraint
+    /// @brief optional local stationarity residual summary owned by the
+  /// constraint
     virtual scalar_t local_stat_residual_inf(const func_approx_data &data) const { return 0.; }
     /// @brief optional local complementarity summary owned by the constraint
     virtual scalar_t local_comp_residual_inf(const func_approx_data &data) const { return 0.; }
     /***
-     * @brief make approximation data for the soft constraint, will use default @ref data_type
+     * @brief make approximation data for the soft constraint, will use default
+   * @ref data_type
      */
     func_approx_data_ptr_t create_approx_data(sym_data &primal, lag_data &raw, shared_data &shared) const override {
-        return func_approx_data_ptr_t(make_approx<soft_constr>(primal, raw, shared));
+        return func_approx_data_ptr_t(
+        make_approx<soft_constr>(primal, raw, shared));
     }
 };
 } // namespace moto

@@ -1,6 +1,6 @@
-#include <moto/solver/soft_constr/pmm_constr.hpp>
 #include <moto/ocp/problem.hpp>
 #include <moto/solver/ineq_soft.hpp>
+#include <moto/solver/soft_constr/pmm_constr.hpp>
 
 namespace moto {
 namespace solver {
@@ -13,6 +13,7 @@ pmm_constr::approx_data::approx_data(base::approx_data &&rhs, scalar_t rho)
     g_.setZero();
     jac_step_.resize(func_.dim());
     jac_step_.setZero();
+  diag_scaling_.setConstant(func_.dim(), scalar_t(1.) / rho_);
     multiplier_backup_.resize(func_.dim());
     multiplier_backup_.setZero();
 }
@@ -26,51 +27,49 @@ void pmm_constr::value_impl(func_approx_data &data) const {
     base::value_impl(data);
     auto &d = data.as<pmm_data>();
     solver::ineq_soft::ensure_initialized(*this, d);
-    d.g_ = d.v_ - d.rho_ * d.multiplier_;  // raw C(x) = h; v_ is the primal residual used by inf_prim_res and merit
+    d.g_ = d.v_ - d.rho_ * d.multiplier_;  // raw C(x) = h; v_ is the primal residual
+                                     // used by inf_prim_res and merit
 }
 
 void pmm_constr::jacobian_impl(func_approx_data &data) const {
     base::jacobian_impl(data);
-    propagate_jacobian(data);
-    propagate_hessian(data);
 }
 
-void pmm_constr::propagate_jacobian(func_approx_data &data) const {
+soft_constr::condensation_view pmm_constr::condensation(data_map_t &data,
+                                                        bool hessian) const {
     auto &d = data.as<pmm_data>();
-    soft_constr::propagate_jacobian(d, d.g_, scalar_t(1.) / d.rho_);
+  return {{d.g_.data()},
+          {hessian ? d.diag_scaling_.data() : nullptr},
+          {scalar_t(1.) / d.rho_}};
 }
 
-void pmm_constr::propagate_hessian(func_approx_data &data) const {
-    auto &d = data.as<pmm_data>();
-    soft_constr::propagate_hessian(d, scalar_t(1. / d.rho_));
+vector_ref pmm_constr::jacobian_step(data_map_t &data) const {
+  return data.as<pmm_data>().jac_step_;
 }
 
 void pmm_constr::finalize_newton_step(data_map_t &data) const {
     auto &d = data.as<pmm_data>();
     if (!d.runtime_bound_) {
-        throw std::runtime_error(fmt::format("pmm_constr {} finalize_newton_step without runtime binding", name()));
+        throw std::runtime_error(fmt::format(
+        "pmm_constr {} finalize_newton_step without runtime binding", name()));
     }
     if (!d.initialized_) {
-        throw std::runtime_error(fmt::format("pmm_constr {} finalize_newton_step before initialization", name()));
+        throw std::runtime_error(fmt::format(
+        "pmm_constr {} finalize_newton_step before initialization", name()));
     }
     if (d.d_multiplier_.size() != d.g_.size()) {
-        throw std::runtime_error(fmt::format("pmm_constr {} d_multiplier size mismatch: {} vs g {}",
+        throw std::runtime_error(
+        fmt::format("pmm_constr {} d_multiplier size mismatch: {} vs g {}",
                                              name(), d.d_multiplier_.size(), d.g_.size()));
     }
     if (d.prim_step_.size() != static_cast<size_t>(d.func_.in_args().size())) {
-        throw std::runtime_error(fmt::format("pmm_constr {} prim_step size mismatch: {} vs in_args {}",
+        throw std::runtime_error(
+        fmt::format("pmm_constr {} prim_step size mismatch: {} vs in_args {}",
                                              name(), d.prim_step_.size(), d.func_.in_args().size()));
     }
     // From row 2 of KKT: J*du - rho*dlam = -h  =>  dlam = (J*du + h) / rho
     d.d_multiplier_.noalias() = d.g_;
-    size_t arg_idx = 0;
-    for (const sym &arg : d.func_.in_args()) {
-        if (arg.field() < field::num_prim && d.has_jacobian_block(arg_idx)) {
-            d.jac_step_.noalias() = d.jac_[arg_idx] * d.prim_step_[arg_idx];
             d.d_multiplier_.noalias() += d.jac_step_;
-        }
-        arg_idx++;
-    }
     d.d_multiplier_ /= d.rho_;
 }
 

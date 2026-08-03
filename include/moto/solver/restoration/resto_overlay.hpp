@@ -1,9 +1,9 @@
 #pragma once
 
+#include <moto/core/array.hpp>
 #include <moto/ocp/cost.hpp>
 #include <moto/ocp/ineq_constr.hpp>
 #include <moto/ocp/problem.hpp>
-#include <moto/core/array.hpp>
 #include <moto/solver/ipm/ipm_config.hpp>
 #include <moto/solver/ipm/positivity_step.hpp>
 #include <moto/solver/linesearch_config.hpp>
@@ -15,7 +15,7 @@ struct node_data;
 namespace solver::ns_riccati {
 struct ns_riccati_data;
 }
-}
+} // namespace moto
 
 namespace moto::solver::restoration {
 
@@ -149,7 +149,10 @@ class resto_eq_elastic_constr final : public soft_constr {
         scalar_t *rho = nullptr;
 
         explicit approx_data(soft_constr::approx_data &&rhs)
-            : soft_constr::approx_data(std::move(rhs)) {}
+            : soft_constr::approx_data(std::move(rhs)) {
+            jac_step.setZero(func_.dim());
+            jac_step_tmp.setZero(func_.dim());
+        }
     };
 
     resto_eq_elastic_constr(const std::string &name,
@@ -163,6 +166,8 @@ class resto_eq_elastic_constr final : public soft_constr {
     void value_impl(func_approx_data &data) const override;
     void jacobian_impl(func_approx_data &data) const override;
     void hessian_impl(func_approx_data &data) const override;
+  condensation_view condensation(data_map_t &data, bool hessian) const override;
+  vector_ref jacobian_step(data_map_t &data) const override;
 
     void initialize(data_map_t &data) const override;
     void finalize_newton_step(data_map_t &data) const override;
@@ -178,7 +183,8 @@ class resto_eq_elastic_constr final : public soft_constr {
     scalar_t search_penalty_dir_deriv(const func_approx_data &data) const override;
     scalar_t local_stat_residual_inf(const func_approx_data &data) const override;
     scalar_t local_comp_residual_inf(const func_approx_data &data) const override;
-    static void compute_local_model(detail::eq_local_state &elastic,
+    static void compute_local_model(
+      detail::eq_local_state &elastic,
                                     const vector_const_ref &base_residual,
                                     const vector_const_ref &multiplier,
                                     scalar_t rho,
@@ -212,7 +218,10 @@ class resto_ineq_elastic_ipm_constr final : public ineq_constr {
       scalar_t *rho = nullptr;
 
         explicit approx_data(ineq_constr::approx_data &&rhs)
-            : ineq_constr::approx_data(std::move(rhs)) {}
+            : ineq_constr::approx_data(std::move(rhs)) {
+            jac_step.setZero(func_.dim());
+            jac_step_tmp.setZero(func_.dim());
+        }
     };
 
     resto_ineq_elastic_ipm_constr(const std::string &name,
@@ -226,6 +235,8 @@ class resto_ineq_elastic_ipm_constr final : public ineq_constr {
     void value_impl(func_approx_data &data) const override;
     void jacobian_impl(func_approx_data &data) const override;
     void hessian_impl(func_approx_data &data) const override;
+  condensation_view condensation(data_map_t &data, bool hessian) const override;
+  vector_ref jacobian_step(data_map_t &data) const override;
 
     void initialize(data_map_t &data) const override;
     void finalize_newton_step(data_map_t &data) const override;
@@ -241,7 +252,8 @@ class resto_ineq_elastic_ipm_constr final : public ineq_constr {
     scalar_t search_penalty_dir_deriv(const func_approx_data &data) const override;
     scalar_t local_stat_residual_inf(const func_approx_data &data) const override;
     scalar_t local_comp_residual_inf(const func_approx_data &data) const override;
-    static void compute_local_model(detail::ineq_local_state &elastic,
+    static void compute_local_model(
+      detail::ineq_local_state &elastic,
                                     const ineq_constr::box_spec &box,
                                     scalar_t rho,
                                     scalar_t mu_bar,

@@ -11,9 +11,11 @@ def_unique_ptr(node_data);
 namespace solver {
 struct data_base;
 }
+struct node_linear_plan;
 /**
  * @brief node data class
- * stores the shooting node data including symbolics, raw approximation and its sparse mapping
+ * stores the shooting node data including symbolics, raw approximation and its
+ * sparse mapping
  */
 struct MOTO_ALIGN_NO_SHARING node_data {
     scalar_t inf_prim_res_ = 0.;
@@ -27,6 +29,7 @@ struct MOTO_ALIGN_NO_SHARING node_data {
     shared_data_ptr_t shared_; /// < shared data
     shifted_array<std::vector<func_approx_data_ptr_t>, field::num_func, __dyn>
         sparse_; /// < sparse view per func
+  mutable std::shared_ptr<node_linear_plan> linear_plan_;
 
   public:
     node_data(const ocp_ptr_t &prob);
@@ -78,6 +81,10 @@ struct MOTO_ALIGN_NO_SHARING node_data {
      */
     void update_approximation(update_mode config = update_mode::eval_all,
                               bool include_original_cost = true);
+  void assemble_constraint_gradient();
+  void condense_soft_constraints(bool hessian);
+  void evaluate_soft_jacobian_steps();
+  void prepare_linear_plan();
 
     template <typename Callback>
     void for_each(field_t field, Callback &&callback) {
@@ -86,7 +93,8 @@ struct MOTO_ALIGN_NO_SHARING node_data {
         using func_type = std::decay_t<typename func_info::arg_type<0>>;
         using approx_type = std::decay_t<typename func_info::arg_type<1>>;
         static_assert(std::is_base_of_v<generic_func, func_type> && std::is_base_of_v<func_approx_data, approx_type>,
-                      "Callback must accept a (derived) generic_func and (derived) func_approx_data");
+                      "Callback must accept a (derived) generic_func and (derived) "
+                  "func_approx_data");
         size_t idx = 0;
         auto &s = this->sparse_[field];
         for (const func_type &f : prob_->exprs(field)) {
@@ -110,6 +118,11 @@ struct MOTO_ALIGN_NO_SHARING node_data {
     void bind_soft_runtime_owner(solver::data_base *owner);
 
     void print_residuals() const;
+
+  private:
+    void prepare_constraint_gradient();
+    void prepare_soft_condensation(bool hessian);
+    void prepare_soft_jacobian_steps();
 };
 } // namespace moto
 

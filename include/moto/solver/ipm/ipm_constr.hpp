@@ -63,9 +63,9 @@ class ipm_constr : public ineq_constr {
     void value_impl(func_approx_data &data) const override;
     /// update the IPM-modified cost jacobian and hessian
     void jacobian_impl(func_approx_data &data) const override;
-    void propagate_jacobian(func_approx_data &data) const;
-    void propagate_hessian(func_approx_data &data) const;
-    std::unique_ptr<base::approx_data::box_pair_runtime> create_side_data() const override {
+  condensation_view condensation(data_map_t &data, bool hessian) const override;
+  vector_ref jacobian_step(data_map_t &data) const override;
+  std::unique_ptr<base::approx_data::box_pair_runtime> create_side_data() const override {
         return std::make_unique<approx_data::side_data>();
     }
     residual_summary primal_residual_summary(const func_approx_data &data) const override;
@@ -77,11 +77,13 @@ class ipm_constr : public ineq_constr {
     }
     /// @brief initialize the IPM constraint data
     void initialize(data_map_t &data) const override;
-    /// @brief post rollout operation for the IPM constraint to compute the newton step
+    /// @brief post rollout operation for the IPM constraint to compute the newton
+  /// step
     void finalize_newton_step(data_map_t &data) const override;
     /// @brief finalize the predictor step, should be called after the rollout
     void finalize_predictor_step(data_map_t &data, workspace_data *cfg) const override;
-    /// @brief will compute the cost jacobian correction depending on the IPM settings
+    /// @brief will compute the cost jacobian correction depending on the IPM
+  /// settings
     void apply_corrector_step(data_map_t &data) const override;
     /// @brief line search step for the IPM constraint
     void apply_affine_step(data_map_t &data, workspace_data *cfg) const override;
@@ -89,7 +91,8 @@ class ipm_constr : public ineq_constr {
     void update_ls_bounds(data_map_t &data, workspace_data *cfg) const override;
     /// @brief backup the current IPM trial state before a line-search attempt
     void backup_trial_state(data_map_t &data) const override;
-    /// @brief restore the backed-up IPM trial state before the next line-search attempt
+    /// @brief restore the backed-up IPM trial state before the next line-search
+  /// attempt
     void restore_trial_state(data_map_t &data) const override;
     void restoration_commit_dual_step(data_map_t &data, scalar_t alpha_dual) const override;
     void restoration_reset_bound_multipliers(data_map_t &data) const override;

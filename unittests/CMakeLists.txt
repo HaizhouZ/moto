@@ -56,7 +56,7 @@ add_moto_test(sym_test)
 add_moto_test(ineq_jac_sparsity)
 add_moto_test(equality_multiplier_init)
 add_moto_test(restoration)
-add_moto_test(spmm --rng-seed 1)
+add_moto_test(linear_backend)
 
 add_executable(graph_model_compose_test graph_model_compose.cpp)
 target_include_directories(graph_model_compose_test PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

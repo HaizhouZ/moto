@@ -11,7 +11,7 @@
 #include <casadi/casadi.hpp>
 #include <re2/re2.h>
 
-#include <moto/spmm/fwd.hpp> // moto::sparsity
+#include <moto/core/sparse.hpp> // moto::sparsity
 
 namespace moto {
 namespace utils {

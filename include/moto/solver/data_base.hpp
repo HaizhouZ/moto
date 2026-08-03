@@ -26,11 +26,11 @@ struct MOTO_ALIGN_NO_SHARING data_base {
     row_vector &Q_x;
     row_vector &Q_u;
     row_vector &Q_y;
-    sparse_mat &Q_xx, &Q_xx_mod;
-    sparse_mat &Q_ux, &Q_ux_mod;
-    sparse_mat &Q_uu, &Q_uu_mod;
-    sparse_mat &Q_yx, &Q_yx_mod;
-    sparse_mat &Q_yy, &Q_yy_mod;
+    sparse_matrix &Q_xx, &Q_xx_mod;
+    sparse_matrix &Q_ux, &Q_ux_mod;
+    sparse_matrix &Q_uu, &Q_uu_mod;
+    sparse_matrix &Q_yx, &Q_yx_mod;
+    sparse_matrix &Q_yy, &Q_yy_mod;
     // Snapshot of the base stage Lagrangian gradient before any pending
     // reduced-system correction in lag_jac_corr_ is activated.
     //

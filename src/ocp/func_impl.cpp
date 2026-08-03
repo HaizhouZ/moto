@@ -1,11 +1,11 @@
 #include <algorithm>
 #include <cstdlib>
 #include <map>
-#include <mutex>
 #include <moto/core/external_function.hpp>
 #include <moto/ocp/impl/custom_func.hpp>
 #include <moto/ocp/impl/func.hpp>
 #include <moto/utils/codegen.hpp>
+#include <mutex>
 
 #include <moto/ocp/problem.hpp>
 
@@ -66,10 +66,12 @@ generic_func::~generic_func() = default;
 
 func_approx_data_ptr_t generic_func::create_approx_data(sym_data &primal, lag_data &raw, shared_data &shared) const {
     if (field() - __dyn >= field::num_func)
-        throw std::runtime_error(fmt::format("create_approx_data cannot be called for func {} type {}",
+        throw std::runtime_error(
+        fmt::format("create_approx_data cannot be called for func {} type {}",
                                              name(), field::name(field())));
     if (in_args().empty())
-        throw std::runtime_error(fmt::format("in args unset for func {} in field {}",
+        throw std::runtime_error(fmt::format(
+        "in args unset for func {} in field {}",
                                              name(), field::name(field())));
     return std::make_unique<func_approx_data>(primal, raw, shared, *this);
 }
@@ -85,23 +87,28 @@ void generic_func::compute_approx(func_approx_data &data,
 
 void generic_func::value_impl(func_approx_data &data) const {
     if (!value) {
-        throw std::runtime_error(fmt::format("Function {} has no value implementation, please implement it or load from shared library", name()));
+        throw std::runtime_error(
+        fmt::format("Function {} has no value implementation, please implement "
+                    "it or load from shared library", name()));
     }
     value(data);
 }
 void generic_func::jacobian_impl(func_approx_data &data) const {
     if (!jacobian) {
-        throw std::runtime_error(fmt::format("Function {} has no jacobian implementation, please implement it or load from shared library", name()));
+        throw std::runtime_error(
+        fmt::format("Function {} has no jacobian implementation, please "
+                    "implement it or load from shared library", name()));
     }
     jacobian(data);
 }
 
-void generic_func::setup_hess() {
-}
+void generic_func::setup_hess() {}
 
 void generic_custom_func::finalize_impl() {
     if (in_field(field_, moto::func_fields) || field_ == __undefined) {
-        throw std::runtime_error(fmt::format("func {} field type {} not qualified as custom function - finalization failed",
+        throw std::runtime_error(
+        fmt::format("func {} field type {} not qualified as custom function - "
+                    "finalization failed",
                                              name_, field::name(field_)));
     }
     generic_func::finalize_impl();
@@ -113,7 +120,9 @@ generic_custom_func::clone_ptr generic_custom_func::clone() const {
 
 void generic_func::hessian_impl(func_approx_data &data) const {
     if (!hessian) {
-        throw std::runtime_error(fmt::format("Function {} has no hessian implementation, please implement it or load from shared library", name()));
+        throw std::runtime_error(
+        fmt::format("Function {} has no hessian implementation, please "
+                    "implement it or load from shared library", name()));
     }
     hessian(data);
 }
@@ -141,7 +150,8 @@ void generic_func::substitute(const sym &arg, const sym &rhs) {
     }
     auto in_arg_it = std::find(in_args_.begin(), in_args_.end(), arg);
     if (in_arg_it == in_args_.end())
-        throw std::runtime_error(fmt::format("func {} substitute failed: argument to replace not found", name_));
+        throw std::runtime_error(fmt::format(
+        "func {} substitute failed: argument to replace not found", name_));
     // update the in_args_ to point to the new sym
     *in_arg_it = rhs;
     // update the dep_ to point to the new sym
@@ -205,13 +215,16 @@ generic_func::normalized_remap generic_func::normalize_argument_remap(const symb
             continue;
         }
         if (!same_derivative_role(from, to)) {
-            throw std::runtime_error(fmt::format(
-                "func {} remap failed: cannot remap {} field {} to {} field {}; remap_arguments only supports primal-to-primal or nonprimal-to-nonprimal mappings",
+            throw std::runtime_error(
+          fmt::format("func {} remap failed: cannot remap {} field {} to {} "
+                      "field {}; remap_arguments only supports "
+                      "primal-to-primal or nonprimal-to-nonprimal mappings",
                 name_, from->name(), field::name(from->field()), to->name(), field::name(to->field())));
         }
         if (from->dim() != to->dim() || from->tdim() != to->tdim()) {
             throw std::runtime_error(fmt::format(
-                "func {} remap failed: cannot remap {} dim {} tdim {} to {} dim {} tdim {}; remapped arguments must have matching dimensions",
+                "func {} remap failed: cannot remap {} dim {} tdim {} to {} dim {} "
+          "tdim {}; remapped arguments must have matching dimensions",
                 name_, from->name(), from->dim(), from->tdim(), to->name(), to->dim(), to->tdim()));
         }
         auto [it, inserted] = normalized.entries.emplace(from_uid, std::pair{from, to});
@@ -264,7 +277,8 @@ shared_expr generic_func::remap_arguments_cached(const symbol_remap &remap,
     auto &remapped_func = remapped_expr.as<generic_func>();
     remapped_func.apply_argument_remap(normalized, context, problem_uid);
     if (!remapped_func.finalize()) {
-        throw std::runtime_error(fmt::format("func {} remap failed: remapped clone could not be finalized", name_));
+        throw std::runtime_error(fmt::format(
+        "func {} remap failed: remapped clone could not be finalized", name_));
     }
 
     auto [it, inserted] = remaps.emplace(std::move(normalized.key), remapped_expr);
@@ -289,7 +303,8 @@ shared_expr generic_func::remap_arguments(const symbol_remap &remap) {
 
 void generic_func::set_from_casadi(const var_inarg_list &in_args, const cs::SX &out) {
     if (gen_.task_)
-        throw std::runtime_error(fmt::format("func {} already has a casadi codegen task", name_));
+        throw std::runtime_error(
+        fmt::format("func {} already has a casadi codegen task", name_));
     else {
         add_arguments(in_args);
         gen_.task_ = new gen_info::task_type();
@@ -322,15 +337,20 @@ void generic_func::finalize_impl() {
     }
     rebuild_argument_layout();
     if (order_ != approx_order::none && dim_ == dim_tbd && !zero_dim_) {
-        throw std::runtime_error(fmt::format("generic_func {} has no dimension set", name_));
+        throw std::runtime_error(
+        fmt::format("generic_func {} has no dimension set", name_));
     }
     if (!zero_dim_) {
-        jac_sp_.clear();
-        jac_sp_.reserve(in_args_.size());
-        for (const sym &arg : in_args_) {
-            jac_sp_.push_back({sparsity::dense, 0, 0, this->dim_, arg.tdim()});
+        if (detect_jacobian_sparsity_ || jac_sp_.size() != in_args_.size()) {
+            jac_sp_.clear();
+            jac_sp_.reserve(in_args_.size());
+            for (const sym &arg : in_args_) {
+                jac_sp_.push_back(
+                    {sparsity::dense, 0, 0, this->dim_, arg.tdim()});
+            }
         }
-        // setup default hessian sparsity as @ref default_hess_sp_, which can be refined by codegen
+        // setup default hessian sparsity as @ref default_hess_sp_, which can be
+    // refined by codegen
         hess_sp_.assign(in_args_.size(), {});
         for (size_t i : range(in_args_.size())) {
             hess_sp_[i].resize(in_args_.size());
@@ -352,13 +372,14 @@ void generic_func::finalize_impl() {
         t.gen_hessian = order_ >= approx_order::second;
         t.append_value = field_ == __cost;
         t.append_jac = field_ == __cost;
-        t.jac_sp = nullptr;
+        t.jac_sp = in_field(field_, ineq_soft_constr_fields) ? &jac_sp_ : nullptr;
         t.hess_sp = &hess_sp_;
         t.verbose = false;
         t.force_recompile = false;
         t.keep_generated_src = true;
-        auto jobs = std::move(utils::cs_codegen::generate_and_compile(t)
-                                  .add_finish_callback([this]() {
+        auto jobs = std::move(
+        utils::cs_codegen::generate_and_compile(t).add_finish_callback(
+            [this]() {
                                       load_external_impl(); ///< load the generated code
                                       set_ready_status(true);
                                   }));
@@ -412,21 +433,24 @@ CHECK_DONE:
 void generic_func::enable_if_all(const expr_inarg_list &args) {
     field_write_guard();
     if (enable_if_any_deps_.size() > 0) {
-        throw std::runtime_error("Cannot use enable_if_all together with enable_if_any");
+        throw std::runtime_error(
+        "Cannot use enable_if_all together with enable_if_any");
     }
     enable_if_all_deps_.insert(enable_if_all_deps_.end(), args.begin(), args.end());
 }
 void generic_func::disable_if_any(const expr_inarg_list &args) {
     field_write_guard();
     if (enable_if_any_deps_.size() > 0) {
-        throw std::runtime_error("Cannot use disable_if_any together with enable_if_any");
+        throw std::runtime_error(
+        "Cannot use disable_if_any together with enable_if_any");
     }
     disable_if_any_deps_.insert(disable_if_any_deps_.end(), args.begin(), args.end());
 }
 void generic_func::enable_if_any(const expr_inarg_list &args) {
     field_write_guard();
     if (enable_if_all_deps_.size() > 0) {
-        throw std::runtime_error("Cannot use enable_if_any together with enable_if_all");
+        throw std::runtime_error(
+        "Cannot use enable_if_any together with enable_if_all");
     }
     enable_if_any_deps_.insert(enable_if_any_deps_.end(), args.begin(), args.end());
 }

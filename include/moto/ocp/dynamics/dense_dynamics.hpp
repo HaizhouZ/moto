@@ -20,8 +20,8 @@ class dense_dynamics : public generic_dynamics {
   public:
     using base = generic_dynamics;
     struct approx_data : public generic_dynamics::approx_data {
-        // sparse_mat proj_f_x_;
-        // sparse_mat proj_f_u_;
+        // sparse_matrix proj_f_x_;
+        // sparse_matrix proj_f_u_;
         using lu_t = utils::blasfeo_lu;
         movable_ptr<lu_t> lu_;                             ///< LU decomposition for dense dynamics
         aligned_map_t f_x_, f_y_;                          ///< Jacobian of f_y

@@ -13,11 +13,7 @@ inline std::string overlay_name(const generic_func &source, std::string_view suf
 }
 
 inline void copy_source_sparsity(generic_func &dst, const generic_func &src) {
-    const auto &src_args = src.in_args();
-    const auto &src_sp = src.jac_sparsity();
-    for (size_t i = 0; i < src_args.size() && i < src_sp.size(); ++i) {
-        dst.set_jac_sparsity(src_args[i], src_sp[i]);
-    }
+    dst.set_jac_sparsity(src.jac_sparsity());
     dst.set_hess_sparsity(src.hess_sparsity());
 }
 

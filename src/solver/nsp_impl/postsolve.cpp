@@ -1,5 +1,6 @@
 #define MOTO_NS_RICCATI_IMPL
 #include <moto/solver/ns_riccati/generic_solver.hpp>
+#include <moto/core/linear_backend.hpp>
 
 namespace moto {
 namespace solver {
@@ -27,10 +28,10 @@ void generic_solver::compute_primal_sensitivity(ns_riccati_data *cur) {
         d.d_u.k = nsp.z_k;
         d.d_u.K = nsp.z_K;
         d.d_y.k = -d.F_0;
-        d.F_u.times<false>(d.d_u.k, d.d_y.k);
+        linear_backend::multiply(d.F_u, d.d_u.k, d.d_y.k, -1.);
         d.d_y.K.setZero();
-        d.F_x.dump_into(d.d_y.K, spmm::dump_config{.add = false});
-        d.F_u.times<false>(d.d_u.K, d.d_y.K);
+        linear_backend::write_dense(d.F_x, d.d_y.K, {.alpha = -1.});
+        linear_backend::multiply(d.F_u, d.d_u.K, d.d_y.K, -1.);
     } else if (d.rank_status_ == rank_status::fully_constrained) {
     } else {
         // nsp.z_k = -nsp.z_0_k;
@@ -67,7 +68,7 @@ void generic_solver::compute_primal_sensitivity_correction(ns_riccati_data *cur)
         // d.d_y.k.noalias() = -d.F_u.dense() * d.d_u.k;
         d.d_u.k = nsp.z_k;
         d.d_y.k.setZero();
-        d.F_u.times<false>(d.d_u.k, d.d_y.k);
+        linear_backend::multiply(d.F_u, d.d_u.k, d.d_y.k, -1.);
 
     } else if (d.rank_status_ == rank_status::fully_constrained) {
         d.d_u.k.setZero();

@@ -59,6 +59,8 @@ bool ns_sqp::initialize_equality_multipliers(storage_type &outer_graph, bool ref
                          solver::ineq_soft::bind_and_invalidate(overlay);
                          solver::equality_init::sync_equality_init_overlay_duals(*outer, *overlay);
                          solver::ineq_soft::mark_initialized(overlay);
+                         overlay->prepare_linear_plan();
+                         overlay->prepare_linear_backend();
                          overlay->update_approximation(node_data::update_mode::eval_all, true);
                      });
 

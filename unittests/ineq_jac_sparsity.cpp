@@ -14,7 +14,7 @@ const bool force_sync_codegen_for_test = []() {
 
 using namespace moto;
 
-TEST_CASE("inequality jacobians are stored as dense panels") {
+TEST_CASE("inequality jacobians preserve generated structure") {
     auto [x, y] = sym::states("x_sparse_jac", 3);
     (void)y;
     auto prob = stage_ocp::create();
@@ -26,9 +26,7 @@ TEST_CASE("inequality jacobians are stored as dense panels") {
         vector::Constant(3, scalar_t(-1)),
         vector::Constant(3, scalar_t(1)),
         approx_order::first);
-    auto diag = ineq_constr::create(
-        "diag_box",
-        var_inarg_list(var_list{x}),
+    auto diag = ineq_constr::create("diag_box", var_inarg_list(var_list{x}),
         scalar_t(2) * static_cast<const cs::SX &>(x),
         vector::Constant(3, scalar_t(-1)),
         vector::Constant(3, scalar_t(1)),
@@ -53,18 +51,18 @@ TEST_CASE("inequality jacobians are stored as dense panels") {
     REQUIRE(eye_func.jac_sparsity().size() == 1);
     REQUIRE(diag_func.jac_sparsity().size() == 1);
     REQUIRE(dense_func.jac_sparsity().size() == 1);
-    REQUIRE(eye_func.jac_sparsity()[0].pattern == sparsity::dense);
-    REQUIRE(diag_func.jac_sparsity()[0].pattern == sparsity::dense);
+    REQUIRE(eye_func.jac_sparsity()[0].pattern == sparsity::eye);
+  REQUIRE(diag_func.jac_sparsity()[0].pattern == sparsity::diag);
     REQUIRE(dense_func.jac_sparsity()[0].pattern == sparsity::dense);
 
     node_data data(prob);
     const auto &jac = data.dense().approx_[__ineq_x].jac_[__x];
-    REQUIRE(jac.eye_panels_.empty());
-    REQUIRE(jac.diag_panels_.empty());
-    REQUIRE(jac.dense_panels_.size() == 3);
+  REQUIRE(jac.eye_panels_.size() == 1);
+  REQUIRE(jac.diag_panels_.size() == 1);
+  REQUIRE(jac.dense_panels_.size() == 1);
 }
 
-TEST_CASE("manual jacobian sparsity declarations are ignored") {
+TEST_CASE("manual callbacks fall back to dense jacobians") {
     auto [x, y] = sym::states("x_manual_sparse_jac", 3);
     (void)y;
     auto prob = stage_ocp::create();

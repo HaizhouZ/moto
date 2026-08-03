@@ -2,6 +2,7 @@
 #define MOTO_OCP_DYNAMICS_EULER_DYNAMICS_HPP
 
 #include <moto/ocp/dynamics.hpp>
+#include <moto/core/linear_backend.hpp>
 
 namespace moto {
 struct euler : public generic_func {
@@ -74,7 +75,7 @@ struct stacked_euler : public generic_dynamics {
     struct approx_data : public generic_dynamics::approx_data {
         aligned_vector_map_t f_u, proj_f_u; // dfda
         aligned_vector_map_t f_t, proj_f_t; // dfdt
-        sparse_mat f_y_inv;
+        sparse_matrix f_y_inv;
         std::vector<euler::euler_data> dyn_data;
         approx_data(base::approx_data &&rhs) : generic_dynamics::approx_data(std::move(rhs)) {}
     };
@@ -99,12 +100,12 @@ struct stacked_euler : public generic_dynamics {
         }
         if (dt_) {
             d.proj_f_t.setZero();
-            d.f_y_inv.times(d.f_t, d.proj_f_t);
+            linear_backend::multiply(d.f_y_inv, d.f_t, d.proj_f_t);
         }
     }
     void compute_project_residual(func_approx_data &data) const override {
         auto &d = data.as<approx_data>();
-        d.f_y_inv.times(d.v_, d.proj_f_res_);
+        linear_backend::multiply(d.f_y_inv, d.v_, d.proj_f_res_);
     }
 };
 } // namespace moto

@@ -2,15 +2,17 @@
 
 #include <algorithm>
 #include <moto/ocp/impl/node_data.hpp>
-#include <moto/solver/ipm/ipm_constr.hpp>
 #include <moto/solver/ineq_soft.hpp>
+#include <moto/solver/ipm/ipm_constr.hpp>
 #include <moto/solver/overlay_common.hpp>
 
 namespace moto::solver::equality_init {
 namespace {
 
 void sync_ineq_overlay_dual_field(node_data &outer, node_data &overlay, field_t field) {
-    solver::overlay::for_each_overlay_pair<solver::overlay::pair_match::same_size>(outer, overlay, field, "equality-init", [&](const constr &outer_expr, const constr &overlay_expr) {
+  solver::overlay::for_each_overlay_pair<
+      solver::overlay::pair_match::same_size>(
+      outer, overlay, field, "equality-init", [&](const constr &outer_expr, const constr &overlay_expr) {
         auto &outer_ipm = outer.data(outer_expr).as<solver::ipm_constr::approx_data>();
         auto &overlay_ipm = overlay.data(overlay_expr).as<solver::ipm_constr::approx_data>();
         overlay_ipm.multiplier_ = outer_ipm.multiplier_;
@@ -21,14 +23,16 @@ void sync_ineq_overlay_dual_field(node_data &outer, node_data &overlay, field_t 
 }
 
 void sync_soft_overlay_dual_field(node_data &outer, node_data &overlay, field_t field) {
-    solver::overlay::for_each_overlay_pair<solver::overlay::pair_match::prefix>(outer, overlay, field, "equality-init", [&](const constr &outer_expr, const constr &overlay_expr) {
+  solver::overlay::for_each_overlay_pair<solver::overlay::pair_match::prefix>(
+      outer, overlay, field, "equality-init", [&](const constr &outer_expr, const constr &overlay_expr) {
         auto &d = overlay.data(overlay_expr).as<pmm_constr::approx_data>();
         d.multiplier_ = outer.problem().extract(outer.dense().dual_[field], outer_expr);
     });
 }
 
 void commit_soft_overlay_dual_field(node_data &outer, node_data &overlay, field_t field) {
-    solver::overlay::for_each_overlay_pair<solver::overlay::pair_match::prefix>(outer, overlay, field, "equality-init", [&](const constr &outer_expr, const constr &overlay_expr) {
+  solver::overlay::for_each_overlay_pair<solver::overlay::pair_match::prefix>(
+      outer, overlay, field, "equality-init", [&](const constr &outer_expr, const constr &overlay_expr) {
         auto &d = overlay.data(overlay_expr).as<pmm_constr::approx_data>();
         auto dst = outer.problem().extract(outer.dense().dual_[field], outer_expr);
         dst = d.multiplier_;
@@ -44,7 +48,8 @@ eq_init_pmm_constr::eq_init_pmm_constr(const std::string &name,
       source_(source),
       source_func_(dynamic_cast<const generic_func *>(source.get())) {
     if (source_func_ == nullptr) {
-        throw std::runtime_error(fmt::format("eq_init_pmm_constr source {} is not a generic_func", source->name()));
+        throw std::runtime_error(fmt::format(
+        "eq_init_pmm_constr source {} is not a generic_func", source->name()));
     }
     this->rho = rho;
     field_hint_.is_eq = true;
@@ -64,8 +69,6 @@ void eq_init_pmm_constr::value_impl(func_approx_data &data) const {
 void eq_init_pmm_constr::jacobian_impl(func_approx_data &data) const {
     source_func_->jacobian(data);
     auto &d = data.as<pmm_constr::approx_data>();
-    propagate_jacobian(d);
-    propagate_hessian(d);
 }
 
 void eq_init_pmm_constr::hessian_impl(func_approx_data &data) const {
@@ -74,7 +77,8 @@ void eq_init_pmm_constr::hessian_impl(func_approx_data &data) const {
     }
 }
 
-ocp_ptr_t build_equality_init_overlay_problem(const ocp_ptr_t &source_prob,
+ocp_ptr_t build_equality_init_overlay_problem(
+    const ocp_ptr_t &source_prob,
                                               const equality_init_overlay_settings &settings) {
     ocp::active_status_config config;
     for (auto field : std::array{__eq_x, __eq_xu}) {
@@ -84,8 +88,10 @@ ocp_ptr_t build_equality_init_overlay_problem(const ocp_ptr_t &source_prob,
     }
 
     auto overlay_prob = source_prob->clone(config);
-    solver::overlay::add_constr_overlay_group(source_prob, overlay_prob, std::array{__eq_x, __eq_xu}, [&](const constr &source) {
-        return constr(new eq_init_pmm_constr(solver::overlay::overlay_name(*source, "eq_init_pmm"),
+  solver::overlay::add_constr_overlay_group(
+      source_prob, overlay_prob, std::array{__eq_x, __eq_xu}, [&](const constr &source) {
+        return constr(new eq_init_pmm_constr(
+            solver::overlay::overlay_name(*source, "eq_init_pmm"),
                                              source,
                                              settings.rho_eq));
     });
@@ -100,7 +106,8 @@ void sync_equality_init_overlay_primal(node_data &outer, node_data &overlay) {
 
 void sync_equality_init_overlay_duals(node_data &outer, node_data &overlay) {
     solver::overlay::copy_dense_dual_if_present(outer, overlay, __dyn);
-    solver::overlay::copy_source_multipliers<eq_init_pmm_constr>(outer, overlay, std::array{__eq_x, __eq_xu});
+  solver::overlay::copy_source_multipliers<eq_init_pmm_constr>(
+      outer, overlay, std::array{__eq_x, __eq_xu});
     sync_soft_overlay_dual_field(outer, overlay, __eq_x_soft);
     sync_soft_overlay_dual_field(outer, overlay, __eq_xu_soft);
     sync_ineq_overlay_dual_field(outer, overlay, __ineq_x);
@@ -109,7 +116,8 @@ void sync_equality_init_overlay_duals(node_data &outer, node_data &overlay) {
 
 void commit_equality_init_overlay_duals(node_data &outer, node_data &overlay) {
     solver::overlay::copy_dense_dual_if_present(overlay, outer, __dyn);
-    solver::overlay::commit_source_multipliers<eq_init_pmm_constr>(outer, overlay, std::array{__eq_x, __eq_xu});
+  solver::overlay::commit_source_multipliers<eq_init_pmm_constr>(
+      outer, overlay, std::array{__eq_x, __eq_xu});
     commit_soft_overlay_dual_field(outer, overlay, __eq_x_soft);
     commit_soft_overlay_dual_field(outer, overlay, __eq_xu_soft);
 }

@@ -94,6 +94,8 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
                 c.setup_workspace_data(fd, &settings);
             });
             solver::ineq_soft::bind_and_invalidate(resto);
+            resto->prepare_linear_plan();
+            resto->prepare_linear_backend();
             resto->update_approximation(node_data::update_mode::eval_val, true);
         });
         solver::for_each(solver::par, resto_graph, [](data *d) {

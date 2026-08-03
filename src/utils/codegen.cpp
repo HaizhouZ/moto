@@ -98,24 +98,22 @@ void compress_jacobian(cs::SX &expr, sp_info *sp) {
         sp->pattern = sparsity::unknown;
         return;
     }
-    // assumption full row rank
     const int nnz = expr.nnz();
-    int min_dim = std::min(rows, cols);
-    if (nnz != min_dim) // no chance
+  if (nnz > std::min(rows, cols))
         return;
-    for (int i = 0; i < expr.columns(); ++i) {
-        if (i + min_dim > expr.columns()) {
-            return;
-        }
-        // check this sub-block
-        auto block = expr(cs::Slice(0, min_dim), cs::Slice(i, i + min_dim));
+    for (int r = 0; r + nnz <= rows; ++r) {
+    for (int c = 0; c + nnz <= cols; ++c) {
+      auto block = expr(cs::Slice(r, r + nnz), cs::Slice(c, c + nnz));
         if (block.nnz() == nnz) {
             compress_structured_output(block, &sp->pattern);
             if (sp->pattern == sparsity::diag || sp->pattern == sparsity::eye) {
                 expr = block;
-                sp->col_offset = i;
-                sp->cols = min_dim;
+          sp->row_offset = r;
+          sp->col_offset = c;
+          sp->rows = nnz;
+          sp->cols = nnz;
                 return;
+        }
             }
         }
     }
@@ -178,8 +176,7 @@ std::vector<std::pair<int, int>> ccs_index_to_ij(const cs::Sparsity &sp) {
     return ij_pairs;
 }
 // Transforms raw C code to modern C++ with Eigen
-std::string process_generated_code(
-    const std::string &raw_c_code,
+std::string process_generated_code(const std::string &raw_c_code,
     const std::string &func_name,
     const std::vector<cs::SX> &sx_inputs,
     const std::vector<cs::SX> &sx_outputs,
@@ -234,7 +231,8 @@ std::string process_generated_code(
                    << "#if defined(_WIN32) || defined(__WIN32__) || defined(__CYGWIN__)\n"
                    << "    #define CASADI_SYMBOL_EXPORT __declspec(dllexport)\n"
                    << "#elif defined(__GNUC__)\n"
-                   << "    #define CASADI_SYMBOL_EXPORT __attribute__ ((visibility (\"default\")))\n"
+                   << "    #define CASADI_SYMBOL_EXPORT __attribute__ ((visibility "
+         "(\"default\")))\n"
                    << "#endif\n\n"
                    << "extern \"C\" {\n\n";
 
@@ -327,8 +325,7 @@ std::string process_generated_code(
 }
 
 // Core implementation logic for a single function
-void run(
-    std::string func_name,
+void run(std::string func_name,
     task::in_arg_list_t sx_inputs,
     std::vector<cs::SX> sx_outputs,
     std::string output_dir,
@@ -373,7 +370,8 @@ void run(
         sx_inputs_cs.emplace_back(s);
     }
     if (!aux.is_empty()) {
-        // throw std::runtime_error("Auxiliary variable is not supported in this context.");
+        // throw std::runtime_error("Auxiliary variable is not supported in this
+    // context.");
         sx_inputs_cs.emplace_back(aux);
     }
     // auto filtered_outputs = casadi_func(sx_inputs_cs);
@@ -400,8 +398,8 @@ void run(
     }
     std::string raw_c_code = buffer.str();
 
-    std::string processed_code = process_generated_code(
-        raw_c_code, func_name, sx_inputs_cs, filtered_outputs, append, !aux.is_empty());
+    std::string processed_code =
+      process_generated_code(raw_c_code, func_name, sx_inputs_cs, filtered_outputs, append, !aux.is_empty());
 
     // Step 4: Write new C++ file with Eigen interface
     std::string final_cpp_path = fs::path(output_dir) / (func_name + ".cpp");
@@ -472,7 +470,8 @@ void run(
         if (ret != 0) {
             std::error_code ec;
             fs::remove(so_tmp_path, ec);
-            throw std::runtime_error(fmt::format("Compilation failed for {} with exit code {}", func_name, ret));
+            throw std::runtime_error(fmt::format(
+          "Compilation failed for {} with exit code {}", func_name, ret));
         }
 
         fs::rename(so_tmp_path, so_file_path);
@@ -510,8 +509,8 @@ void run(
 void task::finalize(job_list &jobs_) {
     std::string full_func_name = prefix.empty() ? func_name : prefix + "_" + func_name;
     if (gen_eval)
-        jobs_.add(std::bind(&impl::run,
-                            full_func_name,
+    jobs_.add(std::bind(
+        &impl::run, full_func_name,
                             sx_inputs,
                             std::vector{!gauss_newton ? sx_output : 0.5 * cs::SX::dot(sx_output, sx_output * weight_gn)},
                             output_dir,
@@ -532,7 +531,9 @@ void task::finalize(job_list &jobs_) {
     std::map<size_t, cs::SX> external_jac;
     for (auto &[in_arg, jac] : ext_jac) {
         if (jac.columns() != in_arg->tdim() || jac.rows() != sx_output.rows())
-            throw std::runtime_error(fmt::format("Jacobian dimension mismatch for sym {} in field {}, expected ({}, {}), got ({}, {})",
+            throw std::runtime_error(
+          fmt::format("Jacobian dimension mismatch for sym {} in field {}, "
+                      "expected ({}, {}), got ({}, {})",
                                                  in_arg->name(), in_arg->field(), sx_output.rows(), in_arg->tdim(), jac.rows(), jac.columns()));
         external_jac[in_arg->uid()] = std::move(jac);
     }
@@ -543,13 +544,17 @@ void task::finalize(job_list &jobs_) {
         size_t uid1 = in_arg1->uid();
         if (uid0 < uid1) {
             if (hess.rows() != in_arg0->tdim() || hess.columns() != in_arg1->tdim())
-                throw std::runtime_error(fmt::format("Hessian dimension mismatch for syms {} (field {}) and {} (field {}), expected ({}, {}), got ({}, {})",
+                throw std::runtime_error(
+            fmt::format("Hessian dimension mismatch for syms {} (field {}) and "
+                        "{} (field {}), expected ({}, {}), got ({}, {})",
                                                      in_arg0->name(), in_arg0->field(), in_arg1->name(), in_arg1->field(),
                                                      in_arg0->tdim(), in_arg1->tdim(), hess.rows(), hess.columns()));
             external_hess[{uid0, uid1}] = std::move(hess);
         } else {
             if (hess.rows() != in_arg1->tdim() || hess.columns() != in_arg0->tdim())
-                throw std::runtime_error(fmt::format("Hessian dimension mismatch for syms {} (field {}) and {} (field {}), expected ({}, {}), got ({}, {})",
+                throw std::runtime_error(
+            fmt::format("Hessian dimension mismatch for syms {} (field {}) and "
+                        "{} (field {}), expected ({}, {}), got ({}, {})",
                                                      in_arg1->name(), in_arg1->field(), in_arg0->name(), in_arg0->field(),
                                                      in_arg1->tdim(), in_arg0->tdim(), hess.rows(), hess.columns()));
             external_hess[{uid1, uid0}] = hess.T();
@@ -569,8 +574,10 @@ void task::finalize(job_list &jobs_) {
     }
 
     auto get_dstep_ds = [](const sym &s) -> cs::SX {
-        /// @todo : this assumes affine dependence on step size, which may not be true for all cases (i.e., hessian wrt step size will be zero)
-        /// for example if the integration is s + step ^ 2, the jacobian will contain step which is not an input to the function (is it necessary?)
+        /// @todo : this assumes affine dependence on step size, which may not be
+    /// true for all cases (i.e., hessian wrt step size will be zero) for
+    /// example if the integration is s + step ^ 2, the jacobian will contain
+    /// step which is not an input to the function (is it necessary?)
         auto step = cs::SX::sym(s.name() + "_step", s.tdim());
         return cs::SX::jacobian(s.symbolic_integrate(s, step), step);
     };
@@ -600,7 +607,8 @@ void task::finalize(job_list &jobs_) {
             if (!jac_outputs.empty()) {
                 jacs = jac_outputs;
                 if (gen_hessian)
-                    throw std::runtime_error("Cannot compute hessian when multiple jacobian outputs are specified.");
+                    throw std::runtime_error("Cannot compute hessian when multiple "
+                                   "jacobian outputs are specified.");
             } else {
                 if (check_jac_ad) {
                     /// @warning not applicable to nontrivial integration
@@ -656,7 +664,9 @@ void task::finalize(job_list &jobs_) {
                 sym &t = sx_inputs[j];
                 if (excluded.contains(s.uid()) or excluded.contains(t.uid()))
                     continue;
-                external_hess[{s.uid(), t.uid()}] = cs::SX::mtimes(jacs_copy[i].T(), cs::SX::mtimes(cs::SX::diag(weight_gn), jacs_copy[j]));
+                external_hess[{s.uid(), t.uid()}] = cs::SX::mtimes(
+            jacs_copy[i].T(),
+            cs::SX::mtimes(cs::SX::diag(weight_gn), jacs_copy[j]));
             }
         }
     }
@@ -710,7 +720,9 @@ void task::finalize(job_list &jobs_) {
                 } else if (j.has_non_trivial_integration()) { // apply integration
                     hess[idx_i][idx_j] = cs::SX::mtimes(hess[idx_i][idx_j], get_dstep_ds(j));
                 }
-                compress_structured_output(hess[idx_i][idx_j], hess_sp != nullptr ? &(*hess_sp)[idx_i][idx_j] : nullptr);
+        compress_structured_output(
+            hess[idx_i][idx_j],
+            hess_sp != nullptr ? &(*hess_sp)[idx_i][idx_j] : nullptr);
             }
         }
         // hess = [item for sublist in hess for item in sublist]
@@ -749,9 +761,8 @@ job_list generate_and_compile(task &_task) {
 // Waits for all compilation threads to finish
 // void wait_until_generated() {
 //     std::lock_guard<std::mutex> lock(impl::mutex_);
-//     std::cout << "Waiting for code generation tasks to complete..." << std::endl;
-//     impl::jobs_.wait_until_finished();
-//     impl::jobs_.jobs.clear();
+//     std::cout << "Waiting for code generation tasks to complete..." <<
+//     std::endl; impl::jobs_.wait_until_finished(); impl::jobs_.jobs.clear();
 //     std::cout << "All code generation completed." << std::endl;
 // }
 

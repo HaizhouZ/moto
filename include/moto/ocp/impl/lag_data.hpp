@@ -3,7 +3,7 @@
 
 #include <moto/core/array.hpp>
 #include <moto/core/fields.hpp>
-#include <moto/spmm/sparse_mat.hpp>
+#include <moto/core/sparse_matrix.hpp>
 namespace moto {
 class ocp;
 struct generic_dynamics;
@@ -18,12 +18,12 @@ struct lag_data {
     struct approx_data {
         vector v_; // value
         /// outer index is field, inner index is dynamics index
-        array_type<sparse_mat, primal_fields> jac_;
+        array_type<sparse_matrix, primal_fields> jac_;
     };
     array_type<approx_data, constr_fields> approx_;
     constexpr static auto stored_constr_fields = constr_fields;
     struct dynamics_data {
-        sparse_mat proj_f_x_, proj_f_u_;
+        sparse_matrix proj_f_x_, proj_f_u_;
         vector proj_f_res_;
     };
     auto &proj_f_x() { return dynamics_data_.proj_f_x_; }
@@ -55,8 +55,8 @@ struct lag_data {
     /// - some correction paths temporarily swap this buffer with lag_jac_ for efficiency
     array<row_vector, field::num_prim> lag_jac_corr_;
     /// cost hessian h[a][b] is h_ab. Note only the upper block-triangular part is stored
-    array<array<sparse_mat, field::num_prim>, field::num_prim> lag_hess_;
-    array<array<sparse_mat, field::num_prim>, field::num_prim> hessian_modification_;
+    array<array<sparse_matrix, field::num_prim>, field::num_prim> lag_hess_;
+    array<array<sparse_matrix, field::num_prim>, field::num_prim> hessian_modification_;
 };
 def_unique_ptr(lag_data);
 } // namespace moto

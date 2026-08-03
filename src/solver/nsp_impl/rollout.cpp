@@ -1,5 +1,6 @@
 #define MOTO_NS_RICCATI_IMPL
 #include <moto/solver/ns_riccati/generic_solver.hpp>
+#include <moto/core/linear_backend.hpp>
 
 #include <moto/utils/field_conversion.hpp>
 
@@ -17,17 +18,17 @@ void generic_solver::finalize_dual_newton_step(ns_riccati_data *cur) {
     auto &d = *cur;
     auto &nsp = d.nsp_;
     d.d_lbd_f.noalias() = -d.Q_y.transpose() - d.V_yy * d.trial_prim_step[__y];
-    d.Q_yx.times<false>(d.trial_prim_step[__x], d.d_lbd_f);
-    d.Q_yx_mod.times<false>(d.trial_prim_step[__x], d.d_lbd_f);
+    linear_backend::multiply(d.Q_yx, d.trial_prim_step[__x], d.d_lbd_f, -1.);
+    linear_backend::multiply(d.Q_yx_mod, d.trial_prim_step[__x], d.d_lbd_f, -1.);
     // update hard constraint multipliers
     if (d.ncstr > 0 && d.rank_status_ != rank_status::unconstrained) {
         // LU.solve([rhs])
         d.d_lbd_s_c_pre_solve.noalias() = -d.Q_u.transpose();
-        d.Q_ux.times<false>(d.trial_prim_step[__x], d.d_lbd_s_c_pre_solve);
-        d.Q_ux_mod.times<false>(d.trial_prim_step[__x], d.d_lbd_s_c_pre_solve);
-        d.Q_uu.times<false>(d.trial_prim_step[__u], d.d_lbd_s_c_pre_solve);
-        d.Q_uu_mod.times<false>(d.trial_prim_step[__u], d.d_lbd_s_c_pre_solve);
-        d.F_u.T_times<false>(d.d_lbd_f, d.d_lbd_s_c_pre_solve);
+        linear_backend::multiply(d.Q_ux, d.trial_prim_step[__x], d.d_lbd_s_c_pre_solve, -1.);
+        linear_backend::multiply(d.Q_ux_mod, d.trial_prim_step[__x], d.d_lbd_s_c_pre_solve, -1.);
+        linear_backend::multiply(d.Q_uu, d.trial_prim_step[__u], d.d_lbd_s_c_pre_solve, -1.);
+        linear_backend::multiply(d.Q_uu_mod, d.trial_prim_step[__u], d.d_lbd_s_c_pre_solve, -1.);
+        linear_backend::transpose_multiply(d.F_u, d.d_lbd_f, d.d_lbd_s_c_pre_solve, -1.);
         // solve for hard constraint multiplers
         // fmt::print("Q_y: \n{}\n", d.Q_y);
         // fmt::print("Q_x: \n{}\n", d.Q_x);
@@ -56,7 +57,7 @@ void generic_solver::finalize_dual_newton_step(ns_riccati_data *cur) {
             // append last term in dynamics multipler computation
             d.trial_dual_step[__eq_x] = d.d_lbd_s_c.head(d.ns);
             cur_idx += d.ns;
-            d.s_y.T_times<false>(d.trial_dual_step[__eq_x], d.d_lbd_f);
+            linear_backend::transpose_multiply(d.s_y, d.trial_dual_step[__eq_x], d.d_lbd_f, -1.);
         }
         if (d.nc > 0) {
             d.trial_dual_step[__eq_xu] = d.d_lbd_s_c.tail(d.nc);
@@ -99,17 +100,17 @@ void generic_solver::compute_kkt_residual(ns_riccati_data *cur) {
     // compute KKT residual
     auto dense = d.dense_;
     d.kkt_stat_err_[__u].noalias() = d.base_lag_grad_backup[__u].transpose();
-    d.Q_uu.times(d.trial_prim_step[__u], d.kkt_stat_err_[__u]);
+    linear_backend::multiply(d.Q_uu, d.trial_prim_step[__u], d.kkt_stat_err_[__u]);
     d.kkt_stat_err_[__y].noalias() = d.base_lag_grad_backup[__y].transpose();
-    d.Q_yy.times(d.trial_prim_step[__y], d.kkt_stat_err_[__y]);
+    linear_backend::multiply(d.Q_yy, d.trial_prim_step[__y], d.kkt_stat_err_[__y]);
     d.kkt_stat_err_[__x].noalias() = d.base_lag_grad_backup[__x].transpose();
-    d.Q_xx.times(d.trial_prim_step[__x], d.kkt_stat_err_[__x]);
+    linear_backend::multiply(d.Q_xx, d.trial_prim_step[__x], d.kkt_stat_err_[__x]);
     for (auto f : primal_fields) {
         for (auto constr : constr_fields) {
             if (dense->approx_[constr].jac_[f].is_empty() || d.trial_dual_step[constr].size() == 0) {
                 continue;
             }
-            dense->approx_[constr].jac_[f].right_T_times(d.trial_dual_step[constr], d.kkt_stat_err_[f]);
+            linear_backend::right_transpose_multiply(d.trial_dual_step[constr], dense->approx_[constr].jac_[f], d.kkt_stat_err_[f]);
         }
     }
 }
