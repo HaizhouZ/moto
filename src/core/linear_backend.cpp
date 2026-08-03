@@ -355,6 +355,88 @@ MOTO_DUMP_WRAPPER(moto_linear_dump_eye_accumulate, eye, false)
 MOTO_DUMP_WRAPPER(moto_linear_dump_eye_overwrite, eye, true)
 #undef MOTO_DUMP_WRAPPER
 
+extern "C" __attribute__((visibility("default"))) void
+moto_linear_row_scale_dense(double *a, size_t rows, size_t cols,
+                            const double *scale, size_t row_offset) {
+  Eigen::Map<matrix, Eigen::Aligned>(a, rows, cols).array().colwise() *=
+      Eigen::Map<const vector>(scale + row_offset, rows).array();
+}
+
+extern "C" __attribute__((visibility("default"))) void
+moto_linear_row_scale_diag(double *a, size_t rows, const double *scale,
+                           size_t row_offset) {
+  Eigen::Map<vector, Eigen::Aligned>(a, rows).array() *=
+      Eigen::Map<const vector>(scale + row_offset, rows).array();
+}
+
+template <bool Scaled>
+void row_infnorm_dense(const double *a, size_t rows, size_t cols,
+                       const double *scale, double *norms, size_t row_offset) {
+  const auto values = Eigen::Map<const matrix, Eigen::Aligned>(a, rows, cols)
+                          .cwiseAbs()
+                          .rowwise()
+                          .maxCoeff();
+  auto output = Eigen::Map<vector>(norms + row_offset, rows);
+  if constexpr (Scaled)
+    output.array() = output.array().max(
+        values.array() *
+        Eigen::Map<const vector>(scale + row_offset, rows).cwiseAbs().array());
+  else
+    output = output.cwiseMax(values);
+}
+
+template <bool Scaled>
+void row_infnorm_diag(const double *a, size_t rows, const double *scale,
+                      double *norms, size_t row_offset) {
+  auto values = Eigen::Map<const vector, Eigen::Aligned>(a, rows).cwiseAbs();
+  auto output = Eigen::Map<vector>(norms + row_offset, rows);
+  if constexpr (Scaled)
+    output = output.cwiseMax(
+        values.cwiseProduct(Eigen::Map<const vector>(scale + row_offset, rows)
+                                .cwiseAbs()));
+  else
+    output = output.cwiseMax(values);
+}
+
+extern "C" __attribute__((visibility("default"))) void
+moto_linear_row_infnorm_dense(const double *a, size_t rows, size_t cols,
+                              const double *, double *norms,
+                              size_t row_offset) {
+  row_infnorm_dense<false>(a, rows, cols, nullptr, norms, row_offset);
+}
+extern "C" __attribute__((visibility("default"))) void
+moto_linear_scaled_row_infnorm_dense(const double *a, size_t rows, size_t cols,
+                                     const double *scale, double *norms,
+                                     size_t row_offset) {
+  row_infnorm_dense<true>(a, rows, cols, scale, norms, row_offset);
+}
+extern "C" __attribute__((visibility("default"))) void
+moto_linear_row_infnorm_diag(const double *a, size_t rows, size_t,
+                             const double *, double *norms,
+                             size_t row_offset) {
+  row_infnorm_diag<false>(a, rows, nullptr, norms, row_offset);
+}
+extern "C" __attribute__((visibility("default"))) void
+moto_linear_scaled_row_infnorm_diag(const double *a, size_t rows, size_t,
+                                    const double *scale, double *norms,
+                                    size_t row_offset) {
+  row_infnorm_diag<true>(a, rows, scale, norms, row_offset);
+}
+extern "C" __attribute__((visibility("default"))) void
+moto_linear_row_infnorm_eye(const double *, size_t rows, size_t,
+                            const double *, double *norms, size_t row_offset) {
+  auto output = Eigen::Map<vector>(norms + row_offset, rows);
+  output.array() = output.array().max(1.);
+}
+extern "C" __attribute__((visibility("default"))) void
+moto_linear_scaled_row_infnorm_eye(const double *, size_t rows, size_t,
+                                   const double *scale, double *norms,
+                                   size_t row_offset) {
+  auto output = Eigen::Map<vector>(norms + row_offset, rows);
+  output = output.cwiseMax(
+      Eigen::Map<const vector>(scale + row_offset, rows).cwiseAbs());
+}
+
 #define MOTO_DUMP_PAIR_WRAPPER(pattern, overwrite, mode)                       \
   extern "C" __attribute__((visibility("default"))) void                     \
       moto_linear_dump_pair_##pattern##_##mode(                               \
@@ -901,6 +983,93 @@ std::vector<scalar_t *> panel_pointers(const ::moto::sparse_matrix &sparse) {
   add(sparse.diag_panels_);
   add(sparse.eye_panels_);
   return pointers;
+}
+
+void rowwise_kernel::operator()(std::span<scalar_t *const> panels,
+                                const scalar_t *scale,
+                                scalar_t *output) const {
+  if (!function_ || panels.size() != panels_)
+    throw std::invalid_argument("invalid sparse JIT rowwise invocation");
+  function_(panels.data(), scale, output);
+}
+
+namespace {
+std::string emit_rowwise_function(const matrix_layout &layout, rowwise_op op,
+                                  std::string_view name) {
+  if (!layout.rows || layout.panels.empty())
+    throw std::invalid_argument("empty sparse JIT rowwise profile");
+  std::ostringstream source;
+  source << "#include <cstddef>\n";
+  if (op == rowwise_op::scale) {
+    if (std::ranges::any_of(layout.panels, [](const panel_layout &panel) {
+          return panel.pattern == sparsity::eye;
+        }))
+      throw std::invalid_argument("row scaling requires dynamic eye profile");
+    source << "extern \"C\" void moto_linear_row_scale_dense(double*,"
+              "std::size_t,std::size_t,const double*,std::size_t);\n"
+              "extern \"C\" void moto_linear_row_scale_diag(double*,"
+              "std::size_t,const double*,std::size_t);\n";
+  } else {
+    const auto prefix =
+        op == rowwise_op::scaled_inf_norm ? "scaled_row_" : "row_";
+    for (const auto pattern : {"dense", "diag", "eye"})
+      source << "extern \"C\" void moto_linear_" << prefix << "infnorm_"
+             << pattern
+             << "(const double*,std::size_t,std::size_t,const double*,double*,"
+                "std::size_t);\n";
+  }
+  source << "static void " << name
+         << "(double *const *p,const double*s,double*out){\n";
+  for (size_t i = 0; i < layout.panels.size(); ++i) {
+    const auto &panel = layout.panels[i];
+    if (panel.row_offset + panel.rows > layout.rows)
+      throw std::invalid_argument("invalid sparse JIT rowwise panel");
+    const auto pattern = panel.pattern == sparsity::dense ? "dense" :
+                         panel.pattern == sparsity::diag  ? "diag" : "eye";
+    if (op == rowwise_op::scale) {
+      source << "  moto_linear_row_scale_" << pattern << "(p[" << i << "],"
+             << panel.rows << ',';
+      if (panel.pattern == sparsity::dense)
+        source << panel.cols << ',';
+      source << "s," << panel.row_offset << ");\n";
+    } else {
+      source << "  moto_linear_"
+             << (op == rowwise_op::scaled_inf_norm ? "scaled_row_" : "row_")
+             << "infnorm_" << pattern << "(p[" << i << "]," << panel.rows
+             << ',' << panel.cols << ",s,out," << panel.row_offset << ");\n";
+    }
+  }
+  source << "}\n";
+  return source.str();
+}
+} // namespace
+
+rowwise_kernels compile_rowwise(matrix_layout layout,
+                                const std::filesystem::path &cache_dir) {
+  std::ostringstream source;
+  const std::array ops{rowwise_op::scale, rowwise_op::inf_norm,
+                       rowwise_op::scaled_inf_norm};
+  for (size_t i = 0; i < ops.size(); ++i)
+    source << emit_rowwise_function(layout, ops[i],
+                                    "moto_linear_jit_rowwise_" +
+                                        std::to_string(i));
+  source << "extern \"C\" __attribute__((visibility(\"default\"))) void *"
+         << symbol_name << "(std::size_t i){static void*f[]={";
+  for (size_t i = 0; i < ops.size(); ++i) {
+    if (i)
+      source << ',';
+    source << "reinterpret_cast<void*>(&moto_linear_jit_rowwise_" << i << ')';
+  }
+  source << "};return f[i];}\n";
+  using registry_type = void *(*)(size_t);
+  auto registry = reinterpret_cast<registry_type>(
+      compile_source(source.str(), cache_dir));
+  const auto make = [&](size_t index) {
+    return rowwise_kernel(
+        layout.panels.size(),
+        reinterpret_cast<rowwise_kernel::function_type>(registry(index)));
+  };
+  return {make(0), make(1), make(2)};
 }
 
 void run_product(const ::moto::sparse_matrix &sparse, product_op op,

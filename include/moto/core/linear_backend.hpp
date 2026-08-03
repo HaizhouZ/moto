@@ -120,6 +120,30 @@ void run_weighted_gram(const ::moto::sparse_matrix &sparse,
                        const scalar_t *middle, scalar_t *out);
 void prepare_weighted_gram(const ::moto::sparse_matrix &sparse);
 
+enum class rowwise_op { scale, inf_norm, scaled_inf_norm };
+
+class rowwise_kernel {
+public:
+  using function_type = void (*)(scalar_t *const *, const scalar_t *, scalar_t *);
+  rowwise_kernel() = default;
+  rowwise_kernel(size_t panels, function_type function)
+      : panels_(panels), function_(function) {}
+  void operator()(std::span<scalar_t *const> panels, const scalar_t *scale,
+                  scalar_t *output) const;
+
+private:
+  size_t panels_ = 0;
+  function_type function_ = nullptr;
+};
+
+struct rowwise_kernels {
+  rowwise_kernel scale, inf_norm, scaled_inf_norm;
+};
+
+rowwise_kernels compile_rowwise(
+    matrix_layout layout,
+    const std::filesystem::path &cache_dir = "gen/linear_backend");
+
 struct dense_write_config {
   scalar_t alpha = 1.;
   bool overwrite = false;

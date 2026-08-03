@@ -20,6 +20,12 @@ struct node_linear_plan {
   linear_backend::batch_product_kernel jacobian_steps;
   std::vector<scalar_t *> jacobian_step_pointers;
   bool jacobian_steps_built = false;
+  struct scaling_phase {
+    linear_backend::rowwise_kernel scale, inf_norm, scaled_inf_norm;
+    std::vector<scalar_t *> pointers;
+    bool built = false;
+  };
+  array_type<scaling_phase, hard_constr_fields_non_dyn> scaling;
 };
 sym_data::sym_data(ocp *prob) : prob_(prob) {
     prob->wait_until_ready();
@@ -329,6 +335,55 @@ void node_data::prepare_linear_plan() {
   prepare_soft_condensation(false);
   prepare_soft_condensation(true);
   prepare_soft_jacobian_steps();
+  prepare_scaling_plan();
+}
+
+void node_data::prepare_scaling_plan() const {
+  if (!linear_plan_)
+    linear_plan_ = std::make_shared<node_linear_plan>();
+  for (const auto cf : hard_constr_fields_non_dyn) {
+    auto &phase = linear_plan_->scaling[cf];
+    if (phase.built)
+      continue;
+    linear_backend::matrix_layout layout{
+        .rows = static_cast<size_t>(dense_->approx_[cf].v_.size())};
+    for (const auto pf : primal_fields) {
+      const auto &jac = dense_->approx_[cf].jac_[pf];
+      if (jac.is_empty())
+        continue;
+      auto part = linear_backend::describe(jac);
+      layout.panels.insert(layout.panels.end(), part.panels.begin(),
+                           part.panels.end());
+      auto pointers = linear_backend::panel_pointers(jac);
+      phase.pointers.insert(phase.pointers.end(), pointers.begin(),
+                            pointers.end());
+    }
+    if (!layout.panels.empty()) {
+      auto kernels = linear_backend::compile_rowwise(std::move(layout));
+      phase.scale = std::move(kernels.scale);
+      phase.inf_norm = std::move(kernels.inf_norm);
+      phase.scaled_inf_norm = std::move(kernels.scaled_inf_norm);
+    }
+    phase.built = true;
+  }
+}
+
+void node_data::constraint_row_infnorms(field_t field, vector &norms,
+                                        const vector *scale) const {
+  prepare_scaling_plan();
+  const auto &phase = linear_plan_->scaling[field];
+  if (phase.pointers.empty())
+    return;
+  const auto &kernel = scale ? phase.scaled_inf_norm : phase.inf_norm;
+  kernel(phase.pointers, scale ? scale->data() : nullptr, norms.data());
+}
+
+void node_data::scale_constraint_jacobian(field_t field,
+                                          const vector &scale) const {
+  prepare_scaling_plan();
+  const auto &phase = linear_plan_->scaling[field];
+  if (!phase.pointers.empty())
+    phase.scale(phase.pointers, scale.data(), nullptr);
 }
 
 void node_data::configure_scaling_profile(bool enabled) {

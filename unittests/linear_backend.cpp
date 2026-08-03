@@ -198,6 +198,38 @@ TEST_CASE("scaled eye panels use their dynamic diagonal values") {
   REQUIRE(sparse.dense().isApprox(expected, 1e-12));
 }
 
+TEST_CASE("OCP rowwise backend scales and reduces a sparse profile") {
+  sparse_matrix sparse;
+  sparse.resize(6, 8);
+  auto dense = sparse.insert(0, 0, 3, 2, sparsity::dense);
+  auto diagonal = sparse.insert(3, 2, 3, 3, sparsity::diag);
+  auto eye = sparse.insert(0, 5, 3, 3, sparsity::eye);
+  dense.setRandom();
+  diagonal.setRandom();
+  eye.setOnes();
+  sparse.set_dynamic_eye(true);
+  const auto layout = describe(sparse);
+  const auto pointers = panel_pointers(sparse);
+
+  vector norms = vector::Random(6).cwiseAbs();
+  vector expected = norms;
+  const matrix before = sparse.dense();
+  expected = expected.cwiseMax(before.cwiseAbs().rowwise().maxCoeff());
+  const auto kernels = compile_rowwise(layout);
+  kernels.inf_norm(pointers, nullptr, norms.data());
+  REQUIRE(norms.isApprox(expected, 1e-12));
+
+  const vector scale = vector::LinSpaced(6, .5, 1.5);
+  vector scaled_norms = vector::Zero(6);
+  const vector expected_scaled =
+      scale.cwiseAbs().cwiseProduct(before.cwiseAbs().rowwise().maxCoeff());
+  kernels.scaled_inf_norm(pointers, scale.data(), scaled_norms.data());
+  REQUIRE(scaled_norms.isApprox(expected_scaled, 1e-12));
+
+  kernels.scale(pointers, scale.data(), nullptr);
+  REQUIRE(sparse.dense().isApprox(scale.asDiagonal() * before, 1e-12));
+}
+
 TEST_CASE("backend preserves aligned panel storage") {
   sparse_matrix sparse;
   sparse.resize(17, 13);

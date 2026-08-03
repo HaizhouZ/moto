@@ -17,81 +17,8 @@
  * evaluation of the full KKT residuals is in original (physical) units.
  */
 #include <moto/solver/ns_sqp.hpp>
-#include <moto/core/sparse_matrix.hpp>
 
 namespace moto {
-
-// ────────────────────────────────────────────────────────────────────────────
-// Helpers for efficient in-place row-/column-scaling of sparse_matrix panels
-// ────────────────────────────────────────────────────────────────────────────
-
-namespace {
-
-/// Row-scale a sparse_matrix in-place: row i ← s[i] * row i.
-/// Avoids dense materialisation by iterating over stored panels.
-void row_scale_inplace(sparse_matrix &mat, const vector &s) {
-    // dense panels
-    for (auto &panel : mat.dense_panels_) {
-        for (int local_r = 0; local_r < panel.rows_; ++local_r) {
-            int glob_r = panel.row_st_ + local_r;
-            if (glob_r < (int)s.size())
-                panel.data_.row(local_r) *= s[glob_r];
-        }
-    }
-    // diagonal panels: data_ is a column vector (diag entries)
-    for (auto &panel : mat.diag_panels_) {
-        for (int local_r = 0; local_r < panel.rows_; ++local_r) {
-            int glob_r = panel.row_st_ + local_r;
-            if (glob_r < (int)s.size())
-                panel.data_[local_r] *= s[glob_r];
-        }
-    }
-    // eye panels: data_ is a vector of ones; scale → diagonal scale
-    for (auto &panel : mat.eye_panels_) {
-        for (int local_r = 0; local_r < panel.rows_; ++local_r) {
-            int glob_r = panel.row_st_ + local_r;
-            if (glob_r < (int)s.size())
-                panel.data_[local_r] *= s[glob_r];
-        }
-    }
-}
-
-/// Update the per-row inf-norms of a sparse_matrix *into* norms[row_st..row_ed),
-/// using norms(row) = max(norms(row), |panel entry|).
-void accumulate_row_infnorms(const sparse_matrix &mat, Eigen::Ref<vector> norms) {
-    for (const auto &panel : mat.dense_panels_) {
-        for (int local_r = 0; local_r < panel.rows_; ++local_r) {
-            int glob_r = panel.row_st_ + local_r;
-            if (glob_r < (int)norms.size()) {
-                scalar_t v = panel.data_.row(local_r).cwiseAbs().maxCoeff();
-                if (v > norms[glob_r])
-                    norms[glob_r] = v;
-            }
-        }
-    }
-    for (const auto &panel : mat.diag_panels_) {
-        for (int local_r = 0; local_r < panel.rows_; ++local_r) {
-            int glob_r = panel.row_st_ + local_r;
-            if (glob_r < (int)norms.size()) {
-                scalar_t v = std::abs(panel.data_[local_r]);
-                if (v > norms[glob_r])
-                    norms[glob_r] = v;
-            }
-        }
-    }
-    for (const auto &panel : mat.eye_panels_) {
-        for (int local_r = 0; local_r < panel.rows_; ++local_r) {
-            int glob_r = panel.row_st_ + local_r;
-            if (glob_r < (int)norms.size()) {
-                // eye panel: |entry| = 1
-                if (1. > norms[glob_r])
-                    norms[glob_r] = 1.;
-            }
-        }
-    }
-}
-
-} // anonymous namespace
 
 // ────────────────────────────────────────────────────────────────────────────
 // compute_and_apply_scaling
@@ -146,9 +73,7 @@ void ns_sqp::compute_and_apply_scaling(const kkt_info &info) {
                 continue;
             auto &approx = d->dense().approx_[cf];
             approx.v_.array() *= s.array();
-            for (field_t pf : primal_fields)
-                if (!approx.jac_[pf].is_empty())
-                    row_scale_inplace(approx.jac_[pf], s);
+            d->scale_constraint_jacobian(cf, s);
         }
         d->scaling_applied_ = true;
     };
@@ -168,9 +93,7 @@ void ns_sqp::compute_and_apply_scaling(const kkt_info &info) {
 
             if (sc.mode == scaling_settings::mode_t::gradient) {
                 s.setZero();
-                for (field_t pf : primal_fields)
-                    if (!approx.jac_[pf].is_empty())
-                        accumulate_row_infnorms(approx.jac_[pf], s);
+                d->constraint_row_infnorms(cf, s);
                 // Widen scale for rows with large residuals too
                 s = s.cwiseMax(approx.v_.cwiseAbs());
                 for (int i = 0; i < m; ++i)
@@ -181,33 +104,7 @@ void ns_sqp::compute_and_apply_scaling(const kkt_info &info) {
                 for (size_t iter = 0; iter < sc.equilibrium_iters; ++iter) {
                     // Work on a temporary copy so we don't touch approx in-place here.
                     vector row_norms = s.cwiseAbs().cwiseProduct(approx.v_.cwiseAbs());
-                    for (field_t pf : primal_fields) {
-                        if (approx.jac_[pf].is_empty())
-                            continue;
-                        for (const auto &panel : approx.jac_[pf].dense_panels_) {
-                            for (int local_r = 0; local_r < panel.rows_; ++local_r) {
-                                int i = panel.row_st_ + local_r;
-                                if (i >= m) continue;
-                                scalar_t rn = s[i] * panel.data_.row(local_r).cwiseAbs().maxCoeff();
-                                if (rn > row_norms[i]) row_norms[i] = rn;
-                            }
-                        }
-                        for (const auto &panel : approx.jac_[pf].diag_panels_) {
-                            for (int local_r = 0; local_r < panel.rows_; ++local_r) {
-                                int i = panel.row_st_ + local_r;
-                                if (i >= m) continue;
-                                scalar_t rn = s[i] * std::abs(panel.data_[local_r]);
-                                if (rn > row_norms[i]) row_norms[i] = rn;
-                            }
-                        }
-                        for (const auto &panel : approx.jac_[pf].eye_panels_) {
-                            for (int local_r = 0; local_r < panel.rows_; ++local_r) {
-                                int i = panel.row_st_ + local_r;
-                                if (i >= m) continue;
-                                if (s[i] > row_norms[i]) row_norms[i] = s[i]; // |1| * s[i]
-                            }
-                        }
-                    }
+                    d->constraint_row_infnorms(cf, row_norms, &s);
                     for (int i = 0; i < m; ++i)
                         s[i] /= std::max(min_s, row_norms[i]);
                 }
@@ -264,9 +161,8 @@ void ns_sqp::unscale_duals(data *d) {
         if (approx.v_.size() > 0)
             approx.v_.array() /= s.array();
         // Reverse constraint Jacobian row scaling
-        for (field_t pf : primal_fields)
-            if (!approx.jac_[pf].is_empty())
-                row_scale_inplace(approx.jac_[pf], s.cwiseInverse());
+        const vector inverse_scale = s.cwiseInverse();
+        d->scale_constraint_jacobian(cf, inverse_scale);
     }
     // Unscale the dual *step* for __eq_x / __eq_xu only.
     // trial_dual_step[cf] is computed in the scaled system:

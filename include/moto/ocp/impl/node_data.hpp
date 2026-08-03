@@ -86,6 +86,9 @@ struct MOTO_ALIGN_NO_SHARING node_data {
   void evaluate_soft_jacobian_steps();
   void prepare_linear_plan();
   void configure_scaling_profile(bool enabled);
+  void constraint_row_infnorms(field_t field, vector &norms,
+                               const vector *scale = nullptr) const;
+  void scale_constraint_jacobian(field_t field, const vector &scale) const;
 
     template <typename Callback>
     void for_each(field_t field, Callback &&callback) {
@@ -124,6 +127,7 @@ struct MOTO_ALIGN_NO_SHARING node_data {
     void prepare_constraint_gradient();
     void prepare_soft_condensation(bool hessian);
     void prepare_soft_jacobian_steps();
+    void prepare_scaling_plan() const;
 };
 } // namespace moto
 
