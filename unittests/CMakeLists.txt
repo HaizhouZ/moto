@@ -57,6 +57,7 @@ add_moto_test(ineq_jac_sparsity)
 add_moto_test(equality_multiplier_init)
 add_moto_test(restoration)
 add_moto_test(linear_backend)
+add_moto_python_test(restoration_demo example/toy/restoration.py)
 
 add_executable(graph_model_compose_test graph_model_compose.cpp)
 target_include_directories(graph_model_compose_test PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
