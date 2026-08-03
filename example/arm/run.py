@@ -14,10 +14,11 @@ import pinocchio.casadi as cpin
 
 from example.helpers import (
     PinocchioCasadiModel,
+    ViserRobot,
     add_terms,
+    animate_trajectory,
     collect_state_trajectory,
     frame_placement,
-    solver_nodes,
     visit_nodes,
 )
 from example_robot_data import load
@@ -132,8 +133,8 @@ dt_nom = moto.sym.params("dt_nom", 1, default_val=0.02)
 dt = 0.02
 
 
-def build_sqp(display: bool, n_job: int = 4):
-    ur5 = load("ur5_limited", display=display, verbose=True)
+def build_sqp(n_job: int = 4):
+    ur5 = load("ur5_limited", display=False, verbose=True)
     q_d = np.copy(ur5.q0)
     model = pin.buildModelFromUrdf(ur5.urdf)
     np.set_printoptions(precision=3, suppress=True, linewidth=200)
@@ -190,7 +191,7 @@ def build_sqp(display: bool, n_job: int = 4):
             if hasattr(model, "W_ee_cost"):
                 data.value[model.W_ee_cost] = np.ones(6) * 1e8
 
-    nodes = visit_nodes(solver_nodes(sqp), set_initial_state)
+    nodes = visit_nodes(sqp.nodes, set_initial_state)
 
     sqp.settings.ipm.mu0 = 0.1
     # sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
@@ -204,45 +205,19 @@ def build_sqp(display: bool, n_job: int = 4):
     sqp.settings.restoration.rho_y = 0.0001
     sqp.settings.ls.update_alpha_dual = False
 
-    return sqp, model, ur5, cfg, horizon, nodes
+    return sqp, model, ur5, cfg, nodes
 
 
-def visualize_solution(ur5, model, cfg, q_res, dt_res, horizon):
-    import meshcat.geometry as mg
-    import meshcat.transformations as tf
-    import meshcat_shapes as mcs
-    import time
-    from scipy.spatial.transform.rotation import Rotation as R
-
-    viz = ur5.viz
-    target = mg.Sphere(0.02)
-    viz.viewer["/target"].set_object(target)
-    quat = cfg[0][3:7]
-    r = R.from_quat(quat).as_matrix()
-    target_pose = tf.compose_matrix(translate=cfg[0][:3])
-    rot = np.eye(4)
-    rot[:3, :3] = r
-    viz.viewer["/target"].set_transform(target_pose)
-
-    mcs.frame(viz.viewer["/frame"])
-    viz.viewer["/frame"].set_transform(target_pose.dot(rot))
-
-    while True:
-        for i in range(len(q_res)):
-            start = time.perf_counter()
-            ur5.display(q_res[i])
-            if i != horizon:
-                dt_ = dt_res[i]
-                remaining = dt_ - (time.perf_counter() - start)
-                if remaining > 0:
-                    time.sleep(remaining)
-        time.sleep(0.5)
+def visualize_solution(ur5, cfg, q_res, dt_res):
+    viewer = ViserRobot(ur5.urdf)
+    viewer.add_target("end_effector", cfg[0][:3], xyzw=cfg[0][3:7])
+    animate_trajectory(viewer, q_res, dt_res)
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--display", action="store_true", help="enable meshcat visualization"
+        "--display", action="store_true", help="enable Viser visualization"
     )
     parser.add_argument(
         "--n-job", type=int, default=4, help="number of solver worker jobs"
@@ -252,9 +227,7 @@ def main():
     )
     args = parser.parse_args()
 
-    sqp, model, ur5, cfg, horizon, nodes = build_sqp(
-        display=args.display, n_job=args.n_job
-    )
+    sqp, model, ur5, cfg, nodes = build_sqp(n_job=args.n_job)
 
     import time
 
@@ -277,7 +250,7 @@ def main():
     print("final ee pos err:", pin.log6(eef_des.inverse() * eef).np)
 
     if args.display:
-        visualize_solution(ur5, model, cfg, q_res, dt_res, horizon)
+        visualize_solution(ur5, cfg, q_res, dt_res)
 
 
 if __name__ == "__main__":

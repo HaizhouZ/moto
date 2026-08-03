@@ -219,7 +219,7 @@ for idx_cfg, cfg in tqdm(enumerate(config), total=len(config)):
     stages[-1].ed.add(joint_limit_constr)
     stages[-1].ed.add(model.make_ee_pos_constr(soft=args.soft, cost=args.cost))
     stages[-1].ed.add(state_cost)
-    nodes = sqp.flatten_nodes()
+    nodes = sqp.nodes
 
     nodes[-1].value[model.r_des] = np.array(cfg[0][:3])
     nodes[-1].value[model.quat_des] = np.array(cfg[0][3:7])

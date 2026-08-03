@@ -2,8 +2,11 @@
 
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
 #include <moto/ocp/dynamics/semi_implicit_euler.hpp>
+#include <moto/ocp/cost.hpp>
 #include <moto/ocp/impl/node_data.hpp>
 #include <moto/multibody/quaternion.hpp>
+#include <moto/solver/ns_riccati/ns_riccati_data.hpp>
+#include <moto/solver/ns_sqp.hpp>
 
 #include <chrono>
 
@@ -200,6 +203,109 @@ TEST_CASE("position Euler is a complete kinematic dynamics") {
   fallback->apply_jac_y_inverse_transpose(
       dense_data.data(fallback), rhs, dense_out);
   REQUIRE(euler_out.isApprox(dense_out, 1e-12));
+}
+
+TEST_CASE("multiple dynamics use independent local projections and shared input") {
+  auto [x1, y1] = sym::states("multi_projection_x1");
+  auto [x2, y2] = sym::states("multi_projection_x2");
+  auto [x3, y3] = sym::states("multi_projection_x3");
+  auto shared_u = sym::inputs("multi_projection_shared_u");
+  auto dense_u = sym::inputs("multi_projection_dense_u");
+  auto euler_u = sym::inputs("multi_projection_euler_u");
+  const cs::SX &sx1 = x1, &sy1 = y1, &sx2 = x2, &sy2 = y2;
+  const cs::SX &sx3 = x3, &sy3 = y3, &ssu = shared_u;
+  const cs::SX &sdu = dense_u, &seu = euler_u;
+  dynamics dense(new dense_dynamics(
+      "multi_projection_dense", 2 * sy1 - sx1 - sdu - ssu,
+      approx_order::first));
+  dynamics euler(new semi_implicit_euler(
+      "multi_projection_euler", 3 * sy2 - 2 * sx2 - 2 * seu - 4 * ssu,
+      semi_implicit_euler::state_t::pos, approx_order::first));
+  dynamics autonomous(new dense_dynamics(
+      "multi_projection_autonomous", 4 * sy3 - sx3, approx_order::first));
+  dense->mark_shared_inputs({shared_u});
+  euler->mark_shared_inputs({shared_u});
+  auto ordering_cost = generic_cost::from_scalar(
+      "multi_projection_ordering_cost", var_inarg_list{},
+      seu * seu + ssu * ssu + sdu * sdu);
+
+  auto problem = ocp::create();
+  problem->add(*ordering_cost);
+  problem->add(*dense);
+  problem->add(*euler);
+  problem->add(*autonomous);
+  problem->wait_until_ready();
+  node_data data(problem);
+  data.sym_val().get(x1)(0) = 1.;
+  data.sym_val().get(y1)(0) = 2.;
+  data.sym_val().get(x2)(0) = 3.;
+  data.sym_val().get(y2)(0) = 4.;
+  data.sym_val().get(x3)(0) = 5.;
+  data.sym_val().get(y3)(0) = 6.;
+  data.sym_val().get(shared_u)(0) = .25;
+  data.sym_val().get(dense_u)(0) = .5;
+  data.sym_val().get(euler_u)(0) = .75;
+  data.update_approximation(node_data::update_mode::eval_all);
+
+  solver::ns_riccati::ns_riccati_data projected(&data);
+  projected.update_projected_dynamics();
+  projected.update_projected_dynamics_residual();
+  matrix expected_fx = matrix::Zero(3, 3);
+  expected_fx.diagonal() << -.5, -2. / 3., -.25;
+  matrix expected_fu = matrix::Zero(3, 3);
+  expected_fu.row(0) << -.5, 0., -.5;
+  expected_fu.row(1) << 0., -2. / 3., -4. / 3.;
+  vector expected_res(3);
+  expected_res << 1.125, 7. / 6., 4.75;
+  REQUIRE(data.dense().proj_f_x().dense().isApprox(expected_fx, 1e-12));
+  REQUIRE(data.dense().proj_f_u().dense().isApprox(expected_fu, 1e-12));
+  REQUIRE(data.dense().proj_f_res().isApprox(expected_res, 1e-12));
+
+  vector rhs(3), result(3), expected_dual(3);
+  rhs << 2., 3., 4.;
+  expected_dual << 1., 1., 1.;
+  projected.apply_jac_y_inverse_transpose(rhs, result);
+  REQUIRE(result.isApprox(expected_dual, 1e-12));
+}
+
+TEST_CASE("multiple dynamics support regrouped phases and optimized initial state") {
+  auto [x1, y1] = sym::states("multi_phase_x1");
+  auto [x2, y2] = sym::states("multi_phase_x2");
+  auto u1 = sym::inputs("multi_phase_u1");
+  auto u2 = sym::inputs("multi_phase_u2");
+  const cs::SX &sx1 = x1, &sy1 = y1, &sx2 = x2, &sy2 = y2;
+  const cs::SX &su1 = u1, &su2 = u2;
+  dynamics combined(new dense_dynamics(
+      "multi_phase_combined",
+      cs::SX::vertcat({sy1 - sx1 - su1, sy2 - sx2 - su2}),
+      approx_order::first));
+  dynamics split1(new dense_dynamics(
+      "multi_phase_split1", sy1 - sx1 - su1, approx_order::first));
+  dynamics split2(new dense_dynamics(
+      "multi_phase_split2", sy2 - sx2 - su2, approx_order::first));
+  auto running = generic_cost::from_scalar(
+      "multi_phase_cost", var_inarg_list{},
+      sx1 * sx1 + sx2 * sx2 + su1 * su1 + su2 * su2);
+
+  auto first = stage_ocp::create(), second = stage_ocp::create();
+  first->add(*combined);
+  first->add(*running);
+  second->add(*split1);
+  second->add(*split2);
+  second->add(*running);
+  ns_sqp sqp(1);
+  sqp.settings.initial_state = ns_sqp::initial_state_mode::optimized;
+  sqp.add_stage(first, 1);
+  sqp.add_stage(second, 2);
+  auto &nodes = sqp.solver_nodes();
+  for (auto *node : nodes) {
+    node->sym_val().get(x1)(0) = 1.;
+    node->sym_val().get(y1)(0) = 1.;
+    node->sym_val().get(x2)(0) = 2.;
+    node->sym_val().get(y2)(0) = 2.;
+  }
+  const auto result = sqp.update(20, false);
+  REQUIRE(result.iter.result == ns_sqp::iter_result_t::success);
 }
 
 } // namespace moto

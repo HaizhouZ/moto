@@ -345,6 +345,7 @@ struct ns_sqp {
     ns_sqp(size_t n_jobs = MAX_THREADS);
     ns_sqp(const ns_sqp &) = delete;
     ~ns_sqp() = default;
+    size_t n_jobs() const noexcept { return graph_n_jobs_; }
     using storage_type = linear_runtime_graph<node_type>;
 
     node_view start_node() const { return model_graph_.start_node(); }

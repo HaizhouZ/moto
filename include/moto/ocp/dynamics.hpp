@@ -33,7 +33,9 @@ class generic_dynamics : public generic_constr {
       compute_project_jacobians(data);
       compute_project_residual(data);
     }
-    virtual void apply_jac_y_inverse_transpose(func_approx_data &data, vector &v, vector &dst) const { dst = v; };
+    virtual void apply_jac_y_inverse_transpose(func_approx_data &data,
+                                               vector_ref v,
+                                               vector_ref dst) const { dst = v; }
 
   protected:
     var_list shared_inputs_;

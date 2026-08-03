@@ -151,7 +151,7 @@ const char *ns_sqp::profile_phase_name(profile_phase phase) {
 void ns_sqp::refresh_problem_flags(storage_type &graph) {
     settings.has_ineq_soft = false;
     settings.has_ipm_ineq = false;
-    for (data *n : graph.flatten_nodes()) {
+    for (data *n : graph.nodes()) {
         for (auto ct : ineq_soft_constr_fields) {
             if (n->problem().dim(ct) > 0) {
                 settings.has_ineq_soft = true;

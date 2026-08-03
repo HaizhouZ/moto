@@ -24,18 +24,22 @@ dense_dynamics::approx_data::approx_data(generic_constr::approx_data &&rhs)
     auto &first_y_arg = func_.in_args(__y)[0];
     auto jac_y = approx_->jac_[__y].insert(f_st, prob.get_expr_start_tangent(first_y_arg), func_.dim(), func_.arg_tdim(__y), sparsity::dense);
     f_y_.reset(jac_y);
+    size_t y_col = 0;
     for (const sym &arg : in_args) {
         auto f = arg.field();
         if (prob.is_active(arg))
             if (f == __y) {
-                auto cols = f_y_.middleCols(prob.get_expr_start_tangent(arg), arg.tdim());
+                auto cols = f_y_.middleCols(y_col, arg.tdim());
                 new (&jac_[arg_idx]) matrix_ref(cols);
+                y_col += arg.tdim();
             }
         arg_idx++;
     }
 }
 
-void dense_dynamics::apply_jac_y_inverse_transpose(func_approx_data &data, vector &v, vector &dst) const {
+void dense_dynamics::apply_jac_y_inverse_transpose(func_approx_data &data,
+                                                   vector_ref v,
+                                                   vector_ref dst) const {
     auto &d = data.as<approx_data>();
     d.lu_->transpose_solve(v, dst);
 }
@@ -44,7 +48,8 @@ void dense_dynamics::compute_project_jacobians(func_approx_data &data) const {
     auto &d = data.as<approx_data>();
     d.lu_->compute(d.f_y_);                                // LU decomposition of the dense Jacobian
     d.lu_->solve(d.f_x_, d.proj_f_x_);                     // Solve for the projection of f_x
-    d.lu_->solve(d.f_u_exclusive_, d.proj_f_u_exclusive_); // Solve for the projection of exclusive f_u
+    if (d.f_u_exclusive_.cols())
+        d.lu_->solve(d.f_u_exclusive_, d.proj_f_u_exclusive_); // Solve for the projection of exclusive f_u
     for (size_t i : range(d.f_u_shared_.size())) {
         d.lu_->solve(d.f_u_shared_[i], d.proj_f_u_shared_[i]); // Solve for the projection of shared f_u
     }
@@ -52,7 +57,7 @@ void dense_dynamics::compute_project_jacobians(func_approx_data &data) const {
 
 void dense_dynamics::compute_project_residual(func_approx_data &data) const {
     auto &d = data.as<approx_data>();
-    d.lu_->solve(d.approx_->v_, d.proj_f_res_); // Solve for the projection of f_res
+    d.lu_->solve(d.v_, d.proj_f_res_); // Solve the function-local residual
 }
 void dense_dynamics::finalize_impl() {
     disable_jacobian_sparsity_detection();

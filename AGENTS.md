@@ -1,1269 +1,539 @@
-# moto AGENTS Guide
+# moto Agent Guide
 
-## Purpose
+## Scope
 
-This file is a maintainer-oriented map of the `moto` codebase. It is meant to help an agent or human contributor answer:
+This is the maintainer map for the current `moto` tree. Keep it focused on
+stable architecture and invariants. Do not add one-off benchmark numbers,
+temporary refactor plans, or descriptions of deleted APIs; those belong in
+issues, commits, or profiling notes.
 
-- where core data lives
-- how an OCP stage is represented
-- how raw function evaluations become a QP
-- how the SQP / Riccati / line-search pipeline moves data each iteration
-- which conventions are easy to violate when editing solver code
+`moto` is a C++20 trajectory optimizer with:
 
-This guide was derived from the code itself, especially:
-
-- `CLAUDE.md`
-- `include/moto/ocp/graph_model.hpp`
-- `include/moto/solver/ns_sqp.hpp`
-- `src/solver/sqp_impl/*.cpp`
-- `src/solver/nsp_impl/*.cpp`
-- `include/moto/ocp/impl/*.hpp`
-- `src/ocp/*.cpp`
-- `include/moto/solver/ipm/*.hpp`
-- `include/moto/solver/soft_constr/*.hpp`
-
-## High-Level Architecture
-
-`moto` is a C++20 trajectory optimization library with:
-
-- symbolic OCP stage definitions
-- sparse-to-dense approximation storage
-- a nonsmooth SQP solver
-- a nullspace / Riccati-based stagewise QP solve
-- optional IPM treatment for inequalities
-- optional PMM treatment for soft equalities
+- graph-first symbolic OCP modeling
+- CasADi derivative generation and sparsity detection
+- precompiled Eigen-based sparse panel kernels
+- a nonsmooth SQP outer solver
+- a nullspace/Riccati stagewise QP solve
+- IPM inequalities, PMM soft equalities, and restoration overlays
 - nanobind Python bindings
 
-The main solver entry point is:
+## Non-Negotiable Invariants
+
+- The public model is stage-centric: users author `x_k`, `u_k`, and terminal
+  `x_N`; internal solver storage may use `x/u/y`.
+- Endpoint lowering is graph policy. Never silently substitute `x -> y` in a
+  standalone expression or standalone problem finalizer.
+- `expr_handle` copies share identity. Copying a handle is not cloning.
+- Symbol cloning and function remapping are different operations.
+- Finalization must be idempotent and must leave every expression ready before
+  runtime storage consumes it.
+- Generated function names are stable artifact identities. Do not create a new
+  code-generated function per repeated stage or per remap.
+- Dynamics-local `P F` construction and OCP-wide linear fusion are separate
+  layers.
+- `dense_dynamics` is the general dense fallback; it must not enter the sparse
+  Euler projection-generation path.
+- Solver matrices are often views into shared storage. Confirm ownership and
+  aliasing before writing in place.
+- Keep Eigen internal threading at one inside SQP parallel regions.
+- Use at most six build jobs in this workspace.
+
+## Repository Map
+
+Modeling and expressions:
+
+- [`include/moto/core/fields.hpp`](/home/harper/Documents/moto/include/moto/core/fields.hpp)
+- [`include/moto/core/expr.hpp`](/home/harper/Documents/moto/include/moto/core/expr.hpp)
+- [`include/moto/ocp/sym.hpp`](/home/harper/Documents/moto/include/moto/ocp/sym.hpp)
+- [`include/moto/ocp/problem.hpp`](/home/harper/Documents/moto/include/moto/ocp/problem.hpp)
+- [`include/moto/ocp/graph_model.hpp`](/home/harper/Documents/moto/include/moto/ocp/graph_model.hpp)
+- [`include/moto/ocp/graph_composer.hpp`](/home/harper/Documents/moto/include/moto/ocp/graph_composer.hpp)
+- [`include/moto/ocp/impl/func.hpp`](/home/harper/Documents/moto/include/moto/ocp/impl/func.hpp)
+- [`include/moto/ocp/impl/func_data.hpp`](/home/harper/Documents/moto/include/moto/ocp/impl/func_data.hpp)
+
+Dynamics and linear backend:
+
+- [`include/moto/ocp/dynamics.hpp`](/home/harper/Documents/moto/include/moto/ocp/dynamics.hpp)
+- [`include/moto/ocp/dynamics/semi_implicit_euler.hpp`](/home/harper/Documents/moto/include/moto/ocp/dynamics/semi_implicit_euler.hpp)
+- [`include/moto/ocp/dynamics/dense_dynamics.hpp`](/home/harper/Documents/moto/include/moto/ocp/dynamics/dense_dynamics.hpp)
+- [`include/moto/core/sparse_matrix.hpp`](/home/harper/Documents/moto/include/moto/core/sparse_matrix.hpp)
+- [`include/moto/core/linear_backend.hpp`](/home/harper/Documents/moto/include/moto/core/linear_backend.hpp)
+- [`src/core/linear_backend.cpp`](/home/harper/Documents/moto/src/core/linear_backend.cpp)
+
+Runtime approximation storage:
+
+- [`include/moto/ocp/impl/node_data.hpp`](/home/harper/Documents/moto/include/moto/ocp/impl/node_data.hpp)
+- [`include/moto/ocp/impl/lag_data.hpp`](/home/harper/Documents/moto/include/moto/ocp/impl/lag_data.hpp)
+- [`src/ocp/node_data.cpp`](/home/harper/Documents/moto/src/ocp/node_data.cpp)
+
+Solver:
 
 - [`include/moto/solver/ns_sqp.hpp`](/home/harper/Documents/moto/include/moto/solver/ns_sqp.hpp)
+- [`include/moto/solver/data_base.hpp`](/home/harper/Documents/moto/include/moto/solver/data_base.hpp)
+- [`include/moto/solver/linear_runtime_graph.hpp`](/home/harper/Documents/moto/include/moto/solver/linear_runtime_graph.hpp)
+- [`include/moto/solver/ns_riccati/ns_riccati_data.hpp`](/home/harper/Documents/moto/include/moto/solver/ns_riccati/ns_riccati_data.hpp)
+- [`src/solver/sqp_impl/`](/home/harper/Documents/moto/src/solver/sqp_impl)
+- [`src/solver/nsp_impl/`](/home/harper/Documents/moto/src/solver/nsp_impl)
+- [`include/moto/solver/ipm/`](/home/harper/Documents/moto/include/moto/solver/ipm)
+- [`include/moto/solver/soft_constr/`](/home/harper/Documents/moto/include/moto/solver/soft_constr)
+- [`src/solver/restoration/`](/home/harper/Documents/moto/src/solver/restoration)
 
-The main SQP iteration loop lives in:
+Bindings, examples, and tests:
 
-- [`src/solver/sqp_impl/ns_sqp_impl.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/ns_sqp_impl.cpp)
-
-## Repo Map
-
-- [`include/moto/core/fields.hpp`](/home/harper/Documents/moto/include/moto/core/fields.hpp): field taxonomy like `__x`, `__u`, `__y`, `__s`, `__dyn`, `__eq_x`, `__ineq_xu`
-- [`include/moto/ocp/problem.hpp`](/home/harper/Documents/moto/include/moto/ocp/problem.hpp): stage formulation container
-- [`include/moto/ocp/impl/func.hpp`](/home/harper/Documents/moto/include/moto/ocp/impl/func.hpp): generic function abstraction
-- [`include/moto/ocp/impl/func_data.hpp`](/home/harper/Documents/moto/include/moto/ocp/impl/func_data.hpp): sparse maps from symbolic args to dense storage
-- [`include/moto/ocp/impl/node_data.hpp`](/home/harper/Documents/moto/include/moto/ocp/impl/node_data.hpp): per-stage runtime storage
-- [`include/moto/ocp/impl/lag_data.hpp`](/home/harper/Documents/moto/include/moto/ocp/impl/lag_data.hpp): dense merged cost/constraint derivatives
-- [`include/moto/solver/data_base.hpp`](/home/harper/Documents/moto/include/moto/solver/data_base.hpp): solver-facing aliases and Newton-step storage
-- [`include/moto/solver/ns_riccati/ns_riccati_data.hpp`](/home/harper/Documents/moto/include/moto/solver/ns_riccati/ns_riccati_data.hpp): nullspace and Riccati state
-- [`include/moto/solver/ns_riccati/generic_solver.hpp`](/home/harper/Documents/moto/include/moto/solver/ns_riccati/generic_solver.hpp): stage solver interface
-- [`src/solver/nsp_impl/presolve.cpp`](/home/harper/Documents/moto/src/solver/nsp_impl/presolve.cpp): nullspace factorization setup
-- [`src/solver/nsp_impl/backward.cpp`](/home/harper/Documents/moto/src/solver/nsp_impl/backward.cpp): backward Riccati recursion
-- [`src/solver/nsp_impl/rollout.cpp`](/home/harper/Documents/moto/src/solver/nsp_impl/rollout.cpp): forward rollout and dual-step recovery
-- [`src/solver/sqp_impl/line_search.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/line_search.cpp): filter and merit backtracking
-- [`src/solver/sqp_impl/scaling.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/scaling.cpp): Jacobian scaling
-- [`src/solver/sqp_impl/iterative_refinement.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/iterative_refinement.cpp): residual correction
-- [`include/moto/solver/ipm/ipm_constr.hpp`](/home/harper/Documents/moto/include/moto/solver/ipm/ipm_constr.hpp): IPM inequality implementation
-- [`include/moto/solver/soft_constr/pmm_constr.hpp`](/home/harper/Documents/moto/include/moto/solver/soft_constr/pmm_constr.hpp): PMM soft equality implementation
-- [`docs/restoration.md`](/home/harper/Documents/moto/docs/restoration.md): restoration design note; useful for the elastic KKT / condensation math, but not a complete description of the current overlay-based implementation
-- [`bindings/`](/home/harper/Documents/moto/bindings): Python bindings
-- [`example/`](/home/harper/Documents/moto/example): manual examples
-- [`unittests/`](/home/harper/Documents/moto/unittests): Catch2 tests
-- [`include/moto/ocp/graph_model.hpp`](/home/harper/Documents/moto/include/moto/ocp/graph_model.hpp): graph-first modeling layer
-- [`include/moto/solver/linear_runtime_graph.hpp`](/home/harper/Documents/moto/include/moto/solver/linear_runtime_graph.hpp): internal linear solver traversal storage
+- [`bindings/`](/home/harper/Documents/moto/bindings)
+- [`example/helpers.py`](/home/harper/Documents/moto/example/helpers.py)
+- [`example/toy/`](/home/harper/Documents/moto/example/toy)
+- [`example/arm/`](/home/harper/Documents/moto/example/arm)
+- [`example/quadruped/`](/home/harper/Documents/moto/example/quadruped)
+- [`unittests/`](/home/harper/Documents/moto/unittests)
 
 ## Build And Validation
 
-Top-level build uses CMake:
+Use a Release/native build for performance work and no more than six jobs:
 
 ```bash
-mkdir -p build
-cd build
-cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX ..
-cmake --build . -j8
-ctest --output-on-failure
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX" \
+  -DWITH_NATIVE_OPT=ON
+cmake --build build -j6
+ctest --test-dir build --output-on-failure -j6
 ```
 
-Important build facts:
-
-- project uses C++20
-- dependencies include Eigen, BLASFEO, OpenMP, fmt, magic_enum, re2, OpenSSL, CasADi, nlohmann_json, nanobind
-- `WITH_NATIVE_OPT=ON` enables `-march=native`
-- Python bindings are built from [`bindings/CMakeLists.txt`](/home/harper/Documents/moto/bindings/CMakeLists.txt)
-- unit tests are defined in [`unittests/CMakeLists.txt`](/home/harper/Documents/moto/unittests/CMakeLists.txt)
-- current CMake test registration includes `sym_test` and `graph_model_compose_test`
-
-Manual runs from the repo docs:
+Useful focused checks:
 
 ```bash
-python example/arm/run.py
-python example/quadruped/run.py
-python example/quadruped/mpc.py
-```
-
-Useful current validation commands:
-
-```bash
-python -m py_compile example/quadruped/run.py
-find gen -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+MOTO_SYNC_CODEGEN=1 ./build/unittests/semi_implicit_euler_test
+./build/unittests/linear_backend_test
 ./build/unittests/graph_model_compose_test
-MOTO_SQP_MAX_ITER=50 python example/quadruped/run.py
-KMP_AFFINITY='noverbose,granularity=fine,scatter' OMP_NUM_THREADS=10 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 MOTO_PROFILE_SQP=1 MOTO_SQP_BENCH_RUNS=1 MOTO_SQP_MAX_ITER=50 python example/quadruped/run.py
+python example/toy/initial_state_optimization.py
+python example/toy/restoration.py
+python example/quadruped/quaternion_test.py
+python example/quadruped/run.py --no-display --acceleration-control \
+  --horizon 4 --steps 1 --nodes-per-step 2 --max-iter 1
 ```
 
-Current practical note from local quadruped profiling:
+Quadruped smoke test with controlled threading:
 
-- when benchmarking `example/quadruped/run.py` with `OMP_NUM_THREADS=10`, keeping `Eigen::setNbThreads(1)` in `ns_sqp` construction was measurably better than leaving Eigen's internal thread count unconstrained
-- the most comparable local check was:
-  - `KMP_AFFINITY='noverbose,granularity=fine,scatter' OMP_NUM_THREADS=10 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 MOTO_PROFILE_SQP=1 MOTO_SQP_BENCH_RUNS=1 MOTO_SQP_MAX_ITER=50 python example/quadruped/run.py`
-- on that workload, the version with `Eigen::setNbThreads(1)` reduced total profiled update time from roughly `474 ms` to roughly `415 ms` in one run, and from `526 ms` to `374 ms` after additional iterative-refinement experiments; exact values do vary run-to-run, but the direction was consistently favorable enough to keep the setting in `ns_sqp`
-- a more recent warm run of the current quadruped setup converged in `35` iterations with about `112 ms` total profiled update time and about `3.2 ms / iter`
-- in that run there was no backtracking:
-  - `trial_evals = 35`
-  - every iteration had exactly one accepted full-step trial
-- the dominant globalization cost in that profile was not filter bookkeeping itself:
-  - `run_globalization` was about `0.55 ms / iter`
-  - `update_approx_accepted` was about `0.50 ms / iter`
-  - `evaluate_trial_point` was only about `0.05 ms / iter`
-- practical implication:
-  - for current filter runs, the expensive part is often relinearizing the accepted point for the next SQP iteration, not the scalar acceptance logic in [`src/solver/sqp_impl/line_search.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/line_search.cpp)
+```bash
+KMP_AFFINITY='noverbose,granularity=fine,scatter' \
+OMP_NUM_THREADS=6 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+python example/quadruped/run.py --no-display --horizon 4 --steps 1 \
+  --nodes-per-step 2 --max-iter 1 --configuration-velocity next
+```
 
-Useful benchmarking / profiling environment variables in `example/quadruped/run.py`:
+Build and Python validation rules:
 
-- `MOTO_SQP_MAX_ITER`: iterations requested per `sqp.update(...)`
-- `MOTO_SQP_BENCH_RUNS`: number of timed hot-start runs
-- `MOTO_PROFILE_SQP`: print the last run's SQP profile summary
-- `MOTO_SQP_BENCH_VERBOSE`: if set, print verbose logs for every timed run; otherwise only the last timed run is verbose
-- `MOTO_PARALLEL_BLOCK_ORDER={forward,reverse}`: override chunk assignment order in `parallel_for`
-- `MOTO_DEBUG_SOLVER_PROBS`: print head/tail solver problems for the realized graph
-- `MOTO_DEBUG_GRAPH_LAYOUT`: print flattened solver graph dimensions and dynamics count
-
-Current benchmark-script caveats:
-
-- [`example/quadruped/run.py`](/home/harper/Documents/moto/example/quadruped/run.py) no longer has a dedicated warm-up loop
-- benchmark timing now measures only the configured `MOTO_SQP_BENCH_RUNS`
-- `get_profile_report()` still reports the most recent `update(...)` call only
-- the script still defaults to `display = True`, so headless or solver-only profiling often uses a temporary no-visualization copy rather than editing the file in place
-
-Current default parallel behavior:
-
-- chunk order defaults to `forward`
-- solver callbacks receive the logical chunk id used by `parallel_for`
-- chunking follows the order of the provided view; backward passes use the
-  reversed traversal view from `solver::backward_edges(...)`
+- Wait for `moto_pywrap` to finish linking before running Python.
+- A first run may include CasADi and linear-backend compilation. Do not compare
+  it directly with hot solver time.
+- Use `MOTO_PROFILE_SQP=1` and `get_profile_report()` for solver timing.
+- Do not increase build parallelism to compensate for slow code generation.
+- Do not delete unrelated contents of `gen/`; generated artifacts may belong
+  to another active test or user run.
 
 ## Field System
-
-Fields encode the semantic role of symbols and functions.
 
 Primary primal fields:
 
 - `__x`: current state
-- `__u`: control
-- `__y`: next state
+- `__u`: interval input
+- `__y`: predicted next-state copy used by solver algebra
 
-Solver-managed non-primal storage:
+Other symbol storage:
 
-- `__s`: internal shared slack storage reserved for solver-owned IPM state and other solver-private storage
-- `__p`: non-decision parameters
+- `__p`: parameters, not decision variables
+- `__s`: solver-managed private slack/storage
+- `__usr_var`: user-defined nonstandard storage
 
-Core function / constraint fields:
+Main function fields:
 
 - `__dyn`: dynamics residual
-- `__eq_x`: state-only equality
-- `__eq_xu`: state-input equality
-- `__ineq_x`: state-only inequality
-- `__ineq_xu`: state-input inequality
-- `__eq_x_soft`
-- `__eq_xu_soft`
-- `__cost`
+- `__cost`: costs
+- `__eq_x`, `__eq_xu`: hard equalities
+- `__ineq_x`, `__ineq_xu`: inequalities
+- `__eq_x_soft`, `__eq_xu_soft`: soft equalities
 
-Important convention:
+Do not treat `__s` as a public primal block. `primal_fields` is `x/u/y`.
 
-- pure state-only path terms are modeled by the user on `x`
-- terminal pure-`x` terms are added through the final stage endpoint view:
-  `stages[-1].ed.add(term)`
-- `stage_ocp` is the public modeling container
-- `stage_ocp.st` and `stage_ocp.ed` are lightweight endpoint views for pure
-  `x` terms
-- `__dyn`, `u` terms, and mixed interval terms belong on `stage_ocp.add(...)`
-- any required lowering from node semantics to solver storage should happen during graph-aware compose, not during generic expression finalization
+## Public Modeling Surface
 
-Why this is easy to trip over:
-
-- a user may write a stage-local constraint `g(x_k)` and expect it to remain attached to the current `x`
-- any hidden remap changes formulation, so it must be explicit in logs and scoped by graph topology
-- the intended semantics are stage-centric:
-  - interval terms stay on the solver interval unchanged
-  - graph-start terms are authored explicitly through `sqp.start_node` and
-    materialize on the first solver `x`
-  - stage start endpoint terms lower onto the incoming interval's solver `y`
-    whenever the stage has a predecessor
-  - end endpoint terms lower by cached `x -> y` remap and materialize on solver `y`
-- this decision cannot be made correctly by a local `finalize()` on a standalone expression or a standalone problem
-
-Useful field groups used throughout the solver:
-
-- `primal_fields = {__x, __u, __y}`
-- `__s` is intentionally not part of `primal_fields`
-- hard constraints = `{__dyn, __eq_x, __eq_xu}`
-- inequalities = `{__ineq_x, __ineq_xu}`
-- soft equalities = `{__eq_x_soft, __eq_xu_soft}`
-- `ineq_soft_constr_fields = inequalities + soft equalities`
-
-## Problem Representation
-
-An OCP stage is represented by [`ocp`](/home/harper/Documents/moto/include/moto/ocp/problem.hpp).
-
-What `ocp` stores:
-
-- expressions grouped by field
-- enabled, disabled, and pruned expressions
-- flattened indexing for each expression into dense field vectors
-- dimensions per field
-- tangent dimensions per primal field
-- sub-problems
-
-Important `ocp` behaviors:
-
-- `add(expr)` registers symbols/functions in the stage
-- `finalize()` computes field dimensions, flattened indices, ordering, and consistency
-- `extract(...)` and `extract_tangent(...)` provide views into serialized field vectors
-- `maintain_order()` preserves primal ordering required by dynamics-related block computations
-- `wait_until_ready()` blocks until code-generated functions are available
-
-`ocp` is the static formulation. Runtime values and derivatives live elsewhere.
-
-### Problem Types
-
-There are two related problem containers that matter in practice:
-
-- `ocp`
-  - generic container used by C++ solver internals
-  - not a Python modeling entry point
-- `stage_ocp`
-  - public modeling container
-  - accepts `__dyn`, `u` terms, mixed interval terms, and pure `x` terms
-  - pure `x` terms added with `stage.add(...)` are interval-local and
-    materialize on solver `x`
-  - pure `y` terms are rejected; users should write the expression on `x` and
-    add it with `stage.ed.add(...)`
-
-The key invariant is:
-
-- users model interval semantics on `stage_ocp`
-- users model endpoint-only state terms through `stage.st` or `stage.ed`
-- graph compose produces internal `ocp` interval problems
-- the SQP solver ultimately consumes composed interval problems
-
-## Graph Modeling
-
-The current recommended API is graph-first.
-
-Core type:
-
-- [`graph_model`](/home/harper/Documents/moto/include/moto/ocp/graph_model.hpp)
-
-Intended semantics:
-
-- `stage_ocp.add(...)` holds interval terms such as dynamics, control costs, and
-  mixed constraints
-- `stage_ocp.st.add(...)` holds pure start-state terms
-- `stage_ocp.ed.add(...)` holds pure end-state terms
-- when a new phase is appended, pure `x` terms on the new phase's `stage.st`
-  are part of the same graph node as the previous phase's `stage.ed`; both
-  endpoint sources lower onto the previous interval's solver `y`, and the
-  `stage.st` terms are not duplicated on the new phase's outgoing `x`
-- end-node pure-`x` terms lower onto the current interval's solver `y`
-- terminal terms are ordinary endpoint terms on the last graph-owned stage:
-  `stages[-1].ed.add(term)`
-
-Important compose rules that are now covered by unit tests:
-
-- inactive `u` symbols prune the composed interval's primal `u`
-- `stage.add(x_only)` materializes on solver `x`
-- `sqp.start_node.add(x_only)` materializes on the first solver `x`
-- `stage.st.add(x_only)` lowers onto the previous interval's solver `y` when
-  the stage is connected after a predecessor, including appended phase
-  boundaries
-- `stage.ed.add(x_only)` materializes on solver `y`
-- endpoint pure-`x` costs and constraints lower onto the relevant interval `y`
-- invalid endpoint terms involving `u`, `y`, or `__dyn` are rejected clearly
-- returned graph-owned stage handles are mutable and invalidate solver caches
-- edits to a prototype after `add_stage(...)` do not affect graph-owned clones
-- codegen finalization of lowered/materialized clones must be serialized or uniquely named to avoid `.so` races
-- current implementation chooses serialization plus reuse:
-  - finalized clones intentionally share stable generated symbol names
-  - same-name codegen is serialized with a per-function mutex in [`src/utils/codegen.cpp`](/home/harper/Documents/moto/src/utils/codegen.cpp)
-  - compiled `.so` and `.json` outputs are written through `.tmp` files and renamed atomically
-- graph realization now lives with `graph_model` itself:
-  - `graph_model::compose_stage(...)` handles interval composition and endpoint materialization
-  - `ns_sqp::realize_runtime(...)` consumes composed intervals to build internal solver storage
-
-## SQP Graph Ownership
-
-`ns_sqp` owns a default `graph_model`, but the public modeling API is exposed
-directly on `sqp` through `start_node()`, `add_stage(...)`, `add_stages(...)`,
-and `flatten_nodes()`. Solver storage is realized lazily from that model.
-
-Current restoration detail:
-
-- `ns_sqp` caches separate restoration runtime storage built from overlay problems
-- the cached restoration runtime is rebuilt only when the modeled path or restoration settings change
-- this avoids rebuilding the restoration overlay on every restoration entry
-
-Current recommended Python flow:
+Python modeling starts from `moto.sqp` and `moto.stage()`:
 
 ```python
-sqp = moto.sqp(n_job=10)
-
-stage = moto.stage_ocp.create()
-stage.add(model.dyn)
-stage.add(path_cost_or_constraint)
-
-stages = sqp.add_stage(stage, N)
-stages[-1].ed.add(model.terminal_cost)
-
-flat_nodes = sqp.flatten_nodes()
+sqp = moto.sqp(n_job=6)
+stage = moto.stage()
+stage.add(dynamics)
+stage.add(interval_cost)
+stages = sqp.add_stage(stage, horizon)
+stages[-1].ed.add(terminal_cost)
+nodes = sqp.nodes
 ```
 
-Important current path semantics:
+Placement rules:
 
-- `sqp.add_stage(stage, N)` appends exactly `N` graph-owned stage clones
-- the first append starts from `sqp.start_node`
-- repeated `add_stage(...)` calls append from the current graph tail
-- `sqp.add_stages(start_node, stage, N)` appends from an explicit node view
-- there is no hidden terminal tail edge anymore
-- returned stages are graph-owned mutable clones
-- endpoint edits on graph-owned stages invalidate solver/runtime caches
+- `stage.add(...)`: interval dynamics, input terms, mixed terms, and ordinary
+  path-state terms evaluated on the interval's current `x`
+- `stage.st.add(...)`: state-only term on the phase start boundary
+- `stage.ed.add(...)`: state-only term on the phase end boundary
+- `sqp.start_node.add(...)`: state-only term on the graph's initial state
 
-Current division of responsibility:
+Endpoint views reject terms involving `u`, authored `y`, or dynamics. Users
+write endpoint expressions on `x`; graph composition performs the necessary
+solver-storage lowering.
 
-- user edits the `sqp` graph through `add_stage(...)`, `add_stages(...)`, and
-  returned graph-owned stage handles
-- `graph_model` owns path composition and topology realization policy
-- `sqp.flatten_nodes()` returns realized solver stages for initialization and debug inspection
-- Python top-level exports only the modeling/solver surface; low-level runtime/data bindings stay behind `moto._moto_pywrap` for debugging
+`sqp.add_stage(stage, N)` appends `N` graph-owned stage copies from the current
+tail. `sqp.add_stages(node, stage, N)` appends from an explicit graph boundary.
+Returned stages are mutable graph-owned copies; editing them invalidates cached
+realization. Editing the original prototype later does not mutate those copies.
 
-Useful modeling entry points:
+`sqp.nodes` realizes and returns the ordered solver-stage list for initialization
+and debugging. It is not the modeling API and should not absorb graph semantic
+policy.
 
-- `sqp.start_node`
-- `sqp.add_stage(...)`
-- `sqp.add_stages(...)`
-- `sqp.flatten_nodes()`
+## Graph Composition
 
-The design direction is:
+`graph_model` owns topology and mutation revision tracking.
+`graph_composer` turns a topology snapshot into internal `ocp` intervals.
+`ns_sqp` consumes the composed result and reconciles runtime storage.
 
-- keep linear runtime storage internal
-- keep the Python modeling surface on `sqp`
-- avoid re-exposing low-level runtime graph machinery
+Lowering rules:
 
-## X-U-Y Triplet Formulation
+- interval terms remain on their authored interval
+- graph-start terms materialize on the first solver `x`
+- a connected stage-start boundary lowers onto the predecessor interval's `y`
+- a stage-end boundary lowers onto that interval's `y`
+- `prev.ed` and `next.st` describe the same connected graph boundary
+- inactive symbols are pruned when composed stages are copied
 
-The current stage model is built around three primal blocks:
+Endpoint lowering uses cached function remaps. It must not mutate the authored
+function and must not generate a unique compiled artifact for every stage.
+Enable `MOTO_TRACE_COMPOSE=1` only when debugging lowering/remap decisions.
 
-- `x_k`: current state entering stage `k`
-- `u_k`: control applied at stage `k`
-- `y_k`: state leaving stage `k`
+## Expression Identity, Clone, Remap, And Reuse
 
-This is a valid solver formulation, but it mixes two different concerns:
+Keep these semantics distinct:
 
-- modeling semantics: "what variables does the user think this stage owns?"
-- solver algebra: "which state copy is most convenient for the nullspace / Riccati factorization?"
+- handle/share: `expr::handle()` and copied `expr_handle` values refer to the
+  exact same UID and object
+- symbol clone: `sym.clone(name)` creates a new logical symbol with a fresh UID;
+  cloning an `x` state also creates its paired `y`
+- stage copy: `stage.copy(...)` creates an independent container while sharing
+  immutable expression handles until graph lowering needs a remapped function
+- function remap: changes the symbols used to address an already finalized
+  function implementation; it is not symbolic re-derivation
+- remap reuse: `reuse_remap(...)` caches by normalized source/target UID pairs
+  and returns the same remapped handle for an equivalent mapping
 
-Today the solver still stores some path-state algebra on `y`, but the modeling interface should stay simpler:
+Function cloning is an implementation detail. Do not expose a generic public
+`func.clone()` API. If a user needs a distinct symbolic expression, build it
+from cloned symbols; if only argument identity changes, remap the function.
 
-- users write `constr.create(...)` and choose `cost.from_scalar(...)` or
-  `cost.from_vector(...)` according to the cost output shape
-- if an expression is terminal, the user writes `stages[-1].ed.add(term)`
-- if an expression is a path-state equality that the solver wants on predecessor storage, that should be decided during graph compose, not by hidden mutation of the authored expression
+## Symbols And Automatic Argument Inference
 
-That makes stage-local modeling harder than it needs to be.
+Every symbol created through `moto.sym` is registered by UID in
+`global_registry`. CasADi-backed functions infer arguments by querying the
+symbolic primitives in the output and resolving them through this registry.
 
-Recommended usage:
+Consequences:
 
-- create a stage prototype with `moto.stage_ocp.create()`
-- add dynamics and interval terms with `stage.add(...)`
-- add start-state-only terms with `stage.st.add(...)`
-- add end-state or terminal state-only terms with `stage.ed.add(...)`
-- build solver paths through `sqp.add_stage(stage, N)`
-- inspect realized stages through `sqp.flatten_nodes()` when needed
+- `constr.create(name, expression)`, `cost.from_scalar(...)`,
+  `cost.from_vector(...)`, `ineq.bounds(...)`, and dynamics constructors do not
+  require a duplicated argument list for ordinary use
+- explicitly supplied symbols are registered before inference
+- inferred arguments are UID-based, not name-based
+- unused arguments are removed during function finalization unless explicitly
+  exempted
+- constants must remain constants; do not turn every numeric weight/reference
+  into a symbol
 
-### Best Internal Mental Model
+Parameters used in values, weights, references, lower bounds, or upper bounds
+may be numeric scalars/vectors or explicitly supplied symbols. Partial bounds
+are represented by the bounded expression/symbol passed to `ineq.bounds`, not
+by forcing a full-state bound vector.
 
-If the solver keeps the triplet, the cleanest interpretation is:
+## Finalization And Code Generation
 
-- `x`: state owned by the node
-- `u`: action owned by the outgoing edge
-- `y`: predicted outgoing state copy used only by the solver
+Expression finalization establishes dimensions, dependencies, derivative
+sparsity, and generated callbacks. Problem finalization then:
 
-That is better than presenting all three as peer modeling variables.
+1. maintains dynamics-compatible primal ordering when enabled
+2. rebuilds flattened field layouts
+3. marks the problem finalized
+4. builds its `ocp_linear_profile` from finalized function sparsity
 
-## Model Graph And Runtime Storage
+`wait_until_ready()` waits for every expression's generated implementation and
+then finalizes the problem layout. Runtime objects must not be created from a
+partially ready problem.
 
-Recent refactor work exposed an important design constraint:
+Generated names are stable function names. Same-name codegen is serialized in
+[`src/utils/codegen.cpp`](/home/harper/Documents/moto/src/utils/codegen.cpp),
+and compiled outputs are published atomically. Repeated stages and cached
+remaps intentionally reuse those artifacts.
 
-- `graph_model` is the modeling-side linear path graph
-- `ns_sqp` owns one default `graph_model`
-- linear runtime storage is internal solver traversal machinery, not a public modeling object
-- Python graph-building APIs live on `sqp`
-- graph realization policy should live on `graph_model`
-- `ns_sqp` should consume a realized graph model rather than mirror its topology or lowering API
+Do not put graph topology decisions into `generic_func::finalize_impl()` or
+`ocp_base::finalize()`; neither has enough context to place endpoint terms.
 
-This matters for lowering:
+## Structured Euler And Dense Dynamics
 
-- lowering is not fundamentally "move a term from one node to another node"
-- it is "assign an endpoint-authored term to the correct solver interval storage"
-- in the current strict interpretation:
-  - interval terms stay on the current composed interval
-  - graph-start pure-`x` terms are authored explicitly through
-    `sqp.start_node` and materialize on the first solver `x`
-  - stage start endpoint pure-`x` terms lower to the incoming interval's solver
-    `y` once the stage is connected after a predecessor
-  - end endpoint pure-`x` terms lower to solver `y`
-  - at a connected boundary, `prev.ed` and `next.st` are two authoring views of
-    the same graph node and their terms are composed onto the predecessor `y`
-  - there is no generic predecessor-edge remap beyond endpoint `x -> y` lowering
+All dynamics implement the `generic_dynamics` projection interface consumed by
+the solver:
 
-Because of that, graph-aware compose should be centered on stages:
+- `F_x = F_y^{-1} f_x`
+- `F_u = F_y^{-1} f_u`
+- `F_0 = F_y^{-1} f`
+- application of `F_y^{-T}` to multiplier vectors
 
-- `stage_ocp` remains the authoring surface for interval costs and constraints
-- endpoint views provide side-specific state-only placement
-- ownership of `u` should stay with the outgoing edge, not with an incoming-edge compatibility convention
+`semi_implicit_euler` is the only structured Euler class:
 
-Practical implication for future work:
+- `state_t::pos_vel` / Python `state.pos_vel` is the default complete
+  position-plus-velocity dynamics
+- `state_t::pos` / Python `state.pos` is the complete position-only dynamics
+  used for kinematic optimization
+- the position block uses the supplied configuration structure, including the
+  small orientation block
+- the position-velocity mode uses the semi-implicit block-triangular inverse
 
-- do not keep adding semantic policy inside `ns_sqp`
-- do not reintroduce finalize-time silent substitution
-- prefer a graph-level lowering/composition pass that:
-  - sees the whole modeled graph
-  - keeps interval role terms unchanged
-  - materializes graph-start endpoint terms on `x`
-  - lowers endpoint pure-`x` terms onto `y` when that endpoint is an interval
-    end or an appended phase boundary
-  - then materializes solver problems in a form compatible with internal linear solver storage
+During dynamics finalization, CasADi forms tangent Jacobians, the symbolic
+inverse, and the final projected expressions. Their output sparsity is split
+into dense, diagonal, and identity panels. Runtime data writes generated
+projected Jacobians directly into sparse `proj_f_x_` and `proj_f_u_` storage;
+residual and inverse-transpose products use precompiled linear-backend kernels.
 
-Current status of the refactor:
+Do not hand-code SpGEMM for this path. CasADi owns symbolic product formation
+and sparsity discovery; the backend owns runtime panel execution.
 
-- Python uses `stage_ocp` directly as the modeling prototype
-- Python graph construction goes through `sqp.add_stage(...)` or `sqp.add_stages(...)`
-- `node_ocp`, `edge_ocp`, and `add_terminal(...)` are no longer public APIs
-- quadruped runs through the modeled composition path and still converges under `MOTO_SQP_MAX_ITER=50`
+`dense_dynamics` is independent. It gathers dense `F_y`, factors it with the
+dense BLASFEO LU path, and solves projections at runtime. It must not generate
+or cache symbolic `P F` products.
 
-In short:
+The helper [`example/helpers.py`](/home/harper/Documents/moto/example/helpers.py)
+provides Pinocchio-aware state creation and the standard `pos_vel` residual so
+examples do not repeat direct manifold `integrate` / `difference` calls.
 
-- user-facing model: `x_k`, `u_k`, `x_N`
-- internal solver model: `x/u/y`
-- bridge between them: explicit lowering, not implicit substitution
+## OCP Linear Profiles And Backend
 
-## Expression And Function Model
+After all functions are finalized, `ocp_base::build_linear_profile()` collects
+active Jacobian and Hessian panels into stage-global offsets. `node_data`
+allocates sparse matrices from that profile and lazily compiles OCP-level
+kernels.
 
-Most solver-facing functions derive from [`generic_func`](/home/harper/Documents/moto/include/moto/ocp/impl/func.hpp).
+Current backend responsibilities include:
 
-What `generic_func` provides:
+- sparse/dense products and transpose products
+- sparse/sparse product profiles
+- dense writes
+- weighted Gram products
+- rowwise scaling and norms
+- batched constraint-gradient assembly
+- batched soft-constraint Jacobian-step products
+- batched first- and second-order soft-constraint condensation
 
-- expression identity and field
-- input argument list `in_args_`
-- approximation order: `zero`, `first`, `second`
-- callbacks `value`, `jacobian`, `hessian`
-- CasADi-backed codegen support
-- enable/disable rules like `enable_if_all(...)`, `enable_if_any(...)`, `disable_if_any(...)`
-- active-argument queries per OCP
+The backend emits straight-line C++ specialized to runtime dimensions and
+panel layouts, compiles it once, caches it, and invokes it through compact
+pointer arrays. Generated kernels use Eigen maps and preserve aligned maps for
+panel data that has the aligned-storage guarantee.
 
-How evaluation works:
+Fusion is stage/OCP-level where pointer lifetimes and output order allow it.
+Do not fall back to per-constraint handwritten matrix traversal when the same
+operation belongs in a batch plan. Do not fuse unrelated dense and diagonal
+storage merely to claim a larger kernel; fusion must preserve the detected
+sparsity and avoid copies/permutations whose cost exceeds the saved dispatch.
 
-- `compute_approx(data, eval_val, eval_jac, eval_hess)` dispatches to `value_impl`, `jacobian_impl`, `hessian_impl`
-- if a function was created from CasADi, finalize/codegen loads compiled callbacks
-- function arguments are mapped into dense primal storage through `func_arg_map`
+## Runtime Approximation Data
 
-## Constraint Hierarchy
+`node_data` owns one runtime stage:
 
-Constraint classes layer solver-specific state on top of `generic_func`.
-
-Hierarchy:
-
-- `generic_constr`
-- `soft_constr`
-- `ineq_constr`
-- `solver::ipm_constr`
-- `solver::pmm_constr`
-
-Responsibilities:
-
-- `generic_constr`: multiplier mapping and constraint-field finalization
-- `soft_constr`: Newton-step split state, Jacobian modifications, dual-step storage
-- `ineq_constr`: complementarity residual storage
-- `ipm_constr`: slack, NT scaling, barrier residuals, IPM predictor/corrector logic; no longer `final`
-- `pmm_constr`: soft-equality PMM Schur-complement terms
-
-Restoration note:
-
-- restoration is active through the overlay-based path in [`src/solver/sqp_impl/restoration.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/restoration.cpp)
-- restoration overlay problems are assembled in [`src/solver/restoration/resto_overlay.cpp`](/home/harper/Documents/moto/src/solver/restoration/resto_overlay.cpp)
-- [`docs/restoration.md`](/home/harper/Documents/moto/docs/restoration.md) remains useful for the local elastic KKT derivation, but current entry/exit, logging, and cleanup behavior live in code
-
-Registry-based conversion:
-
-- `generic_constr::cast_ineq("ipm")`
-- `generic_constr::cast_soft("pmm_constr")`
-
-is backed by [`src/solver/ineq_soft_reflect.cpp`](/home/harper/Documents/moto/src/solver/ineq_soft_reflect.cpp).
-
-## Per-Stage Runtime Storage
-
-### `node_data`
-
-[`node_data`](/home/harper/Documents/moto/include/moto/ocp/impl/node_data.hpp) is the runtime view of one stage. It owns:
-
-- `prob_`: the stage `ocp`
+- `prob_`: finalized static `ocp`
 - `sym_`: serialized symbol values
-- `dense_`: dense merged derivative storage
-- `shared_`: shared auxiliary data for custom functions
-- `sparse_`: per-function sparse approximation objects
-
-Each function in the problem gets one sparse approx object created during `node_data` construction.
-
-### `sym_data`
-
-`sym_data` holds the current primal values for each symbolic field.
-
-Important behavior:
-
-- primal vectors are initialized with symbol default values when present
-- `integrate(field, dx, alpha)` applies tangent-space updates symbol-by-symbol
-- `get(sym)` returns a view into the appropriate serialized field vector
-
-### `shared_data`
-
-`shared_data` is a UID-keyed store for precompute or user-defined custom function state shared within a stage.
-
-### `func_arg_map`
-
-`func_arg_map` is a sparse view from a function’s argument list into the stage’s serialized primal values.
-
-It stores:
-
-- references to input arguments
-- a UID-to-argument-index map
-- a backreference to the problem and shared-data store
-
-### `func_approx_data`
-
-`func_approx_data` adds derivative mappings on top of `func_arg_map`.
-
-It exposes:
-
-- `v_`: function value view
-- `jac_`: per-argument Jacobian views
-- `lag_hess_`: views into the stage’s dense Hessian blocks
-
-This is the bridge from function-local derivatives to the global per-stage QP data structures.
-
-Important current convention:
-
-- callbacks should write function-local first-order data through `jac_`
-- `func_approx_data` no longer carries a direct alias into assembled `lag_jac_`
-- assembled stage gradients remain owned by [`lag_data`](/home/harper/Documents/moto/include/moto/ocp/impl/lag_data.hpp) and are formed during stage assembly
-
-## Dense Merged Derivative Storage
-
-[`lag_data`](/home/harper/Documents/moto/include/moto/ocp/impl/lag_data.hpp) is the central dense store for one stage.
-
-It contains:
-
-- `approx_[cf].v_`: dense residual vector for each constraint field
-- `approx_[cf].jac_[pf]`: dense/sparse Jacobian blocks by constraint field and primal field
-- `dual_[cf]`: current dual variables
-- `comp_[cf]`: complementarity residuals for inequalities
-- `cost_`: pure stage cost
-- `lag_`: cost plus dual-weighted constraint residual terms
-- `cost_jac_[pf]`: pure cost gradient
-- `lag_jac_[pf]`: base stage Lagrangian gradient
-- `lag_jac_corr_[pf]`: pending additive gradient correction for the next linear solve
-- `lag_hess_[a][b]`: main upper-triangular Hessian blocks
-- `hessian_modification_[a][b]`: pending Hessian correction terms
-- projected dynamics buffers `proj_f_x_`, `proj_f_u_`, `proj_f_res_`
-
-Important gradient distinction:
-
-- `cost_jac_` is pure cost only
-- `lag_jac_` is the persistent base stage gradient `cost_jac_ + J^T lambda`
-- `lag_jac_corr_` is solver-owned scratch for pending corrections from IPM, PMM, or refinement
-- line search uses `cost_jac_` for `augmented_objective_fullstep_dec`
-- dual residual / stationarity checks use `lag_jac_`
-
-## `update_approximation()` Data Flow
-
-The core stage assembly routine is [`node_data::update_approximation()`](/home/harper/Documents/moto/src/ocp/node_data.cpp).
-
-Its flow is:
-
-1. Zero cost/lagrangian value if value evaluation is requested.
-2. Zero derivative accumulators and pending gradient/Hessian correction buffers if Jacobians/Hessians are requested.
-3. Run `__pre_comp` custom functions.
-4. Call `compute_approx(...)` on every function in every function field.
-5. Run `__post_comp` custom functions.
-6. Snapshot `cost_jac_ = lag_jac_` before constraint dual contributions are added.
-7. For each stored constraint field:
-   constraint residual contributes to `lag_`
-   Jacobian-transpose times dual contributes to `lag_jac_`
-8. If value evaluation is active:
-   compute `inf_prim_res_`, `prim_res_l1_`, `inf_comp_res_`
-   add `cost_` into `lag_`
-
-Important mode distinction:
-
-- `eval_val` updates values and residual summaries only
-- `eval_derivatives` updates Jacobians and Hessians but does not refresh primal-residual summaries by itself
-- in current filter line search, trial points are often checked with `eval_val` only, and the accepted point is then relinearized with `eval_derivatives` so the next SQP iteration sees a fresh QP model
-
-Mental model:
-
-- every function writes into local sparse refs
-- those refs are aliases into `lag_data`
-- after all functions run, `lag_data` contains the entire per-stage dense QP approximation
-
-## Solver Data Layer
-
-### `data_base`
-
-[`data_base`](/home/harper/Documents/moto/include/moto/solver/data_base.hpp) wraps `lag_data` with solver-facing aliases and step storage.
-
-Important aliases:
-
-- `Q_x`, `Q_u`, `Q_y` alias the active stage gradient in `lag_jac_`
-- `Q_xx`, `Q_ux`, `Q_uu`, `Q_yx`, `Q_yy` alias `lag_hess_`
-- `_mod` variants alias `hessian_modification_`
-
-Additional solver state:
-
-- `base_lag_grad_backup[pf]`: snapshot of the base stage gradient before a correction solve activates a pending modification
-- `kkt_stat_err_[pf]`: solver-owned KKT stationarity error used by iterative refinement
-- `V_xx`, `V_yy`: value-function Hessian terms accumulated by Riccati recursion
-- `trial_prim_step[pf]`: current Newton step for each primal field
-- `prim_corr[pf]`: correction step for iterative refinement / corrector steps
-- `trial_prim_state_bak[pf]`: line-search rollback state
-- `trial_dual_step[cf]`: dual Newton step for each constraint field
-- `trial_dual_state_bak[cf]`: line-search rollback dual state
-
-Key helper methods:
-
-- `activate_lag_jac_corr()`: backs up `Q_x/Q_u/Q_y`, then adds `lag_jac_corr_` into the active stage gradient
-- `swap_active_and_lag_jac_corr()`: swaps `lag_jac_` and `lag_jac_corr_` for correction solves
-- `backup_trial_state()` / `restore_trial_state()`: line-search checkpointing
-  - these are now `virtual` on `data_base` and overridden by `ns_sqp::data`
-  - `ns_sqp::data` override first applies the base snapshots, then dispatches `ineq_soft::backup_trial_state` / `restore_trial_state`
-- `first_order_correction_start/end()`: prepare and restore correction-mode gradient corrections
-
-### `ns_riccati_data`
-
-[`ns_riccati_data`](/home/harper/Documents/moto/include/moto/solver/ns_riccati/ns_riccati_data.hpp) extends `data_base` with nullspace/Riccati-specific objects.
-
-Dimensions and matrix aliases:
-
-- `nx`, `nu`, `ny` from `data_base`
-- `ns`, `nc`, `ncstr` for equality counts
-- `nis`, `nic` for active inequality counts
-- `F_x`, `F_u`, `F_0` for projected dynamics
-- `s_y`, `s_x`, `c_x`, `c_u` for equality Jacobian blocks
-
-Step sensitivities:
-
-- `d_u.k`, `d_u.K`
-- `d_y.k`, `d_y.K`
-
-Multiplier-related state:
-
-- `d_lbd_f`
-- `d_lbd_s_c_pre_solve`
-- `d_lbd_s_c`
-
-Auxiliary mode hook:
-
-- `aux_` can still hold solver-private mode-specific state when needed
-- the active restoration runtime is no longer carried through this hook; overlay restoration is cached on the active graph state instead
-
-### `nullspace_data`
-
-Nested inside `ns_riccati_data`, this stores the factorization products used by the stage solve.
-
-Key members:
-
-- `s_c_stacked`: stacked equality Jacobian w.r.t. `u`
-- `s_c_stacked_0_K`: stacked equality Jacobian w.r.t. `x`
-- `s_c_stacked_0_k`: stacked equality residual
-- `lu_eq_`: LU of equality `u` Jacobian
-- `rank`: rank of `s_c_stacked`
-- `Z_u`: nullspace basis in control space
-- `Z_y`: nullspace basis mapped through dynamics
-- `Q_zz`: projected Hessian in nullspace coordinates
-- `u_y_K`, `u_y_k`: particular solution components for equality satisfaction
-- `y_y_K`, `y_y_k`: induced closed-loop dynamics under equality elimination
-- `z_0_K`, `z_K`, `z_0_k`, `z_k`: nullspace reduced coordinates and solves
-
-## Top-Level Solver Object
-
-[`ns_sqp`](/home/harper/Documents/moto/include/moto/solver/ns_sqp.hpp) owns:
-
-- active runtime storage is realized from `model_graph_` and accessed internally through `ns_sqp::active_data()`
-- `mem_`: node-data memory pool
-- `riccati_solver_`: `generic_solver`
-- `settings`
-- `kkt_last`
-- `iter_last`
-
-Public update return value:
-
-- `ns_sqp::result_type`
-  - inherits the latest `kkt_info` summary
-  - carries iteration metadata separately in `iter`
-
-`ns_sqp::data` combines:
-
-- `node_data`
-- `ns_riccati_data`
-- scaling caches:
-  - `scale_c_`
-  - `scale_p_`
-  - `scaling_applied_`
-
-## Settings Layout
-
-Main settings live in `ns_sqp::settings_t` and are defined in the header.
-
-Important sub-groups:
-
-- `settings.ls`: line search parameters
-- `settings.ipm`: barrier and predictor-corrector settings
-- `settings.rf`: iterative refinement settings
-- `settings.scaling`: Jacobian scaling settings
-
-Important invariants:
-
-- `settings.ls` and `settings.ipm` are references into `settings_t`
-- do not copy `settings_t` by value after construction
-- if adding a setting:
-  update the header
-  update the implementation
-  update the bindings
-
-## Initialization Flow
-
-[`ns_sqp::initialize()`](/home/harper/Documents/moto/src/solver/sqp_impl/ns_sqp_impl.cpp) performs:
-
-1. reset `mu` if not warm-starting
-2. refresh `settings.has_ineq_soft` and `settings.has_ipm_ineq` from the active graph
-3. for every node:
-   call `setup_workspace_data(...)` on each constraint
-   bind soft-constraint runtime views with `solver::ineq_soft::bind_runtime(...)`
-   evaluate values and derivatives with `update_approximation(eval_all)`
-5. compute initial `kkt_info`
-6. reset scaling caches
-7. print stats header and iteration-0 stats if verbose
-
-Current soft-constraint lifecycle:
-
-- `solver::ineq_soft::bind_runtime(node_data*)` binds runtime views such as `prim_step_` and `d_multiplier_`
-- individual soft constraints lazily initialize themselves from `value_impl()` via `solver::ineq_soft::ensure_initialized(...)`
-- when restoration / equality-init rebuilds require a fresh soft state, callers explicitly use `solver::ineq_soft::bind_and_invalidate(...)` inside the existing per-node parallel loop
-
-## SQP Iteration Flow
-
-The core iteration routine is `ns_sqp::sqp_iter(...)`.
-
-Its runtime sequence is:
-
-1. Reset line-search worker state.
-2. Optionally scale equality Jacobians and residuals.
-3. `ns_factorization(...)` on every node.
-4. Backward `riccati_recursion(...)`.
-5. `compute_primal_sensitivity(...)`.
-6. Forward `fwd_linear_rollout(...)`.
-7. If true IPM inequalities exist, start predictor mode.
-8. Finalize primal step and compute line-search bounds.
-9. If true IPM inequalities exist, run corrector step and resolve.
-10. Optionally run iterative refinement.
-11. Finalize dual Newton step.
-12. Unscale dual step and restore Jacobians/residuals to original units.
-13. Backup primal and dual states for line search.
-14. Run line-search trial loop:
-    restore backed-up state
-    apply affine step to primal and soft-constraint states
-    evaluate values
-    evaluate KKT residuals
-    accept or backtrack
-15. On acceptance, update derivatives if needed and store `kkt_current = kkt_trial`.
-
-Accepted-trial detail that matters for performance:
-
-- in filter mode, the accepted point commonly reaches `accept_trial_point(...)` with only value information
-- the solver then performs a full `eval_derivatives` pass on the accepted point before the next SQP iteration
-- in merit-backtracking mode, trial derivatives may already be available, so acceptance can skip that extra derivative refresh
-
-## SQP Profiling
-
-`ns_sqp` now keeps a wall-clock profile report for the most recent `update(...)` call.
-
-Relevant surface area:
-
-- [`include/moto/solver/ns_sqp.hpp`](/home/harper/Documents/moto/include/moto/solver/ns_sqp.hpp): profile phase enums and report structs
-- [`src/solver/sqp_impl/ns_sqp_impl.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/ns_sqp_impl.cpp): top-level profiling scopes
-- [`src/solver/sqp_impl/iterative_refinement.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/iterative_refinement.cpp): refinement-specific profiling scopes
-- [`bindings/definition/ns_sqp.cpp`](/home/harper/Documents/moto/bindings/definition/ns_sqp.cpp): Python exposure via `get_profile_report()`
-
-What the report tracks:
-
-- total update time
-- initialization time
-- per-phase total / average milliseconds and call counts
-- per-iteration totals
-- trial evaluation counts
-
-The most useful currently exposed phases for bottleneck work are:
-
-- `solve_direction`
-- `riccati_recursion`
-- `run_globalization`
-- `evaluate_trial_point`
-- `apply_affine_step`
-- `update_res_stat`
-- `accept_trial_point`
-- `update_approx_accepted`
-- `iterative_refinement`
-- `iterative_refinement_step`
-- `correction_post_factorization`
-- `correction_riccati_recursion`
-- `correction_fwd_rollout`
-
-Current profiling takeaway for quadruped:
-
-- if `trial_evaluations` is close to the number of SQP iterations and `ls_steps` stay at zero, line search is not spending time on repeated backtracking trials
-- in that regime, a large `run_globalization` cost usually means accepted-point bookkeeping and relinearization, not the filter predicates themselves
-
-## Nullspace / Riccati Solve Data Flow
-
-### 1. Projected dynamics update
-
-`ns_factorization(...)` starts by calling:
-
-- `update_projected_dynamics()`
-- `activate_lag_jac_corr()`
-
-This makes sure the stage QP sees all pending gradient corrections from IPM, PMM, or refinement.
-
-### 2. Copy base blocks
-
-`Q_ux`, `Q_yx`, `Q_xx`, `Q_yy` and their modification blocks are copied into working matrices like:
-
-- `u_0_p_K`
-- `y_0_p_K`
-- `V_xx`
-- `V_yy`
-
-### 3. Build equality Jacobian stacks
-
-For hard equalities:
-
-- `s_c_stacked = [s_y * F_u ; c_u]`
-- `s_c_stacked_0_K = [s_x + s_y * F_x ; c_x]`
-
-LU factorization of `s_c_stacked` gives rank information and equality elimination data.
-
-### 4. Constrainedness branch
-
-Cases:
-
-- no equality constraints: unconstrained setup
-- rank 0: unconstrained setup
-- rank = `nu`: fully constrained
-- otherwise: constrained with nontrivial nullspace `Z_u`
-
-In the constrained case:
-
-- `Z_u = kernel(s_c_stacked)`
-- `Z_y = F_u * Z_u`
-- `Q_zz = Z_u^T * (Q_uu + Q_uu_mod) * Z_u`
-- `u_y_K = solve(s_c_stacked_0_K)`
-- `y_y_K = F_x + F_u * u_y_K`
-
-### 5. Residual correction setup
-
-`ns_factorization_correction(...)` builds:
-
-- `s_c_stacked_0_k`
-- `u_y_k`
-- `y_y_k`
-- `z_0_k`
-
-These capture the feedforward correction induced by equality residuals.
-
-### 6. Backward Riccati recursion
-
-`riccati_recursion(...)`:
-
-- symmetrizes `V_yy`
-- forms `y_0_p_k`, `y_0_p_K`
-- augments `Q_zz` with future-state terms via `V_yy`
-- solves the reduced LLT system in `Q_zz`
-- updates `Q_x` and `V_xx`
-- propagates first-order and second-order value terms into the previous node’s `Q_y` and `V_yy`
-
-Cross-stage propagation uses the permutation from one stage’s `__y` layout to the next stage’s `__x` layout.
-
-### 7. Forward rollout
-
-Forward rollout reconstructs primal steps:
-
-- `trial_prim_step[__u] = d_u.k + d_u.K * trial_prim_step[__x]`
-- `trial_prim_step[__y] = d_y.k + d_y.K * trial_prim_step[__x]`
-- next stage `__x` tangent is populated from current stage `__y`
-
-### 8. Dual step recovery
-
-`finalize_dual_newton_step(...)` computes:
-
-- `d_lbd_f` from `Q_y`, `V_yy`, and current primal step
-- equality duals from the LU solve or GN reconstruction
-- `trial_dual_step[__dyn]` by applying inverse-transpose `f_y^{-T}`
-
-In normal constrained mode:
-
-- solve `lu_eq_.transpose().solve(...)` for hard-equality multipliers
-
-## KKT Information And Residual Accounting
-
-The old monolithic `compute_kkt_info(...)` path has been split. The current main entry points are:
-
-- `update_primal_info(...)`
-- `update_step_info(...)`
-- `update_stat_info(...)`
-
-Current division of responsibility:
-
-- `update_primal_info(...)`
-  - `cost`
-  - `augmented_objective`
-  - `barrier_value`
-  - `ls_objective`
-  - `inf_res`
-  - `res_l1`
-  - `inf_comp`
-- `update_step_info(...)`
-  - line-search directional data such as:
-  - `augmented_objective_fullstep_dec`
-  - `ls_objective_fullstep_dec`
-  - primal/dual step norms
-- `update_stat_info(...)`
-  - `dual.inf_res`
-  - `dual.lambda_l1`
-  - `dual.n_constr`
-  - max dual norms
-  - restoration-local dual/complementarity residual aggregation when restoration is active
-
-Important dual-residual detail:
-
-- `dual.inf_res` is not a raw stationarity norm
-- it is IPOPT-style scaled by
-  `s_d = max(s_max, ||lambda||_1 / n_constr) / s_max`
-
-Cross-stage dual residual for state/costate consistency is formed using:
-
-- current stage `lag_jac_[__y]`
-- next stage `lag_jac_[__x]`
-- `permutation_from_y_to_x(...)`
-
-## Line Search Flow
-
-`moto` supports:
-
-- IPOPT-style filter line search
-- simple merit-function backtracking
-
-### Filter line search
-
-Core logic is in [`src/solver/sqp_impl/line_search.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/line_search.cpp).
-
-Trial acceptance uses:
-
-- filter dominance against stored points
-- IPOPT switching condition
-- Armijo condition in switching mode
-- otherwise, sufficient progress against the current iterate
-- optional flat-objective acceptance
-
-Key details:
-
-- stored filter points contain primal residual, dual residual, and line-search objective
-- barrier value is recomputed with current `mu`
-- `ls_objective_fullstep_dec = augmented_objective_fullstep_dec - search_barrier_dir_deriv`
-- `fullstep_dec < 0` must be checked before `pow(...)` to avoid NaNs
-- backtracking can be linear or geometric
-- failure fallback is either minimum step or best trial
-
-Current practical interpretation:
-
-- the scalar filter / Armijo logic in [`src/solver/sqp_impl/line_search.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/line_search.cpp) is usually not the hot part
-- when globalization looks expensive in current quadruped profiles, the cost typically comes from:
-  - restoring trial state
-  - applying the affine step
-  - re-evaluating the accepted point's derivatives for the next SQP iteration
-
-The old empty SOC scaffold has been removed. Do not add solver settings,
-actions, or dispatch branches unless they execute real algorithmic work.
-
-### Merit backtracking
-
-Alternative line search uses:
-
-- `merit = prim_res_l1^2 + sigma * avg_dual_res^2`
-
-with an Armijo condition based on a finite-difference directional derivative estimate from the full step.
-
-## Scaling Flow
-
-[`src/solver/sqp_impl/scaling.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/scaling.cpp) applies cached in-place row scaling.
-
-Currently scaled:
-
-- hard equalities excluding dynamics
-- specifically `__eq_x` and `__eq_xu`
-
-Intentionally not scaled:
-
-- `__dyn`, because `jac_[__y]` aliases `f_y` and would corrupt projected-dynamics LU usage
-- IPM inequalities, because their Jacobians and duals are managed inside the IPM model
-- cost gradients, because `Q_y` is propagated across stages during the backward recursion, so in-place scaling would contaminate cross-stage first-order accumulation
-
-Recompute policy:
-
-- scales are recomputed on first use
-- scales are recomputed when `inf_prim_step >= 1 / update_ratio_threshold`
-- otherwise cached scales are reused
-
-Application:
-
-- residual rows are multiplied by row scales
-- Jacobian rows are multiplied by row scales
-
-Unscaling after the QP solve:
-
-- residuals are divided back
-- Jacobian rows are divided back
-- dual steps are multiplied by the same row scales
-- accumulated dual variables are not rescaled
-
-## Inequality / Soft-Constraint Flow
-
-Shared dispatch lives in:
-
-- [`include/moto/solver/ineq_soft.hpp`](/home/harper/Documents/moto/include/moto/solver/ineq_soft.hpp)
-- [`src/solver/ineq_soft_impl.cpp`](/home/harper/Documents/moto/src/solver/ineq_soft_impl.cpp)
-
-This layer:
-
-- iterates all soft and inequality constraints in a node
-- binds Newton-step views
-- calls type-specific hooks for initialization, predictor/corrector, line search, and state backup
-
-### IPM inequalities
-
-`ipm_constr` stores:
-
-- raw constraint value `g_`
-- residual `r_s_`
-- slack
-- multiplier
-- NT diagonal scaling
-- scaled residuals
-- predictor/corrector terms
-
-IPM derivative flow:
-
-- `value_impl`: set `g_`, form `v_ = g + slack`, update complementarity-related vectors
-- `jacobian_impl`: build NT scaling and scaled residuals
-- `propagate_jacobian`: add barrier-induced gradient terms into `lag_jac_corr_`
-- `propagate_hessian`: add `J^T D J` into Hessian blocks
-
-IPM Newton-step flow:
-
-- `finalize_newton_step`: compute `d_slack` and `d_multiplier`
-- `update_ls_bounds`: clip primal and dual alpha so slack and multipliers stay positive
-- `finalize_predictor_step`: collect Mehrotra affine-step stats
-- `apply_corrector_step`: switch scaled residuals to the corrected barrier target
-- `apply_affine_step`: update slack and multiplier during line search
-
-### PMM soft equalities
-
-`pmm_constr` implements a Schur-complement PMM model:
-
-- `g_` stores raw residual `h = C(x)`
-- Jacobian propagation adds `(1/rho) J^T h`
-- Hessian propagation adds `(1/rho) J^T J`
-- dual Newton step is `dlam = (J du + h) / rho`
-
-PMM line-search state:
-
-- only multiplier backup/restore is needed
-- no slack variables exist
-
-### Internal slack storage
-
-Current solver direction:
-
-- `__s` exists as solver-managed shared slack storage
-- it is not exposed as a user modeling field and does not participate in code generation like `__x/__u/__y`
-- it is not part of the global Riccati primal state
-
-## Predictor-Corrector And Iterative Refinement
-
-### IPM predictor-corrector
-
-If true IPM inequalities are present:
-
-- first solve produces an affine predictor step
-- worker-local stats are merged
-- adaptive `mu` update may happen
-- the solver reruns a correction solve with updated barrier data
-- line-search bounds are recomputed afterward
-
-### Iterative refinement
-
-[`src/solver/sqp_impl/iterative_refinement.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/iterative_refinement.cpp) does:
-
-1. finalize dual step
-2. compute KKT stationarity residuals
-3. aggregate residual norms
-4. if needed, inject `kkt_stat_err_` into `lag_jac_corr_` via `first_order_correction_start(...)`
-5. rerun factorization/backward/forward correction passes
-6. add corrections into `trial_prim_step`
-7. restore original Jacobian state
-8. recompute line-search bounds
-
-This is a true correction solve on the linearized KKT system, not a full relinearization of the nonlinear problem.
-
-## Restoration Note
-
-- the legacy restoration implementation was removed, but restoration is still active through the overlay-based path in [`src/solver/sqp_impl/restoration.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/restoration.cpp)
-- restoration overlay problems are built by [`src/solver/restoration/resto_overlay.cpp`](/home/harper/Documents/moto/src/solver/restoration/resto_overlay.cpp)
-- the active graph state caches the realized restoration runtime and invalidates it when the modeled graph or restoration settings change
-- [`docs/restoration.md`](/home/harper/Documents/moto/docs/restoration.md) is still useful as historical design context, but it is not a complete description of the current overlay implementation
-
-## Diagnostics
-
-Useful built-in diagnostics:
-
-- `print_stats(...)`
-- `print_scaling_info()`
-- `print_dual_res_breakdown()`
-- `print_licq_info()`
-
-`print_licq_info()` performs a global LICQ check using forward nullspace propagation and approximately active inequalities.
-
-Verbose output rules:
-
-- logging should remain gated behind `settings.verbose`
-- avoid unconditional printing in hot solver paths
+- `dense_`: assembled cost, constraints, Jacobians, Hessians, and projections
+- `shared_`: UID-keyed custom/precompute state
+- `sparse_`: one function-local approximation map per active function
+- `linear_plan_`: lazily compiled stage-level batch kernels
+
+`func_arg_map` maps function arguments into serialized symbol storage.
+`func_approx_data` maps function-local value/Jacobian/Hessian outputs into the
+stage storage planned from `ocp_linear_profile`.
+
+`lag_data` contains, among other fields:
+
+- constraint residuals and sparse Jacobian blocks
+- constraint duals and complementarity residuals
+- `cost_` and `lag_`
+- `cost_jac_`: cost gradient only
+- `lag_jac_`: active base Lagrangian gradient
+- `lag_jac_corr_`: pending solver correction
+- upper-triangular Lagrangian Hessian blocks
+- Hessian-modification blocks
+- `proj_f_x_`, `proj_f_u_`, and `proj_f_res_`
+
+`node_data::update_approximation()` currently:
+
+1. resets requested value/derivative outputs
+2. executes precompute callbacks
+3. evaluates active functions
+4. condenses soft constraints through the stage batch plan
+5. executes postcompute callbacks
+6. establishes the base cost/Lagrangian gradient
+7. adds constraint value and `J^T lambda` contributions
+8. updates primal and complementarity residual summaries when values are active
+
+Value-only and derivative-only updates do not have identical side effects.
+Line-search trial evaluation and accepted-point relinearization must use the
+appropriate mode.
+
+## Solver Flow
+
+The main loop is in
+[`src/solver/sqp_impl/ns_sqp_impl.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/ns_sqp_impl.cpp).
+At a high level:
+
+1. realize/reconcile runtime stages from the graph model
+2. initialize primal/dual/IPM state when required
+3. update nonlinear approximations
+4. apply scaling
+5. form projected dynamics and equality/nullspace data
+6. run backward Riccati recursion
+7. run forward rollout and recover dual steps
+8. perform IPM correction and iterative refinement when enabled
+9. globalize with filter or merit backtracking
+10. accept/reject, restore state as needed, and relinearize the accepted point
+
+`data_base` aliases solver names such as `Q_x`, `Q_u`, `Q_y`, `Q_xx`, and
+`Q_uu` onto `lag_data`; these are not independent matrices. Trial-state backup
+and restore are virtual because inequality/soft runtimes must checkpoint their
+own state together with the base primal and dual values.
+
+The nullspace/Riccati layer consumes projected dynamics and equality blocks.
+Be especially careful with `F_x`, `F_u`, `Q_y`, `Q_zz`, nullspace bases, and
+forward/backward traversal order.
+
+## Initial State, Inequalities, And Restoration
+
+`settings.initial_state` has two modes:
+
+- `fixed`: the initial state is not optimized
+- `optimized`: the initial state participates in the SQP step
+
+The executable demo is
+[`example/toy/initial_state_optimization.py`](/home/harper/Documents/moto/example/toy/initial_state_optimization.py).
+
+Inequalities are converted through the registered IPM implementation. Soft
+equalities use the PMM layer and share the soft-constraint dispatch and
+condensation machinery. Do not assume every `ineq_soft` object is an inequality.
+
+Restoration is an overlay runtime, not mutation of the authored graph. The
+solver caches restoration overlay storage and invalidates it when model or
+restoration settings change. Current implementation files are:
+
+- [`src/solver/sqp_impl/restoration.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/restoration.cpp)
+- [`src/solver/restoration/resto_overlay.cpp`](/home/harper/Documents/moto/src/solver/restoration/resto_overlay.cpp)
+- [`example/toy/restoration.py`](/home/harper/Documents/moto/example/toy/restoration.py)
+
+[`docs/restoration.md`](/home/harper/Documents/moto/docs/restoration.md) explains
+the elastic KKT derivation, but code is authoritative for entry, exit, caching,
+and cleanup behavior.
+
+## Runtime Traversal And Threading
+
+`linear_runtime_graph` is internal contiguous solver storage. Its `nodes()`
+accessor returns the ordered list directly; there is no flattening operation. It provides
+forward, backward, adjacent, zipped, sequential, and parallel views. It is not
+a public modeling graph.
+
+Parallel callbacks receive a logical worker/chunk ID. Backward passes should
+use the reversed view supplied by `solver::backward_edges(...)`; do not reverse
+indices again inside callbacks. Keep Eigen, OpenBLAS, and MKL internal thread
+counts at one to avoid nested parallelism.
 
 ## Python Bindings
 
-Bindings live in `bindings/` and use nanobind.
+Bindings use nanobind. The public package surface is defined by:
 
-Important files:
+- [`bindings/definition/public_api.py`](/home/harper/Documents/moto/bindings/definition/public_api.py)
+- [`bindings/package_init.py`](/home/harper/Documents/moto/bindings/package_init.py)
+- [`bindings/definition/sqp.py`](/home/harper/Documents/moto/bindings/definition/sqp.py)
+- [`bindings/definition/var.py`](/home/harper/Documents/moto/bindings/definition/var.py)
 
-- [`bindings/setup_bindings.cpp`](/home/harper/Documents/moto/bindings/setup_bindings.cpp)
-- [`bindings/definition/ns_sqp.cpp`](/home/harper/Documents/moto/bindings/definition/ns_sqp.cpp)
+Low-level `node_data`, `lag_data`, and runtime-graph machinery are debugging
+details and should not be promoted to top-level modeling APIs.
 
-When adding or changing settings, enum values, or public solver surface area:
+When changing a public enum, constructor, setting, or return type:
 
-- update the header
-- update the implementation
-- update bindings and generated stubs if needed
+1. update C++ declaration and implementation
+2. update the nanobind definition
+3. rebuild the extension and generated `.pyi`
+4. import through the installed `moto` package, not only the raw extension
+5. run at least one example using the changed surface
 
-Current profiling-related Python entry points on `moto.sqp`:
+For external libraries that do not recognize the derived `moto.var`, pass
+`var.sx`. Prefer helpers for Pinocchio manifold operations.
 
-- `reset_profile()`
-- `get_profile_report()`
+Robot example visualization uses `viser` and `viser.extras.ViserUrdf` through
+the shared `ViserRobot` helper in `example/helpers.py`. Do not reintroduce
+MeshCat or initialize an `example_robot_data` viewer during model construction.
 
-## Practical Editing Rules
+## Editing Checklist
 
-- follow nearby style instead of introducing a new one
-- prefer understanding aliasing before editing matrices or vectors in place
-- be careful with any change touching `Q_y`, `f_y`, or stage permutations
-- remember many sparse/dense objects are views into shared storage, not owned copies
-- do not copy `settings_t`
-- do not assume soft constraints are only inequalities; PMM soft equalities use the same dispatch layer
-- do not keep dormant solver hooks as public API; either implement the algorithmic work or remove the misleading surface
-- when changing C++ code that affects Python examples, always wait for the full build to finish before running Python tests
-- do not trust a Python test run started while `moto` / `moto_pywrap` is still linking; stale modules can easily give misleading results
-- do not compare first-run wall time across commits without separating solver time from codegen / shared-library compilation time
-- remember that same-name codegen is intentionally serialized today; apparent loss of "multithreaded codegen" may be reuse and race avoidance rather than a regression in the solver itself
+Before editing:
 
-## Common Pitfalls
+- locate the authoritative owner of the behavior
+- inspect aliases and sparse-panel ownership
+- check whether the change is modeling-time, finalize-time, dynamics-local, or
+  OCP-runtime work
+- inspect the worktree and preserve unrelated user changes
 
-- confusing `cost_jac_` with `lag_jac_`
-- forgetting that `update_approximation()` snapshots `cost_jac_` before adding `J^T lambda`
-- modifying `__dyn` scaling and breaking projected-dynamics solves
-- assuming `__eq_x` / `__ineq_x` differentiate against `__x`
-- touching line-search or IPM state without handling backup/restore
-- assuming `eval_val` and `eval_derivatives` have the same bookkeeping side effects
-- blaming [`src/solver/sqp_impl/line_search.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/line_search.cpp) predicates for globalization cost before checking `update_approx_accepted`
-- changing a settings struct without updating bindings
-- treating [`example/quadruped/run.py`](/home/harper/Documents/moto/example/quadruped/run.py) as canonical; it is often used for experiments
-- seeing `warning: substitution in generic_constr ... go2_q_nxt` means some path has reintroduced generic expression substitution instead of graph-level lowering
+Before committing:
 
-## Suggested Reading Order For Solver Work
+- run `git diff --check`
+- build Release/native with `-j6`
+- run focused tests for the changed subsystem
+- run `ctest --output-on-failure -j6` for cross-cutting changes
+- run a Python smoke test after the binding has finished linking
+- check `git status --short`
 
-If you are new to the repo and need to debug solver behavior, read in this order:
+Common mistakes:
 
-1. [`include/moto/solver/ns_sqp.hpp`](/home/harper/Documents/moto/include/moto/solver/ns_sqp.hpp)
-2. [`src/solver/sqp_impl/ns_sqp_impl.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/ns_sqp_impl.cpp)
-3. [`src/ocp/node_data.cpp`](/home/harper/Documents/moto/src/ocp/node_data.cpp)
-4. [`src/solver/nsp_impl/presolve.cpp`](/home/harper/Documents/moto/src/solver/nsp_impl/presolve.cpp)
-5. [`src/solver/nsp_impl/backward.cpp`](/home/harper/Documents/moto/src/solver/nsp_impl/backward.cpp)
-6. [`src/solver/nsp_impl/rollout.cpp`](/home/harper/Documents/moto/src/solver/nsp_impl/rollout.cpp)
-7. [`src/solver/sqp_impl/line_search.cpp`](/home/harper/Documents/moto/src/solver/sqp_impl/line_search.cpp)
-8. [`src/solver/ipm_impl/ipm_constr.cpp`](/home/harper/Documents/moto/src/solver/ipm_impl/ipm_constr.cpp)
-9. [`src/solver/soft_impl/pmm_constr.cpp`](/home/harper/Documents/moto/src/solver/soft_impl/pmm_constr.cpp)
+- moving endpoint terms during standalone function finalization
+- confusing handle sharing with cloning
+- generating a new artifact for an equivalent function remap
+- treating `y` as a user-owned peer state
+- using dense dynamics to infer structured Euler projections
+- rebuilding `P F` in the OCP-wide backend
+- reintroducing per-constraint handwritten sparse traversal
+- losing aligned panel guarantees in generated Eigen maps
+- copying `settings_t`; it contains reference members
+- confusing `cost_jac_`, `lag_jac_`, and `lag_jac_corr_`
+- scaling `__dyn` as if it were an ordinary hard equality
+- forgetting inequality/soft state during line-search backup and restore
+- running Python against a stale or partially linked extension
+- reporting cold codegen time as hot solver regression
 
-That path covers most bugs involving assembly, factorization, rollout, globalization, and inequality handling.
+## Reading Order
 
-## Current Refactor Status
+For graph/modeling work:
 
-As of the current working tree, the OCP graph modeling API has been refactored to:
+1. `include/moto/core/expr.hpp`
+2. `include/moto/ocp/sym.hpp`
+3. `include/moto/ocp/impl/func.hpp`
+4. `include/moto/ocp/problem.hpp`
+5. `include/moto/ocp/graph_model.hpp`
+6. `src/ocp/graph_composer.cpp`
 
-- `ocp_base` as the shared storage / activation / flattening container
-- `ocp` as the generic internal problem type
-- `stage_ocp` as the public modeling container
-- `node_view` as the lightweight endpoint handle exposed through `stage.st`,
-  `stage.ed`, and `sqp.start_node`
+For approximation/backend work:
 
-What is already true:
+1. `include/moto/core/sparse_matrix.hpp`
+2. `include/moto/core/linear_backend.hpp`
+3. `src/core/linear_backend.cpp`
+4. `include/moto/ocp/impl/func_data.hpp`
+5. `src/ocp/node_data.cpp`
 
-- Python exposes `moto.stage_ocp.create()`, `stage.add(...)`, `stage.st.add(...)`,
-  `stage.ed.add(...)`, `sqp.start_node`, `sqp.add_stage(...)`,
-  `sqp.add_stages(...)`, and `sqp.flatten_nodes()`
-- Python no longer exposes `moto.node_ocp`, `moto.edge_ocp`, `sqp.graph`,
-  `sqp.graph.add_path(...)`, `sqp.graph.flatten_nodes(...)`, or
-  `add_terminal(...)`
-- clone logic is shared through `ocp_base::refresh_after_clone(...)`
-- graph-owned stages are cloned on append, mutable, and invalidate solver caches
-- endpoint terms lower through cached `x -> y` remaps, so repeated stages reuse
-  function entities instead of generating per-stage copies
-- current regression checks:
-  - `cmake --build build -j8`
-  - `ctest --test-dir build --output-on-failure`
-  - clean `gen/`, `MOTO_DISPLAY=0 MOTO_SQP_MAX_ITER=50 python example/quadruped/run.py`
-    converges at iteration `22` with `28` generated shared libraries
-  - clean `gen/`, `python example/arm/run.py --max-iter 100 --n-job 4`
-    returns the current restoration result at iteration `87` with `14`
-    generated shared libraries
+For solver work:
 
-Recommended next step from here:
-
-1. Keep adding focused compose tests only when new topology behavior is added;
-   the current linear append API is already covered by regression tests.
-2. Add debug tooling or golden tests for node/stage initialization so future path-authoring changes can be validated quickly
-3. If incoming-edge authoring is ever needed again, expose it as an explicit modeling helper rather than relying on implicit compose behavior
-
-This order helps keep future graph-semantics changes explicit and testable instead of rediscovering them through quadruped regressions.
-
-## Todo
-
-- add rank-based backward degeneration test and propagation
-- add automatic inertia correction after ill-conditioning is detected
+1. `include/moto/solver/ns_sqp.hpp`
+2. `src/solver/sqp_impl/ns_sqp_impl.cpp`
+3. `src/solver/nsp_impl/presolve.cpp`
+4. `src/solver/nsp_impl/backward.cpp`
+5. `src/solver/nsp_impl/rollout.cpp`
+6. `src/solver/sqp_impl/line_search.cpp`
+7. IPM/soft/restoration implementation for the relevant mode

@@ -6,6 +6,8 @@ discrete impulse conventions out of the individual OCP examples.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import casadi as cs
 import numpy as np
 import pinocchio as pin
@@ -76,14 +78,24 @@ class PinocchioCasadiModel(cpin.Model):
         self.nj = self.nv - 6 if self.is_floating_based else self.nv
         self.nqb = 7 if self.nq - self.nv == 1 else 6 if self.is_floating_based else 0
 
-    def create_trajectory_variables(self, dt, q_nom=None):
-        """Create the standard q/v state pair and actuated torque input."""
+    def create_trajectory_variables(
+        self, dt, q_nom=None, *, acceleration_control=False
+    ):
+        """Create q/v states and either acceleration or torque input."""
         self.dt = dt
         self.q, self.qn, self.v, self.vn = pinocchio_states(
             self, self.name, q_nom
         )
-        self.a = (self.vn - self.v) / dt
-        self.tq = moto.sym.inputs(f"{self.name}_tq", self.nj)
+        self.a = (
+            moto.sym.inputs(f"{self.name}_a", self.nv)
+            if acceleration_control
+            else (self.vn - self.v) / dt
+        )
+        self.tq = (
+            None
+            if acceleration_control
+            else moto.sym.inputs(f"{self.name}_tq", self.nj)
+        )
 
         self.q_stack = self.q.sx
         self.v_stack = self.v.sx
@@ -179,6 +191,7 @@ class ContactModel:
         force_default=(0.0, 0.0, 0.5),
         kinematic_gain=100.0,
         friction_coefficient=0.7,
+        with_impulses=True,
     ):
         self.robot = robot
         self.q = q
@@ -188,14 +201,21 @@ class ContactModel:
 
         robot.update_kinematics(q.sx, v.sx)
         self.jacobians = robot.frame_translational_jacobians(self.frame_ids)
-        self.impulses = [
-            moto.sym.inputs(
-                f"{force_prefix}_{name}", 3, default_val=np.asarray(force_default)
-            )
-            for name in self.frame_names
-        ]
+        self.impulses = (
+            [
+                moto.sym.inputs(
+                    f"{force_prefix}_{name}",
+                    3,
+                    default_val=np.asarray(force_default),
+                )
+                for name in self.frame_names
+            ]
+            if with_impulses
+            else []
+        )
         self.generalized_impulses = [
-            jacobian.T @ force for jacobian, force in zip(self.jacobians, self.impulses)
+            jacobian.T @ force
+            for jacobian, force in zip(self.jacobians, self.impulses)
         ]
         self.generalized_impulse = sum(self.generalized_impulses, cs.SX.zeros(robot.nv))
         self.velocities, self.heights = robot.frame_linear_kinematics(
@@ -203,8 +223,10 @@ class ContactModel:
         )
 
         self.kinematic_gain = moto.sym.params("k_f", default_val=kinematic_gain)
-        self.friction_coefficient = moto.sym.params(
-            "mu", default_val=friction_coefficient
+        self.friction_coefficient = (
+            moto.sym.params("mu", default_val=friction_coefficient)
+            if self.impulses
+            else None
         )
         self.kinematic_constraints = [
             self._make_kinematic_constraint(index)
@@ -212,7 +234,7 @@ class ContactModel:
         ]
         self.friction_constraints = [
             self._make_friction_constraint(index)
-            for index in range(len(self.frame_names))
+            for index in range(len(self.impulses))
         ]
 
     def _make_kinematic_constraint(self, index):
@@ -227,7 +249,8 @@ class ContactModel:
             f"kin_{self.frame_names[index]}",
             residual,
         )
-        constraint.enable_if_all([self.impulses[index]])
+        if self.impulses:
+            constraint.enable_if_all([self.impulses[index]])
         return constraint
 
     def _make_friction_constraint(self, index):
@@ -247,7 +270,8 @@ class ContactModel:
 
     def add_to_stage(self, stage):
         """Add interval friction and start-node contact kinematics."""
-        stage.add(self.friction_constraints)
+        if self.friction_constraints:
+            stage.add(self.friction_constraints)
         stage.st.add(self.kinematic_constraints)
 
     def add_to_endpoint(self, endpoint):
@@ -258,7 +282,7 @@ class ContactModel:
 
 
 class ContactRobotModel(PinocchioCasadiModel):
-    """Ready-to-use q/v/torque/contact dynamics model for OCP examples."""
+    """Ready-to-use contact or acceleration-controlled robot model."""
 
     def __init__(
         self,
@@ -270,13 +294,33 @@ class ContactRobotModel(PinocchioCasadiModel):
         contact_frames=GO2_FOOT_FRAMES,
         use_forward_dynamics=True,
         configuration_velocity="next",
+        acceleration_control=False,
     ):
         super().__init__(model, name)
         self.use_fwd_dyn = use_forward_dynamics
-        self.create_trajectory_variables(dt, q_nom)
-        self.contacts = ContactModel(self, self.q, self.v, contact_frames)
+        self.acceleration_control = acceleration_control
+        self.create_trajectory_variables(
+            dt, q_nom, acceleration_control=acceleration_control
+        )
+        self.contacts = ContactModel(
+            self,
+            self.q,
+            self.v,
+            contact_frames,
+            with_impulses=not acceleration_control,
+        )
 
-        if use_forward_dynamics:
+        if acceleration_control:
+            self.dyn = semi_implicit_dynamics(
+                f"{self.name}_acceleration",
+                self.q,
+                self.v,
+                self.qn,
+                self.vn,
+                self.vn - self.v - self.a * dt,
+                dt,
+            )
+        elif use_forward_dynamics:
             self.aba = self.forward_dynamics_step(
                 self.q_stack,
                 self.v_stack,
@@ -296,7 +340,8 @@ class ContactRobotModel(PinocchioCasadiModel):
         if configuration_velocity not in ("next", "predicted"):
             raise ValueError("configuration_velocity must be 'next' or 'predicted'")
         self.configuration_velocity = configuration_velocity
-        self.dyn = self._make_contact_dynamics()
+        if not acceleration_control:
+            self.dyn = self._make_contact_dynamics()
 
         self.q_nom = moto.sym.params(
             "q_nom",
@@ -322,7 +367,20 @@ class ContactRobotModel(PinocchioCasadiModel):
             name, cs.vcat([self.q.symbolic_difference(self.qn.sx, q_next), velocity_residual])
         )
 
-    def input_cost(self, *, torque_weight=1e-6, contact_weight=1e-3, name="c_u"):
+    def input_cost(
+        self,
+        *,
+        acceleration_weight=1e-3,
+        torque_weight=1e-6,
+        contact_weight=1e-3,
+        name=None,
+    ):
+        mode = "acceleration" if self.acceleration_control else "contact"
+        name = name or f"{self.name}_{mode}_input_cost"
+        if self.acceleration_control:
+            return moto.cost.from_vector(
+                name, self.a, weight=2 * acceleration_weight
+            )
         impulses = cs.vcat(self.contacts.impulses)
         residual = cs.vcat([self.tq, impulses])
         weight = np.r_[
@@ -330,11 +388,6 @@ class ContactRobotModel(PinocchioCasadiModel):
             np.full(impulses.numel(), 2 * contact_weight),
         ]
         return moto.cost.from_vector(name, residual, weight=weight)
-
-
-def solver_nodes(sqp):
-    """Materialize solver nodes once for reuse by an example."""
-    return list(sqp.flatten_nodes())
 
 
 def add_terms(container, *terms):
@@ -420,6 +473,63 @@ def print_graph_layout(nodes):
             f"u={prob.dim(moto.field.field___u)} "
             f"y={prob.dim(moto.field.field___y)}"
         )
+
+
+class ViserRobot:
+    """Small Viser URDF wrapper for fixed- and floating-base trajectories."""
+
+    def __init__(self, urdf, *, floating_base=False, root="/robot", port=8080):
+        import viser
+        from viser.extras import ViserUrdf
+
+        self.server = viser.ViserServer(port=port)
+        self.server.scene.set_up_direction("+z")
+        self.server.scene.add_grid("/ground", infinite_grid=True)
+        self.root = self.server.scene.add_frame(root, show_axes=False)
+        self.robot = ViserUrdf(
+            self.server, Path(urdf), root_node_name=root
+        )
+        self.floating_base = floating_base
+        self.joint_count = len(self.robot.get_actuated_joint_names())
+
+    def update(self, configuration):
+        q = np.asarray(configuration)
+        with self.server.atomic():
+            if self.floating_base:
+                self.root.position = q[:3]
+                self.root.wxyz = q[[6, 3, 4, 5]]
+            self.robot.update_cfg(q[-self.joint_count :])
+
+    def add_target(self, name, position, *, xyzw=None, color=(0, 255, 0)):
+        position = np.asarray(position)
+        path = f"/targets/{name}"
+        self.server.scene.add_icosphere(
+            f"{path}/point", radius=0.025, color=color, position=position
+        )
+        return self.server.scene.add_frame(
+            f"{path}/frame",
+            position=position,
+            wxyz=(1.0, 0.0, 0.0, 0.0)
+            if xyzw is None
+            else np.asarray(xyzw)[[3, 0, 1, 2]],
+            axes_length=0.12,
+            axes_radius=0.006,
+        )
+
+
+def animate_trajectory(viewer, configurations, time_steps):
+    """Replay a trajectory continuously on a Viser server."""
+    import time
+
+    while True:
+        for index, configuration in enumerate(configurations):
+            start = time.perf_counter()
+            viewer.update(configuration)
+            if index < len(time_steps):
+                remaining = time_steps[index] - (time.perf_counter() - start)
+                if remaining > 0:
+                    time.sleep(remaining)
+        time.sleep(0.5)
 
 
 def frame_placement(model: pin.Model, q, frame_id: int):

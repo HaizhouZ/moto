@@ -11,7 +11,7 @@ import casadi as cs
 import moto
 import numpy as np
 
-from example.helpers import add_terms, collect_node_values, solver_nodes, visit_nodes
+from example.helpers import add_terms, collect_node_values, visit_nodes
 
 np.set_printoptions(precision=4, suppress=True)
 
@@ -55,7 +55,7 @@ def build_sqp():
     stages = sqp.add_stage(stage_prob, N)
     stages[-1].ed.add(terminal_cost)
 
-    nodes = solver_nodes(sqp)
+    nodes = sqp.nodes
     print("Stage problem")
     nodes[0].prob.print_summary()
     print("Terminal problem")

@@ -25,21 +25,24 @@ generic_dynamics::approx_data::approx_data(base::approx_data &&rhs,
             func_.arg_tdim(__x), sparsity::dense));
 
     size_t exclusive_dim = 0;
-    const sym *first_u = nullptr;
+    const sym *first_exclusive_u = nullptr;
     for (const sym &arg : func_.in_args(__u)) {
         if (!prob.is_active(arg)) continue;
-        if (!first_u) first_u = &arg;
-        if (!dyn.input_shared(arg)) exclusive_dim += arg.tdim();
+        if (!dyn.input_shared(arg)) {
+            if (!first_exclusive_u) first_exclusive_u = &arg;
+            exclusive_dim += arg.tdim();
+        }
     }
-    if (!first_u)
-        throw std::runtime_error(fmt::format("dynamics {} has no active input", func_.name()));
-    f_u_exclusive_.reset(approx_->jac_[__u].insert(
-        f_st, prob.get_expr_start_tangent(*first_u), func_.dim(), exclusive_dim,
-        sparsity::dense));
-    if (!sparse_projection)
-        proj_f_u_exclusive_.reset(dyn_proj_->proj_f_u_.insert(
-            f_st, prob.get_expr_start_tangent(*first_u), func_.dim(), exclusive_dim,
+    if (exclusive_dim) {
+        f_u_exclusive_.reset(approx_->jac_[__u].insert(
+            f_st, prob.get_expr_start_tangent(*first_exclusive_u), func_.dim(),
+            exclusive_dim, sparsity::dense));
+        if (!sparse_projection)
+            proj_f_u_exclusive_.reset(dyn_proj_->proj_f_u_.insert(
+            f_st, prob.get_expr_start_tangent(*first_exclusive_u), func_.dim(),
+            exclusive_dim,
             sparsity::dense));
+    }
 
     size_t x_col = 0, u_col = 0;
     for (size_t i = 0; i < func_.in_args().size(); ++i) {

@@ -34,8 +34,8 @@ public:
   }
   void compute_project_jacobians(func_approx_data &data) const override;
   void compute_project_residual(func_approx_data &data) const override;
-  void apply_jac_y_inverse_transpose(func_approx_data &data, vector &v,
-                                     vector &dst) const override;
+  void apply_jac_y_inverse_transpose(func_approx_data &data, vector_ref v,
+                                     vector_ref dst) const override;
   const auto &projected_profiles() const { return projected_profiles_; }
 
 protected:
