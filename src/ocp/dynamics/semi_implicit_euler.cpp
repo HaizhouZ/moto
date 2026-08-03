@@ -155,6 +155,7 @@ void semi_implicit_euler::prepare_dynamics_codegen() {
     throw std::runtime_error("semi-implicit Euler requires a CasADi expression");
   jac_panels_.clear();
   inverse_panels_.clear();
+  projected_profiles_.clear();
   task->jac_outputs.clear();
   std::vector<cs::SX> fy_blocks;
   for (size_t i = 0; i < in_args_.size(); ++i) {
@@ -189,11 +190,19 @@ void semi_implicit_euler::prepare_dynamics_codegen() {
       {cs::SX::horzcat({a_inv, -cs::SX::mtimes(a_inv, b)}),
        cs::SX::horzcat({cs::SX::zeros(n, n), cs::SX::eye(n)})});
 
-  for (const sym &arg : in_args_)
-    if (arg.field() == __x || arg.field() == __u)
-      task->jac_outputs.push_back(cs::SX::mtimes(
-          inverse,
-          utils::cs_codegen::tangent_jacobian(task->sx_output, arg)));
+  for (const sym &arg : in_args_) {
+    if (arg.field() != __x && arg.field() != __u)
+      continue;
+    cs::SX jac =
+        utils::cs_codegen::tangent_jacobian(task->sx_output, arg);
+    projected_profiles_.push_back(linear_backend::analyze_spgemm(
+        inverse.sparsity(), jac.sparsity()));
+    cs::SX projected = cs::SX::mtimes(inverse, jac);
+    if (projected_profiles_.back().nnz() !=
+        static_cast<size_t>(projected.nnz()))
+      throw std::logic_error("CasADi SpGEMM profile differs from PF expression");
+    task->jac_outputs.push_back(std::move(projected));
+  }
   for (auto &[block, value] : split_panels(inverse)) {
     inverse_panels_.push_back(block);
     task->jac_outputs.push_back(std::move(value));

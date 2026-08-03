@@ -41,6 +41,7 @@ protected:
 private:
   std::vector<jac_panel> jac_panels_;
   std::vector<sp_info> inverse_panels_;
+  std::vector<linear_backend::ccs_layout> projected_profiles_;
 };
 
 } // namespace moto

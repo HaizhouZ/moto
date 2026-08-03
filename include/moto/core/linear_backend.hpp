@@ -115,6 +115,8 @@ private:
   function_type function_ = nullptr;
 };
 
+ccs_layout analyze_spgemm(const casadi::Sparsity &lhs,
+                          const casadi::Sparsity &rhs);
 spgemm_kernel compile_spgemm(
     const casadi::Sparsity &lhs, const casadi::Sparsity &rhs,
     const std::filesystem::path &cache_dir = "gen/linear_backend");

@@ -916,28 +916,11 @@ compile_batch_product(batch_product_spec spec,
   return batch_kernels.emplace(key, kernel).first->second;
 }
 
-spgemm_kernel compile_spgemm(const casadi::Sparsity &lhs,
-                             const casadi::Sparsity &rhs,
-                             const std::filesystem::path &cache_dir) {
+ccs_layout analyze_spgemm(const casadi::Sparsity &lhs,
+                          const casadi::Sparsity &rhs) {
   if (lhs.size2() != rhs.size1() || !lhs.nnz() || !rhs.nnz())
     throw std::invalid_argument("invalid CasADi SpGEMM sparsity");
-  const casadi::SX a = casadi::SX::sym("a", lhs);
-  const casadi::SX b = casadi::SX::sym("b", rhs);
-  const casadi::SX product = casadi::SX::mtimes(a, b);
-  const casadi::Function function("moto_casadi_spgemm", {a, b}, {product});
-  casadi::Dict options;
-  options["casadi_real"] = "double";
-  casadi::CodeGenerator generator("moto_casadi_spgemm.c", options);
-  generator.add(function);
-  std::string source = generator.dump();
-  source += fmt::format(
-      "\nextern \"C\" __attribute__((visibility(\"default\"))) void {}"
-      "(double *const *p){{const casadi_real* a[2]={{p[0],p[1]}};"
-      "casadi_real* r[1]={{p[2]}};casadi_int iw[{}];casadi_real w[{}];"
-      "moto_casadi_spgemm(a,r,iw,w,0);}}\n",
-      symbol_name, std::max<size_t>(1, function.sz_iw()),
-      std::max<size_t>(1, function.sz_w()));
-  const auto &sp = product.sparsity();
+  const auto sp = casadi::Sparsity::mtimes(lhs, rhs);
   ccs_layout output{static_cast<size_t>(sp.size1()),
                     static_cast<size_t>(sp.size2())};
   for (const auto value : sp.get_colind())
@@ -956,6 +939,29 @@ spgemm_kernel compile_spgemm(const casadi::Sparsity &lhs,
   copy_index(col_permutation, output.col_permutation);
   copy_index(row_blocks, output.row_blocks);
   copy_index(col_blocks, output.col_blocks);
+  return output;
+}
+
+spgemm_kernel compile_spgemm(const casadi::Sparsity &lhs,
+                             const casadi::Sparsity &rhs,
+                             const std::filesystem::path &cache_dir) {
+  ccs_layout output = analyze_spgemm(lhs, rhs);
+  const casadi::SX a = casadi::SX::sym("a", lhs);
+  const casadi::SX b = casadi::SX::sym("b", rhs);
+  const casadi::SX product = casadi::SX::mtimes(a, b);
+  const casadi::Function function("moto_casadi_spgemm", {a, b}, {product});
+  casadi::Dict options;
+  options["casadi_real"] = "double";
+  casadi::CodeGenerator generator("moto_casadi_spgemm.c", options);
+  generator.add(function);
+  std::string source = generator.dump();
+  source += fmt::format(
+      "\nextern \"C\" __attribute__((visibility(\"default\"))) void {}"
+      "(double *const *p){{const casadi_real* a[2]={{p[0],p[1]}};"
+      "casadi_real* r[1]={{p[2]}};casadi_int iw[{}];casadi_real w[{}];"
+      "moto_casadi_spgemm(a,r,iw,w,0);}}\n",
+      symbol_name, std::max<size_t>(1, function.sz_iw()),
+      std::max<size_t>(1, function.sz_w()));
   auto compiled = reinterpret_cast<spgemm_kernel::function_type>(
       compile_source(source, cache_dir));
   return {static_cast<size_t>(lhs.nnz()), static_cast<size_t>(rhs.nnz()),
