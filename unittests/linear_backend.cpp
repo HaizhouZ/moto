@@ -191,6 +191,88 @@ TEST_CASE("backend preserves aligned panel storage") {
   REQUIRE_NOTHROW(Eigen::Map<const vector>(diagonal.data() + 1, 5).sum());
 }
 
+TEST_CASE("JIT fuses overlapping diagonal contributions") {
+  sparse_matrix sparse;
+  sparse.resize(18, 18);
+  auto d0 = sparse.insert(0, 0, 18, 18, sparsity::diag);
+  auto d1 = sparse.insert(0, 0, 18, 18, sparsity::diag);
+  d0.setRandom();
+  d1.setRandom();
+  vector rhs = vector::Random(18), out = vector::Zero(18);
+  multiply(sparse, rhs, out);
+  REQUIRE(out.isApprox((d0 + d1).asDiagonal() * rhs, 1e-12));
+  matrix rhs_m = matrix::Random(18, 7), out_m = matrix::Zero(18, 7);
+  transpose_multiply(sparse, rhs_m, out_m);
+  REQUIRE(out_m.isApprox((d0 + d1).asDiagonal() * rhs_m, 1e-12));
+  matrix lhs = matrix::Random(5, 18), right = matrix::Zero(5, 18);
+  right_multiply(lhs, sparse, right);
+  REQUIRE(right.isApprox(lhs * (d0 + d1).asDiagonal(), 1e-12));
+  matrix lhs_t = matrix::Random(18, 5), right_t = matrix::Zero(5, 18);
+  right_transpose_multiply(lhs_t, sparse, right_t);
+  REQUIRE(right_t.isApprox(lhs_t.transpose() * (d0 + d1).asDiagonal(), 1e-12));
+  const product_spec spec{.sparse = describe(sparse),
+                          .op = product_op::times,
+                          .other_rows = 18,
+                          .other_cols = 1,
+                          .out_rows = 18,
+                          .out_cols = 1};
+  const auto source = emit_product_source(spec);
+  REQUIRE(source.find("moto_linear_fused_diag_times") != std::string::npos);
+  REQUIRE(source.find("#include <Eigen/Core>") == std::string::npos);
+  REQUIRE(source.find("  moto_linear_diag_times(") == std::string::npos);
+  REQUIRE(sparse.dense().diagonal().isApprox(d0 + d1, 1e-12));
+}
+
+TEST_CASE("static profile physically fuses adjacent diagonal bindings") {
+  sparse_matrix sparse;
+  sparse.resize(7, 7);
+  const std::array blocks{
+      sparse_block_spec{0, 0, 3, 3, sparsity::diag},
+      sparse_block_spec{3, 3, 4, 4, sparsity::diag}};
+  sparse.plan(blocks);
+  auto d0 = sparse.insert(0, 0, 3, 3, sparsity::diag);
+  auto d1 = sparse.insert(3, 3, 4, 4, sparsity::diag);
+  d0.setRandom();
+  d1.setRandom();
+  REQUIRE(sparse.diag_panels_.size() == 1);
+  REQUIRE(d1.data() == d0.data() + d0.size());
+  vector expected(7);
+  expected << d0, d1;
+  REQUIRE(sparse.dense().diagonal().isApprox(expected, 1e-12));
+}
+
+TEST_CASE("planned references survive fallback panel growth") {
+  sparse_matrix sparse;
+  sparse.resize(4, 4);
+  const std::array blocks{
+      sparse_block_spec{0, 0, 4, 4, sparsity::diag}};
+  sparse.plan(blocks);
+  auto planned = sparse.insert(0, 0, 4, 4, sparsity::diag);
+  for (size_t i = 0; i < 16; ++i)
+    sparse.insert(0, 0, 4, 4, sparsity::diag).setZero();
+  planned.setOnes();
+  REQUIRE(sparse.dense().diagonal().isOnes());
+}
+
+TEST_CASE("JIT fuses overlapping dense contributions") {
+  sparse_matrix sparse;
+  sparse.resize(8, 6);
+  auto a = sparse.insert(0, 0, 8, 6, sparsity::dense);
+  auto b = sparse.insert(0, 0, 8, 6, sparsity::dense);
+  a.setRandom();
+  b.setRandom();
+  matrix rhs = matrix::Random(6, 5), out = matrix::Zero(8, 5);
+  multiply(sparse, rhs, out);
+  REQUIRE(out.isApprox((a + b) * rhs, 1e-12));
+  REQUIRE(emit_product_source({.sparse = describe(sparse),
+                               .op = product_op::times,
+                               .other_rows = 6,
+                               .other_cols = 5,
+                               .out_rows = 8,
+                               .out_cols = 5})
+              .find("moto_linear_fused_dense_times") != std::string::npos);
+}
+
 TEST_CASE("OCP batch fuses quadruped limits and friction") {
   const panel_layout q{.pattern = sparsity::eye,
                        .row_offset = 0,

@@ -5,6 +5,7 @@
 #include <moto/ocp/impl/func.hpp>
 #include <moto/ocp/impl/node_data.hpp>
 #include <moto/ocp/ineq_constr.hpp>
+#include <moto/ocp/cost.hpp>
 
 namespace {
 const bool force_sync_codegen_for_test = []() {
@@ -93,5 +94,36 @@ TEST_CASE("manual callbacks fall back to dense jacobians") {
     REQUIRE(jac.eye_panels_.empty());
     REQUIRE(jac.diag_panels_.empty());
     REQUIRE(jac.dense_panels_.size() == 2);
+}
+
+TEST_CASE("OCP finalize fuses structured blocks across callbacks") {
+    auto [x0, y0] = sym::states("x_profile_0", 3);
+    auto [x1, y1] = sym::states("x_profile_1", 3);
+    (void)y0; (void)y1;
+    auto prob = stage_ocp::create();
+    const vector lb = vector::Constant(3, -1.);
+    const vector ub = vector::Constant(3, 1.);
+    auto c0 = ineq_constr::create("profile_box_0", var_inarg_list(var_list{x0}),
+                                  static_cast<const cs::SX &>(x0), lb, ub,
+                                  approx_order::first);
+    auto c1 = ineq_constr::create("profile_box_1", var_inarg_list(var_list{x1}),
+                                  static_cast<const cs::SX &>(x1), lb, ub,
+                                  approx_order::first);
+    auto q0 = cost(new generic_cost("profile_cost_0", var_inarg_list(var_list{x0}),
+                                    cs::SX::dot(x0, x0), approx_order::second));
+    auto q1 = cost(new generic_cost("profile_cost_1", var_inarg_list(var_list{x1}),
+                                    cs::SX::dot(x1, x1), approx_order::second));
+    q0->set_diag_hess();
+    q1->set_diag_hess();
+    prob->add(*c0); prob->add(*c1); prob->add(*q0); prob->add(*q1);
+    prob->wait_until_ready();
+    node_data data(prob);
+    const auto &jac = data.dense().approx_[__ineq_x].jac_[__x];
+    REQUIRE(jac.eye_panels_.size() == 1);
+    REQUIRE(jac.eye_panels_[0].rows_ == 6);
+    const auto &hess = data.dense().lag_hess_[__x][__x];
+    REQUIRE(hess.diag_panels_.size() == 2);
+    REQUIRE(hess.diag_panels_[0].row_st_ == hess.diag_panels_[1].row_st_);
+    REQUIRE(hess.diag_panels_[0].rows_ == hess.diag_panels_[1].rows_);
 }
 } // namespace

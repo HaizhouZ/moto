@@ -2,6 +2,62 @@
 #include <moto/core/sparse_matrix.hpp>
 
 namespace moto {
+void sparse_matrix::plan(std::span<const sparse_block_spec> blocks) {
+  struct group {
+    sparse_block_spec box;
+    std::vector<size_t> blocks;
+  };
+  std::vector<group> groups;
+  for (size_t i = 0; i < blocks.size(); ++i)
+    groups.push_back({blocks[i], {i}});
+  bool merged;
+  do {
+    merged = false;
+    for (size_t i = 0; i < groups.size() && !merged; ++i)
+      for (size_t j = i + 1; j < groups.size(); ++j) {
+        auto &a = groups[i].box;
+        const auto &b = groups[j].box;
+        if (a.pattern != b.pattern) continue;
+        const bool dense = a.pattern == sparsity::dense && a.row == b.row &&
+                           a.rows == b.rows &&
+                           (a.col + a.cols == b.col || b.col + b.cols == a.col);
+        const bool diagonal = a.pattern != sparsity::dense &&
+            ((a.row + a.rows == b.row && a.col + a.cols == b.col) ||
+             (b.row + b.rows == a.row && b.col + b.cols == a.col));
+        if (!dense && !diagonal) continue;
+        const auto row_end = std::max(a.row + a.rows, b.row + b.rows);
+        const auto col_end = std::max(a.col + a.cols, b.col + b.cols);
+        a.row = std::min(a.row, b.row);
+        a.col = std::min(a.col, b.col);
+        a.rows = row_end - a.row;
+        a.cols = col_end - a.col;
+        groups[i].blocks.insert(groups[i].blocks.end(), groups[j].blocks.begin(),
+                                groups[j].blocks.end());
+        groups.erase(groups.begin() + j);
+        merged = true;
+        break;
+      }
+  } while (merged);
+
+  for (const auto &group : groups) {
+    const auto &g = group.box;
+    size_t panel;
+    if (g.pattern == sparsity::dense) {
+      panel = dense_panels_.size();
+      dense_panels_.emplace_back(g.row, g.col, g.rows, g.cols);
+    } else if (g.pattern == sparsity::diag) {
+      panel = diag_panels_.size();
+      diag_panels_.emplace_back(g.row, g.col, g.rows, g.cols);
+    } else {
+      panel = eye_panels_.size();
+      eye_panels_.emplace_back(g.row, g.col, g.rows, g.cols);
+    }
+    for (const auto bi : group.blocks)
+      planned_.push_back({blocks[bi], panel, blocks[bi].row - g.row,
+                          blocks[bi].col - g.col});
+  }
+}
+
 void sparse_matrix::resize(size_t rows, size_t cols) {
   jit_cache_.reset();
   // check consistency
@@ -80,6 +136,17 @@ matrix_ref sparse_matrix::insert(size_t r_st, size_t c_st, size_t r, size_t c,
     }
   assert(r_st + r <= rows_ && c_st + c <= cols_ &&
          "Inserted panel exceeds matrix size");
+  const sparse_block_spec requested{r_st, c_st, r, c, sp};
+  for (auto &binding : planned_) {
+    if (binding.used || binding.block != requested) continue;
+    binding.used = true;
+    if (sp == sparsity::dense)
+      return dense_panels_[binding.panel].data_.block(
+          binding.local_row, binding.local_col, r, c);
+    if (sp == sparsity::diag)
+      return diag_panels_[binding.panel].data_.segment(binding.local_row, r);
+    return eye_panels_[binding.panel].data_.segment(binding.local_row, r);
+  }
   switch (sp) {
   case sparsity::dense:
     dense_panels_.emplace_back(r_st, c_st, r, c);

@@ -13,6 +13,7 @@
 
 #include <moto/core/expr.hpp>
 #include <moto/core/field_layout_store.hpp>
+#include <moto/core/sparse.hpp>
 #include <moto/ocp/sym.hpp>
 
 namespace moto {
@@ -30,6 +31,20 @@ enum class stage_expr_role : size_t {
     interval,
     start_node,
     end_node,
+};
+
+enum class linear_target : size_t { jacobian, lag_hessian, hessian_modification };
+
+struct ocp_linear_profile {
+    std::unordered_map<size_t, std::vector<sparse_block_spec>> blocks;
+    static constexpr size_t key(linear_target target, field_t a, field_t b) {
+        return (static_cast<size_t>(target) * field::num + a) * field::num + b;
+    }
+    const std::vector<sparse_block_spec> &get(linear_target target, field_t a, field_t b) const {
+        static const std::vector<sparse_block_spec> empty;
+        const auto it = blocks.find(key(target, a, b));
+        return it == blocks.end() ? empty : it->second;
+    }
 };
 
 class ocp_base : protected field_layout_store<expr_list> {
@@ -52,8 +67,10 @@ class ocp_base : protected field_layout_store<expr_list> {
     utils::unique_id<ocp_base> uid_;
     std::array<expr_list, field::num> disabled_expr_, pruned_expr_;
     std::unordered_set<size_t> uids_, disabled_uids_, pruned_uids_;
+    ocp_linear_profile linear_profile_;
 
     void finalize();
+    void build_linear_profile();
     void refresh_after_clone(const active_status_config &config);
     void move_active_expr(const expr &ex, bool prune);
     bool restore_inactive_expr(const expr &ex, bool from_pruned);
@@ -75,6 +92,10 @@ class ocp_base : protected field_layout_store<expr_list> {
     bool is_active(const expr &ex) const;
     void wait_until_ready();
     void print_summary();
+    const ocp_linear_profile &linear_profile() const {
+        field_read_guard();
+        return linear_profile_;
+    }
 
     vector_ref extract(vector_ref data, const expr &ex) const {
         return data.segment(get_expr_start(ex), ex.dim());

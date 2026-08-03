@@ -45,6 +45,10 @@ struct sparse_panel : public sparse_panel_base {
     if (setup)
       setup_data();
   }
+  sparse_panel(const sparse_panel &) = default;
+  sparse_panel(sparse_panel &&) noexcept = default;
+  sparse_panel &operator=(const sparse_panel &) = default;
+  sparse_panel &operator=(sparse_panel &&) noexcept = default;
   std::conditional_t<Sp == sparsity::dense, matrix, vector> data_;
 
   void setup_data() {

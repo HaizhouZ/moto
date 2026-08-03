@@ -41,6 +41,10 @@ void ns_riccati_data::prepare_linear_backend() {
   }
   for (auto *q : {&Q_xx_mod, &Q_uu_mod, &Q_yy_mod})
     dump(*q, q->rows());
+  product(Q_yx_mod, product_op::times, -1., nx, 1, ny, 1);
+  product(Q_ux_mod, product_op::times, -1., nx, 1, nu, 1);
+  product(Q_uu, product_op::times, -1., nu, 1, nu, 1);
+  product(Q_uu_mod, product_op::times, -1., nu, 1, nu, 1);
   for (auto *q : {&Q_ux, &Q_ux_mod}) {
     dump(*q, q->rows());
     product(*q, product_op::right_transpose_times, -1., q->rows(), 1, 1,
@@ -69,6 +73,7 @@ void ns_riccati_data::prepare_linear_backend() {
 
   if (ns) {
     product(s_y, product_op::times, -1., ny, 1, ns, 1);
+    product(s_y, product_op::transpose_times, -1., ns, 1, ny, 1);
     prepare_sparse_product(s_y, F_u, product_op::times, -1., ns, nu);
     prepare_sparse_product(s_y, F_x, product_op::times, -1., ns, nx);
     dump(s_x, ns);
@@ -78,11 +83,13 @@ void ns_riccati_data::prepare_linear_backend() {
     dump(c_x, nc);
   }
 
-  for (size_t cols : {nu, nz}) {
+  for (size_t cols : {nu, nz, nx}) {
     if (!cols)
       continue;
     product(Q_uu, product_op::times, 1., nu, cols, nu, cols);
+    product(Q_uu, product_op::times, -1., nu, cols, nu, cols);
     product(Q_uu_mod, product_op::times, 1., nu, cols, nu, cols);
+    product(Q_uu_mod, product_op::times, -1., nu, cols, nu, cols);
     product(F_u, product_op::times, -1., nu, cols, ny, cols);
   }
   prepare_sparse_product(F_x, Q_yx, product_op::transpose_times, -1., nx, nx);

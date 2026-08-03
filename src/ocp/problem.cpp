@@ -54,6 +54,7 @@ ocp_base::ocp_base(const ocp_base &rhs)
       uid_(rhs.uid_),
       disabled_expr_(rhs.disabled_expr_),
       pruned_expr_(rhs.pruned_expr_),
+      linear_profile_(rhs.linear_profile_),
       uids_(rhs.uids_),
       disabled_uids_(rhs.disabled_uids_),
       pruned_uids_(rhs.pruned_uids_),
@@ -147,6 +148,46 @@ void ocp_base::finalize() {
             maintain_order();
         rebuild_layout();
         this->finalized_ = true;
+        build_linear_profile();
+    }
+}
+
+void ocp_base::build_linear_profile() {
+    linear_profile_ = {};
+    const auto add = [this](linear_target target, field_t a, field_t b,
+                            sparse_block_spec block) {
+        linear_profile_.blocks[ocp_linear_profile::key(target, a, b)].push_back(block);
+    };
+    for (const auto ff : func_fields) {
+        for (const generic_func &f : exprs(ff)) {
+            const auto &args = f.in_args();
+            if (f.order() >= approx_order::first && ff != __cost && ff != __dyn) {
+                for (size_t i : range(args.size())) {
+                    const auto &arg = args[i];
+                    if (arg->field() >= field::num_prim || !is_active(arg)) continue;
+                    const auto &sp = f.jac_sparsity()[i];
+                    add(linear_target::jacobian, ff, arg->field(),
+                        {get_expr_start(f) + sp.row_offset,
+                         get_expr_start_tangent(arg) + sp.col_offset,
+                         sp.rows, sp.cols, sp.pattern});
+                }
+            }
+            if (f.order() < approx_order::second && !in_field(ff, ineq_soft_constr_fields))
+                continue;
+            const auto target = ff == __cost ? linear_target::lag_hessian
+                                             : linear_target::hessian_modification;
+            for (size_t i : range(args.size())) for (size_t j : range(args.size())) {
+                const auto fi = args[i]->field(), fj = args[j]->field();
+                if (fi >= field::num_prim || fj >= field::num_prim || fi < fj ||
+                    !is_active(args[i]) || !is_active(args[j])) continue;
+                const auto &sp = f.hess_sparsity()[i][j];
+                if (sp.pattern == sparsity::unknown) continue;
+                add(target, fi, fj,
+                    {get_expr_start_tangent(args[i]) + sp.row_offset,
+                     get_expr_start_tangent(args[j]) + sp.col_offset,
+                     sp.rows, sp.cols, sp.pattern});
+            }
+        }
     }
 }
 void ocp_base::refresh_after_clone(const active_status_config &config) {

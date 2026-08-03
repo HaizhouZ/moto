@@ -12,6 +12,11 @@ struct sp_info {
   size_t rows = std::numeric_limits<size_t>::max();
   size_t cols = std::numeric_limits<size_t>::max();
 };
+struct sparse_block_spec {
+  size_t row = 0, col = 0, rows = 0, cols = 0;
+  sparsity pattern = sparsity::unknown;
+  bool operator==(const sparse_block_spec &) const = default;
+};
 } // namespace moto
 
 #endif // MOTO_CORE_SPARSE_HPP

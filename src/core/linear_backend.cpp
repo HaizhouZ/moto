@@ -10,6 +10,7 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <numeric>
@@ -39,6 +40,22 @@ size_t pair_index(size_t n, size_t lhs, size_t rhs) {
   if (lhs > rhs)
     std::swap(lhs, rhs);
   return lhs * n - lhs * (lhs - 1) / 2 + rhs - lhs;
+}
+
+std::vector<std::vector<size_t>>
+fused_panel_groups(const matrix_layout &layout) {
+  using key_t = std::tuple<sparsity, size_t, size_t, size_t, size_t>;
+  std::map<key_t, std::vector<size_t>> grouped;
+  for (size_t i = 0; i < layout.panels.size(); ++i) {
+    const auto &p = layout.panels[i];
+    grouped[{p.pattern, p.row_offset, p.col_offset, p.rows, p.cols}]
+        .push_back(i);
+  }
+  std::vector<std::vector<size_t>> result;
+  for (auto &[key, panels] : grouped)
+    if (panels.size() > 1)
+      result.push_back(std::move(panels));
+  return result;
 }
 
 std::vector<std::pair<size_t, size_t>>
@@ -192,6 +209,46 @@ void structured_product(const double *a, size_t n, const double *b, size_t br,
   }
 }
 
+template <product_op Op, bool Dense>
+void fused_pair_product(const double *a, const double *a1, size_t ar,
+                        size_t ac, const double *b, size_t br, size_t bc,
+                        double *o, size_t orows, size_t ocols, size_t ro,
+                        size_t co, double alpha) {
+  Eigen::Map<const matrix> B(b, br, bc);
+  Eigen::Map<matrix> O(o, orows, ocols);
+  if constexpr (Dense) {
+    const Eigen::Map<const matrix, Eigen::Aligned> A(a, ar, ac), A1(a1, ar, ac);
+    if constexpr (Op == product_op::times)
+      O.block(ro, 0, ar, bc).noalias() +=
+          alpha * (A + A1) * B.block(co, 0, ac, bc);
+    else if constexpr (Op == product_op::transpose_times)
+      O.block(co, 0, ac, bc).noalias() +=
+          alpha * (A + A1).transpose() * B.block(ro, 0, ar, bc);
+    else if constexpr (Op == product_op::right_times)
+      O.block(0, co, br, ac).noalias() +=
+          alpha * B.block(0, ro, br, ar) * (A + A1);
+    else
+      O.block(0, co, bc, ac).noalias() +=
+          alpha * B.block(ro, 0, ar, bc).transpose() * (A + A1);
+  } else {
+    const auto d = Eigen::Map<const vector, Eigen::Aligned>(a, ar).array() +
+                   Eigen::Map<const vector, Eigen::Aligned>(a1, ar).array();
+    if constexpr (Op == product_op::times)
+      O.middleRows(ro, ar).array() +=
+          alpha * (B.middleRows(co, ar).array().colwise() * d);
+    else if constexpr (Op == product_op::transpose_times)
+      O.middleRows(co, ar).array() +=
+          alpha * (B.middleRows(ro, ar).array().colwise() * d);
+    else if constexpr (Op == product_op::right_times)
+      O.middleCols(co, ar).array() +=
+          alpha * (B.middleCols(ro, ar).array().rowwise() * d.transpose());
+    else
+      O.middleCols(co, ar).array() +=
+          alpha * (B.middleRows(ro, ar).transpose().array().rowwise() *
+                   d.transpose());
+  }
+}
+
 #define MOTO_STRUCTURED_PRODUCT_WRAPPER(name, op, eye)                         \
   extern "C" __attribute__((visibility("default"))) void name(                 \
       const double *a, size_t ar, size_t, const double *b, size_t br,          \
@@ -214,6 +271,25 @@ MOTO_STRUCTURED_PRODUCT_WRAPPER(moto_linear_diag_right_transpose_times,
 MOTO_STRUCTURED_PRODUCT_WRAPPER(moto_linear_eye_right_transpose_times,
                                 right_transpose_times, true)
 #undef MOTO_STRUCTURED_PRODUCT_WRAPPER
+
+#define MOTO_FUSED_PAIR_WRAPPER(pattern, dense, op)                            \
+  extern "C" __attribute__((visibility("default"))) void                     \
+      moto_linear_fused_##pattern##_##op(                                     \
+          const double *a, const double *a1, size_t ar, size_t ac,             \
+          const double *b, size_t br, size_t bc, double *o, size_t orows,      \
+          size_t ocols, size_t ro, size_t co, double alpha) {                  \
+    fused_pair_product<product_op::op, dense>(                                 \
+        a, a1, ar, ac, b, br, bc, o, orows, ocols, ro, co, alpha);             \
+  }
+#define MOTO_FUSED_PAIR_OPS(pattern, dense)                                    \
+  MOTO_FUSED_PAIR_WRAPPER(pattern, dense, times)                               \
+  MOTO_FUSED_PAIR_WRAPPER(pattern, dense, transpose_times)                     \
+  MOTO_FUSED_PAIR_WRAPPER(pattern, dense, right_times)                         \
+  MOTO_FUSED_PAIR_WRAPPER(pattern, dense, right_transpose_times)
+MOTO_FUSED_PAIR_OPS(dense, true)
+MOTO_FUSED_PAIR_OPS(diag, false)
+#undef MOTO_FUSED_PAIR_OPS
+#undef MOTO_FUSED_PAIR_WRAPPER
 
 template <sparsity Pattern, bool Overwrite>
 void dump_panel(const double *a, size_t rows, size_t cols, double *out,
@@ -242,6 +318,28 @@ void dump_panel(const double *a, size_t rows, size_t cols, double *out,
   }
 }
 
+template <sparsity Pattern, bool Overwrite>
+void dump_pair(const double *a, const double *a1, size_t rows, size_t cols,
+               double *out, size_t out_rows, size_t row, size_t col,
+               double alpha) {
+  Eigen::Map<matrix> O(out, out_rows, col + cols);
+  if constexpr (Pattern == sparsity::dense) {
+    const Eigen::Map<const matrix, Eigen::Aligned> A(a, rows, cols),
+        A1(a1, rows, cols);
+    if constexpr (Overwrite)
+      O.block(row, col, rows, cols) = alpha * (A + A1);
+    else
+      O.block(row, col, rows, cols) += alpha * (A + A1);
+  } else {
+    auto dst = O.block(row, col, rows, rows).diagonal();
+    const Eigen::Map<const vector, Eigen::Aligned> A(a, rows), A1(a1, rows);
+    if constexpr (Overwrite)
+      dst = alpha * (A + A1);
+    else
+      dst += alpha * (A + A1);
+  }
+}
+
 #define MOTO_DUMP_WRAPPER(name, pattern, overwrite)                            \
   extern "C" __attribute__((visibility("default"))) void name(                 \
       const double *a, size_t rows, size_t cols, double *out, size_t out_rows, \
@@ -256,6 +354,20 @@ MOTO_DUMP_WRAPPER(moto_linear_dump_diag_overwrite, diag, true)
 MOTO_DUMP_WRAPPER(moto_linear_dump_eye_accumulate, eye, false)
 MOTO_DUMP_WRAPPER(moto_linear_dump_eye_overwrite, eye, true)
 #undef MOTO_DUMP_WRAPPER
+
+#define MOTO_DUMP_PAIR_WRAPPER(pattern, overwrite, mode)                       \
+  extern "C" __attribute__((visibility("default"))) void                     \
+      moto_linear_dump_pair_##pattern##_##mode(                               \
+          const double *a, const double *a1, size_t rows, size_t cols,         \
+          double *out, size_t out_rows, size_t row, size_t col, double alpha) {\
+    dump_pair<sparsity::pattern, overwrite>(                                   \
+        a, a1, rows, cols, out, out_rows, row, col, alpha);                    \
+  }
+MOTO_DUMP_PAIR_WRAPPER(dense, false, accumulate)
+MOTO_DUMP_PAIR_WRAPPER(dense, true, overwrite)
+MOTO_DUMP_PAIR_WRAPPER(diag, false, accumulate)
+MOTO_DUMP_PAIR_WRAPPER(diag, true, overwrite)
+#undef MOTO_DUMP_PAIR_WRAPPER
 
 template <bool LhsTranspose, bool RhsTranspose>
 void pair_dense_dense(const double *a, size_t ar, size_t ac, size_t ak,
@@ -573,23 +685,35 @@ std::string emit_product_function(const product_spec &spec,
                                   std::string_view name, bool exported) {
   spec.validate();
   std::ostringstream s;
+  const auto op_name = [&] {
+    return spec.op == product_op::times             ? "times"
+           : spec.op == product_op::transpose_times ? "transpose_times"
+           : spec.op == product_op::right_times     ? "right_times"
+                                                     : "right_transpose_times";
+  };
   const auto kernel_name = [&](sparsity pattern) {
     const char *prefix = pattern == sparsity::dense  ? "moto_linear_dense_"
                          : pattern == sparsity::diag ? "moto_linear_diag_"
                                                      : "moto_linear_eye_";
-    const char *suffix =
-        spec.op == product_op::times             ? "times"
-        : spec.op == product_op::transpose_times ? "transpose_times"
-        : spec.op == product_op::right_times     ? "right_times"
-                                                 : "right_transpose_times";
-    return std::string(prefix) + suffix;
+    return std::string(prefix) + op_name();
   };
+  const auto fused = fused_panel_groups(spec.sparse);
   s << "#include <cstddef>\n";
   for (const auto &panel : spec.sparse.panels)
     s << "extern \"C\" void " << kernel_name(panel.pattern)
       << "(const double*,std::size_t,std::size_t,const double*,std::size_t,"
          "std::size_t,double*,std::size_t,std::size_t,std::size_t,std::size_t,"
          "double);\n";
+  for (const auto &group : fused) {
+    const auto pattern = spec.sparse.panels[group.front()].pattern;
+    if (pattern == sparsity::eye) continue;
+    s << "extern \"C\" void moto_linear_fused_"
+      << (pattern == sparsity::dense ? "dense_" : "diag_")
+      << op_name()
+      << "(const double*,const double*,std::size_t,std::size_t,const double*,"
+         "std::size_t,std::size_t,double*,std::size_t,std::size_t,std::size_t,"
+         "std::size_t,double);\n";
+  }
   if (exported)
     s << "extern \"C\" __attribute__((visibility(\"default\"))) ";
   else
@@ -601,7 +725,38 @@ std::string emit_product_function(const product_spec &spec,
     s << "  const double *__restrict a" << i << " = p[" << i << "];\n";
   s << std::setprecision(std::numeric_limits<scalar_t>::max_digits10);
 
+  std::vector<int> fused_owner(spec.sparse.panels.size(), -1);
+  for (size_t i = 0; i < fused.size(); ++i)
+    for (const auto panel : fused[i])
+      fused_owner[panel] = static_cast<int>(i);
   for (size_t pi = 0; pi < spec.sparse.panels.size(); ++pi) {
+    if (fused_owner[pi] >= 0) {
+      const auto &group = fused[static_cast<size_t>(fused_owner[pi])];
+      if (pi != group.front()) continue;
+      const auto &a = spec.sparse.panels[pi];
+      if (a.pattern == sparsity::eye) {
+        const auto scale = spec.sign * static_cast<scalar_t>(group.size());
+        s << "  " << kernel_name(a.pattern) << "(a" << pi << ',' << a.rows
+          << ',' << a.cols << ",b," << spec.other_rows << ','
+          << spec.other_cols << ",o," << spec.out_rows << ',' << spec.out_cols
+          << ',' << a.row_offset << ',' << a.col_offset << ',' << scale
+          << ");\n";
+      } else {
+        const auto prefix = a.pattern == sparsity::dense ? "dense_" : "diag_";
+        s << "  moto_linear_fused_" << prefix << op_name()
+          << "(a" << group[0] << ",a" << group[1] << ',' << a.rows << ','
+          << a.cols << ",b," << spec.other_rows << ',' << spec.other_cols
+          << ",o," << spec.out_rows << ',' << spec.out_cols << ','
+          << a.row_offset << ',' << a.col_offset << ',' << spec.sign << ");\n";
+        for (size_t gi = 2; gi < group.size(); ++gi)
+          s << "  " << kernel_name(a.pattern) << "(a" << group[gi] << ','
+            << a.rows << ',' << a.cols << ",b," << spec.other_rows << ','
+            << spec.other_cols << ",o," << spec.out_rows << ',' << spec.out_cols
+            << ',' << a.row_offset << ',' << a.col_offset << ',' << spec.sign
+            << ");\n";
+      }
+      continue;
+    }
     const auto &a = spec.sparse.panels[pi];
     s << "  " << kernel_name(a.pattern) << "(a" << pi << ',' << a.rows << ','
       << a.cols << ",b," << spec.other_rows << ',' << spec.other_cols << ",o,"
@@ -1011,6 +1166,7 @@ void run_dense_write(const sparse_matrix &sparse, scalar_t *out,
   }
   std::lock_guard lock(cache.mutex);
   auto layout = describe(sparse);
+  const auto fused = fused_panel_groups(layout);
   auto pointers = panel_pointers(sparse);
   pointers.push_back(out);
   std::ostringstream source;
@@ -1021,9 +1177,53 @@ void run_dense_write(const sparse_matrix &sparse, scalar_t *out,
            << "(const "
               "double*,std::size_t,std::size_t,double*,std::size_t,std::size_t,"
               "std::size_t,double);\n";
+  if (overwrite)
+    for (const auto pattern : {"dense", "diag"})
+      source << "extern \"C\" void moto_linear_dump_" << pattern
+             << "_accumulate(const double*,std::size_t,std::size_t,double*,"
+                "std::size_t,std::size_t,std::size_t,double);\n";
+  for (const auto pattern : {"dense", "diag"})
+    source << "extern \"C\" void moto_linear_dump_pair_" << pattern << '_'
+           << (overwrite ? "overwrite" : "accumulate")
+           << "(const double*,const double*,std::size_t,std::size_t,double*,"
+              "std::size_t,std::size_t,std::size_t,double);\n";
   source << "extern \"C\" __attribute__((visibility(\"default\"))) void "
          << symbol_name << "(double *const *p) {\n";
+  std::vector<int> fused_owner(layout.panels.size(), -1);
+  for (size_t gi = 0; gi < fused.size(); ++gi)
+    for (const auto panel : fused[gi])
+      fused_owner[panel] = static_cast<int>(gi);
   for (size_t i = 0; i < layout.panels.size(); ++i) {
+    if (fused_owner[i] >= 0) {
+      const auto &group = fused[static_cast<size_t>(fused_owner[i])];
+      if (i != group.front()) continue;
+      const auto &a = layout.panels[i];
+      const char *pattern = a.pattern == sparsity::dense  ? "dense"
+                            : a.pattern == sparsity::diag ? "diag"
+                                                          : "eye";
+      if (a.pattern == sparsity::eye) {
+        source << "  moto_linear_dump_eye_"
+               << (overwrite ? "overwrite" : "accumulate") << "(p[" << i
+               << "]," << a.rows << ',' << a.cols << ",p["
+               << layout.panels.size() << "]," << out_rows << ','
+               << a.row_offset << ',' << a.col_offset << ','
+               << alpha * static_cast<scalar_t>(group.size()) << ");\n";
+      } else {
+        source << "  moto_linear_dump_pair_" << pattern << '_'
+               << (overwrite ? "overwrite" : "accumulate") << "(p["
+               << group[0] << "],p[" << group[1] << "]," << a.rows << ','
+               << a.cols << ",p[" << layout.panels.size() << "]," << out_rows
+               << ',' << a.row_offset << ',' << a.col_offset << ',' << alpha
+               << ");\n";
+        for (size_t j = 2; j < group.size(); ++j)
+          source << "  moto_linear_dump_" << pattern << "_accumulate(p["
+                 << group[j] << "]," << a.rows << ',' << a.cols << ",p["
+                 << layout.panels.size() << "]," << out_rows << ','
+                 << a.row_offset << ',' << a.col_offset << ',' << alpha
+                 << ");\n";
+      }
+      continue;
+    }
     const auto &a = layout.panels[i];
     const char *pattern = a.pattern == sparsity::dense  ? "dense"
                           : a.pattern == sparsity::diag ? "diag"
