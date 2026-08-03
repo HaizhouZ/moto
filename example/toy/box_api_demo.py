@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+import casadi as cs
+import moto
+import numpy as np
+
+
+def main():
+    x, xn = moto.sym.states("x", 4)
+    u = moto.sym.inputs("u", 4)
+    dt = moto.sym.params("dt", 1)
+    p_lb = moto.sym.params("p_lb", 4)
+    p_ub = moto.sym.params("p_ub", 4)
+
+    boxes = [
+        moto.ineq.bounds(
+            "x_box_numeric", x,
+            np.array([-1.0, 0.0, -2.0, 1.0]),
+            np.array([2.0, 3.0, 4.0, 5.0]),
+        ),
+        moto.ineq.bounds(
+            "x_box_mixed", x,
+            np.array([-np.inf, 0.5, -1.0, -np.inf]),
+            np.array([2.0, np.inf, 3.0, 4.0]),
+        ),
+    ]
+
+    g = cs.vertcat(x.sx[0] + x.sx[1], cs.sin(x.sx[2]))
+    boxes.append(
+        moto.ineq.create("g_box", g, np.array([-1.0, -0.2]), np.array([1.0, 0.8]))
+    )
+    boxes.append(moto.ineq.bounds("x_box_symbolic", x, p_lb, p_ub))
+    boxes.append(moto.ineq.bounds("dt_box_scalar", dt, 1e-3, 0.1))
+
+    scalar_weight = moto.sym.params("scalar_weight", 1, default_val=2.0)
+    scalar_reference = moto.sym.params("scalar_reference", 1, default_val=0.5)
+    vector_weight = moto.sym.params(
+        "vector_weight", 4, default_val=np.arange(1.0, 5.0)
+    )
+    vector_reference = moto.sym.params(
+        "vector_reference", 4, default_val=np.zeros(4)
+    )
+    scalar_cost = moto.cost.from_scalar(
+        "scalar_tracking", x[0] + dt,
+        weight=scalar_weight, reference=scalar_reference,
+    )
+    vector_cost = moto.cost.from_vector(
+        "vector_tracking", x.sx,
+        weight=vector_weight, reference=vector_reference,
+    )
+    numeric_vector_cost = moto.cost.from_vector(
+        "numeric_vector_tracking", x.sx,
+        weight=np.arange(1.0, 5.0), reference=np.zeros(4),
+    )
+    inferred_constr = moto.constr.create("inferred_constr", x[0] + dt)
+    inferred_dynamics = moto.dense_dynamics.create(
+        "inferred_dynamics", xn.sx - x.sx - u.sx
+    )
+    assert scalar_cost.weight.dim == scalar_cost.reference.dim == 1
+    assert vector_cost.weight.dim == vector_cost.reference.dim == 4
+    assert scalar_cost.weight.uid == scalar_weight.uid
+    assert scalar_cost.reference.uid == scalar_reference.uid
+    assert vector_cost.weight.uid == vector_weight.uid
+    assert vector_cost.reference.uid == vector_reference.uid
+    assert numeric_vector_cost.weight.dim == numeric_vector_cost.reference.dim == 4
+    assert {arg.uid for arg in inferred_constr.in_args} == {x.uid, dt.uid}
+    assert {arg.uid for arg in inferred_dynamics.in_args} == {x.uid, xn.uid, u.uid}
+    assert not hasattr(moto.cost, "create")
+
+    sel = cs.vertcat(x.sx[0], x.sx[3])
+    boxes.append(
+        moto.ineq.create(
+            "x_box_slice", sel, np.array([-1.0, 2.0]), np.array([4.0, 5.0])
+        )
+    )
+
+    print("native box inequality examples")
+    for box in boxes:
+        print(f"  {box.name:<16} dim={box.dim}")
+    print("auto-inferred cost factories")
+    print(f"  {scalar_cost.name:<16} output=scalar args={len(scalar_cost.in_args)}")
+    print(f"  {vector_cost.name:<16} output=vector args={len(vector_cost.in_args)}")
+
+    try:
+        moto.ineq.create("bad_primal_bound", x.sx, x.sx - 1.0, x.sx + 1.0)
+    except RuntimeError as exc:
+        print("  bad_primal_bound rejected:", str(exc).splitlines()[0])
+    else:
+        raise AssertionError(
+            "box bounds that depend on primal variables should be rejected"
+        )
+
+
+if __name__ == "__main__":
+    main()

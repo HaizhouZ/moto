@@ -1,13 +1,6 @@
-#include <moto/ocp/constr.hpp>
-#include <moto/ocp/sym.hpp>
-#include <moto/ocp/usr_func.hpp>
-#include <nanobind/stl/function.h>
-#include <nanobind/stl/variant.h>
-#include <type_cast.hpp>
-
+#include <moto/multibody/casadi_manifold.hpp>
 #include <moto/multibody/quaternion.hpp>
-
-#include <moto/ocp/dynamics/dense_dynamics.hpp>
+#include <type_cast.hpp>
 
 void register_submodule_multibody(nb::module_ &m) {
     using namespace moto::multibody;
@@ -18,4 +11,9 @@ void register_submodule_multibody(nb::module_ &m) {
         .def_static("exp3", &quaternion::exp3, nb::arg("w"), nb::arg("tolerance") = 1e-12, "exponential map from R^3 to unit quaternion")
         .def_static("log3", &quaternion::log3, nb::arg("q"), nb::arg("tolerance") = 1e-12, "logarithm map from unit quaternion to R^3")
         .def_static("create", &quaternion::create, nb::arg("name"), "create a new quaternion symbolic variable");
+    nb::class_<casadi_manifold, moto::sym>(m, "casadi_manifold")
+        .def_static("create", &casadi_manifold::create,
+                    nb::arg("name"), nb::arg("q"), nb::arg("dq"),
+                    nb::arg("integrated"), nb::arg("other"),
+                    nb::arg("difference"), nb::arg("default_val") = nb::none());
 }

@@ -3,25 +3,43 @@
 
 namespace moto {
 
+namespace {
+struct phase_mu_info {
+    scalar_t display = 0.;
+    bool valid = false;
+};
+
+phase_mu_info current_phase_mu(bool in_restoration,
+                               bool has_ipm_ineq,
+                               scalar_t outer_mu) {
+    phase_mu_info info;
+    info.display = outer_mu;
+    info.valid = has_ipm_ineq && (!in_restoration || outer_mu > 0.);
+    return info;
+}
+} // namespace
+
 struct stat_item {
     std::string_view name;
-    size_t width; // default width for each stat item
-    stat_item(std::string_view n, size_t w = stat_width) : name(n), width(w) {}
+    size_t width;
+    int precision; // -1 means use default (.6e)
+    stat_item(std::string_view n, size_t w = stat_width, int p = -1) : name(n), width(w), precision(p) {}
     void print_header() const {
         fmt::print("| {:<{}} |", name, width);
     }
 };
 stat_item stats[] = {{"no.", 3},
-                     {"objective"},
-                     {"prim_res"},
-                     {"dual_res"},
-                     {"comp_res"},
-                     {"||p||"},
-                     {"||d||"},
-                     {"alpha_p"},
-                     {"alpha_d"},
+                     {"obj", 8, 3},
+                     {"r(prim)", 8, 3},
+                     {"r(dual)", 8, 3},
+                     {"r(comp)", 8, 3},
+                     {"||p||", 8, 3},
+                     {"||d_eq||", 8, 3},
+                     {"||d_iq||", 8, 3},
+                     {"alpha_p", 8, 3},
+                     {"alpha_d", 8, 3},
                      {"ls", 3},
-                     {"ipm_mu", stat_width + 2}};
+                     {"mu(max)", stat_width + 2}};
 
 void ns_sqp::print_stat_header() {
     for (const auto &term : stats) {
@@ -30,31 +48,54 @@ void ns_sqp::print_stat_header() {
     putc('\n', stdout);
 }
 
-void ns_sqp::print_stats(int i_iter, const kkt_info &info, bool hcast_ineq) {
-    scalar_t stats_value[] = {0., info.objective, info.inf_prim_res, info.inf_dual_res, info.inf_comp_res, info.inf_prim_step, info.inf_dual_step,
-                              settings.alpha_primal, settings.alpha_dual, 0., settings.mu};
+void ns_sqp::print_stats(const kkt_info &info, const iter_info &iter, size_t ls_steps) {
+    const bool restoration_active = settings.in_restoration;
+    auto mu_info = current_phase_mu(restoration_active, settings.has_ipm_ineq, settings.ipm.mu);
+    scalar_t stats_value[] = {0., info.barrier_objective.augmented_objective, info.primal.inf_res, info.dual.inf_res, info.primal.inf_comp, info.step.inf_prim_step, info.step.inf_eq_dual_step, info.step.inf_ineq_dual_step,
+                              settings.ls.alpha_primal, settings.ls.alpha_dual, 0., mu_info.display};
     std::string_view ipm_flags;
-    if (hcast_ineq && settings.ipm_enable_corrector()) {
-        if (settings.ipm_accept_corrector()) {
+    if (!restoration_active && settings.has_ipm_ineq && settings.ipm.ipm_enable_corrector()) {
+        if (settings.ipm.ipm_accept_corrector()) {
             ipm_flags = "[c:a]";
         } else {
             ipm_flags = "[c:r]";
         }
     }
     size_t idx_stat = 0;
+    size_t i_iter = static_cast<size_t>(iter.num_iter);
+    const std::string iter_label =
+        i_iter == 0 ? "--" : restoration_active ? fmt::format("{}r", i_iter) : std::to_string(i_iter);
     for (auto &item : stats) {
         if (item.name == "no.") {
-            fmt::print("| {:<{}} |", i_iter < 0 ? "--" : std::to_string(i_iter + 1), item.width);
+            fmt::print("| {:<{}} |", iter_label, item.width);
         } else if (item.name == "ls") {
-            fmt::print("| {:<{}} |", info.ls_steps < 0 ? "--" : std::to_string(info.ls_steps), item.width);
-        } else if (item.name == "ipm_mu") {
-            fmt::print("| {:<{}} |", hcast_ineq ? fmt::format("{:.6e}{}", std::log10(stats_value[idx_stat]), ipm_flags) : "---------", item.width);
+            fmt::print("| {:<{}} |", std::to_string(ls_steps), item.width);
+        } else if (item.name == "mu(max)") {
+            if (!mu_info.valid) {
+                fmt::print("| {:<{}} |", "---------", item.width);
+            } else if (restoration_active) {
+                fmt::print("| {:<{}} |", fmt::format("{:.3e}(resto)", stats_value[idx_stat]), item.width);
+            } else {
+                fmt::print("| {:<{}} |", fmt::format("{:.3e}{}({:.1f})", stats_value[idx_stat], ipm_flags, std::log10(stats_value[idx_stat])), item.width);
+            }
+        } else if (item.precision == 3) {
+            fmt::print("| {:<{}.3e} |", stats_value[idx_stat], item.width);
         } else {
             fmt::print("| {:<{}.6e} |", stats_value[idx_stat], item.width);
         }
         idx_stat++;
     }
-
     fmt::print("\n");
+    if (restoration_active) {
+        fmt::print("    phase=restoration  aug_obj={:.3e}  ls_obj={:.3e}  barrier={:.3e}\n",
+                   info.barrier_objective.augmented_objective, info.barrier_objective.ls_objective, info.barrier_objective.barrier_value);
+    } else if (std::abs(info.barrier_objective.ls_objective - info.barrier_objective.augmented_objective) >
+               scalar_t(1e-12) * (scalar_t(1.0) + std::abs(info.barrier_objective.augmented_objective))) {
+        fmt::print("    phase=normal  aug_obj={:.3e}  ls_obj={:.3e}  barrier={:.3e}\n",
+                   info.barrier_objective.augmented_objective, info.barrier_objective.ls_objective,
+                   info.barrier_objective.ls_objective - info.barrier_objective.augmented_objective);
+    }
+    fmt::print("    ||lam_eq||={:.3e}  ||lam_ineq||={:.3e}  ||lam||={:.3e}\n",
+               info.dual.max_eq_norm, info.dual.max_ineq_norm, info.dual.max_norm);
 };
 } // namespace moto

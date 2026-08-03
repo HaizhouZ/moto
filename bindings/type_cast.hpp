@@ -42,8 +42,9 @@ struct type_caster<cs::SX> {
             assert(swig_obj != nullptr);
             auto sx_ptr = reinterpret_cast<cs::SX *>(swig_obj->ptr);
             value = *sx_ptr;
-        } else
-            nb::raise_type_error("Expected a casadi.SX object, but got: %s", nb::type_name(src).c_str());
+        } else {
+            return false;
+        }
         return true;
     }
 
@@ -62,85 +63,25 @@ struct type_caster<cs::SX> {
 } // namespace detail
 } // namespace nanobind
 
-#include <moto/core/array.hpp>
-#include <nanobind/stl/array.h>
-
-namespace nanobind {
-namespace detail {
-template <typename Entry, size_t Size, size_t shift>
-struct type_caster<moto::shifted_array<Entry, Size, shift>> {
-    using Array = moto::shifted_array<Entry, Size, shift>;
-    NB_TYPE_CASTER(Array, const_name("moto.shifted_array"))
-    using Caster = make_caster<Entry>;
-
-    bool from_python(handle src, uint8_t flags, cleanup_list *cleanup) noexcept {
-        PyObject *temp;
-
-        /* Will initialize 'temp' (NULL in the case of a failure.) */
-        PyObject **o = seq_get_with_size(src.ptr(), Size, &temp);
-
-        Caster caster;
-        bool success = o != nullptr;
-
-        flags = flags_for_local_caster<Entry>(flags);
-
-        if (success) {
-            for (size_t i = 0; i < Size; ++i) {
-                if (!caster.from_python(o[i], flags, cleanup) ||
-                    !caster.template can_cast<Entry>()) {
-                    success = false;
-                    break;
-                }
-
-                value[i] = caster.operator cast_t<Entry>();
-            }
-
-            Py_XDECREF(temp);
-        }
-
-        return success;
-    }
-
-    template <typename T>
-    static handle from_cpp(T &&src, rv_policy policy, cleanup_list *cleanup) {
-        object ret = steal(PyList_New(Size));
-
-        if (ret.is_valid()) {
-            Py_ssize_t index = 0;
-
-            for (auto &value : src) {
-                handle h = Caster::from_cpp(forward_like_<T>(value), policy, cleanup);
-
-                if (!h.is_valid()) {
-                    ret.reset();
-                    break;
-                }
-
-                NB_LIST_SET_ITEM(ret.ptr(), index++, h.ptr());
-            }
-        }
-
-        return ret.release();
-    }
-};
-
-} // namespace detail
-} // namespace nanobind
-
 #include <moto/ocp/impl/func.hpp>
 
 namespace moto {
-struct var_alias : public var {
-    using var::var;
-};
-// using var_alias = var;
-expr *get_expr_ptr(const nb::handle &h);
-// var &cast_to_var(const nb::handle &h);
-func &cast_to_func(const nb::handle &h);
+expr_handle get_expr_handle(const nb::handle &h);
+var get_var_handle(const nb::handle &h);
 } // namespace moto
 
 namespace nanobind {
 namespace detail {
+template <typename F>
+bool try_handle_cast(F &&cast) noexcept {
+    try {
+        cast();
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
 template <typename T>
 struct type_caster<moto::utils::unique_id<T>> {
     NB_TYPE_CASTER(moto::utils::unique_id<T>, const_name("int"));
@@ -169,15 +110,10 @@ struct type_caster<moto::expr_inarg_list> {
         auto &l = list_cast.value;
         value.reserve(l.size());
         value.clear();
-        for (auto &ex : l) {
-            try {
-                value.emplace_back(*moto::get_expr_ptr(ex));
-            } catch (const std::exception &e) {
-                fmt::print("Failed to cast to shared_expr: {}\n", e.what());
-                return false;
-            }
-        }
-        return true;
+        return try_handle_cast([&] {
+            for (auto &ex : l)
+                value.emplace_back(*moto::get_expr_handle(ex));
+        });
     }
 };
 } // namespace detail
@@ -186,13 +122,8 @@ struct type_caster<moto::expr_inarg_list> {
 namespace moto {
 /// @brief read-only inarg wrapper for moto::var
 struct py_var_inarg_wrapper {
-    sym *v = nullptr;
+    var v;
     operator moto::sym &() const { return *v; }
-};
-/// @brief read-only inarg wrapper for moto::expr
-struct py_expr_inarg_wrapper {
-    expr *v = nullptr;
-    operator moto::expr &() const { return *v; }
 };
 } // namespace moto
 namespace nanobind {
@@ -201,38 +132,21 @@ template <>
 struct type_caster<moto::py_var_inarg_wrapper> {
     NB_TYPE_CASTER(moto::py_var_inarg_wrapper, const_name("moto.var"));
     bool from_python(handle src, uint8_t flags, void *ptr) {
-        try {
-            value.v = static_cast<moto::sym *>(moto::get_expr_ptr(src));
-        } catch (const std::exception &e) {
-            fmt::print("Failed to cast to moto.var: {}\n", e.what());
-            return false;
-        }
-        return true;
+        return try_handle_cast([&] {
+            value.v = moto::get_var_handle(src);
+        });
     }
 };
+/// @brief Type caster for an owning expression handle.
 template <>
-struct type_caster<moto::py_expr_inarg_wrapper> {
-    NB_TYPE_CASTER(moto::py_expr_inarg_wrapper, const_name("moto.expr | moto.var"));
-    bool from_python(handle src, uint8_t flags, void *ptr) {
-        value.v = moto::get_expr_ptr(src);
-        return true;
-    }
-};
-/// @brief Type caster for moto::shared_expr
-/// @note for inargs of funcs, use @ref moto::py_expr_inarg_wrapper instead
-template <>
-struct type_caster<moto::shared_expr> {
-    NB_TYPE_CASTER(moto::shared_expr, const_name("moto.expr"));
+struct type_caster<moto::expr_handle> {
+    NB_TYPE_CASTER(moto::expr_handle, const_name("moto.expr"));
     bool from_python(handle src, uint8_t flags, cleanup_list *cleanup) {
-        try {
-            value = moto::shared_expr(*moto::get_expr_ptr(src));
-        } catch (const std::exception &e) {
-            fmt::print("Failed to cast to moto.shared_expr: {}\n", e.what());
-            return false;
-        }
-        return true;
+        return try_handle_cast([&] {
+            value = moto::get_expr_handle(src);
+        });
     }
-    static handle from_cpp(const moto::shared_expr &src, rv_policy policy, cleanup_list *cleanup) {
+    static handle from_cpp(const moto::expr_handle &src, rv_policy policy, cleanup_list *cleanup) {
         return type_caster<std::shared_ptr<moto::expr>>::from_cpp(src, policy, cleanup);
     }
 };
@@ -242,23 +156,12 @@ template <>
 struct type_caster<moto::var> {
     NB_TYPE_CASTER(moto::var, const_name("moto.var"));
     bool from_python(handle src, uint8_t flags, void *ptr) {
-        try {
-            if (nb::hasattr(src, "__sym__")) {
-                value = nb::cast<moto::sym &>(src.attr("__sym__"));
-            } else {
-                nb::print("Unsupported type for cast_to_var: ", src);
-                throw std::runtime_error("Unsupported type for cast_to_var");
-            }
-        } catch (const std::exception &e) {
-            fmt::print("Failed to cast to moto.var: {}\n", e.what());
-            return false;
-        }
-        return true;
+        return try_handle_cast([&] {
+            value = moto::get_var_handle(src);
+        });
     }
     static nb::handle from_cpp(const moto::var &src, rv_policy policy, cleanup_list *cleanup) {
         nb::object py_cs_module = nb::module_::import_("moto");
-        // use the sym stored to initialize a casadi.SX object
-        // nb::object py_cs_var = py_cs_module.attr("var")((const std::shared_ptr<moto::sym> &)(src));
         nb::object py_cs_var = py_cs_module.attr("var")(type_caster<std::shared_ptr<moto::sym>>::from_cpp(src, policy, cleanup));
         return py_cs_var.release();
     }

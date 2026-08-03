@@ -4,8 +4,19 @@
 #include <moto/utils/codegen.hpp>
 
 namespace moto {
+void shared_data::add(size_t uid, func_arg_map_ptr_t &&data) { data_.try_emplace(uid, std::move(data)); }
+
+func_arg_map *shared_data::try_get(size_t uid) {
+    auto it = data_.find(uid);
+    return it == data_.end() ? nullptr : it->second.get();
+}
+func_arg_map &shared_data::get(size_t uid) { return *data_.at(uid); }
+func_arg_map &shared_data::operator[](const expr &ex) { return get(ex.uid()); }
+const func_arg_map &shared_data::get(size_t uid) const { return *data_.at(uid); }
+const func_arg_map &shared_data::operator[](const expr &ex) const { return get(ex.uid()); }
+
 func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, const generic_func &f)
-    : func_(f), shared_(shared), sym_uid_idx_(f.sym_uid_idx_), primal_(&primal) {
+    : func_(f), shared_(shared), primal_(&primal) {
     auto &in_args = f.in_args();
     in_args_.reserve(in_args.size());
     for (auto &arg : in_args) {
@@ -17,10 +28,15 @@ func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, const generic_
     }
 }
 
-vector_ref get_value_ref(const generic_func &f, merit_data &raw) {
+vector_ref func_arg_map::operator[](const sym &in) const { return in_args_[func_.arg_idx(in)]; }
+vector_ref func_arg_map::operator[](size_t i) const { return in_args_.at(i); }
+const std::vector<vector_ref> &func_arg_map::in_arg_data() const { return in_args_; }
+const ocp *func_arg_map::problem() const { return shared_.prob_; }
+
+vector_ref get_value_ref(const generic_func &f, lag_data &raw) {
     if (f.field() == __cost) {
         return vector_ref(mapped_vector(&raw.cost_, 1));
-    } else if (in_field(f.field(), merit_data::stored_constr_fields)) {
+    } else if (in_field(f.field(), lag_data::stored_constr_fields)) {
         return raw.approx_[f.field()].v_.segment(raw.prob_->get_expr_start(f), f.dim());
     } else {
         throw std::runtime_error(fmt::format("Function {} in field {} with uid {} does not have stored value",
@@ -29,31 +45,33 @@ vector_ref get_value_ref(const generic_func &f, merit_data &raw) {
 }
 
 func_approx_data::func_approx_data(sym_data &primal,
-                                   merit_data &raw,
+                                   lag_data &raw,
                                    shared_data &shared,
                                    const generic_func &f)
-    : func_arg_map(primal, shared, f), v_(get_value_ref(f, raw)), merit_data_(&raw) {
+    : func_arg_map(primal, shared, f), v_(get_value_ref(f, raw)), lag_data_(&raw) {
     auto &in_args = f.in_args();
-    size_t f_st = raw.prob_->get_expr_start(f);
-    // for non-cost
     if (f.order() >= approx_order::first) {
-        // bind merit jacobian
-        merit_jac_.reserve(in_args_.size());
+        jac_.reserve(in_args_.size());
+        const auto f_field = func_.field();
+        auto *prob = raw.prob_;
         for (size_t i : range(in_args_.size())) {
-            if (in_args[i]->field() < field::num_prim && raw.prob_->is_active(in_args[i])) {
-                merit_jac_.push_back(raw.prob_->extract_tangent(raw.jac_[in_args[i]->field()], in_args[i]));
-            } else { // useless
-                static row_vector empty;
-                merit_jac_.push_back(empty);
+            const auto &arg = in_args[i];
+            if (arg->field() < field::num_prim && prob->is_active(arg) && f_field != __dyn) {
+                if (f_field == __cost) {
+                    jac_.push_back(prob->extract_row_tangent(raw.cost_jac_[arg->field()], arg));
+                    continue;
+                } else if (in_field(f_field, lag_data::stored_constr_fields)) {
+                    const auto sp = func_.jac_sparsity()[i];
+                    const auto f_st = prob->get_expr_start(func_);
+                    auto &jac = lag_data_->approx_[f_field].jac_[arg->field()];
+                    const auto r_st = f_st + sp.row_offset;
+                    const auto c_st = prob->get_expr_start_tangent(arg) + sp.col_offset;
+                    jac_.push_back(matrix_ref(jac.insert(r_st, c_st, sp.rows, sp.cols, sp.pattern)));
+                    continue;
+                }
             }
-        }
-        // bind approx jacobian
-        if (f.field() != __cost) {
             static matrix empty;
-            jac_.assign(in_args_.size(), empty);
-        } else {
-            jac_.reserve(merit_jac_.size());
-            jac_.assign(merit_jac_.begin(), merit_jac_.end());
+            jac_.push_back(empty);
         }
     }
     setup_hessian();
@@ -62,42 +80,66 @@ func_approx_data::func_approx_data(sym_data &primal,
 void func_approx_data::setup_hessian() {
     auto &f = func_;
     auto &in_args = f.in_args();
-    assert(merit_data_ != nullptr && "merit_data_ should not be null");
-    auto &raw = *merit_data_;
-    if (f.order() >= approx_order::second || in_field(f.field(), ineq_soft_constr_fields)) {
+    assert(lag_data_ != nullptr && "lag_data_ should not be null");
+    auto &raw = *lag_data_;
+    bool is_ineq_soft = in_field(f.field(), ineq_soft_constr_fields);
+    if (f.order() >= approx_order::second || is_ineq_soft) {
         size_t field_1, field_2;
-        auto *hessian = f.field() == __cost ? &raw.hessian_ : &raw.hessian_modification_;
-        merit_hess_.resize(in_args_.size());
+        auto *hessian = f.field() == __cost ? &raw.lag_hess_ : &raw.hessian_modification_;
+        if (!f.hess_panel_sp_.empty()) {
+            hess_panels_.reserve(f.hess_panel_sp_.size());
+            for (const auto &[i, j, sp] : f.hess_panel_sp_) {
+                const auto fi = in_args[i]->field(), fj = in_args[j]->field();
+                if (fi >= fj && fi < field::num_prim && fj < field::num_prim &&
+                    raw.prob_->is_active(in_args[i]) &&
+                    raw.prob_->is_active(in_args[j])) {
+                    hess_panels_.push_back((*hessian)[fi][fj].insert(
+                        raw.prob_->get_expr_start_tangent(in_args[i]) + sp.row_offset,
+                        raw.prob_->get_expr_start_tangent(in_args[j]) + sp.col_offset,
+                        sp.rows, sp.cols, sp.pattern));
+                } else {
+                    static matrix empty;
+                    hess_panels_.push_back(empty);
+                }
+            }
+            return;
+        }
+        lag_hess_.resize(in_args_.size());
         for (size_t i : range(in_args_.size())) {
             if (in_args[i]->field() < field::num_prim) {
-                merit_hess_[i].reserve(in_args_.size());
+                lag_hess_[i].reserve(in_args_.size());
                 for (size_t j : range(in_args_.size())) {
                     field_1 = in_args[i]->field();
                     field_2 = in_args[j]->field();
                     if (raw.prob_->is_active(in_args[i]) &&
                         field_2 < field::num_prim &&
                         raw.prob_->is_active(in_args[j])) {
-                        /// @note order matches merit_data
+                        /// @note order matches lag_data
                         /// h[i][j] = h[j][i] if i, j in the same field or field(i) < field(j)
                         /// otherwise only keep h[i][j] (empty)
-                        if (func_.hess_sp_[i][j] == sparsity::unknown) {
+                        if (func_.hess_sp_[i][j].pattern == sparsity::unknown) {
                             goto BIND_EMPTY_HESS;
                         } else if (field_1 >= field_2) {
-                            merit_hess_[i].push_back((*hessian)[field_1][field_2].insert(
-                                raw.prob_->get_expr_start_tangent(in_args[i]),
-                                raw.prob_->get_expr_start_tangent(in_args[j]),
-                                in_args[i]->tdim(), in_args[j]->tdim(), func_.hess_sp_[i][j]));
+                            const auto &hess_sp = func_.hess_sp_[i][j];
+                            lag_hess_[i].push_back((*hessian)[field_1][field_2].insert(
+                                raw.prob_->get_expr_start_tangent(in_args[i]) + hess_sp.row_offset,
+                                raw.prob_->get_expr_start_tangent(in_args[j]) + hess_sp.col_offset,
+                                hess_sp.rows, hess_sp.cols, hess_sp.pattern));
                             continue;
                         }
                     }
                 BIND_EMPTY_HESS:
-                    // this should be empty. do this anyway to make the shape of merit_hess_ right
+                    // this should be empty. do this anyway to make the shape of lag_hess_ right
                     static matrix empty;
-                    merit_hess_[i].push_back(empty);
+                    lag_hess_[i].push_back(empty);
                 }
             }
         }
-        merit_hess_.shrink_to_fit();
+        lag_hess_.shrink_to_fit();
     }
 }
+
+bool func_approx_data::has_jacobian_block(size_t arg_idx) const { return arg_idx < jac_.size() && jac_[arg_idx].size() != 0; }
+matrix_ref func_approx_data::jac(const sym &in) const { return jac_[func_.arg_idx(in)]; }
+matrix_ref func_approx_data::jac(size_t i) const { return jac_.at(i); }
 } // namespace moto

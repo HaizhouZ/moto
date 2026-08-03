@@ -1,5 +1,11 @@
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 import moto
-import casadi as cs
 import numpy as np
 import pinocchio as pin
 import pinocchio.casadi as cpin
@@ -35,7 +41,6 @@ n_trials = 1000
 for _ in range(n_trials):
     dt = float(np.random.random() * 0.1)
     q0 = R.random().as_quat()
-    # print("q0", q0)
     w = np.random.random(3)
     q1 = qn.integrate(q0, w, dt)
     gt = pin.integrate(r_model, q0, w * dt)
@@ -44,7 +49,5 @@ for _ in range(n_trials):
     w_diff = qn.difference(q1, q0) / dt
     if not np.allclose(w_diff, w, atol=1e-8):
         raise RuntimeError("mismatch difference")
-    # print("q1", q1)
-    # print("gt", pin.integrate(r_model, q0, w * 0.01))
 
 print("all tests passed")

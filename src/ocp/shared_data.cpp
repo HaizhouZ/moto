@@ -3,7 +3,7 @@
 #include <moto/ocp/problem.hpp>
 
 namespace moto {
-shared_data::shared_data(ocp *prob, sym_data *primal, merit_data *raw) : prob_(prob) {
+shared_data::shared_data(ocp *prob, sym_data *primal, lag_data *raw) : prob_(prob) {
     prob->wait_until_ready();
     data_.reserve(moto::custom_func_fields.size());
     for (auto field : moto::custom_func_fields) {

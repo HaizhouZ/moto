@@ -11,7 +11,7 @@
 // namespace multibody {
 // func euler::from_urdf(const std::string &urdf_path, var dt, root_joint_t root_joint, euler::v_int_type v_int) {
 // #ifdef MOTO_WITH_PINOCCHIO
-//     pin::Model model;
+//     pin model;
 //     if (root_joint == root_joint_t::fixed) {
 //         pin::urdf::buildModel(urdf_path, model);
 //     } else {

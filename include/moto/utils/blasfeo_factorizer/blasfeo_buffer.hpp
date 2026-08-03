@@ -15,7 +15,7 @@ struct buffer_tpl {
     void *mem_;
     size_t size_;
 
-    buffer_tpl() : data_(nullptr, 0, 0), mem_(nullptr) {}
+    buffer_tpl() : data_(nullptr, 0, 0), mem_(nullptr), size_(0) {}
     void resize(size_t r, size_t c) {
         size_t required_size = r * c;
         if (size_ < required_size) {
@@ -39,7 +39,7 @@ struct blasfeo_buffer_tpl {
     void *mem_ = nullptr;
     size_t size_ = 0;
 
-    blasfeo_buffer_tpl() : mem_(nullptr) {}
+    blasfeo_buffer_tpl() : mem_(nullptr), size_(0) {}
     void resize(size_t r, size_t c) {
         size_t required_size;
         if constexpr (std::is_same_v<DataType, blasfeo_dmat>)

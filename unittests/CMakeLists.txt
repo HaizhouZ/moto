@@ -11,6 +11,8 @@ else()
     FetchContent_MakeAvailable(Catch2)
 endif()
 
+find_package(Python 3.8 COMPONENTS Interpreter REQUIRED)
+
 function(add_moto_test name)
     set(test_name ${name}_test)
     set(test_file ${name}.cpp)
@@ -19,23 +21,64 @@ function(add_moto_test name)
     target_include_directories(${test_name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(${test_name} PRIVATE moto)
     target_link_libraries(${test_name} PRIVATE Catch2::Catch2WithMain)
+    set_target_properties(${test_name} PROPERTIES
+        BUILD_RPATH "\$ORIGIN/.."
+    )
 
     # set_source_files_properties(${test_file} PROPERTIES
     #     COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O3>"
     #     COMPILE_DEFINITIONS "$<$<CONFIG:Debug>:NDEBUG>"
     # )
     
-    add_test(NAME ${test_name} COMMAND ${test_name} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(NAME ${test_name} COMMAND ${test_name} ${ARGN} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(
+        ${test_name}
+        PROPERTIES
+        ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}:$ENV{LD_LIBRARY_PATH}"
+    )
+endfunction()
+
+function(add_moto_python_test name script)
+    add_test(
+        NAME ${name}
+        COMMAND ${Python_EXECUTABLE} ${script}
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    )
+    set_tests_properties(
+        ${name}
+        PROPERTIES
+        ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}:$ENV{LD_LIBRARY_PATH};OMP_NUM_THREADS=1"
+    )
 endfunction()
 
 
 add_moto_test(sym_test)
-# add_moto_test(expr_ownership)
-# add_moto_test(constr_cast)
-# add_moto_test(dynamics)
-# add_moto_test(field_conversion)
-# add_moto_test(spmm)
-# add_moto_test(dynamics_cen)
-# add_moto_test(blasfeo_factor)
-# add_moto_test(multibody_euler)
-# target_link_libraries(multibody_euler_test PRIVATE )
+add_moto_test(ineq_jac_sparsity)
+add_moto_test(equality_multiplier_init)
+add_moto_test(restoration)
+add_moto_test(linear_backend)
+add_moto_test(semi_implicit_euler)
+target_link_libraries(semi_implicit_euler_test PRIVATE moto_multibody)
+add_moto_python_test(restoration_demo example/toy/restoration.py)
+add_moto_python_test(modeling_shortcuts_demo example/toy/box_api_demo.py)
+add_moto_python_test(initial_state_optimization_demo example/toy/initial_state_optimization.py)
+
+add_executable(graph_model_compose_test graph_model_compose.cpp)
+target_include_directories(graph_model_compose_test PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(graph_model_compose_test PRIVATE moto Catch2::Catch2WithMain)
+set_target_properties(graph_model_compose_test PROPERTIES
+    BUILD_RPATH "\$ORIGIN/.."
+)
+
+foreach(graph_shard IN ITEMS mapping remap path mutation validation concurrency)
+    add_test(
+        NAME graph_model_compose_${graph_shard}_test
+        COMMAND graph_model_compose_test "[graph][${graph_shard}]"
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    )
+    set_tests_properties(
+        graph_model_compose_${graph_shard}_test
+        PROPERTIES
+        ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}:$ENV{LD_LIBRARY_PATH}"
+    )
+endforeach()

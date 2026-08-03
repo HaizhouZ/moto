@@ -9,13 +9,13 @@
 
 namespace moto {
 class expr;                              // forward declaration of expr
-using shared_expr = utils::shared<expr>; ///< shared pointer type for expr
+using expr_handle = utils::shared<expr>; ///< owning identity handle; copying never clones
 
 struct expr_inarg_list; ///< forward declaration
 
 /// @brief list of expressions, used for storing expressions in a vector
-struct expr_list : public std::vector<shared_expr> {
-    using base = std::vector<shared_expr>;
+struct expr_list : public std::vector<expr_handle> {
+    using base = std::vector<expr_handle>;
     using base::base; ///< inherit constructors from list_of_shared
     /// constructor from a vector of reference wrappers
     expr_list(const expr_inarg_list &exprs);
@@ -23,23 +23,11 @@ struct expr_list : public std::vector<shared_expr> {
 
 constexpr size_t dim_tbd = 0;
 
-#define CONST_PROPERTY(mem_name) \
-    const auto &mem_name() const { return mem_name##_; }
-
-#define PROPERTY(mem_name)                                                             \
-    auto &mem_name() { return mem_name##_; }                                           \
-    const auto &mem_name() const { return mem_name##_; }                               \
-    void __set_##mem_name(const decltype(mem_name##_) &value) { mem_name##_ = value; } \
-    const auto &__get_##mem_name() const { return mem_name##_; }
-
-class ocp;
+class ocp_base;
 /**
  * @brief general expression base class (now merged with impl)
  */
 class expr : public std::enable_shared_from_this<expr>, public utils::clone_base<expr> {
-  public:
-    static size_t max_uid; /// < uid used to index global expressions
-
   protected:
     class async_ready_status {
       private:
@@ -75,13 +63,26 @@ class expr : public std::enable_shared_from_this<expr>, public utils::clone_base
     expr(const expr &rhs); ///< copy constructor
 
   public:
-    PROPERTY(name);                 ///< getter for name
-    PROPERTY(dim);                  ///< getter for dim
-    PROPERTY(uid);                  ///< getter for uid
-    PROPERTY(field);                ///< getter for field
-    PROPERTY(finalized);            ///< getter for finalized
-    PROPERTY(tdim)                  ///< tangent space dimension of the symbolic variable
-    PROPERTY(default_active_status) ///< default active status when added to an ocp
+    auto &name() { return name_; }
+    const auto &name() const { return name_; }
+    const auto &__get_name() const { return name_; }
+
+    const auto &dim() const { return dim_; }
+    const auto &__get_dim() const { return dim_; }
+
+    const auto &uid() const { return uid_; }
+
+    const auto &field() const { return field_; }
+    const auto &__get_field() const { return field_; }
+
+    const auto &finalized() const { return finalized_; }
+    const auto &__get_finalized() const { return finalized_; }
+
+    auto &tdim() { return tdim_; }
+    const auto &tdim() const { return tdim_; }
+    const auto &__get_tdim() const { return tdim_; }
+
+    bool default_active_status() const { return default_active_status_; }
 
     auto &dep() { return dep_; } ///< get the dependencies of this expression
 
@@ -98,9 +99,11 @@ class expr : public std::enable_shared_from_this<expr>, public utils::clone_base
         }
     }
 
-    virtual void add_to_ocp_callback(ocp *) {} /// callback when added to an ocp
-
     explicit operator bool() const { return uid_.is_valid(); }
+
+    /// Owning handle to this exact expression. This never clones.
+    expr_handle handle();
+    expr_handle handle() const;
 
     expr() = default; // default constructor for derived classes
     /**
@@ -134,12 +137,21 @@ class expr : public std::enable_shared_from_this<expr>, public utils::clone_base
     DEF_DEFAULT_CLONE(expr)
 };
 
+template <std::derived_from<expr> T>
+utils::shared<T> expr_cast(const expr_handle &handle) {
+    auto result = std::dynamic_pointer_cast<T>(
+        static_cast<const std::shared_ptr<expr> &>(handle));
+    if (!result)
+        throw std::bad_cast();
+    return result;
+}
+
 std::string format_as(const expr &e); ///< format an expression as a string for debugging
 
 /// @brief list of expressions, used for function arguments
 struct expr_inarg_list : public std::vector<std::reference_wrapper<expr>> {
     using std::vector<std::reference_wrapper<expr>>::vector; ///< inherit constructors from std::vector
-    /// constructor from a vector of shared_expr
+    /// constructor from owning expression handles
     expr_inarg_list(const expr_list &exprs);
 }; ///< list of expressions
 

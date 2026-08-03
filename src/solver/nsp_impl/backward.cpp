@@ -1,6 +1,7 @@
 #define MOTO_NS_RICCATI_IMPL
 
 #include <moto/solver/ns_riccati/generic_solver.hpp>
+#include <moto/core/linear_backend.hpp>
 #include <moto/utils/field_conversion.hpp>
 
 // #define ENABLE_TIMED_BLOCK
@@ -39,10 +40,10 @@ void generic_solver::riccati_recursion(ns_riccati_data *cur, ns_riccati_data *pr
     timed_block_start("compute_U");
     nsp.y_0_p_k.noalias() = d.Q_y.transpose() - d.V_yy * nsp.y_y_k;
     if (d.rank_status_ == rank_status::unconstrained) {
-        d.F_x.right_times<false>(d.V_yy, nsp.y_0_p_K);
-        d.F_u.inner_product(d.V_yy, nsp.Q_zz);
-        d.F_u.T_times<false>(nsp.y_0_p_k, nsp.z_0_k);
-        d.F_u.T_times<false>(nsp.y_0_p_K, nsp.z_0_K);
+        linear_backend::right_multiply(d.V_yy, d.F_x, nsp.y_0_p_K, -1.);
+        linear_backend::weighted_gram(d.F_u, d.V_yy, nsp.Q_zz);
+        linear_backend::transpose_multiply(d.F_u, nsp.y_0_p_k, nsp.z_0_k, -1.);
+        linear_backend::transpose_multiply(d.F_u, nsp.y_0_p_K, nsp.z_0_K, -1.);
     } else {
         nsp.y_0_p_K.noalias() -= d.V_yy * nsp.y_y_K;
         if (d.rank_status_ == rank_status::constrained) [[likely]] {
@@ -106,9 +107,9 @@ void generic_solver::riccati_recursion(ns_riccati_data *cur, ns_riccati_data *pr
         d.V_xx.noalias() += nsp.z_0_K.transpose() * nsp.z_K - nsp.y_0_p_K.transpose() * nsp.y_y_K;
     } else {
         d.Q_x.noalias() += nsp.z_0_k.transpose() * nsp.z_K;
-        d.F_x.right_T_times<false>(nsp.y_0_p_k, d.Q_x);
+        linear_backend::right_transpose_multiply(nsp.y_0_p_k, d.F_x, d.Q_x, -1.);
         d.V_xx.noalias() += nsp.z_0_K.transpose() * nsp.z_K;
-        d.F_x.right_T_times<false>(nsp.y_0_p_K, d.V_xx);
+        linear_backend::right_transpose_multiply(nsp.y_0_p_K, d.F_x, d.V_xx, -1.);
     }
     // update value function derivatives of previous node
     if (prev != nullptr) [[likely]] {
@@ -133,9 +134,9 @@ void generic_solver::riccati_recursion_correction(ns_riccati_data *cur, ns_ricca
     // tmp.setZero();
     if (d.rank_status_ == rank_status::unconstrained) {
         nsp.z_0_k = d.Q_u.transpose();
-        d.F_u.right_times<false>(d.Q_y, nsp.z_0_k);
+        linear_backend::right_multiply(d.Q_y, d.F_u, nsp.z_0_k, -1.);
         d.Q_x.noalias() += nsp.z_0_k.transpose() * nsp.z_K;
-        d.F_x.right_times<false>(d.Q_y, d.Q_x);
+        linear_backend::right_multiply(d.Q_y, d.F_x, d.Q_x, -1.);
     } else if (d.rank_status_ == rank_status::constrained) {
         nsp.z_0_k.noalias() = nsp.Z_u.transpose() * d.Q_u.transpose() + nsp.Z_y.transpose() * d.Q_y.transpose();
         d.Q_x.noalias() += nsp.z_0_k.transpose() * nsp.z_K - (d.Q_u * nsp.u_y_K + d.Q_y * nsp.y_y_K);
@@ -149,7 +150,7 @@ void generic_solver::riccati_recursion_correction(ns_riccati_data *cur, ns_ricca
         auto &d_pre = *prev;
         auto &perm = utils::permutation_from_y_to_x(prev->dense_->prob_, cur->dense_->prob_);
         d.Q_x *= perm;
-        d_pre.Q_y += d.Q_x;
+        d_pre.Q_y.noalias() += d.Q_x;
     }
 }
 } // namespace ns_riccati

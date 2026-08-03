@@ -21,6 +21,11 @@ void *load_from_shared(const std::string &lib_path, const std::string &func_name
  * This struct holds a pointer to the loaded function and provides an interface to invoke it.
  */
 struct ext_func {
+    using input_list = std::vector<vector_ref>;
+    using value_func = void (*)(const input_list &, vector_ref);
+    using jacobian_func = void (*)(const input_list &, std::vector<matrix_ref> &);
+    using hessian_func = void (*)(const input_list &, std::vector<std::vector<matrix_ref>> &);
+
     void *func_;
     ext_func() : func_(nullptr) {}
     /**
@@ -42,10 +47,14 @@ struct ext_func {
      * @param input input arg, e.g. std::vector<vector::ref>
      * @param output output arg, e.g. std::vector<vector::ref>
      */
-    template <typename in_t, typename out_t>
-    void invoke(in_t &input,
-                out_t &output) const {
-        reinterpret_cast<void (*)(decltype(input), decltype(output))>(func_)(input, output);
+    void invoke(const input_list &input, vector_ref output) const {
+        reinterpret_cast<value_func>(func_)(input, output);
+    }
+    void invoke(const input_list &input, std::vector<matrix_ref> &output) const {
+        reinterpret_cast<jacobian_func>(func_)(input, output);
+    }
+    void invoke(const input_list &input, std::vector<std::vector<matrix_ref>> &output) const {
+        reinterpret_cast<hessian_func>(func_)(input, output);
     }
 };
 /**

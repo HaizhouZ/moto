@@ -1,14 +1,41 @@
 #include <moto/ocp/impl/custom_func.hpp>
-#include <moto/ocp/impl/data_mgr.hpp>
+#include <moto/ocp/impl/node_data.hpp>
+#include <moto/ocp/problem.hpp>
+#include <moto/ocp/soft_constr.hpp>
+#include <moto/solver/data_base.hpp>
+#include <moto/core/linear_backend.hpp>
 
 namespace moto {
+struct node_linear_plan {
+  struct condensation_phase {
+    linear_backend::batch_condensation_kernel kernel;
+    std::vector<scalar_t *> pointers;
+    std::vector<vector> zeros;
+    bool built = false;
+  };
+  linear_backend::batch_product_kernel constraint_gradient;
+  std::vector<scalar_t *> pointers;
+  bool gradient_built = false;
+  std::array<condensation_phase, 2> condensation;
+  linear_backend::batch_product_kernel jacobian_steps;
+  std::vector<scalar_t *> jacobian_step_pointers;
+  bool jacobian_steps_built = false;
+  struct scaling_phase {
+    linear_backend::rowwise_kernel scale, inf_norm, scaled_inf_norm;
+    std::vector<scalar_t *> pointers;
+    bool built = false;
+  };
+  array_type<scaling_phase, hard_constr_fields_non_dyn> scaling;
+};
 sym_data::sym_data(ocp *prob) : prob_(prob) {
     prob->wait_until_ready();
     auto set_default_val = [this](const sym &s) {
         if (s.default_value().size() > 0) {
-            auto v = this->prob_->extract(this->value_.at(s.field()), s);
+            auto v = this->prob_->extract(this->value_[s.field()], s);
             if (s.default_value().size() != s.dim())
-                throw std::runtime_error(fmt::format("default value size mismatch for sym {} in field {}, expected {}, got {}",
+                throw std::runtime_error(
+            fmt::format("default value size mismatch for sym {} in field {}, "
+                        "expected {}, got {}",
                                                      s.name(), field::name(s.field()), s.dim(), s.default_value().size()));
             v = s.default_value();
         }
@@ -35,7 +62,7 @@ void sym_data::integrate(field_t f, vector &dx, scalar_t alpha) {
 
 void sym_data::print() {
     auto p = prob_;
-    for (auto f : concat_fields(primal_fields, std::array{__p, __usr_var})) {
+    for (auto f : concat_fields(primal_fields, std::array{__s, __p, __usr_var})) {
         if (p->dim(f) == 0)
             continue; // skip empty fields
         fmt::println("Field {}: dim {}", field::name(f), p->dim(f));
@@ -48,83 +75,109 @@ vector_ref sym_data::get(const sym &s) {
     if (s.field() == __usr_var)
         return usr_value_.at(s.uid());
     else
-        return prob_->extract(value_.at(s.field()), s);
+        return prob_->extract(value_[s.field()], s);
 }
 
 node_data::node_data(const ocp_ptr_t &prob)
     : prob_(prob),
       sym_(new sym_data(prob.get())),
-      dense_(new merit_data(prob.get())),
+      dense_(new lag_data(prob.get())),
       shared_(new shared_data(prob.get(), sym_.get())) {
+    const auto &profile = prob->linear_profile();
+    for (const auto cf : constr_fields)
+        for (const auto pf : primal_fields)
+            dense_->approx_[cf].jac_[pf].plan(
+                profile.get(linear_target::jacobian, cf, pf));
+    for (const auto a : primal_fields) for (const auto b : primal_fields) {
+        dense_->lag_hess_[a][b].plan(
+            profile.get(linear_target::lag_hessian, a, b));
+        dense_->hessian_modification_[a][b].plan(
+            profile.get(linear_target::hessian_modification, a, b));
+    }
     for (size_t field : func_fields) {
-        size_t idx = 0;
         for (const generic_func &f : prob->exprs(field)) {
-            sparse_[f.field()].push_back(f.create_approx_data(*sym_, *dense_, *shared_));
+      sparse_[f.field()].push_back(
+          f.create_approx_data(*sym_, *dense_, *shared_));
         }
     }
 }
-void node_data::update_approximation(update_mode config) {
+void node_data::update_approximation(update_mode config, bool include_original_cost) {
     /// @todo: always eval residual?
     // call to precompute
-    bool update_cost = config == update_mode::eval_val || config == update_mode::eval_all;
-    if (update_cost) {
+    const bool eval_value = config == update_mode::eval_val || config == update_mode::eval_all;
+    const bool eval_jacobian = config == update_mode::eval_jac ||
+                               config == update_mode::eval_derivatives ||
+                               config == update_mode::eval_all;
+    const bool eval_hessian = config == update_mode::eval_hess ||
+                              config == update_mode::eval_derivatives ||
+                              config == update_mode::eval_all;
+    const bool eval_derivatives = eval_jacobian || eval_hessian;
+    const bool reset_lag_jac = eval_derivatives && !include_original_cost;
+    if (eval_value) {
         dense_->cost_ = 0.;
-        dense_->merit_ = 0.;
+        dense_->lag_ = 0.;
     }
-    // set merit jacobian to zero
-    if (config > update_mode::eval_val) {
-        for (auto &r : dense_->res_stat_) {
-            r.setZero();
-        }
+    // set lagrangian gradient to zero
+    if (eval_derivatives) {
         for (auto field : primal_fields) {
-            dense_->jac_[field].setZero();
-            dense_->jac_modification_[field].setZero();
+            if (reset_lag_jac)
+                dense_->lag_jac_[field].setZero();
+            dense_->lag_jac_corr_[field].setZero();
+            dense_->cost_jac_[field].setZero();
         }
 
-        if (config >= update_mode::eval_hess)
-            for (auto &hess_l_0 : dense_->hessian_) {
+        if (eval_hessian) {
+            for (auto &hess_l_0 : dense_->lag_hess_) {
                 for (auto &hess_l_1 : hess_l_0) {
                     hess_l_1.setZero();
                 }
             }
-        for (auto &hess_l_0 : dense_->hessian_modification_) {
-            for (auto &hess_l_1 : hess_l_0) {
-                hess_l_1.setZero();
+            for (auto &hess_l_0 : dense_->hessian_modification_) {
+                for (auto &hess_l_1 : hess_l_0) {
+                    hess_l_1.setZero();
+                }
             }
         }
     }
     for (const generic_custom_func &f : prob_->exprs(__pre_comp)) {
         f.custom_call((*shared_)[f]); ///< @todo pass update mode
     }
-    bool no_eval = config != update_mode::eval_val && config != update_mode::eval_all;
-    bool no_jac = config != update_mode::eval_jac && config != update_mode::eval_derivatives && config != update_mode::eval_all;
-    bool no_hess = config != update_mode::eval_hess && config != update_mode::eval_derivatives && config != update_mode::eval_all;
-    for_each<func_fields>([=, this](const generic_func &_f, func_approx_data &data) {
+  for_each<func_fields>(
+      [=, this](const generic_func &_f, func_approx_data &data) {
         _f.compute_approx(data,
-                          !no_eval && _f.order() >= approx_order::zero,
-                          !no_jac && _f.order() >= approx_order::first,
-                          !no_hess && _f.order() >= approx_order::second);
+                          eval_value && _f.order() >= approx_order::zero,
+                          eval_jacobian && _f.order() >= approx_order::first,
+                          eval_hessian && _f.order() >= approx_order::second);
     });
+  if (eval_jacobian)
+    condense_soft_constraints(eval_hessian);
     for (const generic_custom_func &f : prob_->exprs(__post_comp)) {
         f.custom_call((*shared_)[f]); ///< @todo pass update mode
     }
-    for (auto f : merit_data::stored_constr_fields) {
+    if (eval_derivatives && include_original_cost)
+        for (auto field : primal_fields)
+            dense_->lag_jac_[field] = dense_->cost_jac_[field];
+
+    for (auto f : lag_data::stored_constr_fields) {
         if (prob_->dim(f) == 0)
             continue; // skip empty jacobian
-        dense_->merit_ += dense_->approx_[f].v_.dot(dense_->dual_[f]);
-        if (config >= update_mode::eval_jac)
-            for (auto p : primal_fields) {
-                if (dense_->approx_[f].jac_[p].is_empty())
-                    continue; // skip empty jacobian
-                dense_->approx_[f].jac_[p].right_T_times(dense_->dual_[f], dense_->jac_[p]);
-            }
-    }
-    if (update_cost) {
+        if (eval_value)
+            dense_->lag_ += dense_->approx_[f].v_.dot(dense_->dual_[f]);
+  }
+        if (eval_jacobian)
+    assemble_constraint_gradient();
+    if (eval_value) {
         inf_prim_res_ = 0.;
-        for (const auto &field_data : dense_->approx_) {
-            if (field_data.v_.size() == 0)
-                continue; // skip empty fields
-            inf_prim_res_ = std::max(field_data.v_.cwiseAbs().maxCoeff(), inf_prim_res_);
+        prim_res_l1_ = 0.;
+        for (auto field : constr_fields) {
+            size_t idx = 0;
+            for (const generic_constr &c : prob_->exprs(field)) {
+                const auto &cd = *sparse_[field][idx];
+                const auto summary = c.primal_residual_summary(cd);
+                inf_prim_res_ = std::max(inf_prim_res_, summary.inf);
+                prim_res_l1_ += summary.l1;
+                ++idx;
+            }
         }
         inf_comp_res_ = 0.;
         for (const auto &comp : dense_->comp_) {
@@ -132,57 +185,237 @@ void node_data::update_approximation(update_mode config) {
                 continue; // skip empty fields
             inf_comp_res_ = std::max(comp.cwiseAbs().maxCoeff(), inf_comp_res_);
         }
-        dense_->merit_ += dense_->cost_;
+        dense_->lag_ += dense_->cost_;
     }
 }
 
+void node_data::prepare_soft_condensation(bool hessian) {
+  if (!linear_plan_)
+    linear_plan_ = std::make_shared<node_linear_plan>();
+  auto &phase = linear_plan_->condensation[hessian];
+  if (!phase.built) {
+    linear_backend::batch_condensation_spec batch;
+    for_each<ineq_soft_constr_fields>(
+        [&](const soft_constr &sf, soft_constr::data_map_t &sd) {
+          auto view = sf.condensation(sd, hessian);
+          if (view.residuals.empty())
+            return;
+          const size_t pointer_start = phase.pointers.size();
+          linear_backend::condensation_spec spec;
+          spec.rows = sf.dim();
+          spec.residual_signs = std::move(view.residual_signs);
+          std::vector<size_t> args;
+          std::vector<size_t> remap(sf.in_args().size(), size_t(-1));
+          for (size_t i = 0; i < sf.in_args().size(); ++i) {
+            if (!sd.has_jacobian_block(i) || sd.lag_jac_corr_[i].size() == 0)
+              continue;
+            const auto &sp = sf.jac_sparsity()[i];
+            remap[i] = args.size();
+            args.push_back(i);
+            spec.jacobians.push_back(
+                {sp.pattern, sp.row_offset, sp.col_offset, sp.rows, sp.cols});
+            phase.pointers.push_back(sd.jac_[i].data());
+          }
+          for (const auto *residual : view.residuals)
+            phase.pointers.push_back(const_cast<scalar_t *>(residual));
+          for (const auto *weight : view.weights) {
+            if (weight) {
+              phase.pointers.push_back(const_cast<scalar_t *>(weight));
+            } else {
+              phase.zeros.push_back(vector::Zero(sf.dim()));
+              phase.pointers.push_back(phase.zeros.back().data());
+            }
+          }
+          for (size_t i : args)
+            phase.pointers.push_back(sd.lag_jac_corr_[i].data());
+          for (size_t i : args) {
+            for (size_t j : args) {
+              if (sd.lag_hess_[i][j].size() == 0)
+                continue;
+              spec.hessian_pairs.emplace_back(remap[i], remap[j]);
+              phase.pointers.push_back(sd.lag_hess_[i][j].data());
+            }
+          }
+          const linear_backend::condensation_kernel layout(spec, nullptr, {});
+          if (phase.pointers.size() - pointer_start != layout.pointer_count())
+            throw std::runtime_error(fmt::format(
+                "condensation pointer layout mismatch for {}: expected {}, got {}",
+                sf.name(), layout.pointer_count(),
+                phase.pointers.size() - pointer_start));
+          batch.constraints.push_back(std::move(spec));
+        });
+    if (!batch.constraints.empty())
+      phase.kernel = linear_backend::compile_batch_condensation(std::move(batch));
+    phase.built = true;
+  }
+}
+
+void node_data::condense_soft_constraints(bool hessian) {
+  prepare_soft_condensation(hessian);
+  auto &phase = linear_plan_->condensation[hessian];
+  if (!phase.pointers.empty())
+    phase.kernel(phase.pointers);
+}
+
+void node_data::prepare_constraint_gradient() {
+  if (!linear_plan_)
+    linear_plan_ = std::make_shared<node_linear_plan>();
+  if (!linear_plan_->gradient_built) {
+    auto &plan = *linear_plan_;
+    linear_backend::batch_product_spec batch;
+    for (auto f : lag_data::stored_constr_fields) {
+      if (prob_->dim(f) == 0)
+        continue;
+      for (auto p : primal_fields) {
+        const auto &jac = dense_->approx_[f].jac_[p];
+        if (jac.is_empty())
+          continue;
+        auto pointers = linear_backend::panel_pointers(jac);
+        plan.pointers.insert(plan.pointers.end(), pointers.begin(),
+                             pointers.end());
+        plan.pointers.push_back(dense_->dual_[f].data());
+        plan.pointers.push_back(dense_->lag_jac_[p].data());
+        batch.products.push_back({.sparse = linear_backend::describe(jac),
+                                  .op = linear_backend::product_op::transpose_times,
+                                  .other_rows = jac.rows(),
+                                  .other_cols = 1,
+                                  .out_rows = jac.cols(),
+                                  .out_cols = 1});
+      }
+    }
+    if (!batch.products.empty())
+      plan.constraint_gradient =
+          linear_backend::compile_batch_product(std::move(batch));
+    plan.gradient_built = true;
+  }
+}
+
+void node_data::assemble_constraint_gradient() {
+  prepare_constraint_gradient();
+  if (!linear_plan_->pointers.empty())
+    linear_plan_->constraint_gradient(linear_plan_->pointers);
+}
+
+void node_data::prepare_soft_jacobian_steps() {
+  if (!linear_plan_)
+    linear_plan_ = std::make_shared<node_linear_plan>();
+  auto &plan = *linear_plan_;
+  if (!plan.jacobian_steps_built) {
+    std::vector<std::pair<size_t, std::vector<linear_backend::panel_layout>>>
+        products;
+    for_each<ineq_soft_constr_fields>(
+        [&](const soft_constr &sf, soft_constr::data_map_t &sd) {
+          auto output = sf.jacobian_step(sd);
+          if (output.size() == 0)
+            return;
+          std::vector<linear_backend::panel_layout> layouts;
+          std::vector<size_t> args;
+          for (size_t i = 0; i < sf.in_args().size(); ++i) {
+            if (!sd.has_jacobian_block(i) || sd.prim_step_[i].size() == 0)
+              continue;
+            const auto &sp = sf.jac_sparsity()[i];
+            layouts.push_back(
+                {sp.pattern, sp.row_offset, sp.col_offset, sp.rows, sp.cols});
+            args.push_back(i);
+            plan.jacobian_step_pointers.push_back(sd.jac_[i].data());
+          }
+          for (size_t i : args)
+            plan.jacobian_step_pointers.push_back(sd.prim_step_[i].data());
+          plan.jacobian_step_pointers.push_back(output.data());
+          products.emplace_back(sf.dim(), std::move(layouts));
+        });
+    if (!products.empty())
+      plan.jacobian_steps =
+          linear_backend::compile_batch_jacobian_product(std::move(products));
+    plan.jacobian_steps_built = true;
+  }
+}
+
+void node_data::evaluate_soft_jacobian_steps() {
+  prepare_soft_jacobian_steps();
+  if (!linear_plan_->jacobian_step_pointers.empty())
+    linear_plan_->jacobian_steps(linear_plan_->jacobian_step_pointers);
+}
+
+void node_data::prepare_linear_plan() {
+  prepare_constraint_gradient();
+  prepare_soft_condensation(false);
+  prepare_soft_condensation(true);
+  prepare_soft_jacobian_steps();
+  prepare_scaling_plan();
+}
+
+void node_data::prepare_scaling_plan() const {
+  if (!linear_plan_)
+    linear_plan_ = std::make_shared<node_linear_plan>();
+  for (const auto cf : hard_constr_fields_non_dyn) {
+    auto &phase = linear_plan_->scaling[cf];
+    if (phase.built)
+      continue;
+    linear_backend::matrix_layout layout{
+        .rows = static_cast<size_t>(dense_->approx_[cf].v_.size())};
+    for (const auto pf : primal_fields) {
+      const auto &jac = dense_->approx_[cf].jac_[pf];
+      if (jac.is_empty())
+        continue;
+      auto part = linear_backend::describe(jac);
+      layout.panels.insert(layout.panels.end(), part.panels.begin(),
+                           part.panels.end());
+      auto pointers = linear_backend::panel_pointers(jac);
+      phase.pointers.insert(phase.pointers.end(), pointers.begin(),
+                            pointers.end());
+    }
+    if (!layout.panels.empty()) {
+      auto kernels = linear_backend::compile_rowwise(std::move(layout));
+      phase.scale = std::move(kernels.scale);
+      phase.inf_norm = std::move(kernels.inf_norm);
+      phase.scaled_inf_norm = std::move(kernels.scaled_inf_norm);
+    }
+    phase.built = true;
+  }
+}
+
+void node_data::constraint_row_infnorms(field_t field, vector &norms,
+                                        const vector *scale) const {
+  prepare_scaling_plan();
+  const auto &phase = linear_plan_->scaling[field];
+  if (phase.pointers.empty())
+    return;
+  const auto &kernel = scale ? phase.scaled_inf_norm : phase.inf_norm;
+  kernel(phase.pointers, scale ? scale->data() : nullptr, norms.data());
+}
+
+void node_data::scale_constraint_jacobian(field_t field,
+                                          const vector &scale) const {
+  prepare_scaling_plan();
+  const auto &phase = linear_plan_->scaling[field];
+  if (!phase.pointers.empty())
+    phase.scale(phase.pointers, scale.data(), nullptr);
+}
+
+void node_data::configure_scaling_profile(bool enabled) {
+  bool changed = false;
+  for (const auto cf : hard_constr_fields_non_dyn)
+    for (const auto pf : primal_fields)
+      changed |= dense_->approx_[cf].jac_[pf].set_dynamic_eye(enabled);
+  if (changed)
+    linear_plan_.reset();
+}
+
 void node_data::print_residuals() const {
-    for (auto f : merit_data::stored_constr_fields) {
+    for (auto f : lag_data::stored_constr_fields) {
         fmt::println("Field {}: dim {} residual {}", field::name(f), dense_->approx_[f].v_.size(),
                      dense_->approx_[f].v_.transpose());
     }
 }
 
-namespace impl {
-void data_mgr::create_data_batch(const ocp_ptr_t &prob, size_t N) {
-    data_.try_emplace(prob->uid());
-    auto &pool = data_[prob->uid()];
-    std::lock_guard _lock(pool.mtx_);
-    for (size_t i = 0; i < N; i++) {
-        pool.emplace(maker_(prob));
+void node_data::bind_soft_runtime_owner(solver::data_base *owner) {
+    for (auto field : ineq_soft_constr_fields) {
+        for (auto &ptr : sparse_[field]) {
+            if (auto *sd = dynamic_cast<soft_constr::data_map_t *>(ptr.get())) {
+                sd->solver_data_ = owner;
+            }
+        }
     }
 }
-
-node_data_ptr_t data_mgr::get_data(const ocp_ptr_t &prob) {
-    data_.try_emplace(prob->uid());
-    auto &pool = data_[prob->uid()];
-    std::lock_guard _lock(pool.mtx_);
-    if (!pool.empty()) {
-        auto p = std::move(pool.top());
-        pool.pop();
-        return p;
-    } else {
-        return nullptr;
-    }
-}
-
-node_data *data_mgr::acquire(const ocp_ptr_t &prob) {
-    auto p = get_data(prob);
-    if (p) {
-        return p.release();
-    } else {
-        return maker_(prob);
-    }
-}
-
-node_data *data_mgr::acquire(const node_data *rhs) {
-    return acquire(rhs->prob_);
-}
-
-void data_mgr::release(node_data *data) {
-    auto &pool = data_[data->prob_->uid()];
-    std::lock_guard _lock(pool.mtx_);
-    pool.emplace(data);
-}
-} // namespace impl
 } // namespace moto

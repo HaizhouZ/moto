@@ -12,7 +12,9 @@ namespace utils {
 template <typename T>
 struct clone_base {
     clone_base() = default;
-    using clone_ptr = clone_base *;
+    // Keep the concrete hierarchy's base type in the static return type. This
+    // lets shared_ptr initialize T's enable_shared_from_this state for clones.
+    using clone_ptr = T *;
     virtual clone_ptr clone() const { return nullptr; }; ///< clone the object
     virtual ~clone_base() = default;
 };

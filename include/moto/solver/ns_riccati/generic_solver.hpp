@@ -12,11 +12,22 @@ struct generic_solver {
 
     virtual ns_riccati_data create_data(node_data *full_data);
     /**
-     * @brief factorization for the nullspace kernel using the hard constraints
-     * @details will directly add related parts to the Q-derivatives
+     * @brief factorization for the nullspace kernel using the hard constraints.
+     * @details will directly add related parts to the Q-derivatives.
+     *          When @p gauss_newton is true, instead of projecting the equality constraints
+     *          into the cost via nullspace, treats them as objectives (Gauss-Newton mode)
+     *          and runs the Riccati in unconstrained mode while preserving lu_eq_
+     *          for the dual step.
+     * @param cur          current node data
+     * @param gauss_newton if true, run in Gauss-Newton mode
+     */
+    virtual void ns_factorization(ns_riccati_data *cur, bool gauss_newton = false);
+    /**
+     * @brief factorization for the correction step
+     * @details reuses the standard nullspace factorization without merging Jacobian modifications
      * @param cur current node data
      */
-    virtual void ns_factorization(ns_riccati_data *cur);
+    virtual void ns_factorization_correction(ns_riccati_data *cur);
     /**
      * @brief perform the riccati recursion for the current node
      * @details will update the Q-derivatives and the nullspace data
@@ -63,15 +74,15 @@ struct generic_solver {
      * @param cur current node data
      * @param finalize_dual whether to finalize the dual step
      */
-    virtual void finalize_newton_step(ns_riccati_data *cur, bool finalize_dual = true);
+    virtual void finalize_primal_step(ns_riccati_data *cur);
 
     virtual void finalize_dual_newton_step(ns_riccati_data *cur);
     /**
      * @brief finalize the newton step for the current node after correction
-     * @details will correct the primal steps before finalizing the dual steps
+     * @note will update the Q derivatives with the correction terms, so it should be called after the correction step
      * @param cur current node data
      */
-    virtual void finalize_newton_step_correction(ns_riccati_data *cur);
+    virtual void finalize_primal_step_correction(ns_riccati_data *cur);
     /**
      * @brief line search step for the current node
      *

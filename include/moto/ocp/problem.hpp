@@ -2,90 +2,103 @@
 #define __MOTO_PROBLEM_HPP__
 
 #include <array>
-#include <map>
+#include <atomic>
+#include <functional>
+#include <memory>
+#include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include <moto/core/expr.hpp>
+#include <moto/core/field_layout_store.hpp>
+#include <moto/core/sparse.hpp>
+#include <moto/ocp/sym.hpp>
 
 namespace moto {
+class ocp_base;
+def_ptr(ocp_base);
 class ocp;
 def_ptr(ocp);
-/**
- * @brief problem formulation of an OCP stage
- *
- */
-class ocp {
-  protected:
-    ocp() { uid_.set_inc(); };     // default constructor
-    ocp(const ocp &rhs) = default; // copy constructor
-    bool add_impl(expr &);
-    /// @brief maintain the order of primal variables by dynamics, 
-    /// required by block-matrix coputation
-    void maintain_order();
-    static size_t max_uid; ///< uid used to index global expressions
-    bool finalized_ = false;
-    utils::unique_id<ocp> uid_;
-    /// collection of all expressions in the problem
-    std::array<expr_list, field::num> expr_, disabled_expr_, pruned_expr_;
-    /// data index of expr in serialized vector, by uid
-    std::unordered_map<size_t, size_t> flatten_idx_;
-    /// data index of tagent space var of expr in serialized vector, by uid
-    std::unordered_map<size_t, size_t> flatten_tidx_;
-    /// position of expr in expr_ e.g., no. xxx, by uid
-    std::unordered_map<size_t, size_t> pos_by_uid_;
-    /// dimension of each field
-    std::array<size_t, field::num> dim_{};
-    /// tangent space dimension of each field
-    std::array<size_t, field::num_prim> tdim_{};
-    /// set of uids to check for duplicates when adding expr
-    std::unordered_set<size_t> uids_, disabled_uids_, pruned_uids_;
+class stage_ocp;
+def_ptr(stage_ocp);
+class node_view;
+class graph_model;
+class graph_composer;
 
-    void set_dim_and_idx();
-    void finalize();
-    inline void field_read_guard() const {
-        assert(finalized_ && "Cannot access before the problem is finalized. "
-                             "Please call finalize() before accessing expressions.");
+enum class stage_expr_role : size_t {
+    interval,
+    start_node,
+    end_node,
+};
+
+enum class linear_target : size_t { jacobian, lag_hessian, hessian_modification };
+
+struct ocp_linear_profile {
+    std::unordered_map<size_t, std::vector<sparse_block_spec>> blocks;
+    static constexpr size_t key(linear_target target, field_t a, field_t b) {
+        return (static_cast<size_t>(target) * field::num + a) * field::num + b;
     }
-    /// @brief get data pointer for expr in the serialized vector
+    const std::vector<sparse_block_spec> &get(linear_target target, field_t a, field_t b) const {
+        static const std::vector<sparse_block_spec> empty;
+        const auto it = blocks.find(key(target, a, b));
+        return it == blocks.end() ? empty : it->second;
+    }
+};
+
+class ocp_base : protected field_layout_store<expr_list> {
+  public:
+    struct active_status_config {
+        expr_list deactivate_list;
+        expr_list activate_list;
+        active_status_config() = default;
+        active_status_config(const expr_inarg_list &deactivate,
+                             const expr_inarg_list &activate)
+            : deactivate_list(deactivate), activate_list(activate) {}
+        bool empty() const { return deactivate_list.empty() && activate_list.empty(); }
+    };
+
+  protected:
+    ocp_base();
+    ocp_base(const ocp_base &rhs);
+    ~ocp_base();
+    bool add_impl(expr_handle);
+    void maintain_order();
+    virtual void on_modified();
+    bool finalized_ = false;
+    utils::unique_id<ocp_base> uid_;
+    std::array<expr_list, field::num> disabled_expr_, pruned_expr_;
+    std::unordered_set<size_t> uids_, disabled_uids_, pruned_uids_;
+    ocp_linear_profile linear_profile_;
+
+    void finalize();
+    void build_linear_profile();
+    void refresh_copy(const active_status_config &config);
+    void move_active_expr(const expr &ex, bool prune);
+    bool restore_inactive_expr(const expr &ex, bool from_pruned);
+    inline void field_read_guard() const {
+        assert(finalized_ && "Cannot access before the problem is finalized. Please call finalize() before accessing expressions.");
+    }
     scalar_t *get_data_ptr(scalar_t *data, const expr &ex) const {
         return data + get_expr_start(ex);
     }
-    /// @deprecated, use get_data_ptr instead
-    // scalar_t *get_data_ptr(scalar_t *data, const expr &ex, size_t offset) const {
-    //     return data + get_expr_start(ex) * offset;
-    // }
 
   public:
-    CONST_PROPERTY(uid); ///< getter for uid
-    /// @brief getter for enabled expressions in field f
-    const auto &exprs(size_t f) const { return expr_.at(f); }
-    /// @brief getter for position of expr in its field, by uid
-    const auto &pos(const expr &ex) const {
-        field_read_guard();
-        return pos_by_uid_.at(ex.uid());
-    }
-    /// @brief getter for dimension of field f
-    size_t dim(size_t f) const {
-        field_read_guard();
-        return dim_.at(f);
-    }
-    /// @brief getter for num of exprs in field f
-    size_t num(size_t f) const { return expr_[f].size(); }
-    /// @brief getter for tangent space dimension of field f
-    size_t tdim(size_t f) const {
-        field_read_guard();
-        return tdim_.at(f);
-    }
-    /// @brief check if expr is in the problem
-    bool contains(const expr &ex, bool include_sub_prob = true) const;
-    /// @brief check if expr is active in the problem
-    bool is_active(const expr &ex, bool include_sub_prob = true) const;
-    /// @brief wait until all expressions in the problem are ready, throw if any expression fails to be ready
+    const auto &uid() const { return uid_; }
+    const expr_list &exprs(size_t f) const;
+    size_t pos(const expr &ex) const;
+    size_t dim(size_t f) const;
+    size_t num(size_t f) const;
+    size_t tdim(size_t f) const;
+    bool contains(const expr &ex) const;
+    bool is_active(const expr &ex) const;
     void wait_until_ready();
-    /// @brief print a summary of the problem
     void print_summary();
+    const ocp_linear_profile &linear_profile() const {
+        field_read_guard();
+        return linear_profile_;
+    }
 
     vector_ref extract(vector_ref data, const expr &ex) const {
         return data.segment(get_expr_start(ex), ex.dim());
@@ -99,78 +112,141 @@ class ocp {
     row_vector_ref extract_row_tangent(row_vector_ref data, const expr &ex) const {
         return data.segment(get_expr_start_tangent(ex), ex.tdim());
     }
-    /**
-     * @brief add expr to problem formulation
-     * @note will copy the shared pointer
-     * @param ex expression to be added
-     */
-    template <typename T>
-        requires std::is_base_of_v<shared_expr, std::remove_cvref_t<T>> ||
-                 std::is_base_of_v<expr, std::remove_reference_t<T>>
-    void add(T &&ex) { add_impl(ex); }
-    /// add multiple exprs
+
+    void add(expr_handle ex) { add_impl(std::move(ex)); }
+    void add(expr &ex) { add(ex.handle()); }
+    void add(const expr &ex) { add(ex.handle()); }
+
     void add(const expr_inarg_list &exprs) {
         for (expr &ex : exprs) {
             add(ex);
         }
     }
 
-    /// add a sub-problem
-    void add(const ocp_ptr_t &sub) {
-        sub_probs_.push_back(sub);
-    }
+    size_t get_expr_start(const expr &ex) const;
+    size_t get_expr_start_tangent(const expr &ex) const;
 
-    /**
-     * @brief get start index of expr in its field
-     */
-    size_t get_expr_start(const expr &ex) const {
-        try {
-            field_read_guard();
-            return flatten_idx_.at(ex.uid());
-        } catch (const std::exception &e) {
-            throw std::runtime_error(fmt::format("expr {} uid {} cannot be found", ex.name(), ex.uid()));
+    virtual bool accepts_term(const expr_handle &ex, std::string *reason = nullptr) const;
+    void update_active_status(const active_status_config &config);
+
+  protected:
+    bool allow_inconsistent_dynamics_ = false;
+    bool automatic_reorder_primal_ = true;
+
+  public:
+    bool allow_inconsistent_dynamics() const { return allow_inconsistent_dynamics_; }
+    void set_allow_inconsistent_dynamics(bool value) {
+        if (allow_inconsistent_dynamics_ != value) {
+            allow_inconsistent_dynamics_ = value;
+            on_modified();
         }
     }
-
-    size_t get_expr_start_tangent(const expr &ex) const {
-        try {
-            field_read_guard();
-            return flatten_tidx_.at(ex.uid());
-        } catch (const std::exception &e) {
-            throw std::runtime_error(fmt::format("expr {} uid {} cannot be found", ex.name(), ex.uid()));
+    bool automatic_reorder_primal() const { return automatic_reorder_primal_; }
+    void set_automatic_reorder_primal(bool value) {
+        if (automatic_reorder_primal_ != value) {
+            automatic_reorder_primal_ = value;
+            on_modified();
         }
     }
+};
 
+class ocp : public ocp_base {
+  protected:
+    ocp() = default;
+    ocp(const ocp &rhs) = default;
+
+  public:
     static auto create() { return std::shared_ptr<ocp>(new ocp()); }
+    ocp_ptr_t copy(const active_status_config &config = {}) const;
 
-    /// @brief configuration for cloning an ocp
-    /// @note deactivate_list will treated as forced deactivation, thus automatic-pruning will not re-enable them
-    /// @note activate_list will re-enable pruned expressions if their args are active
-    ///      but will NOT re-enable previously user-disabled expressions
-    /// @warning if an expr shows up in both lists, it will be deactivated
-    struct active_status_config {
-        expr_inarg_list deactivate_list; ///< list of expressions to be deactivated in the cloned problem
-        expr_inarg_list activate_list;   ///< list of expressions to be re-activated in the cloned problem
-        bool empty() const { return deactivate_list.empty() && activate_list.empty(); }
-    };
+  protected:
+};
 
-    ocp_ptr_t clone(const active_status_config &config = {}) const;
-    void update_active_status(const active_status_config &config, bool update_sub_probs = true);
+class stage_ocp : public ocp, public std::enable_shared_from_this<stage_ocp> {
+    friend class node_view;
+    friend class graph_model;
+    friend class graph_composer;
+
+  protected:
+    stage_ocp() = default;
+    stage_ocp(const stage_ocp &rhs);
 
   private:
-    bool allow_inconsistent_dynamics_ = false; ///< allow inconsistent dynamics when updating active status
-    bool automatic_reorder_primal_ = true;     ///< automatically reorder primal variables by dynamics
-    std::vector<ocp_ptr_t> sub_probs_;         ///< list of sub-problems owned by this problem
+    std::unordered_map<size_t, unsigned> endpoint_role_mask_by_uid_;
+    std::function<void()> mutation_callback_;
+    std::atomic<size_t> mutation_revision_{1};
+    bool add_with_role(expr_handle ex, stage_expr_role role);
+    bool validate_stage_term(const expr_handle &ex, std::string *reason) const;
+    bool validate_endpoint_term(const expr_handle &ex, std::string *reason) const;
+    void set_mutation_callback(std::function<void()> callback);
+    size_t mutation_revision() const noexcept {
+        return mutation_revision_.load(std::memory_order_acquire);
+    }
+    bool has_role(const expr &ex, stage_expr_role role) const;
+    void on_modified() override;
+
   public:
-    PROPERTY(allow_inconsistent_dynamics) ///< getter and setter for allow_inconsistent_dynamics
-    PROPERTY(automatic_reorder_primal)    ///< getter and setter for automatic_reorder_primal
-    const auto &sub_probs() const { return sub_probs_; }
+    static auto create() { return std::shared_ptr<stage_ocp>(new stage_ocp()); }
+    /// Independent stage container sharing immutable expression handles.
+    stage_ocp_ptr_t copy(const active_status_config &config = {}) const;
+    bool accepts_term(const expr_handle &ex, std::string *reason = nullptr) const override;
+
+    void add(expr_handle ex) { add_with_role(std::move(ex), stage_expr_role::interval); }
+    void add(expr &ex) { add(ex.handle()); }
+    void add(const expr &ex) { add(ex.handle()); }
+
+    void add(const expr_inarg_list &exprs) {
+        for (expr &ex : exprs) {
+            add(ex);
+        }
+    }
+
+    node_view st();
+    node_view ed();
+};
+
+class node_view {
+    friend class graph_model;
+
+  public:
+    node_view() = default;
+    node_view(const stage_ocp_ptr_t &stage, stage_expr_role role);
+
+  public:
+    void add(expr_handle ex) {
+        auto owner = owner_;
+        if (!owner) {
+            throw std::runtime_error("Cannot add to an empty endpoint");
+        }
+        if (!ex) {
+            throw std::runtime_error("Cannot add null expression to endpoint");
+        }
+        std::string reason;
+        if (!owner->validate_endpoint_term(ex, &reason)) {
+            throw std::runtime_error(fmt::format(
+                "Cannot add expression {} uid {} to endpoint: {}",
+                ex->name(), ex->uid(), reason));
+        }
+        owner->add_with_role(std::move(ex), role_);
+    }
+    void add(expr &ex) { add(ex.handle()); }
+    void add(const expr &ex) { add(ex.handle()); }
+
+    void add(const expr_inarg_list &exprs) {
+        for (expr &ex : exprs) {
+            add(ex);
+        }
+    }
+
+    stage_ocp_ptr_t stage() const { return owner_; }
+    stage_expr_role role() const { return role_; }
+    explicit operator bool() const { return bool(owner_); }
+
+  private:
+    stage_ocp_ptr_t owner_;
+    stage_expr_role role_ = stage_expr_role::start_node;
 };
 
 } // namespace moto
-
-extern template void moto::ocp::add<const moto::shared_expr &>(const moto::shared_expr &ex);
-extern template void moto::ocp::add<const moto::shared_expr>(const moto::shared_expr &&ex);
-extern template void moto::ocp::add<moto::shared_expr>(moto::shared_expr &&ex);
 
 #endif // __MOTO_PROBLEM_HPP__

@@ -2,7 +2,6 @@
 #define __NS_RICCATI_DATA__
 
 #include <moto/solver/data_base.hpp>
-
 #include <Eigen/Cholesky>
 #include <Eigen/LU>
 #include <moto/utils/blasfeo_factorizer/blasfeo_llt.hpp>
@@ -24,8 +23,8 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
     size_t ns, nc, ncstr;
     size_t nis, nic; // number of active inequality constraints
     size_t nz;
-    sparse_mat &F_x, &F_u;
-    sparse_mat &s_y, &s_x, &c_x, &c_u;
+    sparse_matrix &F_x, &F_u;
+    sparse_matrix &s_y, &s_x, &c_x, &c_u;
     vector &F_0;
 
     ///      @brief null space data struct, contains all the elements in null-space based KKT solving
@@ -83,7 +82,9 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
     ns_riccati_data(ns_riccati_data &&rhs) = default;
 
     void update_projected_dynamics();
+    void update_projected_dynamics_residual();
     void apply_jac_y_inverse_transpose(vector &v, vector &dst);
+    void prepare_linear_backend();
 };
 } // namespace ns_riccati
 } // namespace solver

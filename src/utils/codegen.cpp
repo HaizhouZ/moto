@@ -1,5 +1,12 @@
 #include <moto/utils/codegen.hpp>
 
+#include <cerrno>
+#include <cstring>
+#include <fcntl.h>
+#include <numeric>
+#include <sys/file.h>
+#include <unistd.h>
+
 namespace moto {
 namespace utils {
 
@@ -7,6 +14,19 @@ namespace utils {
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 namespace cs_codegen {
+
+cs::SX tangent_map(const sym &input) {
+    auto step = cs::SX::sym(input.name() + "_step", input.tdim());
+    return cs::SX::substitute(
+        cs::SX::jacobian(input.symbolic_integrate(input, step), step), step,
+        cs::SX::zeros(input.tdim(), 1));
+}
+
+cs::SX tangent_jacobian(const cs::SX &output, const sym &input) {
+    if (!input.has_non_trivial_integration())
+        return cs::SX::jacobian(output, input);
+    return cs::SX::mtimes(cs::SX::jacobian(output, input), tangent_map(input));
+}
 
 void job_list::wait_until_finished() {
     for (auto &w : jobs) {
@@ -30,9 +50,221 @@ auto vec_type() {
     }
 }
 
+void compress_structured_output(cs::SX &expr, sparsity *sp) {
+    if (expr.is_empty() || expr.is_zero()) {
+        expr = cs::SX();
+        if (sp != nullptr)
+            *sp = sparsity::unknown;
+        return;
+    }
+    if (expr.is_square() && expr.sparsity().is_diag()) {
+        bool is_eye = false;
+        expr = cs::SX::diag(expr);
+        if (expr.is_one())
+            is_eye = true;
+        if (is_eye)
+            expr = cs::SX::ones(expr.rows());
+        if (sp != nullptr)
+            *sp = is_eye ? sparsity::eye : sparsity::diag;
+    } else {
+        if (sp != nullptr)
+            *sp = sparsity::dense;
+    }
+}
+
+void compress_structured_output(cs::SX &expr, sp_info *sp) {
+    if (expr.is_empty() || expr.is_zero()) {
+        expr = cs::SX();
+        if (sp != nullptr)
+            sp->pattern = sparsity::unknown;
+        return;
+    }
+    if (expr.is_square() && expr.sparsity().is_diag()) {
+        bool is_eye = false;
+        expr = cs::SX::diag(expr);
+        if (expr.is_one())
+            is_eye = true;
+        if (is_eye)
+            expr = cs::SX::ones(expr.rows());
+        if (sp != nullptr)
+            sp->pattern = is_eye ? sparsity::eye : sparsity::diag;
+    } else {
+        if (sp != nullptr)
+            sp->pattern = sparsity::dense;
+    }
+}
+
+void compress_jacobian(cs::SX &expr, sp_info *sp) {
+    if (sp == nullptr) {
+        return;
+    }
+
+    const int rows = expr.rows();
+    const int cols = expr.columns();
+    sp->pattern = sparsity::dense;
+    sp->row_offset = 0;
+    sp->col_offset = 0;
+    sp->rows = static_cast<size_t>(rows);
+    sp->cols = static_cast<size_t>(cols);
+
+    if (expr.is_empty() || expr.is_zero()) {
+        expr = cs::SX();
+        sp->pattern = sparsity::unknown;
+        return;
+    }
+    const int nnz = expr.nnz();
+  if (nnz > std::min(rows, cols))
+        return;
+    for (int r = 0; r + nnz <= rows; ++r) {
+    for (int c = 0; c + nnz <= cols; ++c) {
+      auto block = expr(cs::Slice(r, r + nnz), cs::Slice(c, c + nnz));
+        if (block.nnz() == nnz) {
+            compress_structured_output(block, &sp->pattern);
+            if (sp->pattern == sparsity::diag || sp->pattern == sparsity::eye) {
+                expr = block;
+          sp->row_offset = r;
+          sp->col_offset = c;
+          sp->rows = nnz;
+          sp->cols = nnz;
+                return;
+        }
+            }
+        }
+    }
+}
+
+struct structured_piece {
+    sp_info sp;
+    cs::SX expression;
+};
+
+std::vector<structured_piece> split_hessian_blocks(const cs::SX &expression) {
+    cs::SX expr = cs::SX::sparsify(expression);
+    const size_t rows = static_cast<size_t>(expr.rows());
+    const size_t cols = static_cast<size_t>(expr.columns());
+    const auto one_piece = [&]() {
+        sp_info sp{sparsity::dense, 0, 0, rows, cols};
+        compress_structured_output(expr, &sp);
+        return std::vector<structured_piece>{{sp, std::move(expr)}};
+    };
+    if (rows != cols || rows == 0)
+        return one_piece();
+
+    std::vector<size_t> parent(rows);
+    std::iota(parent.begin(), parent.end(), 0);
+    const auto find = [&](size_t x) {
+        while (parent[x] != x) {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        return x;
+    };
+    const auto merge = [&](size_t a, size_t b) {
+        a = find(a);
+        b = find(b);
+        if (a != b) parent[b] = a;
+    };
+    const auto &structure = expr.sparsity();
+    const auto *row_indices = structure.row();
+    const auto *col_offsets = structure.colind();
+    for (casadi_int col = 0; col < structure.columns(); ++col)
+        for (casadi_int k = col_offsets[col]; k < col_offsets[col + 1]; ++k)
+            if (row_indices[k] != col)
+                merge(static_cast<size_t>(row_indices[k]),
+                      static_cast<size_t>(col));
+
+    std::vector<std::vector<size_t>> components(rows);
+    for (size_t i = 0; i < rows; ++i)
+        components[find(i)].push_back(i);
+    for (const auto &component : components) {
+        if (component.size() < 2) continue;
+        if (component.back() - component.front() + 1 != component.size())
+            return one_piece();
+        const auto start = static_cast<casadi_int>(component.front());
+        const auto end = static_cast<casadi_int>(component.back() + 1);
+        if (expr(cs::Slice(start, end), cs::Slice(start, end)).nnz() !=
+            static_cast<casadi_int>(component.size() * component.size()))
+            return one_piece();
+    }
+
+    std::vector<structured_piece> pieces;
+    for (size_t i = 0; i < rows;) {
+        const auto &component = components[find(i)];
+        if (component.size() > 1) {
+            const size_t count = component.size();
+            const auto begin = static_cast<casadi_int>(i);
+            const auto finish = static_cast<casadi_int>(i + count);
+            pieces.push_back({{sparsity::dense, i, i, count, count},
+                              expr(cs::Slice(begin, finish),
+                                   cs::Slice(begin, finish))});
+            i += count;
+            continue;
+        }
+        if (expr(static_cast<casadi_int>(i), static_cast<casadi_int>(i)).is_zero()) {
+            ++i;
+            continue;
+        }
+        size_t end = i + 1;
+        while (end < rows && components[find(end)].size() == 1 &&
+               !expr(static_cast<casadi_int>(end),
+                     static_cast<casadi_int>(end)).is_zero())
+            ++end;
+        const auto begin = static_cast<casadi_int>(i);
+        const auto finish = static_cast<casadi_int>(end);
+        cs::SX block = expr(cs::Slice(begin, finish),
+                            cs::Slice(begin, finish));
+        sparsity pattern;
+        compress_structured_output(block, &pattern);
+        pieces.push_back({{pattern, i, i, end - i, end - i}, std::move(block)});
+        i = end;
+    }
+    return pieces.empty() ? one_piece() : pieces;
+}
+
 namespace impl {
 // job_list jobs_{};
-std::mutex mutex_{};
+std::mutex func_mutex_map_mutex_{};
+std::unordered_map<std::string, std::shared_ptr<std::mutex>> func_mutexes_{};
+std::unordered_map<std::string, std::string> completed_compile_flags_{};
+
+std::shared_ptr<std::mutex> get_func_mutex(const std::string &func_name) {
+    std::lock_guard<std::mutex> lock(func_mutex_map_mutex_);
+    auto [it, inserted] = func_mutexes_.try_emplace(func_name, std::make_shared<std::mutex>());
+    return it->second;
+}
+
+class process_codegen_lock {
+  public:
+    explicit process_codegen_lock(const fs::path &lock_path) {
+        fd_ = ::open(lock_path.c_str(), O_CREAT | O_RDWR, 0666);
+        if (fd_ == -1) {
+            throw std::runtime_error(fmt::format("failed to open codegen lock {}: {}",
+                                                 lock_path.string(), std::strerror(errno)));
+        }
+        while (::flock(fd_, LOCK_EX) == -1) {
+            if (errno == EINTR) {
+                continue;
+            }
+            const std::string msg = std::strerror(errno);
+            ::close(fd_);
+            fd_ = -1;
+            throw std::runtime_error(fmt::format("failed to lock codegen file {}: {}",
+                                                 lock_path.string(), msg));
+        }
+    }
+    process_codegen_lock(const process_codegen_lock &) = delete;
+    process_codegen_lock &operator=(const process_codegen_lock &) = delete;
+    ~process_codegen_lock() {
+        if (fd_ != -1) {
+            ::flock(fd_, LOCK_UN);
+            ::close(fd_);
+        }
+    }
+
+  private:
+    int fd_ = -1;
+};
+
 // Generates a list of (row, col) pairs from CasADi's CCS sparsity format
 std::vector<std::pair<int, int>> ccs_index_to_ij(const cs::Sparsity &sp) {
     std::vector<std::pair<int, int>> ij_pairs;
@@ -46,14 +278,13 @@ std::vector<std::pair<int, int>> ccs_index_to_ij(const cs::Sparsity &sp) {
     return ij_pairs;
 }
 // Transforms raw C code to modern C++ with Eigen
-std::string process_generated_code(
-    const std::string &raw_c_code,
+std::string process_generated_code(const std::string &raw_c_code,
     const std::string &func_name,
     const std::vector<cs::SX> &sx_inputs,
     const std::vector<cs::SX> &sx_outputs,
     bool append,
     bool with_aux) {
-    bool is_hessian = func_name.find("_hess") != std::string::npos;
+    const bool is_hessian = func_name.ends_with("_hess");
     // Pre-compute CCS to (row, col) index maps
     std::vector<std::vector<std::pair<int, int>>> ij_pairs_all;
     for (const auto &x : sx_inputs) {
@@ -64,7 +295,8 @@ std::string process_generated_code(
     }
     size_t n_in = sx_inputs.size();
 
-    bool is_jac = func_name.find("_jac") != std::string::npos;
+    const bool is_jac = func_name.ends_with("_jac") ||
+                        func_name.ends_with("_hess_panel");
 
     bool vec_out = !is_jac && !is_hessian;
 
@@ -102,13 +334,14 @@ std::string process_generated_code(
                    << "#if defined(_WIN32) || defined(__WIN32__) || defined(__CYGWIN__)\n"
                    << "    #define CASADI_SYMBOL_EXPORT __declspec(dllexport)\n"
                    << "#elif defined(__GNUC__)\n"
-                   << "    #define CASADI_SYMBOL_EXPORT __attribute__ ((visibility (\"default\")))\n"
+                   << "    #define CASADI_SYMBOL_EXPORT __attribute__ ((visibility "
+         "(\"default\")))\n"
                    << "#endif\n\n"
                    << "extern \"C\" {\n\n";
 
     std::stringstream raw_stream(raw_c_code);
     std::string line;
-    bool func_found = false, func_done = false;
+    bool func_found = false;
 
     // RE2 patterns
     RE2 simplify_cond_re("arg\\[\\d+\\]\\? ([^:;]+) : 0;");
@@ -116,15 +349,41 @@ std::string process_generated_code(
     RE2 arg_re("arg\\[(\\d+)\\]\\[(\\d+)\\]");
     RE2 res_re("res\\[(\\d+)\\]\\[(\\d+)\\]");
 
-    while (std::getline(raw_stream, line)) {
-        if (line.find("casadi_real casadi_") != std::string::npos) {
-            processed_code << line << "\n";
-        }
+    bool copying_helper = false;
+    int helper_brace_depth = 0;
+    int func_brace_depth = 0;
 
+    auto update_brace_depth = [](const std::string &s, int &depth) {
+        for (char c : s) {
+            if (c == '{')
+                depth++;
+            else if (c == '}')
+                depth--;
+        }
+    };
+
+    while (std::getline(raw_stream, line)) {
         if (!func_found) {
+            if (!copying_helper && line.find("casadi_real casadi_") != std::string::npos) {
+                copying_helper = true;
+                helper_brace_depth = 0;
+            }
+
+            if (copying_helper) {
+                if (line.starts_with("casadi_real casadi_")) {
+                    line = "static inline " + line;
+                }
+                processed_code << line << "\n";
+                update_brace_depth(line, helper_brace_depth);
+                if (helper_brace_depth == 0) {
+                    copying_helper = false;
+                }
+                continue;
+            }
+
             if (line.find("static int casadi_f0") != std::string::npos) {
                 processed_code << "CASADI_SYMBOL_EXPORT void " << func_name << "(\n"
-                               << "  std::vector<Eigen::Ref<Eigen::" << vec_type() << ">>& inputs,\n";
+                               << "  const std::vector<Eigen::Ref<Eigen::" << vec_type() << ">>& inputs,\n";
                 if (vec_out) {
                     processed_code << "  Eigen::Ref<Eigen::" << vec_type() << "> outputs) {\n";
                 } else {
@@ -135,29 +394,30 @@ std::string process_generated_code(
                     }
                 }
                 func_found = true;
+                func_brace_depth = 1;
             }
             continue;
         }
 
         if (line.find("return 0;") != std::string::npos)
             continue;
-        if (line.find("}") != std::string::npos && !func_done) {
-            processed_code << "}\n";
-            func_done = true;
-            break;
-        }
 
-        // Apply RE2 transformations
         RE2::GlobalReplace(&line, simplify_cond_re, "\\1;");
         RE2::GlobalReplace(&line, simplify_if_re, "\\1;");
 
-        // Iteratively replace arg and res patterns
         int cap1, cap2;
         while (RE2::PartialMatch(line, arg_re, &cap1, &cap2)) {
             RE2::Replace(&line, "arg\\[" + std::to_string(cap1) + "\\]\\[" + std::to_string(cap2) + "\\]", make_input_ref_access(cap1, cap2));
         }
         while (RE2::PartialMatch(line, res_re, &cap1, &cap2)) {
             RE2::Replace(&line, "res\\[" + std::to_string(cap1) + "\\]\\[" + std::to_string(cap2) + "\\]", make_output_ref_access(cap1, cap2));
+        }
+
+        update_brace_depth(line, func_brace_depth);
+
+        if (func_brace_depth == 0) {
+            processed_code << "}\n";
+            break;
         }
 
         processed_code << line << "\n";
@@ -168,8 +428,7 @@ std::string process_generated_code(
 }
 
 // Core implementation logic for a single function
-void run(
-    std::string func_name,
+void run(std::string func_name,
     task::in_arg_list_t sx_inputs,
     std::vector<cs::SX> sx_outputs,
     std::string output_dir,
@@ -180,6 +439,33 @@ void run(
     bool keep_generated_src,
     bool verbose,
     cs::SX aux) {
+    // Finalized clones intentionally share a stable generated symbol name.
+    // Serialize codegen per symbol to avoid concurrent writers racing on
+    // func_name_raw.c / func_name.cpp / func_name.json / libfunc_name.so.
+    auto func_mutex = get_func_mutex(func_name);
+    std::lock_guard<std::mutex> func_lock(*func_mutex);
+    fs::create_directories(output_dir);
+    process_codegen_lock process_lock(fs::path(output_dir) / (func_name + ".lock"));
+
+    fs::path so_file_path = fs::path(output_dir) / ("lib" + func_name + ".so");
+    fs::path so_tmp_path = so_file_path;
+    so_tmp_path += ".tmp";
+    fs::path json_path = fs::path(output_dir) / (func_name + ".json");
+    fs::path json_tmp_path = json_path;
+    json_tmp_path += ".tmp";
+    const std::string cache_key = (fs::path(output_dir) / func_name).string();
+
+    if (!force_recompile) {
+        std::lock_guard<std::mutex> lock(func_mutex_map_mutex_);
+        auto it = completed_compile_flags_.find(cache_key);
+        if (it != completed_compile_flags_.end() && it->second == compile_flag) {
+            if (std::getenv("MOTO_DEBUG_CODEGEN") != nullptr) {
+                fmt::print("[codegen] reuse {}\n", func_name);
+            }
+            return;
+        }
+    }
+
     // Step 1: Create CasADi function and filter near-zero elements
     std::vector<cs::SX> sx_inputs_cs; //(sx_inputs.begin(), sx_inputs.end());
     sx_inputs_cs.reserve(sx_inputs.size() + !aux.is_empty());
@@ -187,7 +473,8 @@ void run(
         sx_inputs_cs.emplace_back(s);
     }
     if (!aux.is_empty()) {
-        // throw std::runtime_error("Auxiliary variable is not supported in this context.");
+        // throw std::runtime_error("Auxiliary variable is not supported in this
+    // context.");
         sx_inputs_cs.emplace_back(aux);
     }
     // auto filtered_outputs = casadi_func(sx_inputs_cs);
@@ -203,10 +490,6 @@ void run(
     opts["casadi_real"] = casadi_real_t;
     cs::CodeGenerator cgen(func_name + "_raw.c", opts);
     cgen.add(casadi_func);
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        fs::create_directories(output_dir);
-    }
     std::string raw_c_path = fs::path(output_dir) / (func_name + "_raw.c");
     cgen.generate(output_dir + '/'); // Generates file in the specified dir
 
@@ -216,9 +499,10 @@ void run(
         std::ifstream raw_file(raw_c_path);
         buffer << raw_file.rdbuf();
     }
+    std::string raw_c_code = buffer.str();
 
-    std::string processed_code = process_generated_code(
-        buffer.str(), func_name, sx_inputs_cs, filtered_outputs, append, !aux.is_empty());
+    std::string processed_code =
+      process_generated_code(raw_c_code, func_name, sx_inputs_cs, filtered_outputs, append, !aux.is_empty());
 
     // Step 4: Write new C++ file with Eigen interface
     std::string final_cpp_path = fs::path(output_dir) / (func_name + ".cpp");
@@ -230,9 +514,7 @@ void run(
         std::cout << "Generated: " << final_cpp_path << std::endl;
 
     // Step 5: Compile if necessary
-    fs::path so_file_path = fs::path(output_dir) / ("lib" + func_name + ".so");
-    fs::path json_path = fs::path(output_dir) / (func_name + ".json");
-    std::string md5_hash = compute_md5(raw_c_path) + compute_md5(final_cpp_path);
+    std::string md5_hash = compute_md5_from_bytes(raw_c_code) + compute_md5_from_bytes(processed_code);
 
     bool needs_compile = true;
     bool json_exists = fs::exists(json_path);
@@ -259,10 +541,26 @@ void run(
         }
     }
 
+    if (std::getenv("MOTO_DEBUG_CODEGEN") != nullptr) {
+        if (needs_compile) {
+            fmt::print("[codegen] compile {}\n", func_name);
+            fmt::print("  json_exists={} so_exists={} force_recompile={}\n",
+                       json_exists, so_exists, force_recompile);
+            fmt::print("  md5_current={} compile_flag_current={}\n", md5_hash, compile_flag);
+            if (json_exists && so_exists && !data.is_discarded() && !data.empty()) {
+                std::string md5_prev = data.contains("md5") ? std::string(data["md5"]) : "<missing>";
+                std::string flag_prev = data.contains("compile_flag") ? std::string(data["compile_flag"]) : "<missing>";
+                fmt::print("  md5_prev={} compile_flag_prev={}\n", md5_prev, flag_prev);
+            }
+        } else {
+            fmt::print("[codegen] reuse {}\n", func_name);
+        }
+    }
+
     if (needs_compile) {
         std::string eigen_include_path = "/usr/include/eigen3"; // Adjust if necessary
         std::string compile_command = "g++ -shared -fPIC -std=c++20 " + compile_flag +
-                                      " -o " + so_file_path.string() + " " + final_cpp_path +
+                                      " -o " + so_tmp_path.string() + " " + final_cpp_path +
                                       " -I " + eigen_include_path;
         int ret = std::system(compile_command.c_str());
         if (verbose) {
@@ -272,6 +570,14 @@ void run(
                 std::cerr << "Compilation failed for: " << func_name << std::endl;
             }
         }
+        if (ret != 0) {
+            std::error_code ec;
+            fs::remove(so_tmp_path, ec);
+            throw std::runtime_error(fmt::format(
+          "Compilation failed for {} with exit code {}", func_name, ret));
+        }
+
+        fs::rename(so_tmp_path, so_file_path);
 
         // Step 6: Create JSON metadata and cleanup
         json j; /// @todo the order here is not guaranteed
@@ -285,12 +591,19 @@ void run(
         j["md5"] = md5_hash;
         j["compile_flag"] = compile_flag;
 
-        std::ofstream o(fs::path(output_dir) / (func_name + ".json"));
+        std::ofstream o(json_tmp_path);
         o << std::setw(4) << j << std::endl;
+        o.close();
+        fs::rename(json_tmp_path, json_path);
         if (!keep_generated_src) {
             fs::remove(raw_c_path);
             fs::remove(final_cpp_path);
         }
+    }
+
+    if (!force_recompile) {
+        std::lock_guard<std::mutex> lock(func_mutex_map_mutex_);
+        completed_compile_flags_[cache_key] = compile_flag;
     }
 }
 
@@ -299,8 +612,8 @@ void run(
 void task::finalize(job_list &jobs_) {
     std::string full_func_name = prefix.empty() ? func_name : prefix + "_" + func_name;
     if (gen_eval)
-        jobs_.add(std::bind(&impl::run,
-                            full_func_name,
+    jobs_.add(std::bind(
+        &impl::run, full_func_name,
                             sx_inputs,
                             std::vector{!gauss_newton ? sx_output : 0.5 * cs::SX::dot(sx_output, sx_output * weight_gn)},
                             output_dir,
@@ -314,14 +627,16 @@ void task::finalize(job_list &jobs_) {
 
     // excluded = [e.name for e in exclude]
     std::set<size_t> excluded;
-    // # exclude inputs in field p
+    // exclude non-primal storage-only inputs
     for (const sym &s : sx_inputs)
-        if (s.field() == __p)
+        if (s.field() == __p || s.field() == __s)
             excluded.insert(s.uid());
     std::map<size_t, cs::SX> external_jac;
     for (auto &[in_arg, jac] : ext_jac) {
         if (jac.columns() != in_arg->tdim() || jac.rows() != sx_output.rows())
-            throw std::runtime_error(fmt::format("Jacobian dimension mismatch for sym {} in field {}, expected ({}, {}), got ({}, {})",
+            throw std::runtime_error(
+          fmt::format("Jacobian dimension mismatch for sym {} in field {}, "
+                      "expected ({}, {}), got ({}, {})",
                                                  in_arg->name(), in_arg->field(), sx_output.rows(), in_arg->tdim(), jac.rows(), jac.columns()));
         external_jac[in_arg->uid()] = std::move(jac);
     }
@@ -332,13 +647,17 @@ void task::finalize(job_list &jobs_) {
         size_t uid1 = in_arg1->uid();
         if (uid0 < uid1) {
             if (hess.rows() != in_arg0->tdim() || hess.columns() != in_arg1->tdim())
-                throw std::runtime_error(fmt::format("Hessian dimension mismatch for syms {} (field {}) and {} (field {}), expected ({}, {}), got ({}, {})",
+                throw std::runtime_error(
+            fmt::format("Hessian dimension mismatch for syms {} (field {}) and "
+                        "{} (field {}), expected ({}, {}), got ({}, {})",
                                                      in_arg0->name(), in_arg0->field(), in_arg1->name(), in_arg1->field(),
                                                      in_arg0->tdim(), in_arg1->tdim(), hess.rows(), hess.columns()));
             external_hess[{uid0, uid1}] = std::move(hess);
         } else {
             if (hess.rows() != in_arg1->tdim() || hess.columns() != in_arg0->tdim())
-                throw std::runtime_error(fmt::format("Hessian dimension mismatch for syms {} (field {}) and {} (field {}), expected ({}, {}), got ({}, {})",
+                throw std::runtime_error(
+            fmt::format("Hessian dimension mismatch for syms {} (field {}) and "
+                        "{} (field {}), expected ({}, {}), got ({}, {})",
                                                      in_arg1->name(), in_arg1->field(), in_arg0->name(), in_arg0->field(),
                                                      in_arg1->tdim(), in_arg0->tdim(), hess.rows(), hess.columns()));
             external_hess[{uid1, uid0}] = hess.T();
@@ -357,13 +676,6 @@ void task::finalize(job_list &jobs_) {
         merit_jac_for_hess = true;
     }
 
-    auto get_dstep_ds = [](const sym &s) -> cs::SX {
-        /// @todo : this assumes affine dependence on step size, which may not be true for all cases (i.e., hessian wrt step size will be zero)
-        /// for example if the integration is s + step ^ 2, the jacobian will contain step which is not an input to the function (is it necessary?)
-        auto step = cs::SX::sym(s.name() + "_step", s.tdim());
-        return cs::SX::jacobian(s.symbolic_integrate(s, step), step);
-    };
-
     std::vector<cs::SX> jacs;
     std::vector<cs::SX> jacs_copy;
     // generate jacobian
@@ -374,13 +686,7 @@ void task::finalize(job_list &jobs_) {
                     jacs.push_back(external_jac[s.uid()]);
                     continue;
                 }
-                if (s.has_non_trivial_integration()) {
-                    // get jacobian wrt step (variation)
-                    auto j = cs::SX::mtimes(cs::SX::jacobian(sx_output, s), get_dstep_ds(s));
-                    jacs.push_back(j);
-                } else {
-                    jacs.push_back(cs::SX::jacobian(sx_output, s));
-                }
+                jacs.push_back(tangent_jacobian(sx_output, s));
             } else
                 jacs.push_back(cs::SX());
         }
@@ -389,7 +695,8 @@ void task::finalize(job_list &jobs_) {
             if (!jac_outputs.empty()) {
                 jacs = jac_outputs;
                 if (gen_hessian)
-                    throw std::runtime_error("Cannot compute hessian when multiple jacobian outputs are specified.");
+                    throw std::runtime_error("Cannot compute hessian when multiple "
+                                   "jacobian outputs are specified.");
             } else {
                 if (check_jac_ad) {
                     /// @warning not applicable to nontrivial integration
@@ -416,6 +723,14 @@ void task::finalize(job_list &jobs_) {
                         jacs_copy = std::move(jacs);
                 }
             }
+
+            for (size_t idx = 0; idx < jacs.size(); ++idx) {
+                jacs[idx] = cs::SX::sparsify(jacs[idx]);
+                if (jac_sp != nullptr) {
+                    compress_jacobian(jacs[idx], &(*jac_sp)[idx]);
+                }
+            }
+
             jobs_.add(std::bind(&impl::run,
                                 full_func_name + "_jac",
                                 sx_inputs,
@@ -437,7 +752,9 @@ void task::finalize(job_list &jobs_) {
                 sym &t = sx_inputs[j];
                 if (excluded.contains(s.uid()) or excluded.contains(t.uid()))
                     continue;
-                external_hess[{s.uid(), t.uid()}] = cs::SX::mtimes(jacs_copy[i].T(), cs::SX::mtimes(cs::SX::diag(weight_gn), jacs_copy[j]));
+                external_hess[{s.uid(), t.uid()}] = cs::SX::mtimes(
+            jacs_copy[i].T(),
+            cs::SX::mtimes(cs::SX::diag(weight_gn), jacs_copy[j]));
             }
         }
     }
@@ -445,6 +762,9 @@ void task::finalize(job_list &jobs_) {
     // generate hessian
     std::vector<std::vector<cs::SX>> hess;
     if (gen_hessian) {
+        std::vector<cs::SX> hess_panel_outputs;
+        if (hess_panels != nullptr)
+            hess_panels->clear();
         hess.resize(sx_inputs.size());
         // use AD of vjp to compute hessian if merit_jac_for_hess is true
         auto lbd = merit_jac_for_hess ? cs::SX::sym(func_name + "_lbd", sx_output.rows()) : cs::SX();
@@ -459,23 +779,27 @@ void task::finalize(job_list &jobs_) {
             size_t idx_j = 0;
             for (size_t idx_j = 0; idx_j < sx_inputs.size(); ++idx_j) {
                 sym &j = sx_inputs[idx_j];
+                bool tangent_hessian = false;
                 if (excluded.contains(j.uid()) or i.field() < j.field()) {
                     continue;
                 }
                 if (!merit_jac_for_hess) {
                     if (external_hess.contains({i.uid(), j.uid()})) {
                         hess[idx_i][idx_j] = external_hess[{i.uid(), j.uid()}];
+                        tangent_hessian = true;
                         goto HESS_SETUP_SPARSITY;
                     } else if (external_hess.contains({j.uid(), i.uid()})) {
                         hess[idx_i][idx_j] = external_hess[{j.uid(), i.uid()}].T();
+                        tangent_hessian = true;
                         goto HESS_SETUP_SPARSITY;
                     }
                 } else if (i.field() == j.field() and idx_i > idx_j) {
                     // for i,j in same field, just copy
                     hess[idx_i][idx_j] = hess[idx_j][idx_i].T();
+                    tangent_hessian = true;
                     if (hess_sp != nullptr)
-                        (*hess_sp)[idx_i][idx_j] = (*hess_sp)[idx_j][idx_i];
-                    continue;
+                        (*hess_sp)[idx_i][idx_j].pattern = (*hess_sp)[idx_j][idx_i].pattern;
+                    goto HESS_SETUP_SPARSITY;
                 }
                 if (merit_jac_for_hess) {
                     hess[idx_i][idx_j] = cs::SX::sparsify(cs::SX::jacobian(merit_jac_, j));
@@ -486,25 +810,44 @@ void task::finalize(job_list &jobs_) {
                 if (hess[idx_i][idx_j].is_zero()) {
                     hess[idx_i][idx_j] = cs::SX();
                     if (hess_sp != nullptr)
-                        (*hess_sp)[idx_i][idx_j] = sparsity::unknown; // no hessian
+                        (*hess_sp)[idx_i][idx_j].pattern = sparsity::unknown; // no hessian
                     continue;
-                } else if (j.has_non_trivial_integration()) { // apply integration
-                    hess[idx_i][idx_j] = cs::SX::mtimes(hess[idx_i][idx_j], get_dstep_ds(j));
+                } else if (!tangent_hessian && j.has_non_trivial_integration()) {
+                    hess[idx_i][idx_j] = cs::SX::mtimes(hess[idx_i][idx_j], tangent_map(j));
                 }
-                if (hess[idx_i][idx_j].is_square() && hess[idx_i][idx_j].sparsity().is_diag()) {
-                    bool is_eye = false;
-                    hess[idx_i][idx_j] = cs::SX::diag(hess[idx_i][idx_j]);
-                    if (hess[idx_i][idx_j].is_one())
-                        is_eye = true;
-                    if (is_eye)
-                        hess[idx_i][idx_j] = cs::SX::ones(hess[idx_i][idx_j].rows());
+                if (hess_panels != nullptr) {
+                    auto pieces = split_hessian_blocks(hess[idx_i][idx_j]);
+                    for (auto &piece : pieces) {
+                        hess_panels->push_back({idx_i, idx_j, piece.sp});
+                        hess_panel_outputs.push_back(std::move(piece.expression));
+                    }
                     if (hess_sp != nullptr)
-                        (*hess_sp)[idx_i][idx_j] = is_eye ? sparsity::eye : sparsity::diag;
+                        (*hess_sp)[idx_i][idx_j] = pieces.size() == 1
+                            ? pieces.front().sp
+                            : sp_info{sparsity::dense, 0, 0,
+                                      static_cast<size_t>(hess[idx_i][idx_j].rows()),
+                                      static_cast<size_t>(hess[idx_i][idx_j].columns())};
                 } else {
-                    if (hess_sp != nullptr)
-                        (*hess_sp)[idx_i][idx_j] = sparsity::dense;
+                    compress_structured_output(
+                        hess[idx_i][idx_j],
+                        hess_sp != nullptr ? &(*hess_sp)[idx_i][idx_j] : nullptr);
                 }
             }
+        }
+        if (hess_panels != nullptr) {
+            jobs_.add(std::bind(&impl::run,
+                                full_func_name + "_hess_panel",
+                                sx_inputs,
+                                std::move(hess_panel_outputs),
+                                output_dir,
+                                hess_compile_flag,
+                                force_recompile,
+                                true,
+                                cs::Function(),
+                                keep_generated_src,
+                                verbose,
+                                lbd));
+            return;
         }
         // hess = [item for sublist in hess for item in sublist]
         std::vector<cs::SX> hess_flat;
@@ -542,40 +885,36 @@ job_list generate_and_compile(task &_task) {
 // Waits for all compilation threads to finish
 // void wait_until_generated() {
 //     std::lock_guard<std::mutex> lock(impl::mutex_);
-//     std::cout << "Waiting for code generation tasks to complete..." << std::endl;
-//     impl::jobs_.wait_until_finished();
-//     impl::jobs_.jobs.clear();
+//     std::cout << "Waiting for code generation tasks to complete..." <<
+//     std::endl; impl::jobs_.wait_until_finished(); impl::jobs_.jobs.clear();
 //     std::cout << "All code generation completed." << std::endl;
 // }
 
 void server::routine() {
-    size_t n_threads = omp_get_max_threads();
-    std::mutex thread_mtx_;
-    std::condition_variable thread_cv_;
+    const size_t max_threads = std::max(1, omp_get_max_threads());
     while (true) {
+        job_list jobs;
         std::unique_lock<std::mutex> lock(queue_mtx_);
         queue_cv_.wait(lock, [this] { return !job_buffer_.jobs.empty() || terminated_; });
-        if (terminated_) {
-            terminated_ = false;
+        if (job_buffer_.jobs.empty() && terminated_) {
             break; ///< exit the loop if terminated
         }
-        auto jobs = std::move(job_buffer_.jobs);
+        jobs.jobs = std::move(job_buffer_.jobs);
         job_buffer_.jobs.clear();
         lock.unlock();
-        for (auto &w : jobs) {
-            std::unique_lock<std::mutex> thread_lock(thread_mtx_);
-            thread_cv_.wait(thread_lock, [&n_threads] { return n_threads > 0; });
-            n_threads--;
-            std::thread([&, w = std::move(w)]() mutable {
-                w();
-                std::lock_guard<std::mutex> thread_lock(thread_mtx_);
-                n_threads++;
-                thread_cv_.notify_one(); ///< notify the server that the job is done
-            }).detach();
+
+        size_t next_job = 0;
+        while (next_job < jobs.jobs.size()) {
+            std::vector<std::thread> workers;
+            workers.reserve(std::min(max_threads, jobs.jobs.size() - next_job));
+            for (size_t i = 0; i < max_threads && next_job < jobs.jobs.size(); ++i, ++next_job) {
+                workers.emplace_back(std::move(jobs.jobs[next_job]));
+            }
+            for (auto &worker : workers) {
+                worker.join();
+            }
         }
     }
-    // std::lock_guard<std::mutex> lock(terminate_mtx_);
-    // terminate_cv_.notify_one();
 } ///< daemon to wait for codegen jobs
 } // namespace cs_codegen
 } // namespace utils

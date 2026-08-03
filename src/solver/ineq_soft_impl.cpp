@@ -4,28 +4,72 @@
 namespace moto {
 namespace solver {
 namespace ineq_soft {
-void initialize(node_data *cur) {
-    for_each(cur, [cur](auto &&sf, auto &&sd) {
-        sd.prim_step_.clear();
-        auto prob = sd.problem();
-        auto d = dynamic_cast<solver::data_base *>(cur);
-        assert(d && "data_base cast failed");
-        for (const sym &arg : sf.in_args()) {
-            if (arg.field() < field::num_prim && prob->is_active(arg)) {
-                sd.prim_step_.push_back(prob->extract_tangent(d->prim_step[arg.field()], arg));
-            } else {
-                static vector empty;
-                sd.prim_step_.emplace_back(empty);
-            }
+namespace {
+
+void bind_runtime(const moto::soft_constr &sf, moto::soft_constr::data_map_t &sd) {
+    if (sd.runtime_bound_) {
+        return;
+    }
+    auto *d = sd.solver_data_;
+    if (d == nullptr) {
+        throw std::runtime_error(fmt::format(
+        "soft constraint {} has no solver_data owner bound", sf.name()));
+    }
+    sd.prim_step_.clear();
+    auto prob = sd.problem();
+    for (const sym &arg : sf.in_args()) {
+        if (arg.field() < field::num_prim && prob->is_active(arg)) {
+      sd.prim_step_.push_back(
+          prob->extract_tangent(d->trial_prim_step[arg.field()], arg));
+        } else {
+            static vector empty;
+            sd.prim_step_.emplace_back(empty);
         }
-        new (&sd.d_multiplier_) mapped_vector{
-            prob->extract(d->dual_step[sf.field()], sf).data(), Eigen::Index(sf.dim())};
+    }
+    new (&sd.d_multiplier_)
+      mapped_vector{prob->extract(d->trial_dual_step[sf.field()], sf).data(), Eigen::Index(sf.dim())};
+    sd.runtime_bound_ = true;
+}
+
+void invalidate_initialized(const moto::soft_constr &, moto::soft_constr::data_map_t &sd) {
+    sd.initialized_ = false;
+}
+
+void mark_initialized(const moto::soft_constr &, moto::soft_constr::data_map_t &sd) {
+    sd.initialized_ = true;
+}
+
+} // namespace
+
+void bind_runtime(node_data *cur) {
+    for_each(cur, [](auto &&sf, auto &&sd) {
+        bind_runtime(sf, sd);
+    });
+}
+
+void bind_and_invalidate(node_data *cur) {
+    for_each(cur, [](auto &&sf, auto &&sd) {
+        bind_runtime(sf, sd);
+        invalidate_initialized(sf, sd);
+    });
+}
+
+void ensure_initialized(const moto::soft_constr &sf, moto::soft_constr::data_map_t &sd) {
+    if (!sd.initialized_) {
         sf.initialize(sd);
+        sd.initialized_ = true;
+    }
+}
+
+void mark_initialized(node_data *cur) {
+    for_each(cur, [](auto &&sf, auto &&sd) {
+        mark_initialized(sf, sd);
     });
 }
 
 void finalize_newton_step(node_data *cur) {
-    for_each(cur, [](auto &&sf, auto &&sd) {
+  cur->evaluate_soft_jacobian_steps();
+  for_each(cur, [](auto &&sf, auto &&sd) {
         sf.finalize_newton_step(sd);
     });
 }
@@ -44,14 +88,31 @@ void update_ls_bounds(node_data *cur, workspace_data *config) {
         sf.update_ls_bounds(sd, config);
     });
 }
+void backup_trial_state(node_data *cur) {
+    for_each(cur, [](auto &&sf, auto &&sd) {
+        sf.backup_trial_state(sd);
+    });
+}
+void restore_trial_state(node_data *cur) {
+    for_each(cur, [](auto &&sf, auto &&sd) {
+        sf.restore_trial_state(sd);
+    });
+}
 void corrector_step_start(data_base *data) {
-    data->first_order_correction_start(
-        get_for_each([](auto &&sf, auto &&sd) {
+    auto *node = dynamic_cast<node_data *>(data);
+    if (node == nullptr) {
+        throw std::runtime_error("ineq_soft::corrector_step_start expects "
+                             "data_base to also be node_data");
+    }
+    data->first_order_correction_start([node]() {
+        for_each(node, [](auto &&sf, auto &&sd) {
             sf.apply_corrector_step(sd);
-        }));
+        });
+    node->condense_soft_constraints(false);
+    });
 }
 void corrector_step_end(data_base *data) {
-    data->swap_jacobian_modification(); // move
+    data->first_order_correction_end();
 }
 
 } // namespace ineq_soft

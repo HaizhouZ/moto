@@ -11,7 +11,7 @@
 #include <casadi/casadi.hpp>
 #include <re2/re2.h>
 
-#include <moto/spmm/fwd.hpp> // moto::sparsity
+#include <moto/core/sparse.hpp> // moto::sparsity
 
 namespace moto {
 namespace utils {
@@ -21,8 +21,12 @@ namespace fs = std::filesystem;
 using json = nlohmann::json;
 
 std::string compute_md5(const std::string &file_path);
+std::string compute_md5_from_bytes(std::string_view content);
 
 namespace cs_codegen {
+
+cs::SX tangent_map(const sym &input);
+cs::SX tangent_jacobian(const cs::SX &output, const sym &input);
 
 struct job_list {
     using job_type = std::function<void()>;
@@ -77,16 +81,18 @@ struct task {
     bool gen_jacobian = false;
     bool gen_hessian = false;
     std::vector<cs::SX> jac_outputs; ///< for multiple outputs
-    std::vector<std::pair<shared_expr, cs::SX>> ext_jac;
-    std::vector<std::tuple<shared_expr, shared_expr, cs::SX>> ext_hess;
-    std::vector<std::vector<sparsity>> *hess_sp = nullptr; ///< optional hessian sparsity pattern
+    std::vector<std::pair<expr_handle, cs::SX>> ext_jac;
+    std::vector<std::tuple<expr_handle, expr_handle, cs::SX>> ext_hess;
+    std::vector<sp_info> *jac_sp = nullptr;                ///< optional jacobian sparsity pattern
+    std::vector<std::vector<sp_info>> *hess_sp = nullptr; ///< optional hessian sparsity pattern
+    std::vector<indexed_sp_info> *hess_panels = nullptr;
     std::string output_dir = "gen";
     bool force_recompile = false;
     bool check_jac_ad = false; ///< check if jacobian is correct by comparing with ad
     bool append_value = false;
     bool append_jac = false;
     cs::SX weight_gn;                ///< weight for gauss-newton hessian
-    bool gauss_newton = false;         ///< use gauss-newton hessian if true
+    bool gauss_newton = false;       ///< use gauss-newton hessian if true
     bool keep_generated_src = false; ///< keep generated files
     std::string eval_compile_flag = "-O3 -DNDEBUG -march=native";
     std::string jac_compile_flag = "-O3 -DNDEBUG -march=native";
@@ -142,7 +148,6 @@ struct server final {
         daemon_ = std::thread([this]() {
             routine(); ///< start the server thread
         });
-        daemon_.detach(); ///< detach the server thread
     }
     ~server() {
         {
@@ -150,8 +155,9 @@ struct server final {
             terminated_ = true;     ///< set the termination flag
             queue_cv_.notify_one(); ///< notify the server to terminate
         }
-        // std::unique_lock<std::mutex> lock(terminate_mtx_);
-        // terminate_cv_.wait(lock, [this] { return terminated_ == false; });
+        if (daemon_.joinable()) {
+            daemon_.join();
+        }
     } ///< destructor to clean up the server thread
     /// daemon to wait for codegen jobs
     void routine();

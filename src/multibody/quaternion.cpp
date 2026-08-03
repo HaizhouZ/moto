@@ -22,29 +22,24 @@ cs::SX quaternion::symbolic_identity() {
 }
 /// exponential map from R^3 to unit quaternion
 cs::SX quaternion::exp3(const cs::SX &dq, scalar_t tolerance) {
-    auto theta = cs::SX::norm_2(dq);
-    auto axis = dq / theta;
-    auto w = cs::SX::cos(theta / 2);
-    auto xyz = axis * cs::SX::sin(theta / 2);
-    return cs::SX::if_else(
-        theta < tolerance,
-        symbolic_identity(),
-        cs::SX::vertcat(std::vector{xyz, w}) // normal case
-    );
+    const auto theta = cs::SX::norm_2(dq);
+    const auto scale = cs::SX::if_else(
+        theta < tolerance, .5 - theta * theta / 48,
+        cs::SX::sin(theta / 2) / theta);
+    return cs::SX::vertcat(
+        std::vector{dq * scale, cs::SX::cos(theta / 2)});
 }
 /// logarithm map from unit quaternion to R^3
 cs::SX quaternion::log3(const cs::SX &q, scalar_t tolerance) {
     auto w = q(3);
     auto xyz = q(cs::Slice(0, 3));
-    auto sin_half_theta = cs::SX::norm_2(xyz);
-    auto cos_half_theta = w;
-    auto half_theta = cs::SX::atan2(sin_half_theta, cos_half_theta);
-    auto axis = xyz / sin_half_theta;
-    return cs::SX::if_else(
-        sin_half_theta < tolerance,
-        cs::SX::zeros(3),
-        axis * (2 * half_theta) // normal case
-    );
+    auto sin_half_inf_prim_res = cs::SX::norm_2(xyz);
+    auto cos_half_inf_prim_res = w;
+    auto half_inf_prim_res = cs::SX::atan2(sin_half_inf_prim_res, cos_half_inf_prim_res);
+    const auto scale = cs::SX::if_else(
+        sin_half_inf_prim_res < tolerance, 2 / cos_half_inf_prim_res,
+        2 * half_inf_prim_res / sin_half_inf_prim_res);
+    return xyz * scale;
 }
 /// @brief quaternion integration using exponential map
 cs::SX quaternion::symbolic_integrate(const cs::SX &q, const cs::SX &dq) const {
