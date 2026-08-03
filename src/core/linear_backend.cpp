@@ -916,11 +916,7 @@ compile_batch_product(batch_product_spec spec,
   return batch_kernels.emplace(key, kernel).first->second;
 }
 
-ccs_layout analyze_spgemm(const casadi::Sparsity &lhs,
-                          const casadi::Sparsity &rhs) {
-  if (lhs.size2() != rhs.size1() || !lhs.nnz() || !rhs.nnz())
-    throw std::invalid_argument("invalid CasADi SpGEMM sparsity");
-  const auto sp = casadi::Sparsity::mtimes(lhs, rhs);
+ccs_layout analyze_sparsity(const casadi::Sparsity &sp) {
   ccs_layout output{static_cast<size_t>(sp.size1()),
                     static_cast<size_t>(sp.size2())};
   for (const auto value : sp.get_colind())
@@ -940,6 +936,13 @@ ccs_layout analyze_spgemm(const casadi::Sparsity &lhs,
   copy_index(row_blocks, output.row_blocks);
   copy_index(col_blocks, output.col_blocks);
   return output;
+}
+
+ccs_layout analyze_spgemm(const casadi::Sparsity &lhs,
+                          const casadi::Sparsity &rhs) {
+  if (lhs.size2() != rhs.size1() || !lhs.nnz() || !rhs.nnz())
+    throw std::invalid_argument("invalid CasADi SpGEMM sparsity");
+  return analyze_sparsity(casadi::Sparsity::mtimes(lhs, rhs));
 }
 
 spgemm_kernel compile_spgemm(const casadi::Sparsity &lhs,

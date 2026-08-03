@@ -196,17 +196,16 @@ void semi_implicit_euler::prepare_dynamics_codegen() {
       continue;
     cs::SX jac = cs::SX::sparsify(
         utils::cs_codegen::tangent_jacobian(task->sx_output, arg));
-    projected_profiles_.push_back(linear_backend::analyze_spgemm(
-        inverse.sparsity(), jac.sparsity()));
     cs::SX projected = cs::SX::mtimes(inverse, jac);
-    if (projected_profiles_.back().nnz() !=
-        static_cast<size_t>(projected.nnz()))
-      throw std::logic_error("CasADi SpGEMM profile differs from PF expression");
+    projected_profiles_.push_back(
+        linear_backend::analyze_sparsity(projected.sparsity()));
     if (std::getenv("MOTO_DEBUG_DYNAMICS_PROFILE")) {
       const auto &profile = projected_profiles_.back();
-      fmt::println("{} P*F_{}: {}x{}, nnz={}/{}, blocks={}", name(),
+      const auto upper = projected(q, cs::Slice()).nnz();
+      const auto lower = projected(v, cs::Slice()).nnz();
+      fmt::println("{} P*F_{}: {}x{}, nnz={}/{} (pos={}, vel={}), blocks={}", name(),
                    arg.name(), profile.rows, profile.cols, profile.nnz(),
-                   profile.rows * profile.cols,
+                   profile.rows * profile.cols, upper, lower,
                    profile.row_blocks.empty() ? 0
                                               : profile.row_blocks.size() - 1);
     }

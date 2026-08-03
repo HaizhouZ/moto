@@ -117,6 +117,7 @@ private:
 
 ccs_layout analyze_spgemm(const casadi::Sparsity &lhs,
                           const casadi::Sparsity &rhs);
+ccs_layout analyze_sparsity(const casadi::Sparsity &sparsity);
 spgemm_kernel compile_spgemm(
     const casadi::Sparsity &lhs, const casadi::Sparsity &rhs,
     const std::filesystem::path &cache_dir = "gen/linear_backend");
