@@ -142,11 +142,11 @@ void semi_implicit_euler::compute_project_jacobians(func_approx_data &data) cons
 void semi_implicit_euler::compute_project_residual(func_approx_data &data) const {
   auto &d = data.as<approx_data>();
   d.proj_f_res_.setZero();
-  d.residual_(d.inverse_pointers_, d.approx_->v_.data(), d.proj_f_res_.data());
+  d.residual_(d.inverse_pointers_, d.v_.data(), d.proj_f_res_.data());
 }
 
 void semi_implicit_euler::apply_jac_y_inverse_transpose(
-    func_approx_data &data, vector &v, vector &dst) const {
+    func_approx_data &data, vector_ref v, vector_ref dst) const {
   auto &d = data.as<approx_data>();
   dst.setZero();
   d.transpose_(d.inverse_pointers_, v.data(), dst.data());

@@ -18,8 +18,12 @@ void ns_riccati_data::update_projected_dynamics_residual() {
     });
 }
 void ns_riccati_data::apply_jac_y_inverse_transpose(vector &v, vector &dst) {
+    dst.setZero();
     full_data_->for_each(__dyn, [&v, &dst](const generic_dynamics &dyn, func_approx_data &data) {
-        dyn.apply_jac_y_inverse_transpose(data, v, dst);
+        const size_t start = data.problem()->get_expr_start(dyn);
+        auto local_v = v.segment(start, dyn.dim());
+        auto local_dst = dst.segment(start, dyn.dim());
+        dyn.apply_jac_y_inverse_transpose(data, local_v, local_dst);
     });
 }
 

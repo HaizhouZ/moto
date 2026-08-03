@@ -83,19 +83,29 @@ bool ocp_base::add_impl(expr_handle ex) {
         }
         const auto &dep = ex->dep();
         if (!dep.empty()) {
-            if (ex->field() == __dyn && !allow_inconsistent_dynamics_)
-                for (auto f : {__x, __y})
-                    for (const generic_dynamics &dyn : field_entries(__dyn)) {
-                        auto it = std::ranges::find_if(dep, [&](const sym &s) { return dyn.has_arg(s); });
-                        if (it != dep.end()) {
-                            throw std::runtime_error(
-                                fmt::format("Dynamics {} arg {} uid {} in {} found in dynamics {}. "
-                                            "Overlapping state variables in dynamics is not allowed to avoid inconsistency."
-                                            " If you want to allow this, call set_allow_inconsistent_dynamics(true).",
-                                            ex->name(),
-                                            (*it)->name(), (*it)->uid(), f, dyn.name()));
+            if (ex->field() == __dyn && !allow_inconsistent_dynamics_) {
+                const auto *candidate = dynamic_cast<const generic_dynamics *>(ex.get());
+                if (candidate) for (const expr_handle &existing : field_entries(__dyn)) {
+                    const auto *dyn = dynamic_cast<const generic_dynamics *>(existing.get());
+                    if (!dyn) continue;
+                    for (const sym &arg : dep) {
+                        if (!dyn->has_arg(arg)) continue;
+                        if (arg.field() == __x || arg.field() == __y) {
+                            throw std::runtime_error(fmt::format(
+                                "Dynamics {} and {} overlap state {} uid {} in {}",
+                                candidate->name(), dyn->name(), arg.name(), arg.uid(),
+                                arg.field()));
+                        }
+                        if (arg.field() == __u &&
+                            (!candidate->input_shared(arg) || !dyn->input_shared(arg))) {
+                            throw std::runtime_error(fmt::format(
+                                "Dynamics {} and {} share input {} uid {} without "
+                                "mark_shared_inputs() on both dynamics",
+                                candidate->name(), dyn->name(), arg.name(), arg.uid()));
                         }
                     }
+                }
+            }
             for (expr &arg : dep) {
                 if (!contains(arg)) {
                     add_impl(arg);
@@ -144,6 +154,22 @@ void ocp_base::finalize() {
         if (!field_empty(__dyn) && automatic_reorder_primal_)
             maintain_order();
         rebuild_layout();
+        for (const expr_handle &entry : exprs(__dyn)) {
+            const auto *dyn = dynamic_cast<const generic_dynamics *>(entry.get());
+            if (!dyn) continue;
+            size_t nx = 0, ny = 0;
+            for (const sym &arg : dyn->in_args()) {
+                if (!is_active(arg)) continue;
+                if (arg.field() == __x) nx += arg.tdim();
+                if (arg.field() == __y) ny += arg.tdim();
+            }
+            if (!nx || !ny || nx != ny || dyn->dim() != ny) {
+                throw std::runtime_error(fmt::format(
+                    "Dynamics {} requires equal nonzero tangent dimensions: "
+                    "x={}, y={}, residual={}",
+                    dyn->name(), nx, ny, dyn->dim()));
+            }
+        }
         this->finalized_ = true;
         build_linear_profile();
     }
@@ -208,28 +234,32 @@ void ocp_base::refresh_copy(const active_status_config &config) {
 void ocp_base::on_modified() {}
 void ocp_base::maintain_order() {
     expr_list tmp;
-    for (auto f : {__x, __y}) {
+    for (auto f : {__x, __y, __u}) {
         auto &syms = field_entries(f);
         tmp.reserve(syms.size());
-        for (const generic_func &dyn : exprs(__dyn)) {
-            for (const expr &arg : dyn.in_args(f)) {
+        for (const generic_func &func : exprs(__dyn)) {
+            const auto *dyn = dynamic_cast<const generic_dynamics *>(&func);
+            for (const sym &arg : func.in_args(f)) {
+                if (!is_active(arg)) continue;
+                if (f == __u && (!dyn || dyn->input_shared(arg))) continue;
                 auto it = std::find(syms.begin(), syms.end(), arg);
                 if (it == syms.end()) {
                     throw std::runtime_error(fmt::format(
                         "order maintenance failure: "
                         "Dynamics {} arg {} uid {} not found in field {}",
-                        dyn.name(), arg.name(), arg.uid(), f));
+                        func.name(), arg.name(), arg.uid(), f));
                 }
                 tmp.emplace_back(std::move(*it));
             }
         }
         std::erase_if(syms, [&](auto &&e) { return !e; });
-        if (!syms.empty()) {
+        if (f != __u && !syms.empty()) {
             throw std::runtime_error(fmt::format(
                 "order maintenance failure: "
                 " field {} has exprs not in dynamics args",
                 f));
         }
+        std::ranges::move(syms, std::back_inserter(tmp));
         syms.swap(tmp);
     }
 }
