@@ -331,6 +331,15 @@ void node_data::prepare_linear_plan() {
   prepare_soft_jacobian_steps();
 }
 
+void node_data::configure_scaling_profile(bool enabled) {
+  bool changed = false;
+  for (const auto cf : hard_constr_fields_non_dyn)
+    for (const auto pf : primal_fields)
+      changed |= dense_->approx_[cf].jac_[pf].set_dynamic_eye(enabled);
+  if (changed)
+    linear_plan_.reset();
+}
+
 void node_data::print_residuals() const {
     for (auto f : lag_data::stored_constr_fields) {
         fmt::println("Field {}: dim {} residual {}", field::name(f), dense_->approx_[f].v_.size(),

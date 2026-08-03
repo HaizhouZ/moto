@@ -887,7 +887,7 @@ matrix_layout describe(const ::moto::sparse_matrix &sparse) {
   };
   add(sparse.dense_panels_, sparsity::dense);
   add(sparse.diag_panels_, sparsity::diag);
-  add(sparse.eye_panels_, sparsity::eye);
+  add(sparse.eye_panels_, sparse.dynamic_eye_ ? sparsity::diag : sparsity::eye);
   return layout;
 }
 

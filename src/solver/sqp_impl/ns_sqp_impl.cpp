@@ -183,6 +183,8 @@ ns_sqp::kkt_info ns_sqp::initialize(storage_type &graph) {
             // setup solver settings
             cur->for_each_constr([this](const generic_constr &c, func_approx_data &d) { c.setup_workspace_data(d, &settings); });
             solver::ineq_soft::bind_runtime(cur);
+            cur->configure_scaling_profile(
+                settings.scaling.mode != scaling_settings::mode_t::none);
         });
         solver::for_each(solver::par, graph, [](data *cur) {
             cur->prepare_linear_plan();

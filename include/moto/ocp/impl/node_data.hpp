@@ -85,6 +85,7 @@ struct MOTO_ALIGN_NO_SHARING node_data {
   void condense_soft_constraints(bool hessian);
   void evaluate_soft_jacobian_steps();
   void prepare_linear_plan();
+  void configure_scaling_profile(bool enabled);
 
     template <typename Callback>
     void for_each(field_t field, Callback &&callback) {

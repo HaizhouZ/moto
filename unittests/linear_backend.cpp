@@ -174,6 +174,30 @@ TEST_CASE("sparse_matrix dispatches dense operands through JIT") {
   REQUIRE(sub.isApprox(expected, 1e-12));
 }
 
+TEST_CASE("scaled eye panels use their dynamic diagonal values") {
+  sparse_matrix sparse;
+  sparse.resize(6, 6);
+  auto eye = sparse.insert(0, 0, 6, 6, sparsity::eye);
+  const vector scale = vector::LinSpaced(6, .25, 1.5);
+  eye = scale;
+  REQUIRE(sparse.set_dynamic_eye(true));
+  REQUIRE(describe(sparse).panels.front().pattern == sparsity::diag);
+
+  const matrix expected = scale.asDiagonal();
+  matrix rhs = matrix::Random(6, 4), out = matrix::Zero(6, 4);
+  multiply(sparse, rhs, out);
+  REQUIRE(out.isApprox(expected * rhs, 1e-12));
+
+  matrix trhs = matrix::Random(6, 3), transpose = matrix::Zero(6, 3);
+  transpose_multiply(sparse, trhs, transpose);
+  REQUIRE(transpose.isApprox(expected.transpose() * trhs, 1e-12));
+
+  matrix weight = matrix::Random(6, 6), gram = matrix::Zero(6, 6);
+  weighted_gram(sparse, weight, gram);
+  REQUIRE(gram.isApprox(expected.transpose() * weight * expected, 1e-12));
+  REQUIRE(sparse.dense().isApprox(expected, 1e-12));
+}
+
 TEST_CASE("backend preserves aligned panel storage") {
   sparse_matrix sparse;
   sparse.resize(17, 13);

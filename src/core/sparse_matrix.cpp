@@ -88,6 +88,13 @@ bool sparse_matrix::valid() const {
       return false;
   return true;
 }
+bool sparse_matrix::set_dynamic_eye(bool enabled) {
+  if (dynamic_eye_ == enabled)
+    return false;
+  dynamic_eye_ = enabled;
+  jit_cache_.reset();
+  return true;
+}
 sparse_matrix &sparse_matrix::operator=(const sparse_matrix &other) {
   if (this != &other)
     jit_cache_.reset();
@@ -97,6 +104,7 @@ sparse_matrix &sparse_matrix::operator=(const sparse_matrix &other) {
     dense_panels_ = other.dense_panels_;
     diag_panels_ = other.diag_panels_;
     eye_panels_ = other.eye_panels_;
+    dynamic_eye_ = other.dynamic_eye_;
   } else {
     assert(rows_ == other.rows_ && cols_ == other.cols_);
     assert(dense_panels_.size() == other.dense_panels_.size());
@@ -108,6 +116,10 @@ sparse_matrix &sparse_matrix::operator=(const sparse_matrix &other) {
     for (size_t i = 0; i < other.diag_panels_.size(); i++) {
       diag_panels_[i].data_ = other.diag_panels_[i].data_;
     }
+    for (size_t i = 0; i < other.eye_panels_.size(); i++) {
+      eye_panels_[i].data_ = other.eye_panels_[i].data_;
+    }
+    dynamic_eye_ = other.dynamic_eye_;
   }
   return *this;
 }
