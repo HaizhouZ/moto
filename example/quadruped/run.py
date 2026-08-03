@@ -45,7 +45,7 @@ class QuadrupedModel(ContactRobotModel):
             q_nom=q_nom,
             contact_frames=foot_frames,
             use_forward_dynamics=use_fwd_dyn,
-            configuration_velocity="next",
+            configuration_velocity="predicted",
         )
 
     def get_state_cost(self):
