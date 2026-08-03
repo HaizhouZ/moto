@@ -1,8 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
+#include <moto/ocp/dynamics/pure_euler.hpp>
 #include <moto/ocp/dynamics/semi_implicit_euler.hpp>
 #include <moto/ocp/impl/node_data.hpp>
+#include <moto/multibody/quaternion.hpp>
 
 #include <chrono>
 
@@ -151,6 +153,51 @@ TEST_CASE("semi-implicit projections match dense dynamics") {
                        ? 0
                        : profiles[i].row_blocks.size() - 1);
   }
+}
+
+TEST_CASE("pure Euler is a complete kinematic dynamics") {
+  auto [q, qn] = multibody::quaternion::create("pure_euler_q");
+  auto velocity = sym::inputs("pure_euler_velocity", 3);
+  const cs::SX integrated = q->symbolic_integrate(
+      *q, .1 * static_cast<const cs::SX &>(*velocity));
+  const cs::SX residual = q->symbolic_difference(*qn, integrated);
+  dynamics euler(new pure_euler("pure_euler", residual, approx_order::first));
+  dynamics fallback(new dense_dynamics("pure_euler_dense", residual,
+                                       approx_order::first));
+  auto euler_problem = ocp::create(), dense_problem = ocp::create();
+  euler_problem->add(*euler);
+  dense_problem->add(*fallback);
+  euler_problem->wait_until_ready();
+  dense_problem->wait_until_ready();
+  node_data euler_data(euler_problem), dense_data(dense_problem);
+  for (node_data *data : {&euler_data, &dense_data}) {
+    data->sym_val().get(*q) = multibody::quaternion::identity();
+    data->sym_val().get(*qn) = multibody::quaternion::identity();
+    data->sym_val().get(velocity) = vector::LinSpaced(3, -.1, .2);
+    data->update_approximation(node_data::update_mode::eval_all);
+  }
+  euler->compute_project_derivatives(euler_data.data(euler));
+  fallback->compute_project_derivatives(dense_data.data(fallback));
+  const auto &euler_approx = euler_data.data(euler).as<
+      semi_implicit_euler::approx_data>();
+  INFO("pure inverse error = " <<
+       (euler_data.dense().approx_[__dyn].jac_[__y].dense() *
+            euler_approx.inverse_.dense() -
+        matrix::Identity(3, 3)).norm());
+  INFO("pure PFx error = " <<
+       (euler_data.dense().proj_f_x().dense() -
+        dense_data.dense().proj_f_x().dense()).norm());
+  REQUIRE(euler_data.dense().proj_f_x().dense().isApprox(
+      dense_data.dense().proj_f_x().dense(), 1e-12));
+  REQUIRE(euler_data.dense().proj_f_u().dense().isApprox(
+      dense_data.dense().proj_f_u().dense(), 1e-12));
+  REQUIRE(euler_data.dense().proj_f_res().isApprox(
+      dense_data.dense().proj_f_res(), 1e-12));
+  vector rhs = vector::LinSpaced(3, -.3, .4), euler_out(3), dense_out(3);
+  euler->apply_jac_y_inverse_transpose(euler_data.data(euler), rhs, euler_out);
+  fallback->apply_jac_y_inverse_transpose(
+      dense_data.data(fallback), rhs, dense_out);
+  REQUIRE(euler_out.isApprox(dense_out, 1e-12));
 }
 
 } // namespace moto

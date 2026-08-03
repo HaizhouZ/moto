@@ -38,6 +38,8 @@ public:
 protected:
   clone_ptr clone() const override { return new semi_implicit_euler(*this); }
   void prepare_dynamics_codegen() override;
+  virtual cs::SX symbolic_inverse(const cs::SX &fy) const;
+  static cs::SX configuration_inverse(const cs::SX &fy);
 
 private:
   std::vector<jac_panel> jac_panels_;

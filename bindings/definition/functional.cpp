@@ -10,6 +10,7 @@
 #include <nanobind/stl/variant.h>
 
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
+#include <moto/ocp/dynamics/pure_euler.hpp>
 #include <moto/ocp/dynamics/semi_implicit_euler.hpp>
 
 #include <enum_export.hpp>
@@ -307,4 +308,14 @@ void register_submodule_functional(nb::module_ &m) {
             nb::arg("order") = approx_order::first)
         .def("mark_shared_inputs", &semi_implicit_euler::mark_shared_inputs,
              nb::arg("shared_inputs"));
+
+    nb::class_<pure_euler, semi_implicit_euler>(m, "pure_euler")
+        .def_static(
+            "create",
+            [](const std::string &name, const cs::SX &out,
+               approx_order order) {
+                return std::make_shared<pure_euler>(name, out, order);
+            },
+            nb::arg("name"), nb::arg("out"),
+            nb::arg("order") = approx_order::first);
 }

@@ -147,10 +147,32 @@ void semi_implicit_euler::apply_jac_y_inverse_transpose(
   d.transpose_(d.inverse_pointers_, v.data(), dst.data());
 }
 
+cs::SX semi_implicit_euler::configuration_inverse(const cs::SX &fy) {
+  cs::SX inverse = cs::SX::diag(1 / cs::SX::diag(fy));
+  if (fy.rows() >= 3) {
+    const casadi_int orientation = fy.rows() >= 6 ? 3 : 0;
+    const cs::Slice so3(orientation, orientation + 3);
+    inverse(so3, so3) = inverse3(fy(so3, so3));
+  }
+  return inverse;
+}
+
+cs::SX semi_implicit_euler::symbolic_inverse(const cs::SX &fy) const {
+  if (fy.rows() != fy.columns() || fy.rows() % 2)
+    throw std::runtime_error(
+        fmt::format("semi-implicit dynamics {} requires paired q/v state", name()));
+  const casadi_int n = fy.rows() / 2;
+  const cs::Slice q(0, n), v(n, 2 * n);
+  const cs::SX a_inv = configuration_inverse(fy(q, q));
+  return cs::SX::sparsify(cs::SX::vertcat(
+      {cs::SX::horzcat({a_inv, -cs::SX::mtimes(a_inv, fy(q, v))}),
+       cs::SX::horzcat({cs::SX::zeros(n, n), cs::SX::eye(n)})}));
+}
+
 void semi_implicit_euler::prepare_dynamics_codegen() {
   auto *task = get_codegen_task();
   if (!task)
-    throw std::runtime_error("semi-implicit Euler requires a CasADi expression");
+    throw std::runtime_error("Euler dynamics requires a CasADi expression");
   jac_panels_.clear();
   projected_panels_.clear();
   inverse_panels_.clear();
@@ -176,19 +198,7 @@ void semi_implicit_euler::prepare_dynamics_codegen() {
     }
   }
   const cs::SX fy = cs::SX::horzcat(fy_blocks);
-  if (fy.rows() != fy.columns() || fy.rows() % 2)
-    throw std::runtime_error(
-        fmt::format("semi-implicit dynamics {} requires paired q/v state", name()));
-  const casadi_int n = fy.rows() / 2;
-  const cs::Slice q(0, n), v(n, 2 * n);
-  const cs::SX a = fy(q, q), b = fy(q, v);
-  cs::SX a_inv = cs::SX::diag(1 / cs::SX::diag(a));
-  const casadi_int orientation = n >= 6 ? 3 : 0;
-  const cs::Slice so3(orientation, orientation + 3);
-  a_inv(so3, so3) = inverse3(a(so3, so3));
-  const cs::SX inverse = cs::SX::sparsify(cs::SX::vertcat(
-      {cs::SX::horzcat({a_inv, -cs::SX::mtimes(a_inv, b)}),
-       cs::SX::horzcat({cs::SX::zeros(n, n), cs::SX::eye(n)})}));
+  const cs::SX inverse = symbolic_inverse(fy);
 
   for (size_t i = 0; i < in_args_.size(); ++i) {
     const sym &arg = in_args_[i];
@@ -201,11 +211,9 @@ void semi_implicit_euler::prepare_dynamics_codegen() {
         linear_backend::analyze_sparsity(projected.sparsity()));
     if (std::getenv("MOTO_DEBUG_DYNAMICS_PROFILE")) {
       const auto &profile = projected_profiles_.back();
-      const auto upper = projected(q, cs::Slice()).nnz();
-      const auto lower = projected(v, cs::Slice()).nnz();
-      fmt::println("{} P*F_{}: {}x{}, nnz={}/{} (pos={}, vel={}), blocks={}", name(),
+      fmt::println("{} P*F_{}: {}x{}, nnz={}/{}, blocks={}", name(),
                    arg.name(), profile.rows, profile.cols, profile.nnz(),
-                   profile.rows * profile.cols, upper, lower,
+                   profile.rows * profile.cols,
                    profile.row_blocks.empty() ? 0
                                               : profile.row_blocks.size() - 1);
     }
