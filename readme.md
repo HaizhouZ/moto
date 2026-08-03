@@ -143,32 +143,7 @@ Costs support explicit scalar- and vector-valued construction through
 
 ### SQP workers: which setting wins?
 
-Pass the desired solver worker count to the constructor. It is fixed for that
-solver instance:
-
-```python
-sqp = moto.sqp(n_job=6)
-print(sqp.n_job)  # effective constructor-time cap, after OpenMP normalization
-```
-
-There are three limits. For a parallel loop with `work_items` stages, Moto
-requests:
-
-```text
-worker_count = min(n_job, OpenMP maximum threads, work_items)
-```
-
-In other words, neither setting wins alone:
-
-- `n_job` is the per-SQP worker ceiling and is the setting application code
-  should use.
-- `OMP_NUM_THREADS` controls the OpenMP process ceiling observed when the SQP
-  is constructed. If it is lower than `n_job`, Moto clamps `sqp.n_job` to it.
-- A loop cannot use more workers than it has stages/items. The OpenMP runtime
-  can reduce the team further when dynamic teams or `OMP_THREAD_LIMIT` apply.
-
-Set the environment before starting Python, and disable dynamic team sizing
-when a reproducible worker count matters:
+Set both limits before constructing the solver:
 
 ```bash
 OMP_NUM_THREADS=6 \
@@ -178,31 +153,14 @@ MKL_NUM_THREADS=1 \
 python example/arm/run.py --n-job 6
 ```
 
-Examples of the resulting SQP cap:
+The effective count is
+`min(n_job, OMP_NUM_THREADS, work_items)`: `n_job` is the per-solver limit and
+`OMP_NUM_THREADS` is the process limit. Check the normalized solver limit with
+`sqp.n_job`. Eigen is forced to one internal thread; the BLAS variables above
+avoid nested threading.
 
-| `OMP_NUM_THREADS` | `moto.sqp(n_job=...)` | `sqp.n_job` |
-|---:|---:|---:|
-| 8 | 6 | 6 |
-| 4 | 6 | 4 |
-| 8 | 1 | 1 |
-
-`ns_sqp` explicitly sets Eigen's internal thread count to one, so Eigen does
-not create a second thread team inside Moto's stage-parallel regions.
-`OPENBLAS_NUM_THREADS` and `MKL_NUM_THREADS` likewise prevent nested threading
-in those libraries when they are present. These variables do not choose the
-SQP worker count.
-
-Two similarly named controls are independent of solver execution:
-
-- `cmake --build build -j6` selects build-system compilation concurrency.
-- generated-function compilation currently uses the OpenMP maximum, not the
-  particular SQP object's `n_job`; `n_job` controls runtime OCP traversal.
-
-For small horizons, `n_job=1` is often fastest because worker dispatch costs
-more than the available stage work. For arm and quadruped problems, benchmark
-`1`, the number of physical cores, and a few intermediate values using the
-same Release build and warm-start state. Do not compare first-run codegen or
-Viser URDF loading with hot `sqp.update(...)` time.
+Build concurrency (`cmake --build ... -j6`) and codegen compilation are
+separate from SQP workers. For short horizons, benchmark against `n_job=1`.
 
 ## Euler Dynamics
 
