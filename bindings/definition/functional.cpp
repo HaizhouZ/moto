@@ -296,7 +296,7 @@ void register_submodule_functional(nb::module_ &m) {
             nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd)
         .def("mark_shared_inputs", &dense_dynamics::mark_shared_inputs, nb::arg("shared_inputs"));
 
-    nb::class_<sparse_dynamics, dense_dynamics>(m, "sparse_dynamics")
+    nb::class_<sparse_dynamics, generic_constr>(m, "sparse_dynamics")
         .def_static(
             "create",
             [](const std::string &name, const cs::SX &out,
@@ -304,5 +304,7 @@ void register_submodule_functional(nb::module_ &m) {
                 return std::make_shared<sparse_dynamics>(name, out, order);
             },
             nb::arg("name"), nb::arg("out"),
-            nb::arg("order") = approx_order::first);
+            nb::arg("order") = approx_order::first)
+        .def("mark_shared_inputs", &sparse_dynamics::mark_shared_inputs,
+             nb::arg("shared_inputs"));
 }

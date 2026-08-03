@@ -143,7 +143,9 @@ solve_profile analyze_solve_profile(std::span<const matrix> samples,
     for (size_t col = 0; col < n; ++col)
       for (size_t row = 0; row < n; ++row)
         pattern[row + col * n] |= std::abs(sample(row, col)) > a_tol;
-    Eigen::PartialPivLU<matrix> lu(sample);
+    Eigen::FullPivLU<matrix> lu(sample);
+    if (!lu.isInvertible())
+      throw std::runtime_error("singular matrix while detecting solve profile");
     const matrix inverse = lu.solve(identity);
     if (!inverse.allFinite() ||
         !(sample * inverse).isApprox(identity, 100 * relative_tolerance))
@@ -192,6 +194,7 @@ solve_profile analyze_solve_profile(std::span<const matrix> samples,
       visit(i);
 
   solve_profile result{.dimension = n,
+                       .lhs = {n, n, {{sparsity::dense, 0, 0, n, n}}},
                        .inverse_nonzeros = std::move(inverse_pattern)};
   std::vector<size_t> component_of(n);
   for (size_t c = 0; c < components.size(); ++c) {
@@ -244,18 +247,68 @@ std::string emit_multi_solve_source(const solve_profile &profile,
   out << "#include <Eigen/Core>\n#include <Eigen/LU>\n"
          "extern \"C\" __attribute__((visibility(\"default\"))) void "
       << symbol_name << "(double* const* p) {\n"
-      << "using M=Eigen::Matrix<double,Eigen::Dynamic,Eigen::Dynamic,Eigen::ColMajor>;\n"
-      << "Eigen::Map<const M> A(p[0]," << profile.dimension << ','
-      << profile.dimension << ");\n"
-      << (transpose ? "auto At=A.transpose();\n" : "auto& At=A;\n");
-  for (size_t i = 0; i < rhs_cols.size(); ++i)
-    out << "Eigen::Map<const M> B" << i << "(p[" << 1 + 2 * i << "],"
-        << profile.dimension << ',' << rhs_cols[i] << ");"
-        << "Eigen::Map<M> X" << i << "(p[" << 2 + 2 * i << "],"
-        << profile.dimension << ',' << rhs_cols[i] << ");X" << i << "=B"
-        << i << ";\n";
+      << "using M=Eigen::Matrix<double,Eigen::Dynamic,Eigen::Dynamic,Eigen::ColMajor>;\n";
+  const auto storage_order = [](size_t rows, size_t cols) {
+    return rows == 1 && cols != 1 ? "Eigen::RowMajor" : "Eigen::ColMajor";
+  };
+  const size_t rhs_start = profile.lhs.panels.size();
+  for (size_t i = 0; i < rhs_cols.size(); ++i) {
+    out << "using R" << i << "=Eigen::Matrix<double," << profile.dimension << ','
+        << rhs_cols[i] << ',' << storage_order(profile.dimension, rhs_cols[i]) << ">;"
+        << "Eigen::Map<const R" << i << "> B" << i << "(p["
+        << rhs_start + 2 * i << "]);"
+        << "Eigen::Map<R" << i << "> X" << i << "(p["
+        << rhs_start + 1 + 2 * i << "]);X" << i << "=B" << i << ";\n";
+  }
+
+  size_t temporary = 0;
+  const auto emit_block = [&](std::string_view target, size_t row, size_t col,
+                              size_t rows, size_t cols) {
+    out << "Eigen::Matrix<double," << rows << ',' << cols
+        << ',' << storage_order(rows, cols) << "> " << target
+        << "=Eigen::Matrix<double," << rows << ',' << cols << ','
+        << storage_order(rows, cols) << ">::Zero();\n";
+    for (size_t i = 0; i < profile.lhs.panels.size(); ++i) {
+      const auto original = profile.lhs.panels[i];
+      auto panel = original;
+      if (transpose) {
+        std::swap(panel.row_offset, panel.col_offset);
+        std::swap(panel.rows, panel.cols);
+      }
+      const size_t r0 = std::max(row, panel.row_offset);
+      const size_t c0 = std::max(col, panel.col_offset);
+      const size_t r1 = std::min(row + rows, panel.row_offset + panel.rows);
+      const size_t c1 = std::min(col + cols, panel.col_offset + panel.cols);
+      if (r0 >= r1 || c0 >= c1) continue;
+      if (panel.pattern == sparsity::dense) {
+        const std::string map = "P" + std::to_string(temporary++);
+        out << "using T" << map << "=Eigen::Matrix<double," << original.rows << ','
+            << original.cols << ',' << storage_order(original.rows, original.cols)
+            << ">;"
+            << "Eigen::Map<const T" << map << "> " << map << "(p[" << i
+            << "]);" << target << ".block("
+            << r0 - row << ',' << c0 - col << ',' << r1 - r0 << ',' << c1 - c0
+            << ")+=\n" << map << (transpose ? ".transpose()" : "") << ".block("
+            << r0 - panel.row_offset << ',' << c0 - panel.col_offset << ','
+            << r1 - r0 << ',' << c1 - c0 << ");\n";
+        continue;
+      }
+      const size_t begin = std::max(r0 - panel.row_offset, c0 - panel.col_offset);
+      const size_t end = std::min(r1 - panel.row_offset, c1 - panel.col_offset);
+      if (begin >= end) continue;
+      out << target << ".block(" << panel.row_offset + begin - row << ','
+          << panel.col_offset + begin - col << ',' << end - begin << ','
+          << end - begin << ").diagonal().array()+=";
+      if (panel.pattern == sparsity::eye)
+        out << "1.;\n";
+      else
+        out << "Eigen::Map<const Eigen::VectorXd>(p[" << i << "]+" << begin
+            << ',' << end - begin << ").array();\n";
+    }
+  };
   if (profile.dense_fallback) {
-    out << "Eigen::PartialPivLU<M> lu(At);\n";
+    emit_block("A", 0, 0, profile.dimension, profile.dimension);
+    out << "Eigen::PartialPivLU<M> lu(A);\n";
     for (size_t i = 0; i < rhs_cols.size(); ++i)
       out << "X" << i << "=lu.solve(X" << i << ").eval();\n";
   } else {
@@ -264,20 +317,24 @@ std::string emit_multi_solve_source(const solve_profile &profile,
       sizes[block.offset] = block.size;
     size_t block_index = 0;
     for (const auto &block : profile.order) {
+      const std::string diagonal = "D" + std::to_string(block_index);
+      emit_block(diagonal, block.offset, block.offset, block.size, block.size);
       if (block.size > 1)
-        out << "auto lu" << block_index << "=At.block(" << block.offset << ','
-            << block.offset << ',' << block.size << ',' << block.size
-            << ").eval().partialPivLu();\n";
+        out << "auto lu" << block_index << '=' << diagonal << ".partialPivLu();\n";
       for (size_t i = 0; i < rhs_cols.size(); ++i) {
-        for (size_t dependency : block.dependencies)
-          out << "X" << i << ".middleRows(" << block.offset << ','
-              << block.size << ").noalias()-=At.block(" << block.offset << ','
-              << dependency << ',' << block.size << ',' << sizes.at(dependency)
-              << ")*X" << i << ".middleRows(" << dependency << ','
-              << sizes.at(dependency) << ");\n";
+        for (size_t dependency : block.dependencies) {
+          const std::string coupling = "E" + std::to_string(block_index) + '_' +
+                                       std::to_string(dependency);
+          if (i == 0)
+            emit_block(coupling, block.offset, dependency, block.size,
+                       sizes.at(dependency));
+          out << "X" << i << ".middleRows(" << block.offset << ',' << block.size
+              << ").noalias()-=" << coupling << "*X" << i << ".middleRows("
+              << dependency << ',' << sizes.at(dependency) << ");\n";
+        }
         if (block.size == 1)
-          out << "X" << i << ".row(" << block.offset << ")/=At("
-              << block.offset << ',' << block.offset << ");\n";
+          out << "X" << i << ".row(" << block.offset << ")/=" << diagonal
+              << "(0,0);\n";
         else
           out << "X" << i << ".middleRows(" << block.offset << ','
               << block.size << ")=lu" << block_index << ".solve(X" << i

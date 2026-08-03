@@ -147,6 +147,7 @@ struct solve_block {
 /// entries and is retained for validation/profile diagnostics.
 struct solve_profile {
   size_t dimension = 0;
+  matrix_layout lhs;
   std::vector<solve_block> order;
   std::vector<unsigned char> inverse_nonzeros;
   bool dense_fallback = false;
@@ -164,7 +165,7 @@ public:
       : profile_(std::move(profile)), rhs_cols_(std::move(rhs_cols)),
         function_(function) {}
   void operator()(std::span<scalar_t *> pointers) const;
-  size_t pointer_count() const { return 1 + 2 * rhs_cols_.size(); }
+  size_t pointer_count() const { return profile_.lhs.panels.size() + 2 * rhs_cols_.size(); }
 
 private:
   solve_profile profile_;

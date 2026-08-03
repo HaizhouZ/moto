@@ -37,6 +37,7 @@ class QuadrupedModel(ContactRobotModel):
         q_nom: np.ndarray | None = None,
         foot_frames=GO2_FOOT_FRAMES,
         use_fwd_dyn: bool = False,
+        configuration_velocity: str = "predicted",
     ):
         super().__init__(
             model,
@@ -45,7 +46,7 @@ class QuadrupedModel(ContactRobotModel):
             q_nom=q_nom,
             contact_frames=foot_frames,
             use_forward_dynamics=use_fwd_dyn,
-            configuration_velocity="predicted",
+            configuration_velocity=configuration_velocity,
         )
 
     def get_state_cost(self):
@@ -74,6 +75,12 @@ def main():
     parser.add_argument("--horizon", type=int, default=100)
     parser.add_argument("--steps", type=int, default=4)
     parser.add_argument("--nodes-per-step", type=int, default=20)
+    parser.add_argument(
+        "--configuration-velocity",
+        choices=("predicted", "next"),
+        default="predicted",
+        help="velocity used to integrate configuration; 'next' selects semi-implicit Euler",
+    )
     parser.add_argument(
         "--max-iter",
         type=int,
@@ -110,7 +117,13 @@ def main():
     q_d = np.copy(go2.q0)
     model = build_floating_base_model(go2.urdf)
     np.set_printoptions(precision=3, suppress=True, linewidth=200)
-    model = QuadrupedModel(model, dt=dt, q_nom=q_d, use_fwd_dyn=True)
+    model = QuadrupedModel(
+        model,
+        dt=dt,
+        q_nom=q_d,
+        use_fwd_dyn=True,
+        configuration_velocity=args.configuration_velocity,
+    )
     model.joint_limit_constr = model.joint_limit_constraint(model.q, model.v)
     model.torque_limit_constr = model.torque_limit_constraint(model.tq)
     model.state_cost = model.get_state_cost()

@@ -176,6 +176,40 @@ TEST_CASE("numeric Eigen LU analysis emits a branch-free semi-implicit solve") {
   REQUIRE((fy * result2).isApprox(rhs2, 1e-12));
 }
 
+TEST_CASE("multi-panel solve consumes sparse dynamics storage directly") {
+  matrix fy = matrix::Identity(6, 6);
+  matrix dense(2, 2);
+  dense << 2., .2, -.1, 1.5;
+  vector coupling(2);
+  coupling << .03, -.04;
+  fy.block<2, 2>(2, 2) = dense;
+  fy(0, 3) = coupling[0];
+  fy(1, 4) = coupling[1];
+  const std::array samples{fy, fy};
+  auto profile = analyze_solve_profile(samples);
+  profile.lhs = {
+      6, 6,
+      {{sparsity::eye, 0, 0, 2, 2},
+       {sparsity::dense, 2, 2, 2, 2},
+       {sparsity::eye, 4, 4, 2, 2},
+       {sparsity::diag, 0, 3, 2, 2}}};
+
+  matrix rhs = matrix::Random(6, 5), result(6, 5);
+  auto kernel = compile_multi_solve(profile, {5});
+  std::vector<scalar_t *> pointers{
+      nullptr, dense.data(), nullptr, coupling.data(),
+      rhs.data(), result.data()};
+  kernel(pointers);
+  REQUIRE((fy * result).isApprox(rhs, 1e-12));
+
+  std::array transposed{matrix(fy.transpose()), matrix(fy.transpose())};
+  auto transpose_profile = analyze_solve_profile(transposed);
+  transpose_profile.lhs = profile.lhs;
+  auto transpose_kernel = compile_multi_solve(transpose_profile, {5}, true);
+  transpose_kernel(pointers);
+  REQUIRE((fy.transpose() * result).isApprox(rhs, 1e-12));
+}
+
 TEST_CASE("sparse_matrix dispatches dense operands through JIT") {
   sparse_matrix sparse;
   sparse.resize(6, 5);

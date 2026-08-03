@@ -2,18 +2,23 @@
 #define MOTO_OCP_SPARSE_DYNAMICS_HPP
 
 #include <moto/core/linear_backend.hpp>
-#include <moto/ocp/dynamics/dense_dynamics.hpp>
+#include <moto/ocp/dynamics.hpp>
 
 namespace moto {
 
 /// Implicit dynamics using a numerically detected, statically compiled block
 /// solve for the next-state Jacobian.
-class sparse_dynamics : public dense_dynamics {
+class sparse_dynamics : public generic_dynamics {
 public:
-  using base = dense_dynamics;
+  using base = generic_dynamics;
   using base::base;
 
-  struct approx_data : public dense_dynamics::approx_data {
+  struct jac_panel {
+    size_t argument = 0;
+    sp_info block;
+  };
+
+  struct approx_data : public generic_dynamics::approx_data {
     linear_backend::multi_solve_kernel jac_solve_;
     linear_backend::multi_solve_kernel residual_solve_, transpose_solve_;
     std::vector<scalar_t *> jac_pointers_, residual_pointers_, transpose_pointers_;
@@ -31,11 +36,11 @@ public:
 
 protected:
   clone_ptr clone() const override { return new sparse_dynamics(*this); }
-  void finalize_impl() override;
+  void prepare_dynamics_codegen() override;
 
 private:
+  std::vector<jac_panel> jac_panels_;
   linear_backend::solve_profile profile_, transpose_profile_;
-  void analyze_profile();
 };
 
 } // namespace moto

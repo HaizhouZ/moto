@@ -24,11 +24,7 @@ class dense_dynamics : public generic_dynamics {
         // sparse_matrix proj_f_u_;
         using lu_t = utils::blasfeo_lu;
         movable_ptr<lu_t> lu_;                             ///< LU decomposition for dense dynamics
-        aligned_map_t f_x_, f_y_;                          ///< Jacobian of f_y
-        aligned_map_t f_u_exclusive_, proj_f_u_exclusive_; ///< Jacobian of f_u (exclusive of shared inputs)
-        std::vector<aligned_map_t> f_u_shared_;            ///< Jacobian of other fields
-        aligned_map_t proj_f_x_;                           ///< Jacobian of x
-        std::vector<aligned_map_t> proj_f_u_shared_;       ///< projection of f_u
+        aligned_map_t f_y_;
         approx_data(generic_constr::approx_data &&rhs);
         ~approx_data();
     };
@@ -48,17 +44,7 @@ class dense_dynamics : public generic_dynamics {
     void compute_project_residual(func_approx_data &data) const override;
     void apply_jac_y_inverse_transpose(func_approx_data &data, vector &v, vector &dst) const override;
 
-    /// @brief mark the shared inputs in the dynamics
-    /// @note should be called before finalization
-    void mark_shared_inputs(const var_inarg_list &args);
-
-  protected:
-    bool input_shared(const sym &s) const;
-
-    var_list shared_inputs_;
-    std::set<size_t> shared_inputs_indices_;
     void finalize_impl() override;
-    void substitute(const sym &arg, const sym &rhs) override;
 };
 } // namespace moto
 
