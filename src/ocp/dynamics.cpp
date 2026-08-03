@@ -4,6 +4,10 @@
 namespace moto {
 
 generic_dynamics::approx_data::approx_data(base::approx_data &&rhs)
+    : approx_data(std::move(rhs), false) {}
+
+generic_dynamics::approx_data::approx_data(base::approx_data &&rhs,
+                                           bool sparse_projection)
     : base::approx_data(std::move(rhs)),
       proj_f_res_(problem()->extract(lag_data_->dynamics_data_.proj_f_res_, func_)) {
     approx_ = &lag_data_->approx_[__dyn];
@@ -15,9 +19,10 @@ generic_dynamics::approx_data::approx_data(base::approx_data &&rhs)
     f_x_.reset(approx_->jac_[__x].insert(
         f_st, prob.get_expr_start_tangent(first_x), func_.dim(),
         func_.arg_tdim(__x), sparsity::dense));
-    proj_f_x_.reset(dyn_proj_->proj_f_x_.insert(
-        f_st, prob.get_expr_start_tangent(first_x), func_.dim(),
-        func_.arg_tdim(__x), sparsity::dense));
+    if (!sparse_projection)
+        proj_f_x_.reset(dyn_proj_->proj_f_x_.insert(
+            f_st, prob.get_expr_start_tangent(first_x), func_.dim(),
+            func_.arg_tdim(__x), sparsity::dense));
 
     size_t exclusive_dim = 0;
     const sym *first_u = nullptr;
@@ -31,9 +36,10 @@ generic_dynamics::approx_data::approx_data(base::approx_data &&rhs)
     f_u_exclusive_.reset(approx_->jac_[__u].insert(
         f_st, prob.get_expr_start_tangent(*first_u), func_.dim(), exclusive_dim,
         sparsity::dense));
-    proj_f_u_exclusive_.reset(dyn_proj_->proj_f_u_.insert(
-        f_st, prob.get_expr_start_tangent(*first_u), func_.dim(), exclusive_dim,
-        sparsity::dense));
+    if (!sparse_projection)
+        proj_f_u_exclusive_.reset(dyn_proj_->proj_f_u_.insert(
+            f_st, prob.get_expr_start_tangent(*first_u), func_.dim(), exclusive_dim,
+            sparsity::dense));
 
     size_t x_col = 0, u_col = 0;
     for (size_t i = 0; i < func_.in_args().size(); ++i) {
@@ -47,9 +53,10 @@ generic_dynamics::approx_data::approx_data(base::approx_data &&rhs)
                 f_st, prob.get_expr_start_tangent(arg), func_.dim(), arg.tdim(),
                 sparsity::dense));
             new (&jac_[i]) matrix_ref(f_u_shared_.back());
-            proj_f_u_shared_.emplace_back(dyn_proj_->proj_f_u_.insert(
-                f_st, prob.get_expr_start_tangent(arg), func_.dim(), arg.tdim(),
-                sparsity::dense));
+            if (!sparse_projection)
+                proj_f_u_shared_.emplace_back(dyn_proj_->proj_f_u_.insert(
+                    f_st, prob.get_expr_start_tangent(arg), func_.dim(), arg.tdim(),
+                    sparsity::dense));
         } else if (arg.field() == __u) {
             new (&jac_[i]) matrix_ref(f_u_exclusive_.middleCols(u_col, arg.tdim()));
             u_col += arg.tdim();

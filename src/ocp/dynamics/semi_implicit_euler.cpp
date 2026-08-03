@@ -82,7 +82,7 @@ std::vector<piece> split_panels(const cs::SX &input) {
 } // namespace
 
 semi_implicit_euler::approx_data::approx_data(generic_constr::approx_data &&rhs)
-    : generic_dynamics::approx_data(std::move(rhs)) {
+    : generic_dynamics::approx_data(std::move(rhs), true) {
   const auto &dyn = static_cast<const semi_implicit_euler &>(func_);
   auto argument_refs = jac_;
   jac_.clear();
@@ -100,22 +100,20 @@ semi_implicit_euler::approx_data::approx_data(generic_constr::approx_data &&rhs)
         block.rows, block.cols, block.pattern);
     jac_.push_back(ref);
   }
-  size_t x_col = 0, u_col = 0, shared = 0;
-  scratch_.reserve(func_.in_args().size());
-  for (const sym &arg : func_.in_args()) {
-    if (!in_field(arg.field(), std::array{__x, __u}))
-      continue;
+  scratch_.reserve(dyn.projected_panels_.size());
+  for (const auto &[argument, block] : dyn.projected_panels_) {
+    const sym &arg = func_.in_args(argument);
     if (!prob.is_active(arg)) {
-      scratch_.emplace_back(func_.dim(), arg.tdim());
+      scratch_.emplace_back(block.rows,
+                            block.pattern == sparsity::dense ? block.cols : 1);
       jac_.emplace_back(scratch_.back());
-    } else if (arg.field() == __x) {
-      jac_.emplace_back(proj_f_x_.middleCols(x_col, arg.tdim()));
-      x_col += arg.tdim();
-    } else if (dyn.input_shared(arg)) {
-      jac_.emplace_back(proj_f_u_shared_[shared++]);
     } else {
-      jac_.emplace_back(proj_f_u_exclusive_.middleCols(u_col, arg.tdim()));
-      u_col += arg.tdim();
+      auto &target = arg.field() == __x ? dyn_proj_->proj_f_x_
+                                        : dyn_proj_->proj_f_u_;
+      jac_.push_back(target.insert(
+          f_st + block.row_offset,
+          prob.get_expr_start_tangent(arg) + block.col_offset,
+          block.rows, block.cols, block.pattern));
     }
   }
   inverse_.resize(func_.dim(), func_.dim());
@@ -154,6 +152,7 @@ void semi_implicit_euler::prepare_dynamics_codegen() {
   if (!task)
     throw std::runtime_error("semi-implicit Euler requires a CasADi expression");
   jac_panels_.clear();
+  projected_panels_.clear();
   inverse_panels_.clear();
   projected_profiles_.clear();
   task->jac_outputs.clear();
@@ -161,7 +160,8 @@ void semi_implicit_euler::prepare_dynamics_codegen() {
   for (size_t i = 0; i < in_args_.size(); ++i) {
     const sym &arg = in_args_[i];
     if (!in_field(arg.field(), primal_fields)) continue;
-    cs::SX jac = utils::cs_codegen::tangent_jacobian(task->sx_output, arg);
+    cs::SX jac = cs::SX::sparsify(
+        utils::cs_codegen::tangent_jacobian(task->sx_output, arg));
     if (arg.field() == __y) {
       fy_blocks.push_back(jac);
       for (auto &[block, value] : split_panels(jac)) {
@@ -186,22 +186,34 @@ void semi_implicit_euler::prepare_dynamics_codegen() {
   const casadi_int orientation = n >= 6 ? 3 : 0;
   const cs::Slice so3(orientation, orientation + 3);
   a_inv(so3, so3) = inverse3(a(so3, so3));
-  const cs::SX inverse = cs::SX::vertcat(
+  const cs::SX inverse = cs::SX::sparsify(cs::SX::vertcat(
       {cs::SX::horzcat({a_inv, -cs::SX::mtimes(a_inv, b)}),
-       cs::SX::horzcat({cs::SX::zeros(n, n), cs::SX::eye(n)})});
+       cs::SX::horzcat({cs::SX::zeros(n, n), cs::SX::eye(n)})}));
 
-  for (const sym &arg : in_args_) {
+  for (size_t i = 0; i < in_args_.size(); ++i) {
+    const sym &arg = in_args_[i];
     if (arg.field() != __x && arg.field() != __u)
       continue;
-    cs::SX jac =
-        utils::cs_codegen::tangent_jacobian(task->sx_output, arg);
+    cs::SX jac = cs::SX::sparsify(
+        utils::cs_codegen::tangent_jacobian(task->sx_output, arg));
     projected_profiles_.push_back(linear_backend::analyze_spgemm(
         inverse.sparsity(), jac.sparsity()));
     cs::SX projected = cs::SX::mtimes(inverse, jac);
     if (projected_profiles_.back().nnz() !=
         static_cast<size_t>(projected.nnz()))
       throw std::logic_error("CasADi SpGEMM profile differs from PF expression");
-    task->jac_outputs.push_back(std::move(projected));
+    if (std::getenv("MOTO_DEBUG_DYNAMICS_PROFILE")) {
+      const auto &profile = projected_profiles_.back();
+      fmt::println("{} P*F_{}: {}x{}, nnz={}/{}, blocks={}", name(),
+                   arg.name(), profile.rows, profile.cols, profile.nnz(),
+                   profile.rows * profile.cols,
+                   profile.row_blocks.empty() ? 0
+                                              : profile.row_blocks.size() - 1);
+    }
+    for (auto &[block, value] : split_panels(projected)) {
+      projected_panels_.push_back({i, block});
+      task->jac_outputs.push_back(std::move(value));
+    }
   }
   for (auto &[block, value] : split_panels(inverse)) {
     inverse_panels_.push_back(block);

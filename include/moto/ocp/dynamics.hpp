@@ -22,6 +22,7 @@ class generic_dynamics : public generic_constr {
         std::vector<aligned_map_t> f_u_shared_, proj_f_u_shared_;
         aligned_map_t proj_f_x_;
         approx_data(base::approx_data &&rhs);
+        approx_data(base::approx_data &&rhs, bool sparse_projection);
     };
     using base::base;
     void mark_shared_inputs(const var_inarg_list &args);

@@ -33,6 +33,7 @@ public:
   void compute_project_residual(func_approx_data &data) const override;
   void apply_jac_y_inverse_transpose(func_approx_data &data, vector &v,
                                      vector &dst) const override;
+  const auto &projected_profiles() const { return projected_profiles_; }
 
 protected:
   clone_ptr clone() const override { return new semi_implicit_euler(*this); }
@@ -40,6 +41,7 @@ protected:
 
 private:
   std::vector<jac_panel> jac_panels_;
+  std::vector<jac_panel> projected_panels_;
   std::vector<sp_info> inverse_panels_;
   std::vector<linear_backend::ccs_layout> projected_profiles_;
 };
