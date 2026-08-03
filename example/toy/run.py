@@ -11,6 +11,8 @@ import casadi as cs
 import moto
 import numpy as np
 
+from example.helpers import add_terms, collect_node_values, solver_nodes, visit_nodes
+
 np.set_printoptions(precision=4, suppress=True)
 
 nx, nu = 2, 1
@@ -29,23 +31,17 @@ dyn = moto.dense_dynamics.create(
     xn.sx - A @ x.sx - B @ u.sx,
 )
 
-running_cost = (
-    moto.cost.create(
-        "toy_base_running_cost",
-        [x, u],
-        0.5 * cs.sumsqr(x.sx) + 0.05 * cs.sumsqr(u.sx),
-    )
-    .set_diag_hess()
-)
+running_cost = moto.cost.create(
+    "toy_base_running_cost",
+    [x, u],
+    0.5 * cs.sumsqr(x.sx) + 0.05 * cs.sumsqr(u.sx),
+).set_diag_hess()
 
-terminal_cost = (
-    moto.cost.create(
-        "toy_base_terminal_cost",
-        [x],
-        5.0 * cs.sumsqr(x.sx),
-    )
-    .set_diag_hess()
-)
+terminal_cost = moto.cost.create(
+    "toy_base_terminal_cost",
+    [x],
+    5.0 * cs.sumsqr(x.sx),
+).set_diag_hess()
 
 u_limit = 0.5
 u_box = moto.ineq.create(
@@ -61,53 +57,45 @@ def build_sqp():
     sqp = moto.sqp(n_job=1)
 
     stage_prob = moto.stage_ocp.create()
-    stage_prob.add(dyn)
-    stage_prob.add(running_cost)
-    stage_prob.add(u_box)
+    add_terms(stage_prob, dyn, running_cost, u_box)
 
     stages = sqp.add_stage(stage_prob, N)
     stages[-1].ed.add(terminal_cost)
 
-    flat_nodes = sqp.flatten_nodes()
+    nodes = solver_nodes(sqp)
     print("Stage problem")
-    flat_nodes[0].prob.print_summary()
+    nodes[0].prob.print_summary()
     print("Terminal problem")
-    flat_nodes[-1].prob.print_summary()
+    nodes[-1].prob.print_summary()
 
-    def init(node: moto.sqp.data_type):
+    def init(node: moto.sqp.data_type, _):
         node.value[x] = x0.copy()
         if node.prob.dim(moto.field.field___y) > 0:
             node.value[xn] = x0.copy()
 
-    for node in sqp.flatten_nodes():
-        init(node)
+    visit_nodes(nodes, init)
     sqp.settings.prim_tol = 1e-8
     sqp.settings.dual_tol = 1e-8
     sqp.settings.comp_tol = 1e-8
-    return sqp
+    return sqp, nodes
 
 
 def main():
-    sqp = build_sqp()
+    sqp, nodes = build_sqp()
     sys.stdout.flush()
     kkt = sqp.update(50, verbose=True)
     sys.stdout.flush()
 
-    values = {"x": [], "u": []}
-
-    def grab(node: moto.sqp.data_type):
-        values["x"].append(np.asarray(node.value[x], dtype=float).reshape(-1))
-        values["u"].append(np.asarray(node.value[u], dtype=float).reshape(-1))
-
-    for node in sqp.flatten_nodes():
-        grab(node)
+    x_values, u_values = collect_node_values(nodes, x, u)
+    x_values = [value.reshape(-1) for value in x_values]
+    u_values = [value.reshape(-1) for value in u_values]
 
     print(f"result   : {kkt.result}")
     print(f"num_iter : {kkt.num_iter}")
     print(f"prim_res : {kkt.inf_prim_res:.2e}")
     print(f"dual_res : {kkt.inf_dual_res:.2e}")
-    print(f"x[0]     : {values['x'][0]}")
-    print(f"u[0]     : {values['u'][0]}")
+    print(f"x[0]     : {x_values[0]}")
+    print(f"u[0]     : {u_values[0]}")
 
     assert kkt.solved, f"toy modeled OCP failed: {kkt.result}"
 

@@ -6,7 +6,6 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import moto
-import casadi as cs
 import numpy as np
 import pinocchio as pin
 import pinocchio.casadi as cpin

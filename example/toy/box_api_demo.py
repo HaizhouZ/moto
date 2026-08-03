@@ -36,12 +36,20 @@ def main():
     ]
 
     g = cs.vertcat(x.sx[0] + x.sx[1], cs.sin(x.sx[2]))
-    boxes.append(moto.ineq.create("g_box", [x], g, np.array([-1.0, -0.2]), np.array([1.0, 0.8])))
-    boxes.append(moto.ineq.create("x_box_symbolic", [x, p_lb, p_ub], x.sx, p_lb.sx, p_ub.sx))
+    boxes.append(
+        moto.ineq.create("g_box", [x], g, np.array([-1.0, -0.2]), np.array([1.0, 0.8]))
+    )
+    boxes.append(
+        moto.ineq.create("x_box_symbolic", [x, p_lb, p_ub], x.sx, p_lb.sx, p_ub.sx)
+    )
     boxes.append(moto.ineq.create("dt_box_scalar", [dt], dt.sx, 1e-3, 0.1))
 
     sel = cs.vertcat(x.sx[0], x.sx[3])
-    boxes.append(moto.ineq.create("x_box_slice", [x], sel, np.array([-1.0, 2.0]), np.array([4.0, 5.0])))
+    boxes.append(
+        moto.ineq.create(
+            "x_box_slice", [x], sel, np.array([-1.0, 2.0]), np.array([4.0, 5.0])
+        )
+    )
 
     print("native box inequality examples")
     for box in boxes:
@@ -52,7 +60,9 @@ def main():
     except RuntimeError as exc:
         print("  bad_primal_bound rejected:", str(exc).splitlines()[0])
     else:
-        raise AssertionError("box bounds that depend on primal variables should be rejected")
+        raise AssertionError(
+            "box bounds that depend on primal variables should be rejected"
+        )
 
 
 if __name__ == "__main__":
