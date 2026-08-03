@@ -38,7 +38,7 @@ initial_cost = moto.cost.create(
 
 def solve(mode, *, optimize):
     sqp = moto.sqp(n_job=1)
-    stage = moto.stage_ocp.create()
+    stage = moto.stage()
     stage.add(dynamics)
     stage.add(control_cost)
     sqp.add_stage(stage, N)

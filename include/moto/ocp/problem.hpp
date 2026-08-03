@@ -50,8 +50,12 @@ struct ocp_linear_profile {
 class ocp_base : protected field_layout_store<expr_list> {
   public:
     struct active_status_config {
-        expr_inarg_list deactivate_list;
-        expr_inarg_list activate_list;
+        expr_list deactivate_list;
+        expr_list activate_list;
+        active_status_config() = default;
+        active_status_config(const expr_inarg_list &deactivate,
+                             const expr_inarg_list &activate)
+            : deactivate_list(deactivate), activate_list(activate) {}
         bool empty() const { return deactivate_list.empty() && activate_list.empty(); }
     };
 
@@ -59,8 +63,7 @@ class ocp_base : protected field_layout_store<expr_list> {
     ocp_base();
     ocp_base(const ocp_base &rhs);
     ~ocp_base();
-    bool add_impl(expr &);
-    bool add_impl(shared_expr);
+    bool add_impl(expr_handle);
     void maintain_order();
     virtual void on_modified();
     bool finalized_ = false;
@@ -71,7 +74,7 @@ class ocp_base : protected field_layout_store<expr_list> {
 
     void finalize();
     void build_linear_profile();
-    void refresh_after_clone(const active_status_config &config);
+    void refresh_copy(const active_status_config &config);
     void move_active_expr(const expr &ex, bool prune);
     bool restore_inactive_expr(const expr &ex, bool from_pruned);
     inline void field_read_guard() const {
@@ -110,10 +113,9 @@ class ocp_base : protected field_layout_store<expr_list> {
         return data.segment(get_expr_start_tangent(ex), ex.tdim());
     }
 
-    template <typename T>
-        requires std::is_base_of_v<shared_expr, std::remove_cvref_t<T>> ||
-                 std::is_base_of_v<expr, std::remove_reference_t<T>>
-    void add(T &&ex) { add_impl(ex); }
+    void add(expr_handle ex) { add_impl(std::move(ex)); }
+    void add(expr &ex) { add(ex.handle()); }
+    void add(const expr &ex) { add(ex.handle()); }
 
     void add(const expr_inarg_list &exprs) {
         for (expr &ex : exprs) {
@@ -124,7 +126,7 @@ class ocp_base : protected field_layout_store<expr_list> {
     size_t get_expr_start(const expr &ex) const;
     size_t get_expr_start_tangent(const expr &ex) const;
 
-    virtual bool accepts_term(const shared_expr &ex, std::string *reason = nullptr) const;
+    virtual bool accepts_term(const expr_handle &ex, std::string *reason = nullptr) const;
     void update_active_status(const active_status_config &config);
 
   protected:
@@ -155,7 +157,7 @@ class ocp : public ocp_base {
 
   public:
     static auto create() { return std::shared_ptr<ocp>(new ocp()); }
-    ocp_ptr_t clone(const active_status_config &config = {}) const;
+    ocp_ptr_t copy(const active_status_config &config = {}) const;
 
   protected:
 };
@@ -173,9 +175,9 @@ class stage_ocp : public ocp, public std::enable_shared_from_this<stage_ocp> {
     std::unordered_map<size_t, unsigned> endpoint_role_mask_by_uid_;
     std::function<void()> mutation_callback_;
     std::atomic<size_t> mutation_revision_{1};
-    bool add_with_role(shared_expr ex, stage_expr_role role);
-    bool validate_stage_term(const shared_expr &ex, std::string *reason) const;
-    bool validate_endpoint_term(const shared_expr &ex, std::string *reason) const;
+    bool add_with_role(expr_handle ex, stage_expr_role role);
+    bool validate_stage_term(const expr_handle &ex, std::string *reason) const;
+    bool validate_endpoint_term(const expr_handle &ex, std::string *reason) const;
     void set_mutation_callback(std::function<void()> callback);
     size_t mutation_revision() const noexcept {
         return mutation_revision_.load(std::memory_order_acquire);
@@ -185,15 +187,13 @@ class stage_ocp : public ocp, public std::enable_shared_from_this<stage_ocp> {
 
   public:
     static auto create() { return std::shared_ptr<stage_ocp>(new stage_ocp()); }
-    stage_ocp_ptr_t clone(const active_status_config &config = {}) const;
-    bool accepts_term(const shared_expr &ex, std::string *reason = nullptr) const override;
+    /// Independent stage container sharing immutable expression handles.
+    stage_ocp_ptr_t copy(const active_status_config &config = {}) const;
+    bool accepts_term(const expr_handle &ex, std::string *reason = nullptr) const override;
 
-    template <typename T>
-        requires std::is_base_of_v<shared_expr, std::remove_cvref_t<T>> ||
-                 std::is_base_of_v<expr, std::remove_reference_t<T>>
-    void add(T &&ex) {
-        add_with_role(shared_expr(ex), stage_expr_role::interval);
-    }
+    void add(expr_handle ex) { add_with_role(std::move(ex), stage_expr_role::interval); }
+    void add(expr &ex) { add(ex.handle()); }
+    void add(const expr &ex) { add(ex.handle()); }
 
     void add(const expr_inarg_list &exprs) {
         for (expr &ex : exprs) {
@@ -213,26 +213,24 @@ class node_view {
     node_view(const stage_ocp_ptr_t &stage, stage_expr_role role);
 
   public:
-    template <typename T>
-        requires std::is_base_of_v<shared_expr, std::remove_cvref_t<T>> ||
-                 std::is_base_of_v<expr, std::remove_reference_t<T>>
-    void add(T &&ex) {
-        auto owner = owner_.lock();
+    void add(expr_handle ex) {
+        auto owner = owner_;
         if (!owner) {
-            throw std::runtime_error("Cannot add to an expired node_view");
+            throw std::runtime_error("Cannot add to an empty endpoint");
         }
-        shared_expr shared(ex);
-        if (!shared) {
-            throw std::runtime_error("Cannot add null expression to node_view");
+        if (!ex) {
+            throw std::runtime_error("Cannot add null expression to endpoint");
         }
         std::string reason;
-        if (!owner->validate_endpoint_term(shared, &reason)) {
+        if (!owner->validate_endpoint_term(ex, &reason)) {
             throw std::runtime_error(fmt::format(
-                "Cannot add expression {} uid {} to node_view: {}",
-                shared->name(), shared->uid(), reason));
+                "Cannot add expression {} uid {} to endpoint: {}",
+                ex->name(), ex->uid(), reason));
         }
-        owner->add_with_role(std::move(shared), role_);
+        owner->add_with_role(std::move(ex), role_);
     }
+    void add(expr &ex) { add(ex.handle()); }
+    void add(const expr &ex) { add(ex.handle()); }
 
     void add(const expr_inarg_list &exprs) {
         for (expr &ex : exprs) {
@@ -240,19 +238,15 @@ class node_view {
         }
     }
 
-    stage_ocp_ptr_t stage() const { return owner_.lock(); }
+    stage_ocp_ptr_t stage() const { return owner_; }
     stage_expr_role role() const { return role_; }
-    bool expired() const { return owner_.expired(); }
+    explicit operator bool() const { return bool(owner_); }
 
   private:
-    std::weak_ptr<stage_ocp> owner_;
+    stage_ocp_ptr_t owner_;
     stage_expr_role role_ = stage_expr_role::start_node;
 };
 
 } // namespace moto
-
-extern template void moto::ocp_base::add<const moto::shared_expr &>(const moto::shared_expr &ex);
-extern template void moto::ocp_base::add<const moto::shared_expr>(const moto::shared_expr &&ex);
-extern template void moto::ocp_base::add<moto::shared_expr>(moto::shared_expr &&ex);
 
 #endif // __MOTO_PROBLEM_HPP__

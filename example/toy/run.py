@@ -56,7 +56,7 @@ u_box = moto.ineq.create(
 def build_sqp():
     sqp = moto.sqp(n_job=1)
 
-    stage_prob = moto.stage_ocp.create()
+    stage_prob = moto.stage()
     add_terms(stage_prob, dyn, running_cost, u_box)
 
     stages = sqp.add_stage(stage_prob, N)

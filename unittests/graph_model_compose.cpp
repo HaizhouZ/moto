@@ -25,7 +25,7 @@ const bool force_sync_codegen_for_test = []() {
 
 std::vector<std::string> expr_names(const moto::ocp_base &prob, moto::field_t field) {
     std::vector<std::string> names;
-    for (const moto::shared_expr &expr : prob.exprs(field)) {
+    for (const moto::expr_handle &expr : prob.exprs(field)) {
         names.push_back(expr->name());
     }
     return names;
@@ -68,7 +68,7 @@ moto::cost layout_cost(const std::string &name,
 }
 
 size_t expr_dim(const moto::var &v) {
-    return v.as<moto::expr>().dim();
+    return v->dim();
 }
 
 size_t expr_dim(const moto::sym &s) {
@@ -117,7 +117,7 @@ moto::cost callback_quadratic_cost(const std::string &name,
 const moto::generic_func &require_func_named_prefix(const moto::ocp_base_ptr_t &prob,
                                                     moto::field_t field,
                                                     const std::string &prefix) {
-    auto it = std::find_if(prob->exprs(field).begin(), prob->exprs(field).end(), [&](const moto::shared_expr &expr) {
+    auto it = std::find_if(prob->exprs(field).begin(), prob->exprs(field).end(), [&](const moto::expr_handle &expr) {
         return expr->name().rfind(prefix, 0) == 0;
     });
     REQUIRE(it != prob->exprs(field).end());
@@ -251,32 +251,42 @@ TEST_CASE("remap cache reuses keyed concrete function clones", "[graph][remap]")
     auto c = layout_cost("cost_remap_cache", var_list{x_a, p});
     REQUIRE(c->finalize(true));
 
-    auto first = c->remap_arguments({{x_a, y_a}});
-    auto second = c->remap_arguments({{x_a, y_a}});
-    auto duplicate = c->remap_arguments({{x_a, y_a}, {x_a, y_a}});
-    auto identity = c->remap_arguments({{x_a, x_a}});
-    auto different = c->remap_arguments({{x_a, y_b}});
+    auto first = c->reuse_remap({{x_a, y_a}});
+    auto second = c->reuse_remap({{x_a, y_a}});
+    auto redundant = c->reuse_remap({{x_a, y_a}, {x_a, y_a}});
+    auto identity = c->reuse_remap({{x_a, x_a}});
+    auto different = c->reuse_remap({{x_a, y_b}});
 
     REQUIRE(first.get() == second.get());
-    REQUIRE(first.get() == duplicate.get());
+    REQUIRE(first.get() == redundant.get());
+    REQUIRE(first->finalized());
+    REQUIRE(first->wait_until_ready());
     REQUIRE(identity.get() == c.get());
+    REQUIRE(identity->finalized());
     REQUIRE(first.get() != different.get());
-    REQUIRE(first.as<generic_func>().in_args().front()->uid() == y_a->uid());
-    REQUIRE(first.as<generic_func>().arg_num(__x) == 0);
-    REQUIRE(first.as<generic_func>().arg_num(__y) == 1);
-    REQUIRE(different.as<generic_func>().in_args().front()->uid() == y_b->uid());
-    REQUIRE_THROWS_AS(c->remap_arguments({{x_a, p}}), std::runtime_error);
-    REQUIRE_THROWS_AS(c->remap_arguments({{p, u_remap}}), std::runtime_error);
+    REQUIRE(expr_cast<generic_func>(first)->in_args().front()->uid() == y_a->uid());
+    REQUIRE(expr_cast<generic_func>(first)->arg_num(__x) == 0);
+    REQUIRE(expr_cast<generic_func>(first)->arg_num(__y) == 1);
+    REQUIRE(expr_cast<generic_func>(different)->in_args().front()->uid() == y_b->uid());
+    const auto fresh_a = c->remap_arguments({{x_a, y_a}});
+    const auto fresh_b = c->remap_arguments({{x_a, y_a}});
+    REQUIRE(fresh_a.get() != fresh_b.get());
+    REQUIRE(fresh_a->uid() != fresh_b->uid());
+    REQUIRE(fresh_a->finalized());
+    REQUIRE(fresh_a->wait_until_ready());
+    REQUIRE(fresh_a->handle().get() == fresh_a.get());
+    REQUIRE_THROWS_AS(c->reuse_remap({{x_a, p}}), std::runtime_error);
+    REQUIRE_THROWS_AS(c->reuse_remap({{p, u_remap}}), std::runtime_error);
     auto y_bad_dim = sym::states("x_remap_bad_dim", 2).second;
     auto p_bad_dim = sym::params("p_remap_bad_dim", 2);
-    REQUIRE_THROWS_AS(c->remap_arguments({{x_a, y_bad_dim}}), std::runtime_error);
-    REQUIRE_THROWS_AS(c->remap_arguments({{p, p_bad_dim}}), std::runtime_error);
+    REQUIRE_THROWS_AS(c->reuse_remap({{x_a, y_bad_dim}}), std::runtime_error);
+    REQUIRE_THROWS_AS(c->reuse_remap({{p, p_bad_dim}}), std::runtime_error);
 
-    std::vector<shared_expr> threaded_results(16);
+    std::vector<expr_handle> threaded_results(16);
     std::vector<std::thread> remap_threads;
     for (size_t i = 0; i < threaded_results.size(); ++i) {
         remap_threads.emplace_back([&, i]() {
-            threaded_results[i] = c->remap_arguments({{x_a, y_a}});
+            threaded_results[i] = c->reuse_remap({{x_a, y_a}});
         });
     }
     for (auto &thread : remap_threads) {
@@ -293,12 +303,47 @@ TEST_CASE("remap cache reuses keyed concrete function clones", "[graph][remap]")
     auto ineq = ineq_constr::create(
         "ineq_concrete_clone", var_list{x}, x, approx_order::first, __ineq_x);
 
-    REQUIRE(dynamic_cast<dense_dynamics *>(shared_expr(dyn).clone().get()) != nullptr);
+    auto remapped_dyn = dyn->remap_arguments({});
+    REQUIRE(dynamic_cast<dense_dynamics *>(remapped_dyn.get()) != nullptr);
 
     REQUIRE(ineq->finalize(true));
+    REQUIRE(ineq->get_codegen_task() != nullptr);
     auto remapped = ineq->remap_arguments({{x, y}});
     REQUIRE(dynamic_cast<ineq_constr *>(remapped.get()) != nullptr);
-    REQUIRE(remapped.as<generic_func>().in_args().front()->uid() == y->uid());
+    REQUIRE(expr_cast<generic_func>(remapped)->get_codegen_task() == nullptr);
+    REQUIRE(expr_cast<generic_func>(remapped)->in_args().front()->uid() == y->uid());
+}
+
+TEST_CASE("expression and endpoint handles have explicit identity semantics",
+          "[graph][handle]") {
+    using namespace moto;
+
+    auto x = sym::state("x_handle_identity", 1);
+    const auto same = x->handle();
+    const auto independent = x->clone("x_handle_independent");
+    REQUIRE(same.get() == x.get());
+    REQUIRE(same->uid() == x->uid());
+    REQUIRE(independent->uid() != x->uid());
+    REQUIRE(independent->name() == "x_handle_independent");
+
+    auto prototype = stage_ocp::create();
+    auto shared_cost = layout_cost("stage_copy_shared_cost", var_list{x});
+    prototype->add(*shared_cost);
+    auto copied = prototype->copy();
+    REQUIRE(copied->exprs(__cost).front().get() == shared_cost.get());
+    copied->add(*layout_cost("stage_copy_local_cost", var_list{x}));
+    REQUIRE(prototype->num(__cost) == 1);
+    REQUIRE(copied->num(__cost) == 2);
+
+    node_view endpoint;
+    {
+        auto stage = stage_ocp::create();
+        endpoint = stage->ed();
+    }
+    REQUIRE(bool(endpoint));
+    REQUIRE(endpoint.stage() != nullptr);
+    REQUIRE_NOTHROW(endpoint.add(*layout_cost(
+        "endpoint_owned_handle_cost", var_list{x})));
 }
 
 TEST_CASE("sqp add_stage appends repeated stage segments from the graph tail", "[graph][path]") {
@@ -406,7 +451,7 @@ TEST_CASE("phase-boundary endpoint terms survive current-interval inactive argum
     stage_b->st().add(*enabled_endpoint);
 
     ns_sqp sqp;
-    sqp.add_stage(stage_a->clone(ocp::active_status_config{{u}, {}}), 1);
+    sqp.add_stage(stage_a->copy(ocp::active_status_config{{u}, {}}), 1);
     sqp.add_stage(stage_b, 1);
 
     auto &flat = sqp.solver_nodes();
@@ -584,7 +629,7 @@ TEST_CASE("stage clone active status is honored during composition", "[graph][mu
     stage->add(*layout_cost("cost_stage_active_u", var_list{ua, ub}));
 
     ns_sqp sqp;
-    auto active_stage = stage->clone(ocp::active_status_config{{ub}, {}});
+    auto active_stage = stage->copy(ocp::active_status_config{{ub}, {}});
     sqp.add_stage(active_stage, 1);
 
     auto &flat = sqp.solver_nodes();
@@ -612,10 +657,10 @@ TEST_CASE("stage and node_view reject invalid endpoint placement", "[graph][vali
     REQUIRE_NOTHROW(stage->ed().add(*layout_cost("ed_x_only_cost", var_list{x})));
     REQUIRE_THROWS_WITH(
         stage->ed().add(*layout_cost("ed_u_cost", var_list{u})),
-        Catch::Matchers::ContainsSubstring("node_view only accepts terms"));
+        Catch::Matchers::ContainsSubstring("endpoint only accepts terms"));
     REQUIRE_THROWS_WITH(
         stage->ed().add(*layout_cost("ed_y_cost", var_list{y})),
-        Catch::Matchers::ContainsSubstring("node_view only accepts terms"));
+        Catch::Matchers::ContainsSubstring("endpoint only accepts terms"));
 
     auto endpoint_stage = stage_ocp::create();
     auto endpoint_only = layout_cost("endpoint_only_cost", var_list{x});

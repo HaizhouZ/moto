@@ -20,11 +20,19 @@ bool lowering_trace_enabled() {
 bool same_derivative_role(const sym &from, const sym &to) {
     return in_field(from.field(), primal_fields) == in_field(to.field(), primal_fields);
 }
+
+const generic_func &ready_copy_source(const generic_func &source) {
+    if (source.finalized() && !source.wait_until_ready())
+        throw std::runtime_error(fmt::format(
+            "cannot clone function {}: source implementation is not ready",
+            source.name()));
+    return source;
+}
 } // namespace
 
 struct generic_func::remap_cache {
     std::mutex mutex;
-    std::map<remap_key, shared_expr> remap_by_key;
+    std::map<remap_key, expr_handle> remap_by_key;
 };
 
 generic_func::generic_func() : remap_cache_(std::make_unique<remap_cache>()) {}
@@ -42,7 +50,7 @@ generic_func::generic_func(const std::string &name, const var_inarg_list &in_arg
 }
 
 generic_func::generic_func(const generic_func &rhs)
-    : expr(rhs),
+    : expr(ready_copy_source(rhs)),
       field_layout_store<var_list>(rhs),
       gen_(rhs.gen_),
       zero_dim_(rhs.zero_dim_),
@@ -260,33 +268,51 @@ void generic_func::apply_argument_remap(const normalized_remap &remap,
     }
 }
 
-shared_expr generic_func::remap_arguments_cached(const symbol_remap &remap,
-                                                 std::string_view context,
-                                                 size_t problem_uid) {
+expr_handle generic_func::remap_clone(const normalized_remap &remap,
+                                      std::string_view context,
+                                      size_t problem_uid) {
+    if (!finalized() && !finalize())
+        throw std::runtime_error(fmt::format(
+            "func {} remap failed: source could not be finalized", name_));
+    if (!wait_until_ready())
+        throw std::runtime_error(fmt::format(
+            "func {} remap failed: source implementation is not ready", name_));
+    expr_handle remapped_expr(clone());
+    auto &remapped_func = *expr_cast<generic_func>(remapped_expr);
+    remapped_func.apply_argument_remap(remap, context, problem_uid);
+    for (expr &dependency : remapped_func.dep_) {
+        if (!dependency.finalize())
+            throw std::runtime_error(fmt::format(
+                "func {} remap failed: dependency {} could not be finalized",
+                name_, dependency.name()));
+    }
+    delete remapped_func.gen_.task_.get();
+    remapped_func.gen_.task_ = nullptr;
+    remapped_func.rebuild_argument_layout();
+    remapped_func.finalized_ = true;
+    remapped_func.set_ready_status(true);
+    return remapped_expr;
+}
+
+expr_handle generic_func::reuse_remap(const symbol_remap &remap,
+                                      std::string_view context,
+                                      size_t problem_uid) {
     auto normalized = normalize_argument_remap(remap);
     if (normalized.empty())
-        return shared_expr(*this);
+        return handle();
 
     std::lock_guard lock(remap_cache_->mutex);
     auto &remaps = remap_cache_->remap_by_key;
-    if (auto it = remaps.find(normalized.key); it != remaps.end()) {
+    if (auto it = remaps.find(normalized.key); it != remaps.end())
         return it->second;
-    }
 
-    shared_expr remapped_expr(clone());
-    auto &remapped_func = remapped_expr.as<generic_func>();
-    remapped_func.apply_argument_remap(normalized, context, problem_uid);
-    if (!remapped_func.finalize()) {
-        throw std::runtime_error(fmt::format(
-        "func {} remap failed: remapped clone could not be finalized", name_));
-    }
-
-    auto [it, inserted] = remaps.emplace(std::move(normalized.key), remapped_expr);
+    auto [it, inserted] = remaps.emplace(
+        std::move(normalized.key), remap_clone(normalized, context, problem_uid));
     static_cast<void>(inserted);
     return it->second;
 }
 
-shared_expr generic_func::lower_expr_x_to_y_cached(std::string_view context, size_t problem_uid) {
+expr_handle generic_func::lower_expr_x_to_y_reuse(std::string_view context, size_t problem_uid) {
     symbol_remap remap;
     remap.reserve(in_args_.size());
     for (const sym &arg : in_args_) {
@@ -294,11 +320,12 @@ shared_expr generic_func::lower_expr_x_to_y_cached(std::string_view context, siz
             remap.emplace_back(var(arg), arg.next());
         }
     }
-    return remap_arguments_cached(remap, context, problem_uid);
+    return reuse_remap(remap, context, problem_uid);
 }
 
-shared_expr generic_func::remap_arguments(const symbol_remap &remap) {
-    return remap_arguments_cached(remap, "remap_arguments");
+expr_handle generic_func::remap_arguments(const symbol_remap &remap) {
+    return remap_clone(normalize_argument_remap(remap), "remap_arguments",
+                       static_cast<size_t>(-1));
 }
 
 void generic_func::set_from_casadi(const var_inarg_list &in_args, const cs::SX &out) {

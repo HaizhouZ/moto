@@ -60,6 +60,7 @@ class pmm_constr : public soft_constr {
         make_approx<soft_constr>(primal, raw, shared));
         return func_approx_data_ptr_t(new approx_data(std::move(*base_d), rho));
     }
+  protected:
     DEF_DEFAULT_CLONE(pmm_constr)
 };
 } // namespace solver

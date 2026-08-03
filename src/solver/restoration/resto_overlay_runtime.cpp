@@ -993,12 +993,12 @@ ocp_ptr_t build_restoration_overlay_problem(
                                             const restoration_overlay_settings &settings) {
     ocp::active_status_config config;
     for (auto field : std::array{__cost, __eq_x, __eq_xu, __ineq_x, __ineq_xu, __eq_x_soft, __eq_xu_soft}) {
-        for (const shared_expr &expr : source_prob->exprs(field)) {
-            config.deactivate_list.emplace_back(*expr);
+        for (const expr_handle &expr : source_prob->exprs(field)) {
+            config.deactivate_list.emplace_back(expr);
         }
     }
 
-    auto resto_prob = source_prob->clone(config);
+    auto resto_prob = source_prob->copy(config);
     var_list u_args;
     var_list y_args;
     for (const sym &arg : resto_prob->exprs(__u)) {

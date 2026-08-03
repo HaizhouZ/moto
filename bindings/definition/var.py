@@ -14,11 +14,15 @@ class var(cs.SX):
 
     def symbolic_integrate(self, x: cs.SX, dx: cs.SX) -> cs.SX:
         """integrate from x with dx, i.e., x + dx"""
-        return self.__sym__.integrate(x, dx)
+        return self.__sym__.symbolic_integrate(x, dx)
 
     def symbolic_difference(self, x1: cs.SX, x0: cs.SX) -> cs.SX:
         """difference from x0 to x1, i.e., x1 - x0"""
-        return self.__sym__.difference(x1, x0)
+        return self.__sym__.symbolic_difference(x1, x0)
+
+    def clone(self, name: str) -> "var":
+        """Clone into an independent symbol with a fresh identity."""
+        return self.__sym__.clone(name)
 
     def integrate(
         self, x: np.ndarray, dx: np.ndarray, alpha: float = 1.0

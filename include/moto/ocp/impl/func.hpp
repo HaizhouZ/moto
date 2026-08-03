@@ -86,11 +86,12 @@ class generic_func : public expr, protected field_layout_store<var_list> {
     void apply_argument_remap(const normalized_remap &remap,
                               std::string_view context = {},
                               size_t problem_uid = static_cast<size_t>(-1));
-    shared_expr remap_arguments_cached(const symbol_remap &remap,
-                                       std::string_view context = {},
-                                       size_t problem_uid = static_cast<size_t>(-1));
-    shared_expr lower_expr_x_to_y_cached(std::string_view context = {},
-                                         size_t problem_uid = static_cast<size_t>(-1));
+    expr_handle remap_clone(const normalized_remap &remap,
+                            std::string_view context,
+                            size_t problem_uid);
+    expr_handle lower_expr_x_to_y_reuse(std::string_view context = {},
+                                        size_t problem_uid = static_cast<size_t>(-1));
+    DEF_DEFAULT_CLONE(generic_func)
 
     generic_func();
     generic_func(const generic_func &);
@@ -172,11 +173,14 @@ class generic_func : public expr, protected field_layout_store<var_list> {
     std::function<void(func_approx_data &)> jacobian;
     std::function<void(func_approx_data &)> hessian;
 
-    DEF_DEFAULT_CLONE(generic_func)
-
     bool has_u_arg() const;
     bool has_pure_x_primal_args() const;
-    shared_expr remap_arguments(const symbol_remap &remap);
+    /// Fresh remapped clone with a new uid.
+    expr_handle remap_arguments(const symbol_remap &remap);
+    /// Cached remap; equal normalized mappings reuse the same handle.
+    expr_handle reuse_remap(const symbol_remap &remap,
+                            std::string_view context = {},
+                            size_t problem_uid = static_cast<size_t>(-1));
 };
 
 } // namespace moto

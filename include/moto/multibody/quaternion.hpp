@@ -34,8 +34,9 @@ struct quaternion : public sym {
     cs::SX symbolic_integrate(const cs::SX &q, const cs::SX &dq) const override final;
     /// @brief quaternion difference using logarithm map q1 \ominus q0 = log(q0^{-1} * q1)
     cs::SX symbolic_difference(const cs::SX &q1, const cs::SX &q0) const override final;
-    /// clone the quaternion symbolic variable
-    var clone(const std::string &name) const override final { return clone_states<quaternion>(name); }
+    var clone(const std::string &name) const override final {
+        return clone_states<quaternion>(name);
+    }
     /// create a new quaternion symbolic variable
     static std::pair<var, var> create(const std::string &name) {
         static var base, base_n;
@@ -50,6 +51,8 @@ struct quaternion : public sym {
         auto tmp = base->clone(name);
         return {tmp, tmp->dual()};
     }
+  protected:
+    clone_ptr clone() const override { return new quaternion(*this); }
 };
 } // namespace multibody
 } // namespace moto

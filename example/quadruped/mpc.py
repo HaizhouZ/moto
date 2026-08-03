@@ -95,7 +95,7 @@ def main():
     model.torque_limit_constr = model.torque_limit_constraint(model.tq)
     model.state_cost = model.get_state_cost()
 
-    prob = moto.stage_ocp.create()
+    prob = moto.stage()
     add_terms(prob, model.dyn, model.torque_limit_constr, model.input_cost())
     model.contacts.add_to_stage(prob)
     add_terms(prob.st, model.joint_limit_constr, model.state_cost)

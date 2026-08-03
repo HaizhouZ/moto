@@ -82,12 +82,12 @@ ocp_ptr_t build_equality_init_overlay_problem(
                                               const equality_init_overlay_settings &settings) {
     ocp::active_status_config config;
     for (auto field : std::array{__eq_x, __eq_xu}) {
-        for (const shared_expr &expr : source_prob->exprs(field)) {
-            config.deactivate_list.emplace_back(*expr);
+        for (const expr_handle &expr : source_prob->exprs(field)) {
+            config.deactivate_list.emplace_back(expr);
         }
     }
 
-    auto overlay_prob = source_prob->clone(config);
+    auto overlay_prob = source_prob->copy(config);
   solver::overlay::add_constr_overlay_group(
       source_prob, overlay_prob, std::array{__eq_x, __eq_xu}, [&](const constr &source) {
         return constr(new eq_init_pmm_constr(

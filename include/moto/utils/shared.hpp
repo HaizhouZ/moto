@@ -74,12 +74,9 @@ class shared : public std::shared_ptr<T> {
     template <shareable U, typename value_type = typename shared_type<U>::value>
     shared(U &&rhs)
         : shared(
-              /// 2. Downcast Base -> Derived
               std::static_pointer_cast<T>(
-                  /// 1. Remove const from Base
                   std::const_pointer_cast<value_type>(
-                      /// 0. deference to call shared_from_this()
-                      ((const value_type &)rhs).shared_from_this()))) {}
+                      static_cast<const value_type &>(rhs).shared_from_this()))) {}
 
     shared() noexcept = default; ///< default constructor
 
@@ -129,7 +126,9 @@ class shared : public std::shared_ptr<T> {
         return !this->operator bool();
     }
 
-    /// @brief clone the object pointed to @return shared<T> to the cloned object
+    /// @brief Clone the pointed-to object with independent identity.
+    /// @note Copying this handle shares identity; clone() never does.
+    /// @return shared<T> owning the cloned object
     shared<T> clone() const {
         static_assert(is_clonable<T>, "Type T must be clonable to use clone()");
         if (!bool(*this)) {

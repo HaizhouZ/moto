@@ -34,8 +34,10 @@ class dense_dynamics : public generic_dynamics {
     };
 
     using base::base;
+  protected:
     clone_ptr clone() const override;
 
+  public:
     func_approx_data_ptr_t create_approx_data(sym_data &primal,
                                               lag_data &raw,
                                               shared_data &shared) const override {

@@ -8,7 +8,7 @@ PUBLIC_BINDINGS = {
     "field",
     "func",
     "ineq",
-    "node_view",
+    "endpoint",
     "pmm_constr",
     "quaternion",
     "stage_ocp",
@@ -20,3 +20,4 @@ def export_public_bindings(extension, namespace):
     for name in PUBLIC_BINDINGS:
         if hasattr(extension, name):
             namespace[name] = getattr(extension, name)
+    namespace["stage"] = extension.stage_ocp.create

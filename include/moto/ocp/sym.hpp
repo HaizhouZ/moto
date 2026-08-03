@@ -160,10 +160,11 @@ class sym : public expr, public cs::SX {
         return std::make_shared<sym>(name, dim, field, default_val);
     } ///< make a symbolic primitive
 
-    /// clone the symbolic variable
+    /// Clone into a new logical symbol with a fresh uid.
     virtual var clone(const std::string &name) const;
 
   protected:
+    clone_ptr clone() const override { return new sym(*this); }
     /// clone the state variable and its dual state
     template <typename derived = sym>
         requires std::is_base_of_v<sym, std::remove_cvref_t<derived>>

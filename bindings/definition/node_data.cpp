@@ -7,7 +7,7 @@ void register_submodule_node_data(nb::module_ &m) {
     using namespace moto;
     nb::class_<ocp_base>(m, "ocp_base")
         .def("add", [](ocp_base &self, expr_inarg_list &&exprs) { self.add(exprs); }, nb::arg("exprs"), "Add a list of expressions to the OCP problem")
-        .def("add", [](ocp_base &self, shared_expr ex) { self.add(ex); }, nb::arg("ex"), "Add an expression to the OCP problem")
+        .def("add", [](ocp_base &self, expr_handle ex) { self.add(std::move(ex)); }, nb::arg("ex"), "Add an expression to the OCP problem")
         .def("dim", [](ocp_base &self, field_t field) { return self.dim(field); }, nb::arg("field"), "Get the dimension of the field")
         .def("wait_until_ready", &ocp_base::wait_until_ready, "Wait until all expressions in the OCP problem are ready")
         .def("is_active", &ocp_base::is_active, nb::arg("arg"), "Check if a given argument is active in the OCP problem")
@@ -15,16 +15,20 @@ void register_submodule_node_data(nb::module_ &m) {
 
     nb::class_<ocp, ocp_base>(m, "ocp");
 
-    nb::class_<node_view>(m, "node_view")
+    nb::class_<node_view>(m, "endpoint")
+        .def("__bool__", [](const node_view &self) { return bool(self); })
         .def("add", [](node_view &self, expr_inarg_list &&exprs) { self.add(exprs); }, nb::arg("exprs"), "Add node-local expressions")
-        .def("add", [](node_view &self, shared_expr ex) { self.add(ex); }, nb::arg("ex"), "Add a node-local expression");
+        .def("add", [](node_view &self, expr_handle ex) { self.add(std::move(ex)); }, nb::arg("ex"), "Add a node-local expression")
+        .def_prop_ro("stage", &node_view::stage, "Stage retained by this endpoint handle");
 
     nb::class_<stage_ocp, ocp>(m, "stage_ocp")
         .def_static("create", &stage_ocp::create, "Create a new stage OCP problem")
-        .def("clone", [](stage_ocp &self) { return self.clone(); }, "Clone the stage OCP problem")
-        .def("clone", &stage_ocp::clone, nb::arg("config"), "Clone the stage OCP problem")
+        .def("copy", [](const stage_ocp &self) { return self.copy(); },
+             "Copy the stage container while sharing expression handles")
+        .def("with_status", &stage_ocp::copy, nb::arg("config"),
+             "Copy the stage with a different active-expression selection")
         .def("add", [](stage_ocp &self, expr_inarg_list &&exprs) { self.add(exprs); }, nb::arg("exprs"), "Add stage expressions")
-        .def("add", [](stage_ocp &self, shared_expr ex) { self.add(ex); }, nb::arg("ex"), "Add a stage expression")
+        .def("add", [](stage_ocp &self, expr_handle ex) { self.add(std::move(ex)); }, nb::arg("ex"), "Add a stage expression")
         .def_prop_ro("st", [](stage_ocp &self) { return self.st(); }, "Start-node view")
         .def_prop_ro("ed", [](stage_ocp &self) { return self.ed(); }, "End-node view");
 

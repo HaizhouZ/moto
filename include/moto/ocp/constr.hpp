@@ -94,10 +94,12 @@ class generic_constr : public generic_func {
      * @param raw approximation data
      * @param shared shared data
      * @return func_approx_data_ptr_t
-     */
+    */
     OVERLOAD_CREATE_APPROX_DATA(generic_constr);
+  protected:
     DEF_DEFAULT_CLONE(generic_constr);
 
+  public:
     virtual residual_summary primal_residual_summary(const func_approx_data &data) const {
         return {
             .inf = data.v_.cwiseAbs().maxCoeff(),

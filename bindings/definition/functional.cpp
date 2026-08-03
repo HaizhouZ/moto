@@ -14,14 +14,19 @@
 #include <enum_export.hpp>
 
 namespace moto {
-expr *get_expr_ptr(const nb::handle &h) {
+expr_handle get_expr_handle(const nb::handle &h) {
     if (nb::isinstance<moto::expr>(h)) {
-        return &nb::cast<moto::expr &>(h);
+        return nb::cast<moto::expr &>(h).handle();
     } else if (nb::hasattr(h, "__sym__")) {
-        return &static_cast<expr &>(nb::cast<moto::sym &>(h.attr("__sym__")));
-    } else {
-        nb::print("Unsupported type for cast_to_var: ", h);
-        throw std::runtime_error("Unsupported type for cast_to_shared_expr");
+        return nb::cast<moto::sym &>(h.attr("__sym__")).handle();
+    }
+    throw nb::type_error("expected moto.expr or moto.var");
+}
+var get_var_handle(const nb::handle &h) {
+    try {
+        return expr_cast<sym>(get_expr_handle(h));
+    } catch (const std::bad_cast &) {
+        throw nb::type_error("expected moto.var");
     }
 }
 } // namespace moto
@@ -47,6 +52,29 @@ moto::ineq_constr::box_bound_t cast_box_bound(const nb::handle &h) {
         return out;
     }
 }
+
+using py_remap = std::vector<
+    std::pair<moto::py_var_inarg_wrapper, moto::py_var_inarg_wrapper>>;
+
+moto::generic_func::symbol_remap cast_remap(const py_remap &remap) {
+    moto::generic_func::symbol_remap result;
+    result.reserve(remap.size());
+    for (const auto &[from, to] : remap)
+        result.emplace_back(moto::var((moto::sym &)from),
+                            moto::var((moto::sym &)to));
+    return result;
+}
+
+std::shared_ptr<moto::generic_func> ready_func(moto::expr_handle handle) {
+    auto result = moto::expr_cast<moto::generic_func>(handle);
+    if (!result->finalized() && !result->finalize())
+        throw std::runtime_error(
+            fmt::format("function {} could not be finalized", result->name()));
+    if (!result->wait_until_ready())
+        throw std::runtime_error(
+            fmt::format("function {} is not ready", result->name()));
+    return result;
+}
 } // namespace
 namespace nanobind {
 namespace detail {
@@ -64,16 +92,10 @@ struct type_caster<moto::var_inarg_list> {
         auto &l = list_cast.value;
         value.reserve(l.size());
         value.clear();
-        for (auto &ex : l) {
-            try {
-                moto::expr *ptr = moto::get_expr_ptr(ex);
-                value.emplace_back(static_cast<moto::sym &>(*ptr));
-            } catch (const std::exception &e) {
-                fmt::print("Failed to cast to var: {}\n", e.what());
-                return false;
-            }
-        }
-        return true;
+        return try_handle_cast([&] {
+            for (auto &ex : l)
+                value.emplace_back(*moto::get_var_handle(ex));
+        });
     }
 };
 
@@ -102,7 +124,8 @@ void register_submodule_functional(nb::module_ &m) {
                                                               v.name(), v.dim(), v.field(), v.uid()); })
         .def_prop_rw("default_value", &sym::__get_default_value, &sym::__set_default_value)
         .def_prop_ro("sx", [](sym &v) { return (cs::SX &)v; }, nb::rv_policy::reference_internal)
-        .def("clone", [](const sym &self, const std::string &name) { return self.clone(name); })
+        .def("clone", nb::overload_cast<const std::string &>(&sym::clone, nb::const_),
+             nb::arg("name"), "Clone into an independent symbol with a fresh uid")
         .def("symbolic_integrate", [](const sym &self, const cs::SX &x, const cs::SX &dx) { return self.symbolic_integrate(x, dx); }, nb::arg("x"), nb::arg("dx"))
         .def("symbolic_difference", [](const sym &self, const cs::SX &x1, const cs::SX &x0) { return self.symbolic_difference(x1, x0); }, nb::arg("x1"), nb::arg("x0"), "difference from x0 to x1, i.e., x1 - x0")
         .def("integrate", [](const sym &self, moto::vector_ref x, moto::vector_ref dx, moto::scalar_t alpha) { 
@@ -132,21 +155,13 @@ void register_submodule_functional(nb::module_ &m) {
         .def("add_argument", [](generic_func &self, py_var_inarg_wrapper v) { self.add_argument((sym &)v); }, nb::arg("in"))
         .def("add_arguments", [](generic_func &self, const var_inarg_list &args) { self.add_arguments(args); })
         .def("remap_arguments",
-             [](generic_func &self,
-                const std::vector<std::pair<py_var_inarg_wrapper, py_var_inarg_wrapper>> &remap)
-                 -> std::shared_ptr<generic_func> {
-                 generic_func::symbol_remap cpp_remap;
-                 cpp_remap.reserve(remap.size());
-                 for (const auto &[from, to] : remap) {
-                     cpp_remap.emplace_back(var((sym &)from), var((sym &)to));
-                 }
-                 auto remapped = self.remap_arguments(cpp_remap).cast<generic_func>();
-                 if (remapped->finalized() && !remapped->wait_until_ready()) {
-                     throw std::runtime_error(fmt::format("remapped function {} is not ready", remapped->name()));
-                 }
-                 return remapped;
-             },
-             nb::arg("remap"));
+             [](generic_func &self, const py_remap &remap) {
+                 return ready_func(self.remap_arguments(cast_remap(remap)));
+             }, nb::arg("remap"), "Create a fresh remapped function")
+        .def("reuse_remap",
+             [](generic_func &self, const py_remap &remap) {
+                 return ready_func(self.reuse_remap(cast_remap(remap)));
+             }, nb::arg("remap"), "Reuse the cached function for this remap");
 
     nb::class_<generic_constr, generic_func>(m, "constr")
         .def_static(

@@ -72,8 +72,8 @@ ocp_ptr_t ns_sqp::build_initial_state_virtual_stage(const ocp_ptr_t &first_stage
     dyn_args.reserve(first_stage->num(__x) * 3);
     residuals.reserve(first_stage->num(__x));
 
-    for (const shared_expr &expr : first_stage->exprs(__x)) {
-        const auto x = expr.cast<sym>();
+    for (const expr_handle &expr : first_stage->exprs(__x)) {
+        const auto x = expr_cast<sym>(expr);
         const var y = x->next();
         const auto u = sym::inputs(fmt::format("moto_initial_state_step_{}", x->name()), x->tdim());
         dyn_args.emplace_back(x);

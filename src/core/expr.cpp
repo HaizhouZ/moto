@@ -30,6 +30,23 @@ expr::expr(const expr &rhs)
       uid_(rhs.uid_), finalized_(false), dep_(rhs.dep_) {
 } ///< copy constructor
 
+expr_handle expr::handle() {
+    try {
+        return shared_from_this();
+    } catch (const std::bad_weak_ptr &) {
+        throw std::runtime_error(fmt::format(
+            "expression {} uid {} has no owning handle", name_, uid_));
+    }
+}
+expr_handle expr::handle() const {
+    try {
+        return std::const_pointer_cast<expr>(shared_from_this());
+    } catch (const std::bad_weak_ptr &) {
+        throw std::runtime_error(fmt::format(
+            "expression {} uid {} has no owning handle", name_, uid_));
+    }
+}
+
 std::string format_as(const expr &e) {
     return fmt::format("expr(name={}, uid={}, dim={}, field={})", e.name(), e.uid(), e.dim(), e.field());
 }
@@ -69,12 +86,12 @@ expr_inarg_list::expr_inarg_list(const expr_list &exprs) {
     for (expr &ex : exprs) {
         emplace_back(ex);
     }
-} ///< constructor from a vector of shared_expr
+} ///< constructor from owning expression handles
 
 expr_list::expr_list(const expr_inarg_list &exprs) {
     reserve(exprs.size());
     for (const expr &ex : exprs) {
-        emplace_back(ex);
+        emplace_back(ex.handle());
     }
 } ///< constructor from a vector of reference wrappers
 

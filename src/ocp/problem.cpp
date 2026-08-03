@@ -22,7 +22,7 @@ bool can_be_active_by_status(const generic_func &func, ocp_base *prob) {
     return has_active_primal_arg(func, prob) && func.check_enable(prob);
 }
 
-const generic_func *as_generic_func(const shared_expr &ex) {
+const generic_func *as_generic_func(const expr_handle &ex) {
     return ex ? dynamic_cast<const generic_func *>(ex.get()) : nullptr;
 }
 
@@ -63,10 +63,7 @@ ocp_base::ocp_base(const ocp_base &rhs)
 
 ocp_base::~ocp_base() = default;
 
-bool ocp_base::add_impl(expr &ex) {
-    return add_impl(shared_expr(ex));
-}
-bool ocp_base::add_impl(shared_expr ex) {
+bool ocp_base::add_impl(expr_handle ex) {
     if (!ex) {
         throw std::runtime_error("Cannot add null expression to problem");
     }
@@ -190,7 +187,7 @@ void ocp_base::build_linear_profile() {
         }
     }
 }
-void ocp_base::refresh_after_clone(const active_status_config &config) {
+void ocp_base::refresh_copy(const active_status_config &config) {
     finalized_ = false;
     if (!config.empty()) {
         update_active_status(config);
@@ -253,16 +250,16 @@ void ocp_base::wait_until_ready() {
     }
     finalize();
 }
-bool ocp_base::accepts_term(const shared_expr &ex, std::string *reason) const {
+bool ocp_base::accepts_term(const expr_handle &ex, std::string *reason) const {
     static_cast<void>(ex);
     if (reason != nullptr) {
         reason->clear();
     }
     return true;
 }
-ocp_ptr_t ocp::clone(const active_status_config &config) const {
+ocp_ptr_t ocp::copy(const active_status_config &config) const {
     auto prob = ocp_ptr_t(new ocp(*this));
-    prob->refresh_after_clone(config);
+    prob->refresh_copy(config);
     return prob;
 }
 
@@ -271,12 +268,12 @@ stage_ocp::stage_ocp(const stage_ocp &rhs)
       endpoint_role_mask_by_uid_(rhs.endpoint_role_mask_by_uid_),
       mutation_revision_(rhs.mutation_revision()) {}
 
-stage_ocp_ptr_t stage_ocp::clone(const active_status_config &config) const {
+stage_ocp_ptr_t stage_ocp::copy(const active_status_config &config) const {
     auto prob = stage_ocp_ptr_t(new stage_ocp(*this));
-    prob->refresh_after_clone(config);
+    prob->refresh_copy(config);
     return prob;
 }
-bool stage_ocp::add_with_role(shared_expr ex, stage_expr_role role) {
+bool stage_ocp::add_with_role(expr_handle ex, stage_expr_role role) {
     if (!ex) {
         throw std::runtime_error("Cannot add null expression to stage_ocp");
     }
@@ -314,7 +311,7 @@ bool stage_ocp::add_with_role(shared_expr ex, stage_expr_role role) {
         throw;
     }
 }
-bool stage_ocp::validate_stage_term(const shared_expr &ex, std::string *reason) const {
+bool stage_ocp::validate_stage_term(const expr_handle &ex, std::string *reason) const {
     if (reason != nullptr) {
         reason->clear();
     }
@@ -334,7 +331,7 @@ bool stage_ocp::validate_stage_term(const shared_expr &ex, std::string *reason) 
     }
     return true;
 }
-bool stage_ocp::validate_endpoint_term(const shared_expr &ex, std::string *reason) const {
+bool stage_ocp::validate_endpoint_term(const expr_handle &ex, std::string *reason) const {
     if (reason != nullptr) {
         reason->clear();
     }
@@ -345,19 +342,19 @@ bool stage_ocp::validate_endpoint_term(const shared_expr &ex, std::string *reaso
     const auto *func = as_generic_func(ex);
     if (func == nullptr || ex->field() == __dyn || dynamic_cast<const generic_dynamics *>(ex.get()) != nullptr) {
         if (reason != nullptr) {
-            *reason = "node_view only accepts pure x cost/constraint terms; dynamics belong to stage.add(...)";
+            *reason = "endpoint only accepts pure x cost/constraint terms; dynamics belong to stage.add(...)";
         }
         return false;
     }
     if (!func->has_pure_x_primal_args()) {
         if (reason != nullptr) {
-            *reason = "node_view only accepts terms with x/prm-style dependencies and no u or y arguments";
+            *reason = "endpoint only accepts terms with x/prm-style dependencies and no u or y arguments";
         }
         return false;
     }
     return true;
 }
-bool stage_ocp::accepts_term(const shared_expr &ex, std::string *reason) const {
+bool stage_ocp::accepts_term(const expr_handle &ex, std::string *reason) const {
     return validate_stage_term(ex, reason);
 }
 bool stage_ocp::has_role(const expr &ex, stage_expr_role role) const {
@@ -418,7 +415,7 @@ void ocp_base::update_active_status(const active_status_config &config) {
     }
     for (int remaining = 5;; --remaining) {
         if (remaining == 0) {
-            throw std::runtime_error("ocp::clone failed to converge during pruning");
+            throw std::runtime_error("ocp::copy failed to converge during pruning");
         }
         bool changed = false;
         array_type<std::vector<std::reference_wrapper<const expr>>, status_func_fields> to_delete, to_re_enable;
@@ -468,7 +465,3 @@ void ocp_base::update_active_status(const active_status_config &config) {
     on_modified();
 }
 } // namespace moto
-
-template void moto::ocp_base::add<const moto::shared_expr &>(const moto::shared_expr &ex);
-template void moto::ocp_base::add<moto::shared_expr>(moto::shared_expr &&ex);
-template void moto::ocp_base::add<const moto::shared_expr>(const moto::shared_expr &&ex);

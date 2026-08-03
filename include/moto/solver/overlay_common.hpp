@@ -23,7 +23,7 @@ void add_constr_overlay_group(const ocp_ptr_t &source_prob,
                               const std::array<field_t, N> &fields,
                               Factory &&factory) {
     for (auto field : fields) {
-        for (const shared_expr &expr : source_prob->exprs(field)) {
+        for (const expr_handle &expr : source_prob->exprs(field)) {
             if (auto source = std::dynamic_pointer_cast<generic_constr>(expr)) {
                 overlay_prob->add(*factory(constr(std::move(source))));
             }

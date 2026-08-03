@@ -5,7 +5,7 @@
 namespace moto {
 
 void graph_model::add_end_boundary_view(interval_record &record, const node_view &node) const {
-    if (node.expired()) {
+    if (!node) {
         return;
     }
     for (const node_view &view : record.end_boundary_views) {
@@ -129,7 +129,7 @@ void graph_model::validate_stage_chain_input(const node_view &start_node,
     if (!stage) {
         throw std::invalid_argument("graph_model::add_stage expects a non-null stage");
     }
-    if (start_node.expired()) {
+    if (!start_node) {
         throw std::invalid_argument("graph_model::add_stage expects a live start node");
     }
     if (intervals_.empty()) {
@@ -148,19 +148,19 @@ graph_model::stage_chain graph_model::build_stage_chain(const node_view &start_n
     chain.stages.reserve(n_stages);
 
     for (size_t i = 0; i < n_stages; ++i) {
-        auto cloned = stage->clone();
-        attach_graph_callback(cloned);
+        auto instance = stage->copy();
+        attach_graph_callback(instance);
         if (!chain.records.empty()) {
-            add_end_boundary_view(chain.records.back(), cloned->st());
+            add_end_boundary_view(chain.records.back(), instance->st());
         }
         interval_record record;
-        record.stage = cloned;
+        record.stage = instance;
         if (i == 0 && same_node(start_node, this->start_node())) {
             record.start_boundary_view = start_node;
         }
-        add_end_boundary_view(record, cloned->ed());
+        add_end_boundary_view(record, instance->ed());
         chain.records.push_back(record);
-        chain.stages.push_back(cloned);
+        chain.stages.push_back(instance);
     }
     chain.tail = chain.records.back().stage->ed();
     return chain;

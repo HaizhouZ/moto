@@ -78,8 +78,8 @@ struct task {
     bool gen_jacobian = false;
     bool gen_hessian = false;
     std::vector<cs::SX> jac_outputs; ///< for multiple outputs
-    std::vector<std::pair<shared_expr, cs::SX>> ext_jac;
-    std::vector<std::tuple<shared_expr, shared_expr, cs::SX>> ext_hess;
+    std::vector<std::pair<expr_handle, cs::SX>> ext_jac;
+    std::vector<std::tuple<expr_handle, expr_handle, cs::SX>> ext_hess;
     std::vector<sp_info> *jac_sp = nullptr;                ///< optional jacobian sparsity pattern
     std::vector<std::vector<sp_info>> *hess_sp = nullptr; ///< optional hessian sparsity pattern
     std::string output_dir = "gen";

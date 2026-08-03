@@ -9,9 +9,9 @@ void deactivate_from(const stage_ocp_ptr_t &source, const ocp_ptr_t &target) {
         return;
     ocp::active_status_config config;
     for (field_t f : primal_fields) {
-        for (const shared_expr &expr : target->exprs(f)) {
+        for (const expr_handle &expr : target->exprs(f)) {
             if (source->contains(*expr) && !source->is_active(*expr)) {
-                config.deactivate_list.emplace_back(*expr);
+                config.deactivate_list.emplace_back(expr);
             }
         }
     }
@@ -25,13 +25,13 @@ void graph_composer::append_role_terms(const stage_ocp_ptr_t &source, stage_expr
     if (!source)
         return;
     for (field_t f : func_fields) {
-        for (const shared_expr &expr : source->exprs(f)) {
+        for (const expr_handle &expr : source->exprs(f)) {
             if (!source->has_role(*expr, role))
                 continue;
             if (placement == term_placement::direct) {
                 target->add(expr);
             } else {
-                target->add(expr.as<generic_func>().lower_expr_x_to_y_cached(
+                target->add(expr_cast<generic_func>(expr)->lower_expr_x_to_y_reuse(
                     fmt::format("stage endpoint term {} materialization", expr->name()), target->uid()));
             }
         }
@@ -47,7 +47,7 @@ void graph_composer::append_node_terms(const node_view &node, const ocp_ptr_t &t
 
 std::vector<graph_composer::dependency> graph_composer::dependencies(const graph_model::interval_record &record) const {
     std::vector<dependency> result;
-    result.reserve(1 + !record.start_boundary_view.expired() + record.end_boundary_views.size());
+    result.reserve(1 + bool(record.start_boundary_view) + record.end_boundary_views.size());
     auto append = [&](const stage_ocp_ptr_t &stage, stage_expr_role role) {
         if (stage)
             result.push_back({stage.get(), stage->mutation_revision(), role});
@@ -67,11 +67,11 @@ ocp_ptr_t graph_composer::compose_stage(const graph_model::interval_record &reco
     composed->set_allow_inconsistent_dynamics(record.stage->allow_inconsistent_dynamics());
     composed->set_automatic_reorder_primal(record.stage->automatic_reorder_primal());
     append_role_terms(record.stage, stage_expr_role::interval, composed, term_placement::direct);
-    if (!record.start_boundary_view.expired()) {
+    if (record.start_boundary_view) {
         append_node_terms(record.start_boundary_view, composed, term_placement::direct);
     }
     deactivate_from(record.stage, composed);
-    if (!record.start_boundary_view.expired())
+    if (record.start_boundary_view)
         deactivate_from(record.start_boundary_view.stage(), composed);
     for (const node_view &view : record.end_boundary_views) {
         append_node_terms(view, composed, term_placement::lower_x_to_y);

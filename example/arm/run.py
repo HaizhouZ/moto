@@ -160,7 +160,7 @@ def build_sqp(display: bool, n_job: int = 4):
     torque_limit_constr = model.torque_limit_constraint(model.tq, name="arm_tq_limit")
     state_cost = model.get_state_cost()
 
-    stage_prob = moto.stage_ocp.create()
+    stage_prob = moto.stage()
     add_terms(stage_prob, model.dyn, torque_limit_constr, model.get_input_cost())
     add_terms(stage_prob.st, joint_limit_constr, state_cost)
 

@@ -10,12 +10,12 @@ sym::sym(const std::string &name, size_t dim, field_t type, default_val_t defaul
     set_default_value(default_val);
 }
 var sym::clone(const std::string &name) const {
-    if (field_ != __x && field_ != __y)
-        return var(new sym(*this));
-    else { // clone also dual
+    if (field_ == __x || field_ == __y)
         return clone_states<sym>(name);
-    }
-} ///< clone the symbolic variable
+    var result(new sym(*this));
+    result->name() = name;
+    return result;
+}
 void sym::integrate(vector_ref x, vector_ref dx, vector_ref out, scalar_t alpha) const {
     if (!integrator_)
         out.noalias() = x + alpha * dx;

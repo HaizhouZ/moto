@@ -116,7 +116,7 @@ def main():
     model.state_cost = model.get_state_cost()
 
     def build_stage_prob(robot: QuadrupedModel):
-        stage_prob = moto.stage_ocp.create()
+        stage_prob = moto.stage()
         add_terms(
             stage_prob,
             robot.dyn,
@@ -165,9 +165,9 @@ def main():
 
     segment_start_nodes = [stage_proto]
     segment_start_nodes.extend(
-        stage_proto.clone(create_phase_config(step)) for step in range(1, steps + 1)
+        stage_proto.with_status(create_phase_config(step)) for step in range(1, steps + 1)
     )
-    segment_start_nodes.append(stage_proto.clone())
+    segment_start_nodes.append(stage_proto.copy())
     graph_stages = add_stage_segments(sqp, segment_start_nodes, segment_lengths)
 
     add_end_node_terms(graph_stages[-1].ed, model)

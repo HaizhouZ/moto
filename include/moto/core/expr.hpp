@@ -9,13 +9,13 @@
 
 namespace moto {
 class expr;                              // forward declaration of expr
-using shared_expr = utils::shared<expr>; ///< shared pointer type for expr
+using expr_handle = utils::shared<expr>; ///< owning identity handle; copying never clones
 
 struct expr_inarg_list; ///< forward declaration
 
 /// @brief list of expressions, used for storing expressions in a vector
-struct expr_list : public std::vector<shared_expr> {
-    using base = std::vector<shared_expr>;
+struct expr_list : public std::vector<expr_handle> {
+    using base = std::vector<expr_handle>;
     using base::base; ///< inherit constructors from list_of_shared
     /// constructor from a vector of reference wrappers
     expr_list(const expr_inarg_list &exprs);
@@ -101,6 +101,10 @@ class expr : public std::enable_shared_from_this<expr>, public utils::clone_base
 
     explicit operator bool() const { return uid_.is_valid(); }
 
+    /// Owning handle to this exact expression. This never clones.
+    expr_handle handle();
+    expr_handle handle() const;
+
     expr() = default; // default constructor for derived classes
     /**
      * @brief Construct a new expr
@@ -133,12 +137,21 @@ class expr : public std::enable_shared_from_this<expr>, public utils::clone_base
     DEF_DEFAULT_CLONE(expr)
 };
 
+template <std::derived_from<expr> T>
+utils::shared<T> expr_cast(const expr_handle &handle) {
+    auto result = std::dynamic_pointer_cast<T>(
+        static_cast<const std::shared_ptr<expr> &>(handle));
+    if (!result)
+        throw std::bad_cast();
+    return result;
+}
+
 std::string format_as(const expr &e); ///< format an expression as a string for debugging
 
 /// @brief list of expressions, used for function arguments
 struct expr_inarg_list : public std::vector<std::reference_wrapper<expr>> {
     using std::vector<std::reference_wrapper<expr>>::vector; ///< inherit constructors from std::vector
-    /// constructor from a vector of shared_expr
+    /// constructor from owning expression handles
     expr_inarg_list(const expr_list &exprs);
 }; ///< list of expressions
 

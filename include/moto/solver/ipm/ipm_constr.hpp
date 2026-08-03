@@ -108,6 +108,7 @@ class ipm_constr : public ineq_constr {
     func_approx_data_ptr_t create_approx_data(sym_data &primal, lag_data &raw, shared_data &shared) const override {
         return func_approx_data_ptr_t(make_approx<ipm_constr>(primal, raw, shared));
     }
+  protected:
     DEF_DEFAULT_CLONE(ipm_constr)
 
 };
