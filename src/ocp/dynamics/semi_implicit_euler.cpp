@@ -81,6 +81,11 @@ std::vector<piece> split_panels(const cs::SX &input) {
 
 } // namespace
 
+semi_implicit_euler::semi_implicit_euler(const std::string &name,
+                                         const cs::SX &out, state_t state,
+                                         approx_order order)
+    : base(name, out, order), state_(state) {}
+
 semi_implicit_euler::approx_data::approx_data(generic_constr::approx_data &&rhs)
     : generic_dynamics::approx_data(std::move(rhs), true) {
   const auto &dyn = static_cast<const semi_implicit_euler &>(func_);
@@ -158,6 +163,12 @@ cs::SX semi_implicit_euler::configuration_inverse(const cs::SX &fy) {
 }
 
 cs::SX semi_implicit_euler::symbolic_inverse(const cs::SX &fy) const {
+  if (state_ == state_t::pos) {
+    if (fy.rows() != fy.columns())
+      throw std::runtime_error(
+          fmt::format("position Euler dynamics {} requires square F_y", name()));
+    return cs::SX::sparsify(configuration_inverse(fy));
+  }
   if (fy.rows() != fy.columns() || fy.rows() % 2)
     throw std::runtime_error(
         fmt::format("semi-implicit dynamics {} requires paired q/v state", name()));

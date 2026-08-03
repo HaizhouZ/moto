@@ -10,7 +10,6 @@
 #include <nanobind/stl/variant.h>
 
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
-#include <moto/ocp/dynamics/pure_euler.hpp>
 #include <moto/ocp/dynamics/semi_implicit_euler.hpp>
 
 #include <enum_export.hpp>
@@ -297,25 +296,22 @@ void register_submodule_functional(nb::module_ &m) {
             nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd)
         .def("mark_shared_inputs", &dense_dynamics::mark_shared_inputs, nb::arg("shared_inputs"));
 
-    nb::class_<semi_implicit_euler, generic_constr>(m, "semi_implicit_euler")
+    auto euler = nb::class_<semi_implicit_euler, generic_constr>(
+        m, "semi_implicit_euler");
+    nb::enum_<semi_implicit_euler::state_t>(euler, "state")
+        .value("pos", semi_implicit_euler::state_t::pos)
+        .value("pos_vel", semi_implicit_euler::state_t::pos_vel);
+    euler
         .def_static(
             "create",
             [](const std::string &name, const cs::SX &out,
-               approx_order order) {
-                return std::make_shared<semi_implicit_euler>(name, out, order);
+               semi_implicit_euler::state_t state, approx_order order) {
+                return std::make_shared<semi_implicit_euler>(name, out, state,
+                                                              order);
             },
             nb::arg("name"), nb::arg("out"),
+            nb::arg("state") = semi_implicit_euler::state_t::pos_vel,
             nb::arg("order") = approx_order::first)
         .def("mark_shared_inputs", &semi_implicit_euler::mark_shared_inputs,
              nb::arg("shared_inputs"));
-
-    nb::class_<pure_euler, semi_implicit_euler>(m, "pure_euler")
-        .def_static(
-            "create",
-            [](const std::string &name, const cs::SX &out,
-               approx_order order) {
-                return std::make_shared<pure_euler>(name, out, order);
-            },
-            nb::arg("name"), nb::arg("out"),
-            nb::arg("order") = approx_order::first);
 }

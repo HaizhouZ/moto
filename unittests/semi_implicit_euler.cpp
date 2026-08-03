@@ -1,7 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
-#include <moto/ocp/dynamics/pure_euler.hpp>
 #include <moto/ocp/dynamics/semi_implicit_euler.hpp>
 #include <moto/ocp/impl/node_data.hpp>
 #include <moto/multibody/quaternion.hpp>
@@ -37,7 +36,8 @@ struct fixture {
         {cs::SX::mtimes(a, qn) + cs::SX::mtimes(b, vn) - q,
          vn - v - cs::SX::mtimes(g, u)});
     semi = dynamics(new semi_implicit_euler(
-        "semi_test_sparse", residual, approx_order::first));
+        "semi_test_sparse", residual, semi_implicit_euler::state_t::pos_vel,
+        approx_order::first));
     dense = dynamics(new dense_dynamics(
         "semi_test_dense", residual, approx_order::first));
     semi_problem = ocp::create();
@@ -155,14 +155,16 @@ TEST_CASE("semi-implicit projections match dense dynamics") {
   }
 }
 
-TEST_CASE("pure Euler is a complete kinematic dynamics") {
-  auto [q, qn] = multibody::quaternion::create("pure_euler_q");
-  auto velocity = sym::inputs("pure_euler_velocity", 3);
+TEST_CASE("position Euler is a complete kinematic dynamics") {
+  auto [q, qn] = multibody::quaternion::create("position_euler_q");
+  auto velocity = sym::inputs("position_euler_velocity", 3);
   const cs::SX integrated = q->symbolic_integrate(
       *q, .1 * static_cast<const cs::SX &>(*velocity));
   const cs::SX residual = q->symbolic_difference(*qn, integrated);
-  dynamics euler(new pure_euler("pure_euler", residual, approx_order::first));
-  dynamics fallback(new dense_dynamics("pure_euler_dense", residual,
+  dynamics euler(new semi_implicit_euler(
+      "position_euler", residual, semi_implicit_euler::state_t::pos,
+      approx_order::first));
+  dynamics fallback(new dense_dynamics("position_euler_dense", residual,
                                        approx_order::first));
   auto euler_problem = ocp::create(), dense_problem = ocp::create();
   euler_problem->add(*euler);
@@ -180,11 +182,11 @@ TEST_CASE("pure Euler is a complete kinematic dynamics") {
   fallback->compute_project_derivatives(dense_data.data(fallback));
   const auto &euler_approx = euler_data.data(euler).as<
       semi_implicit_euler::approx_data>();
-  INFO("pure inverse error = " <<
+  INFO("position inverse error = " <<
        (euler_data.dense().approx_[__dyn].jac_[__y].dense() *
             euler_approx.inverse_.dense() -
         matrix::Identity(3, 3)).norm());
-  INFO("pure PFx error = " <<
+  INFO("position PFx error = " <<
        (euler_data.dense().proj_f_x().dense() -
         dense_data.dense().proj_f_x().dense()).norm());
   REQUIRE(euler_data.dense().proj_f_x().dense().isApprox(

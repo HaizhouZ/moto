@@ -6,11 +6,14 @@
 
 namespace moto {
 
-/// Semi-implicit Euler dynamics supplying its symbolic block-triangular inverse.
+/// Euler dynamics with position or position-velocity state structure.
 class semi_implicit_euler : public generic_dynamics {
 public:
   using base = generic_dynamics;
-  using base::base;
+  enum class state_t { pos, pos_vel };
+  semi_implicit_euler(const std::string &name, const cs::SX &out,
+                      state_t state = state_t::pos_vel,
+                      approx_order order = approx_order::first);
 
   struct jac_panel {
     size_t argument = 0;
@@ -38,10 +41,11 @@ public:
 protected:
   clone_ptr clone() const override { return new semi_implicit_euler(*this); }
   void prepare_dynamics_codegen() override;
-  virtual cs::SX symbolic_inverse(const cs::SX &fy) const;
+  cs::SX symbolic_inverse(const cs::SX &fy) const;
   static cs::SX configuration_inverse(const cs::SX &fy);
 
 private:
+  state_t state_ = state_t::pos_vel;
   std::vector<jac_panel> jac_panels_;
   std::vector<jac_panel> projected_panels_;
   std::vector<sp_info> inverse_panels_;
