@@ -42,8 +42,9 @@ struct type_caster<cs::SX> {
             assert(swig_obj != nullptr);
             auto sx_ptr = reinterpret_cast<cs::SX *>(swig_obj->ptr);
             value = *sx_ptr;
-        } else
-            nb::raise_type_error("Expected a casadi.SX object, but got: %s", nb::type_name(src).c_str());
+        } else {
+            return false;
+        }
         return true;
     }
 

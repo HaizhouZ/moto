@@ -82,6 +82,7 @@ struct task {
     std::vector<std::tuple<expr_handle, expr_handle, cs::SX>> ext_hess;
     std::vector<sp_info> *jac_sp = nullptr;                ///< optional jacobian sparsity pattern
     std::vector<std::vector<sp_info>> *hess_sp = nullptr; ///< optional hessian sparsity pattern
+    std::vector<indexed_sp_info> *hess_panels = nullptr;
     std::string output_dir = "gen";
     bool force_recompile = false;
     bool check_jac_ad = false; ///< check if jacobian is correct by comparing with ad

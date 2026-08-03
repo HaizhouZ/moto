@@ -15,6 +15,96 @@ const bool force_sync_codegen_for_test = []() {
 
 using namespace moto;
 
+class tracking_manifold final : public sym {
+  public:
+    inline static size_t difference_calls = 0;
+    explicit tracking_manifold(const std::string &name) : sym(name, 2, __u) {
+        tdim_ = 1;
+    }
+    cs::SX symbolic_difference(const cs::SX &x1,
+                               const cs::SX &x0) const override {
+        ++difference_calls;
+        return (x1(0) - x0(0)) + scalar_t(2) * (x1(1) - x0(1));
+    }
+
+  protected:
+    clone_ptr clone() const override { return new tracking_manifold(*this); }
+};
+
+TEST_CASE("CasADi symvar inference restores original symbol handles") {
+    auto [x, y] = sym::states("auto_args_x", 2);
+    auto u = sym::inputs("auto_args_u", 1);
+    auto p = sym::params("auto_args_p", 1);
+    auto f = std::make_shared<generic_constr>(
+        "auto_args_func", cs::SX::vertcat({y - x, u + p}),
+        approx_order::first);
+
+    REQUIRE(f->in_args().size() == 4);
+    const std::set<size_t> inferred{
+        f->in_args()[0]->uid(), f->in_args()[1]->uid(),
+        f->in_args()[2]->uid(), f->in_args()[3]->uid()};
+    REQUIRE(inferred == std::set<size_t>{x->uid(), y->uid(), u->uid(), p->uid()});
+    const var_list originals{x, y, u, p};
+    for (const var &arg : f->in_args()) {
+        const auto original = std::ranges::find_if(
+            originals, [&](const var &candidate) {
+                return candidate->uid() == arg->uid();
+            });
+        REQUIRE(original != originals.end());
+        REQUIRE(arg.get() == original->get());
+    }
+}
+
+TEST_CASE("tracking cost uses the value symbol manifold difference") {
+    var q(new tracking_manifold("tracking_manifold_q"));
+    global_registry::add(q);
+    tracking_manifold::difference_calls = 0;
+
+    auto cost = generic_cost::from_vector(
+        "tracking_manifold_cost", var_inarg_list{}, q);
+
+    REQUIRE(tracking_manifold::difference_calls == 1);
+    REQUIRE(cost->reference()->dim() == q->dim());
+    REQUIRE(cost->weight()->dim() == q->tdim());
+}
+
+TEST_CASE("codegen splits mixed dense and diagonal cost Hessians") {
+    auto [x, y] = sym::states("mixed_hessian_x", 8);
+    (void)y;
+    const cs::SX residual = cs::SX::vertcat({
+        x(0), x(1), x(2) * x(3), x(3) * x(4), x(2) * x(4),
+        x(5), x(6), x(7)});
+    auto cost = generic_cost::from_vector(
+        "mixed_hessian_cost", var_inarg_list{}, residual);
+    auto prob = stage_ocp::create();
+    prob->add(*cost);
+    prob->wait_until_ready();
+
+    const auto &panels = cost->hess_panel_sparsity();
+    REQUIRE(panels.size() == 3);
+    REQUIRE(panels[0].block.pattern == sparsity::diag);
+    REQUIRE(panels[0].block.row_offset == 0);
+    REQUIRE(panels[0].block.rows == 2);
+    REQUIRE(panels[1].block.pattern == sparsity::dense);
+    REQUIRE(panels[1].block.row_offset == 2);
+    REQUIRE(panels[1].block.rows == 3);
+    REQUIRE(panels[2].block.pattern == sparsity::diag);
+    REQUIRE(panels[2].block.row_offset == 5);
+    REQUIRE(panels[2].block.rows == 3);
+
+    node_data data(prob);
+    data.sym_val().value_[__x] = vector::LinSpaced(8, 1., 8.);
+    data.update_approximation(node_data::update_mode::eval_all, true);
+    const matrix hessian = data.dense().lag_hess_[__x][__x].dense();
+    matrix expected = matrix::Identity(8, 8);
+    const scalar_t a = 3., b = 4., c = 5.;
+    expected.block<3, 3>(2, 2) <<
+        b * b + c * c, a * b, a * c,
+        a * b, a * a + c * c, b * c,
+        a * c, b * c, a * a + b * b;
+    REQUIRE(hessian.isApprox(expected));
+}
+
 TEST_CASE("inequality jacobians preserve generated structure") {
     auto [x, y] = sym::states("x_sparse_jac", 3);
     (void)y;
@@ -61,6 +151,32 @@ TEST_CASE("inequality jacobians preserve generated structure") {
   REQUIRE(jac.eye_panels_.size() == 1);
   REQUIRE(jac.diag_panels_.size() == 1);
   REQUIRE(jac.dense_panels_.size() == 1);
+}
+
+TEST_CASE("box inequalities preserve sliced and one-sided bounds") {
+    auto [x, y] = sym::states("partial_box_x", 6);
+    (void)y;
+    const cs::SX selected = cs::SX::vertcat({x(1), x(4)});
+    const vector lb = (vector(2) <<
+        -std::numeric_limits<scalar_t>::infinity(), -2.).finished();
+    const vector ub = (vector(2) <<
+        1., std::numeric_limits<scalar_t>::infinity()).finished();
+    auto c = ineq_constr::create("partial_box", var_inarg_list{},
+                                 selected, lb, ub);
+    const auto *box = dynamic_cast<const ineq_constr &>(*c).box_info();
+    REQUIRE(box != nullptr);
+    REQUIRE(box->base_dim == 2);
+    REQUIRE(box->present_mask[box_side::lb].count() == 1);
+    REQUIRE(box->present_mask[box_side::ub].count() == 1);
+    REQUIRE(c->in_args().size() == 1);
+    REQUIRE(c->in_args()[0].get() == x.get());
+
+    auto prob = stage_ocp::create();
+    prob->add(*c);
+    prob->wait_until_ready();
+    node_data data(prob);
+    REQUIRE(data.dense().approx_[__ineq_x].jac_[__x].rows() == 2);
+    REQUIRE(data.dense().approx_[__ineq_x].jac_[__x].cols() == 6);
 }
 
 TEST_CASE("manual callbacks fall back to dense jacobians") {

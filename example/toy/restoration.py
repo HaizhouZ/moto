@@ -19,11 +19,9 @@ def main():
     u = moto.sym.inputs("restoration_demo_u", 1)
 
     dynamics = moto.dense_dynamics.create(
-        "restoration_demo_dynamics", [x, xn, u], xn.sx - x.sx - u.sx
+        "restoration_demo_dynamics", xn.sx - x.sx - u.sx
     )
-    target = moto.constr.create(
-        "restoration_demo_target", [x], x.sx - 1.0
-    )
+    target = moto.constr.create("restoration_demo_target", x.sx - 1.0)
     tracking = moto.cost.from_scalar(
         "restoration_demo_tracking", u, weight=50.0, reference=0.5
     )

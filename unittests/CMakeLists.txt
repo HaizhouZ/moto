@@ -59,6 +59,7 @@ add_moto_test(restoration)
 add_moto_test(linear_backend)
 add_moto_python_test(restoration_demo example/toy/restoration.py)
 add_moto_python_test(modeling_shortcuts_demo example/toy/box_api_demo.py)
+add_moto_python_test(initial_state_optimization_demo example/toy/initial_state_optimization.py)
 
 add_executable(graph_model_compose_test graph_model_compose.cpp)
 target_include_directories(graph_model_compose_test PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

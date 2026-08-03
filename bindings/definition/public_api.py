@@ -3,6 +3,7 @@ PUBLIC_BINDINGS = {
     "approx_order",
     "constr",
     "cost",
+    "casadi_manifold",
     "dense_dynamics",
     "expr",
     "field",

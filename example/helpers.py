@@ -16,12 +16,44 @@ import moto
 GO2_FOOT_FRAMES = ("FL_foot", "FR_foot", "RL_foot", "RR_foot")
 
 
-def build_floating_base_model(urdf):
-    """Build the translation-plus-quaternion free-flyer used by the examples."""
+def build_floating_base_model(urdf, orientation="quaternion"):
+    """Build the common translation plus quaternion/ZYX root joint."""
     root_joint = pin.JointModelComposite()
     root_joint.addJoint(pin.JointModelTranslation())
-    root_joint.addJoint(pin.JointModelSpherical())
+    if orientation == "quaternion":
+        root_joint.addJoint(pin.JointModelSpherical())
+    elif orientation == "euler_zyx":
+        root_joint.addJoint(pin.JointModelSphericalZYX())
+    else:
+        raise ValueError("orientation must be 'quaternion' or 'euler_zyx'")
     return pin.buildModelFromUrdf(urdf, root_joint)
+
+
+def pinocchio_states(model, name, default=None):
+    """Create q/q-next manifold states and matching v/v-next states."""
+    if default is not None:
+        default = np.asarray(default)
+        if default.shape != (model.nq,):
+            raise ValueError(f"default must have shape ({model.nq},)")
+    q_name = f"{name}_q"
+    q0 = cs.SX.sym(f"{q_name}_base", model.nq)
+    q1 = cs.SX.sym(f"{q_name}_other", model.nq)
+    dq = cs.SX.sym(f"{q_name}_step", model.nv)
+    args = (
+        q_name,
+        q0,
+        dq,
+        cpin.integrate(model, q0, dq),
+        q1,
+        cpin.difference(model, q0, q1),
+    )
+    q, qn = (
+        moto.casadi_manifold.create(*args)
+        if default is None
+        else moto.casadi_manifold.create(*args, default)
+    )
+    v, vn = moto.sym.states(f"{name}_v", model.nv)
+    return q, qn, v, vn
 
 
 class PinocchioCasadiModel(cpin.Model):
@@ -40,13 +72,9 @@ class PinocchioCasadiModel(cpin.Model):
     def create_trajectory_variables(self, dt, q_nom=None):
         """Create the standard q/v state pair and actuated torque input."""
         self.dt = dt
-        self.q, self.qn = moto.sym.states(f"{self.name}_q", self.nq)
-        if q_nom is not None:
-            if q_nom.shape != (self.nq,):
-                raise ValueError(f"q_nom must have shape ({self.nq},)")
-            self.q.default_value = q_nom
-            self.qn.default_value = q_nom
-        self.v, self.vn = moto.sym.states(f"{self.name}_v", self.nv)
+        self.q, self.qn, self.v, self.vn = pinocchio_states(
+            self, self.name, q_nom
+        )
         self.a = (self.vn - self.v) / dt
         self.tq = moto.sym.inputs(f"{self.name}_tq", self.nj)
 
@@ -55,11 +83,6 @@ class PinocchioCasadiModel(cpin.Model):
         self.qn_stack = self.qn.sx
         self.vn_stack = self.vn.sx
         self.a_stack = self.a
-        self.pos_args = [self.q]
-        self.vel_args = [self.v]
-        self.acc_args = [self.tq]
-        self.pos_args_n = [self.qn]
-        self.vel_args_n = [self.vn]
         return self
 
     def update_kinematics(self, q, v=None, *, data=None, jacobians=True):
@@ -110,12 +133,6 @@ class PinocchioCasadiModel(cpin.Model):
         """Compute the RNEA generalized impulse minus an external impulse."""
         return cpin.rnea(self, self.data, q, v, a) * dt - external_impulse
 
-    def integrate_configuration(self, q, tangent):
-        return cpin.integrate(self, q, tangent)
-
-    def configuration_difference(self, q0, q1):
-        return cpin.difference(self, q0, q1)
-
     def joint_limit_constraint(self, q, v, *, name="q_limit"):
         """Create the standard actuated joint position/velocity box constraint."""
         q_joint = q[-self.nj :]
@@ -125,7 +142,6 @@ class PinocchioCasadiModel(cpin.Model):
         v_limit = self.fmodel.velocityLimit[-self.nj :]
         return moto.ineq.create(
             name,
-            [q, v],
             cs.vcat([q_joint, v_joint]),
             np.concatenate([q_min, -v_limit]),
             np.concatenate([q_max, v_limit]),
@@ -202,7 +218,6 @@ class ContactModel:
         )
         constraint = moto.constr.create(
             f"kin_{self.frame_names[index]}",
-            [self.q, self.v, self.kinematic_gain],
             residual,
         )
         constraint.enable_if_all([self.impulses[index]])
@@ -219,9 +234,7 @@ class ContactModel:
                 -force[1] - mu * force[2],
             ]
         )
-        constraint = moto.ineq.create(
-            f"fric_{self.frame_names[index]}", [force, mu], residual
-        )
+        constraint = moto.ineq.create(f"fric_{self.frame_names[index]}", residual)
         constraint.enable_if_all([force])
         return constraint
 
@@ -281,8 +294,12 @@ class ContactRobotModel(PinocchioCasadiModel):
             )
         else:
             raise ValueError("configuration_velocity must be 'next' or 'predicted'")
-        q_next = self.integrate_configuration(self.q.sx, integration_velocity * dt)
-        self.configuration_residual = cs.vcat([self.qn - q_next])
+        q_next = self.q.symbolic_integrate(
+            self.q.sx, integration_velocity * dt
+        )
+        self.configuration_residual = self.q.symbolic_difference(
+            self.qn.sx, q_next
+        )
         self.dyn = self._make_contact_dynamics()
 
         self.q_nom = moto.sym.params(
@@ -292,16 +309,6 @@ class ContactRobotModel(PinocchioCasadiModel):
         )
 
     def _make_contact_dynamics(self):
-        args = (
-            self.pos_args
-            + self.vel_args
-            + self.pos_args_n
-            + self.vel_args_n
-            + self.acc_args
-            + self.contacts.impulses
-        )
-        if isinstance(self.dt, cs.SX):
-            args.append(self.dt)
         if self.use_fwd_dyn:
             velocity_residual = self.vn - (self.v + self.aba)
             name = f"{self.name}_fd"
@@ -310,7 +317,6 @@ class ContactRobotModel(PinocchioCasadiModel):
             name = f"{self.name}_id"
         return moto.dense_dynamics.create(
             name,
-            args,
             cs.vcat([self.configuration_residual, velocity_residual]),
         )
 
@@ -321,9 +327,7 @@ class ContactRobotModel(PinocchioCasadiModel):
             np.full(self.tq.numel(), 2 * torque_weight),
             np.full(impulses.numel(), 2 * contact_weight),
         ]
-        return moto.cost.from_vector(
-            name, self.acc_args + self.contacts.impulses, residual, weight=weight
-        )
+        return moto.cost.from_vector(name, residual, weight=weight)
 
 
 def solver_nodes(sqp):
@@ -363,9 +367,9 @@ def add_time_step_regularization(
     bounds = moto.sym.params("dt_bound", 2, default_val=np.array([lower, upper]))
     add_terms(
         stage,
-        moto.ineq.create("dt", [dt, bounds], dt.sx, bounds[0], bounds[1]),
+        moto.ineq.create("dt", dt.sx, bounds[0], bounds[1]),
         moto.cost.from_scalar(
-            "c_t", [dt, nominal_dt], dt - nominal_dt, weight=2 * weight
+            "c_t", dt - nominal_dt, weight=2 * weight
         ),
     )
 

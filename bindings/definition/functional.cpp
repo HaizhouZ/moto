@@ -185,10 +185,11 @@ void register_submodule_functional(nb::module_ &m) {
     nb::class_<generic_constr, generic_func>(m, "constr")
         .def_static(
             "create",
-            [](const std::string &name, const var_inarg_list &args, const cs::SX &out, approx_order order, field_t field) {
-                return std::make_shared<generic_constr>(name, args, out, order, field);
+            [](const std::string &name, const cs::SX &out, approx_order order, field_t field) {
+                return std::make_shared<generic_constr>(name, out, order, field);
             },
-            nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("order") = approx_order::first, nb::arg("field") = field_t::__undefined)
+            nb::arg("name"), nb::arg("out"), nb::arg("order") = approx_order::first,
+            nb::arg("field") = field_t::__undefined)
         .def_static(
             "create",
             [](const std::string &name, approx_order order, size_t dim, field_t field) {
@@ -205,10 +206,12 @@ void register_submodule_functional(nb::module_ &m) {
     nb::class_<ineq_constr, generic_constr>(m, "ineq")
         .def_static(
             "create",
-            [](const std::string &name, const var_inarg_list &args, const cs::SX &out, approx_order order, field_t field) {
-                return std::shared_ptr<generic_constr>(ineq_constr::create(name, args, out, order, field));
+            [](const std::string &name, const cs::SX &out, approx_order order, field_t field) {
+                return std::shared_ptr<generic_constr>(ineq_constr::create(
+                    name, var_inarg_list{}, out, order, field));
             },
-            nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("order") = approx_order::first, nb::arg("field") = field_t::__undefined)
+            nb::arg("name"), nb::arg("out"), nb::arg("order") = approx_order::first,
+            nb::arg("field") = field_t::__undefined)
         .def_static(
             "create",
             [](const std::string &name, approx_order order, size_t dim, field_t field) {
@@ -218,16 +221,16 @@ void register_submodule_functional(nb::module_ &m) {
         .def_static(
             "create",
             [](const std::string &name,
-               const var_inarg_list &args,
                const cs::SX &out,
                const nb::handle &lb,
                const nb::handle &ub,
                approx_order order,
                field_t field) {
-                return std::shared_ptr<generic_constr>(
-                    ineq_constr::create(name, args, out, cast_box_bound(lb), cast_box_bound(ub), order, field));
+                return std::shared_ptr<generic_constr>(ineq_constr::create(
+                    name, var_inarg_list{}, out, cast_box_bound(lb),
+                    cast_box_bound(ub), order, field));
             },
-            nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("lb"), nb::arg("ub"),
+            nb::arg("name"), nb::arg("out"), nb::arg("lb"), nb::arg("ub"),
             nb::arg("order") = approx_order::first, nb::arg("field") = field_t::__undefined)
         .def_static(
             "bounds",
@@ -256,44 +259,20 @@ void register_submodule_functional(nb::module_ &m) {
     nb::class_<generic_cost, generic_func>(m, "cost")
         .def_static(
             "from_vector",
-            [](const std::string &name, const var_inarg_list &args,
-               const cs::SX &value, const nb::handle &weight,
-               const nb::handle &reference) {
-                return std::shared_ptr<generic_cost>(generic_cost::from_vector(
-                    name, args, value, cast_tracking_param(weight),
-                    cast_tracking_param(reference)));
-            },
-            nb::arg("name"), nb::arg("in_args"), nb::arg("value"),
-            nb::arg("weight") = 1.0, nb::arg("reference") = 0.0)
-        .def_static(
-            "from_vector",
-            [](const std::string &name, const py_var_inarg_wrapper &value,
+            [](const std::string &name, const cs::SX &value,
                const nb::handle &weight, const nb::handle &reference) {
-                var v((sym &)value);
                 return std::shared_ptr<generic_cost>(generic_cost::from_vector(
-                    name, var_inarg_list{*v}, v, cast_tracking_param(weight),
+                    name, var_inarg_list{}, value, cast_tracking_param(weight),
                     cast_tracking_param(reference)));
             },
             nb::arg("name"), nb::arg("value"), nb::arg("weight") = 1.0,
             nb::arg("reference") = 0.0)
         .def_static(
             "from_scalar",
-            [](const std::string &name, const var_inarg_list &args,
-               const cs::SX &value, const nb::handle &weight,
-               const nb::handle &reference) {
-                return std::shared_ptr<generic_cost>(generic_cost::from_scalar(
-                    name, args, value, cast_tracking_param(weight),
-                    cast_tracking_param(reference)));
-            },
-            nb::arg("name"), nb::arg("in_args"), nb::arg("value"),
-            nb::arg("weight") = 1.0, nb::arg("reference") = 0.0)
-        .def_static(
-            "from_scalar",
-            [](const std::string &name, const py_var_inarg_wrapper &value,
+            [](const std::string &name, const cs::SX &value,
                const nb::handle &weight, const nb::handle &reference) {
-                var v((sym &)value);
                 return std::shared_ptr<generic_cost>(generic_cost::from_scalar(
-                    name, var_inarg_list{*v}, v, cast_tracking_param(weight),
+                    name, var_inarg_list{}, value, cast_tracking_param(weight),
                     cast_tracking_param(reference)));
             },
             nb::arg("name"), nb::arg("value"), nb::arg("weight") = 1.0,
@@ -304,10 +283,10 @@ void register_submodule_functional(nb::module_ &m) {
     nb::class_<dense_dynamics, generic_constr>(m, "dense_dynamics")
         .def_static(
             "create",
-            [](const std::string &name, const var_inarg_list &args, const cs::SX &out, approx_order order) {
-                return std::make_shared<dense_dynamics>(name, args, out, order);
+            [](const std::string &name, const cs::SX &out, approx_order order) {
+                return std::make_shared<dense_dynamics>(name, out, order);
             },
-            nb::arg("name"), nb::arg("in_args"), nb::arg("out"), nb::arg("order") = approx_order::first)
+            nb::arg("name"), nb::arg("out"), nb::arg("order") = approx_order::first)
         .def_static(
             "create",
             [](const std::string &name, approx_order order, size_t dim) {

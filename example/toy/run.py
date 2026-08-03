@@ -27,13 +27,11 @@ u = moto.sym.inputs("u", nu)
 
 dyn = moto.dense_dynamics.create(
     "toy_base_double_integrator_dyn",
-    [x, xn, u],
     xn.sx - A @ x.sx - B @ u.sx,
 )
 
 running_cost = moto.cost.from_vector(
     "toy_base_running_cost",
-    [x, u],
     cs.vertcat(x.sx, u.sx),
     weight=np.array([1.0, 1.0, 0.1]),
 )

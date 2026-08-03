@@ -2,7 +2,67 @@
 #include <moto/ocp/sym.hpp>
 #include <moto/utils/codegen.hpp>
 
+#include <mutex>
+#include <unordered_map>
+#include <unordered_set>
+
 namespace moto {
+namespace {
+struct registry_storage {
+    std::mutex mutex;
+    std::vector<std::weak_ptr<sym>> symbols;
+    std::unordered_map<casadi_int, size_t> uid_by_casadi_hash;
+};
+
+registry_storage &registry() {
+    static registry_storage value;
+    return value;
+}
+} // namespace
+
+void global_registry::add(const var &symbol) {
+    auto &storage = registry();
+    std::lock_guard lock(storage.mutex);
+    const auto uid = static_cast<size_t>(symbol->uid());
+    if (storage.symbols.size() <= uid)
+        storage.symbols.resize(uid + 1);
+    storage.symbols[uid] = static_cast<const std::shared_ptr<sym> &>(symbol);
+    const cs::SX &sx = static_cast<const cs::SX &>(*symbol);
+    for (casadi_int i = 0; i < sx.numel(); ++i)
+        storage.uid_by_casadi_hash[sx(i).scalar().__hash__()] = uid;
+}
+
+var global_registry::track(var symbol) {
+    add(symbol);
+    return symbol;
+}
+
+std::vector<var> global_registry::infer_args(const cs::SX &expression) {
+    const auto free_symbols = cs::SX::symvar(expression);
+    std::vector<var> result;
+    result.reserve(free_symbols.size());
+    std::unordered_set<size_t> added;
+    auto &storage = registry();
+    std::lock_guard lock(storage.mutex);
+    for (const cs::SX &free : free_symbols) {
+        const auto hash = free.scalar().__hash__();
+        const auto owner = storage.uid_by_casadi_hash.find(hash);
+        if (owner == storage.uid_by_casadi_hash.end() ||
+            owner->second >= storage.symbols.size())
+            throw std::runtime_error(fmt::format(
+                "CasADi symbol {} is not owned by a live moto.sym",
+                free.scalar().name()));
+        auto live = storage.symbols[owner->second].lock();
+        if (!live)
+            throw std::runtime_error(fmt::format(
+                "owner of CasADi symbol {} is no longer alive",
+                free.scalar().name()));
+        if (added.insert(owner->second).second)
+            result.emplace_back(std::move(live));
+    }
+    return result;
+}
+
 sym::sym(const std::string &name, size_t dim, field_t type, default_val_t default_val)
     : expr(name, dim, type), cs::SX(cs::SX::sym(name, dim)) {
     if (!(size_t(type) <= field::num_sym || type == __usr_var))
@@ -14,6 +74,9 @@ var sym::clone(const std::string &name) const {
         return clone_states<sym>(name);
     var result(new sym(*this));
     result->name() = name;
+    const auto sx = cs::SX::sym(name, result->dim());
+    static_cast<cs::SX &>(*result) = static_cast<cs::SX &>(result) = sx;
+    global_registry::add(result);
     return result;
 }
 void sym::integrate(vector_ref x, vector_ref dx, vector_ref out, scalar_t alpha) const {

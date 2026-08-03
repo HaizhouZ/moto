@@ -6,6 +6,7 @@ import pinocchio.casadi as cpin
 
 from example_robot_data import load
 from benchmark_tool import benchmark_tool
+from example.helpers import pinocchio_states
 
 
 benchmark = benchmark_tool()
@@ -45,33 +46,13 @@ class pinCasadiModel(cpin.Model):
         if self.nq - self.nv == 1:
             self.nqb = 7
         # make_primal
-        self.q, self.qn = moto.sym.states(name + "_q", self.nq)
-        if q_nom is not None:
-            assert q_nom.shape == (self.nq,), "q_nom has wrong shape"
-            self.q.default_value = q_nom
-            self.qn.default_value = q_nom
-        self.v, self.vn = moto.sym.states(name + "_v", self.nv)
-        # self.aj = moto.sym.inputs(name + "_aj", self.nj)
-        # self.a = moto.sym.inputs(name + "_a", self.nv)
-        # self.aj = self.a[-self.nj :]
-        # self.ab = (self.vn - self.v)[:6] / dt
+        self.q, self.qn, self.v, self.vn = pinocchio_states(self, name, q_nom)
         self.a = (self.vn - self.v) / dt
-        # self.a = cs.vcat([self.ab, self.aj]) if self.is_floating_based else self.aj
         self.tq = moto.sym.inputs(name + "_tq", self.nj)
 
-        # implicit euler
         def implicit_euler():
-            q_next = cpin.integrate(self, self.q.sx, self.vn * dt)
-            # v_next = self.v[-self.nj :] + self.aj * dt
-            # v_next = self.v + self.a * dt
-            # return moto.dense_dynamics(
-            #     name + "_euler",
-            #     [self.q, self.v, self.qn, self.vn, self.a, dt],
-            #     cs.vcat([self.qn - q_next, self.vn - v_next]),
-            # )
-            # return cs.vcat([self.qn - q_next, self.vn[-self.nj :] - v_next])
-            # return cs.vcat([self.qn - q_next, self.vn - v_next])
-            return cs.vcat([self.qn - q_next])
+            q_next = self.q.symbolic_integrate(self.q.sx, self.vn * dt)
+            return cs.vcat([self.q.symbolic_difference(self.qn.sx, q_next)])
 
         self.joint_euler = implicit_euler()
         # self.ntq = model.nv - 6 if self.is_floating_based else model.nv
@@ -80,14 +61,6 @@ class pinCasadiModel(cpin.Model):
         self.qn_stack = self.qn.sx
         self.vn_stack = self.vn.sx
         self.a_stack = self.a
-        self.pos_args = [self.q]
-        self.vel_args = [self.v]
-        # self.acc_args = [self.aj]
-        # self.acc_args = [self.a]
-        self.acc_args = [self.tq]
-        self.pos_args_n = [self.qn]
-        self.vel_args_n = [self.vn]
-
         cpin.forwardKinematics(self, self.data, self.q_stack, self.v_stack)
         cpin.computeJointJacobians(self, self.data)
         cpin.updateFramePlacements(self, self.data)
@@ -152,29 +125,11 @@ class pinCasadiModel(cpin.Model):
         )
 
     def make_dynamics(self):
-        args = (
-            self.pos_args
-            + self.vel_args
-            + self.pos_args_n
-            + self.vel_args_n
-            + [*self.f_f]
-            + self.acc_args
-        )
-        if isinstance(self.dt, cs.SX):
-            args.append(self.dt)
         out = [self.joint_euler]
-        # out = [self.qn - cpin.integrate(self, self.q, self.vn * self.dt), self.vn - self.v - self.aba * self.dt]
-
-        # if self.is_floating_based:
-        # out.append(self.rnea_base)
-        # return moto.dense_dynamics(self.name + "_fb_id", args, cs.vcat(out))
-        in_arg = self.pos_args + self.vel_args + self.acc_args + [*self.f_f]
-        # return [moto.dense_dynamics(self.name + "_euler", args, cs.vcat(out)),
-        #         moto.constr(self.name + "_id", in_arg, self.rnea[:6])]
         if self.use_fwd_dyn:
             v_next = self.v + self.aba
             return moto.dense_dynamics.create(
-                self.name + "_fd", args, cs.vcat(out + [self.vn - v_next])
+                self.name + "_fd", cs.vcat(out + [self.vn - v_next])
             )
         else:
             tau = (
@@ -183,9 +138,8 @@ class pinCasadiModel(cpin.Model):
                 else self.tq
             )
             return moto.dense_dynamics.create(
-                self.name + "_id", args, cs.vcat(out + [self.rnea - tau * self.dt])
+                self.name + "_id", cs.vcat(out + [self.rnea - tau * self.dt])
             )
-        # return moto.dense_dynamics(self.name + "_fb_fd", args, cs.vcat(out))
 
     def make_foot_kin_constr(self, i: int, soft: bool = False):
         self.v_f = cs.hcat(
@@ -199,7 +153,6 @@ class pinCasadiModel(cpin.Model):
         res = cs.vcat([self.v_f[:2, i], self.k_f * self.z_f[i] + self.v_f[2, i]])
         c = moto.constr.create(
             f"kin_{self.foot_frames[i]}" + ("_soft" if soft else ""),
-            self.pos_args + self.vel_args + [self.k_f],
             cs.vcat([res, -res]) if soft else res,
         )
         c.enable_if_all([self.f_f[i]])
@@ -208,7 +161,7 @@ class pinCasadiModel(cpin.Model):
 
     def make_foot_kin_cost(self, i: int):
         pos_cost = moto.cost.from_scalar(
-            f"kin_pos_cost_{self.foot_frames[i]}", self.pos_args, self.z_f[i],
+            f"kin_pos_cost_{self.foot_frames[i]}", self.z_f[i],
             weight=1e3,
         )
         pos_cost.enable_if_all([self.f_f[i]])
@@ -224,19 +177,16 @@ class pinCasadiModel(cpin.Model):
         print("v_lim:", v_lim)
         qj = self.q[-self.nj :]
         vj = self.v[-self.nj :]
-        return moto.constr.create(
+        return moto.ineq.create(
             "q_limit",
-            [self.q, self.v],
-            cs.vcat([q_min - qj, qj - q_max, vj - v_lim, -vj - v_lim]),
-        ).cast_ineq()
+            cs.vcat([qj, vj]),
+            np.concatenate([q_min, -v_lim]),
+            np.concatenate([q_max, v_lim]),
+        )
 
     def make_tq_limit_constr(self):
         tq_limit = model.effortLimit[-self.nj :]
-        in_arg = [self.tq]
-        # in_arg = self.pos_args + self.vel_args + self.acc_args + [*self.active_foot, *self.f_f] + ([self.dt] if isinstance(self.dt, cs.SX) else [])
-        return moto.constr.create(
-            "tq_limit", in_arg, cs.vcat([self.tq - tq_limit, -self.tq - tq_limit])
-        ).cast_ineq()
+        return moto.ineq.bounds("tq_limit", self.tq, -tq_limit, tq_limit)
 
     def make_fric_cone(self, i, f: moto.var):
         cone = cs.vcat(
@@ -248,9 +198,7 @@ class pinCasadiModel(cpin.Model):
             ]
         )
         # cone = f[0] - self.mu * cs.sqrt(cs.sumsqr(f[1:]) + 1e-9)
-        c = moto.constr.create(
-            f"fric_{self.foot_frames[i]}", [f, self.mu], cone
-        ).cast_ineq()
+        c = moto.constr.create(f"fric_{self.foot_frames[i]}", cone).cast_ineq()
         return c
 
     def add_dt_constr_and_cost(self, prob: moto.stage_ocp, dt_nom: moto.var):
@@ -260,18 +208,17 @@ class pinCasadiModel(cpin.Model):
             )  # bound on dt
             dt_constr = moto.constr.create(
                 "dt",
-                [self.dt, dt_bound],
                 cs.vcat([dt_bound[0] - self.dt, self.dt - dt_bound[1]]),
             ).cast_ineq()
             # dt_constr = moto.constr("dt_fix", [self.dt], self.dt - 2e-2)
             prob.add(dt_constr)
             timing_cost = moto.cost.from_scalar(
-                "c_t", [self.dt, dt_nom], self.dt - dt_nom, weight=2e8
+                "c_t", self.dt - dt_nom, weight=2e8
             )
             prob.add(timing_cost)
 
     def get_state_cost(self):
-        q_nom_res = self.q_stack - self.q_nom
+        q_nom_res = self.q.symbolic_difference(self.q.sx, self.q_nom.sx)
         residual = cs.vcat([q_nom_res, self.v_stack])
         weight = np.r_[
             np.full(self.nqb, 200.0),
@@ -279,17 +226,13 @@ class pinCasadiModel(cpin.Model):
             np.full(6, 2.0),
             np.full(self.v_stack.numel() - 6, 0.02),
         ]
-        state_args = self.pos_args + self.vel_args
-        cost = moto.cost.from_vector(
-            "c", state_args + [self.q_nom], residual, weight=weight
-        )
+        cost = moto.cost.from_vector("c", residual, weight=weight)
         return cost
 
     def get_input_cost(self):
-        input_args = self.acc_args + [*self.f_f]
         forces = cs.vcat(self.f_f)
         return moto.cost.from_vector(
-            "c_u", input_args, cs.vcat([self.tq, forces]),
+            "c_u", cs.vcat([self.tq, forces]),
             weight=np.r_[np.full(self.tq.numel(), 2e-6),
                          np.full(forces.numel(), 2e-3)],
         )
@@ -304,19 +247,17 @@ class pinCasadiModel(cpin.Model):
             )  # desired foot height when in contact
             foot_lift_constr = moto.constr.create(
                 "foot_lift_constr",
-                self.pos_args + [self.z_f_d],
                 (self.z_f - self.z_f_d),
             )
             foot_lift_cost = moto.cost.from_vector(
-                "c_z", [self.z_f_d, self.z_f_lift_d],
-                self.z_f_d - self.z_f_lift_d, weight=200.0,
+                "c_z", self.z_f_d - self.z_f_lift_d, weight=200.0,
             )
             foot_lift_constr.disable_if([*self.f_f])
             foot_lift_cost.disable_if([*self.f_f])
             return [foot_lift_constr, foot_lift_cost]
         else:
             foot_lift_cost = moto.cost.from_vector(
-                "c_z", self.pos_args + [self.z_f_lift_d, *self.active_foot],
+                "c_z",
                 (self.z_f - self.z_f_lift_d)
                 * (1 - cs.vcat(self.active_foot)), weight=200.0,
             )

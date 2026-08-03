@@ -46,7 +46,7 @@ class QuadrupedMpcModel(ContactRobotModel):
         )
 
     def get_state_cost(self):
-        q_nom_res = self.configuration_difference(self.q.sx, self.q_nom.sx)
+        q_nom_res = self.q.symbolic_difference(self.q.sx, self.q_nom.sx)
         residual = cs.vcat([q_nom_res, self.v_stack])
         weight = np.r_[
             np.full(6, 200.0),
@@ -54,10 +54,7 @@ class QuadrupedMpcModel(ContactRobotModel):
             np.full(6, 2.0),
             np.full(self.v_stack.numel() - 6, 0.02),
         ]
-        state_args = self.pos_args + self.vel_args
-        cost = moto.cost.from_vector(
-            "c_mpc", state_args + [self.q_nom], residual, weight=weight
-        )
+        cost = moto.cost.from_vector("c_mpc", residual, weight=weight)
         return cost
 
 

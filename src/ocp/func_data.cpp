@@ -86,6 +86,24 @@ void func_approx_data::setup_hessian() {
     if (f.order() >= approx_order::second || is_ineq_soft) {
         size_t field_1, field_2;
         auto *hessian = f.field() == __cost ? &raw.lag_hess_ : &raw.hessian_modification_;
+        if (!f.hess_panel_sp_.empty()) {
+            hess_panels_.reserve(f.hess_panel_sp_.size());
+            for (const auto &[i, j, sp] : f.hess_panel_sp_) {
+                const auto fi = in_args[i]->field(), fj = in_args[j]->field();
+                if (fi >= fj && fi < field::num_prim && fj < field::num_prim &&
+                    raw.prob_->is_active(in_args[i]) &&
+                    raw.prob_->is_active(in_args[j])) {
+                    hess_panels_.push_back((*hessian)[fi][fj].insert(
+                        raw.prob_->get_expr_start_tangent(in_args[i]) + sp.row_offset,
+                        raw.prob_->get_expr_start_tangent(in_args[j]) + sp.col_offset,
+                        sp.rows, sp.cols, sp.pattern));
+                } else {
+                    static matrix empty;
+                    hess_panels_.push_back(empty);
+                }
+            }
+            return;
+        }
         lag_hess_.resize(in_args_.size());
         for (size_t i : range(in_args_.size())) {
             if (in_args[i]->field() < field::num_prim) {

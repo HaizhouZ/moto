@@ -51,18 +51,15 @@ class QuadrupedModel(ContactRobotModel):
     def get_state_cost(self):
         q_stack = self.q_stack
         v_stack = self.v_stack
-        q_nom_res = q_stack - self.q_nom
+        q_nom_res = self.q.symbolic_difference(self.q.sx, self.q_nom.sx)
         residual = cs.vcat([q_nom_res, v_stack])
         weight = np.r_[
-            np.full(self.nqb, 200.0),
-            np.full(q_nom_res.numel() - self.nqb, 2.0),
+            np.full(6, 200.0),
+            np.full(q_nom_res.numel() - 6, 2.0),
             np.full(6, 2.0),
             np.full(v_stack.numel() - 6, 0.02),
         ]
-        state_args = self.pos_args + self.vel_args
-        cost = moto.cost.from_vector(
-            "c", state_args + [self.q_nom], residual, weight=weight
-        )
+        cost = moto.cost.from_vector("c", residual, weight=weight)
         return cost
 
 

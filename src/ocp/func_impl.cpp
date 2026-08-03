@@ -49,6 +49,10 @@ generic_func::generic_func(const std::string &name, const var_inarg_list &in_arg
     set_from_casadi(in_args, out);
 }
 
+generic_func::generic_func(const std::string &name, const cs::SX &out,
+                           approx_order order, field_t field)
+    : generic_func(name, var_inarg_list{}, out, order, field) {}
+
 generic_func::generic_func(const generic_func &rhs)
     : expr(ready_copy_source(rhs)),
       field_layout_store<var_list>(rhs),
@@ -62,6 +66,7 @@ generic_func::generic_func(const generic_func &rhs)
       skip_unused_arg_check_(rhs.skip_unused_arg_check_),
       jac_sp_(rhs.jac_sp_),
       hess_sp_(rhs.hess_sp_),
+      hess_panel_sp_(rhs.hess_panel_sp_),
       default_hess_sp_(rhs.default_hess_sp_),
       detect_jacobian_sparsity_(rhs.detect_jacobian_sparsity_),
       remap_cache_(std::make_unique<remap_cache>()),
@@ -138,7 +143,9 @@ void generic_func::hessian_impl(func_approx_data &data) const {
 void generic_func::load_external_impl(const std::string &path) {
     const std::string func_name =
         (gen_.task_ && !gen_.task_->func_name.empty()) ? gen_.task_->func_name : name_;
-    auto funcs = load_approx(func_name, true, order_ >= approx_order::first, order_ >= approx_order::second);
+    const bool panel_hessian = !hess_panel_sp_.empty();
+    auto funcs = load_approx(func_name, true, order_ >= approx_order::first,
+                             order_ >= approx_order::second && !panel_hessian);
     value = [eval = std::move(funcs[0])](func_approx_data &d) {
         eval.invoke(d.in_arg_data(), d.v_);
     };
@@ -146,9 +153,16 @@ void generic_func::load_external_impl(const std::string &path) {
         jac.invoke(d.in_arg_data(), d.jac_);
     };
 
-    hessian = [hess = std::move(funcs[2])](func_approx_data &d) {
-        hess.invoke(d.in_arg_data(), d.lag_hess_);
-    };
+    if (panel_hessian) {
+        hessian = [hess = ext_func(func_name + "_hess_panel", path)](
+                      func_approx_data &d) {
+            hess.invoke(d.in_arg_data(), d.hess_panels_);
+        };
+    } else {
+        hessian = [hess = std::move(funcs[2])](func_approx_data &d) {
+            hess.invoke(d.in_arg_data(), d.lag_hess_);
+        };
+    }
     setup_hess();
 }
 
@@ -333,7 +347,11 @@ void generic_func::set_from_casadi(const var_inarg_list &in_args, const cs::SX &
         throw std::runtime_error(
         fmt::format("func {} already has a casadi codegen task", name_));
     else {
+        for (sym &arg : in_args)
+            global_registry::add(var(arg));
         add_arguments(in_args);
+        for (const var &arg : global_registry::infer_args(out))
+            add_argument(arg);
         gen_.task_ = new gen_info::task_type();
         gen_.task_->sx_output = out;
     }
@@ -401,6 +419,7 @@ void generic_func::finalize_impl() {
         t.append_jac = field_ == __cost;
         t.jac_sp = in_field(field_, ineq_soft_constr_fields) ? &jac_sp_ : nullptr;
         t.hess_sp = &hess_sp_;
+        t.hess_panels = field_ == __cost ? &hess_panel_sp_ : nullptr;
         t.verbose = false;
         t.force_recompile = false;
         t.keep_generated_src = true;

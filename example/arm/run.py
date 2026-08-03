@@ -39,8 +39,8 @@ class ArmModel(PinocchioCasadiModel):
         self.create_trajectory_variables(dt, q_nom)
 
         def implicit_euler():
-            q_next = self.integrate_configuration(self.q.sx, self.vn * dt)
-            return cs.vcat([self.qn - q_next])
+            q_next = self.q.symbolic_integrate(self.q.sx, self.vn * dt)
+            return cs.vcat([self.q.symbolic_difference(self.qn.sx, q_next)])
 
         self.joint_euler = implicit_euler()
         self.update_kinematics(self.q_stack, self.v_stack)
@@ -69,26 +69,16 @@ class ArmModel(PinocchioCasadiModel):
         self.v_lim = v_lim
 
     def make_dynamics(self):
-        args = (
-            self.pos_args
-            + self.vel_args
-            + self.pos_args_n
-            + self.vel_args_n
-            + self.acc_args
-        )
-        if isinstance(self.dt, cs.SX):
-            args.append(self.dt)
         out = [self.joint_euler]
         if self.use_fwd_dyn:
             v_next = self.v + self.aba
             return moto.dense_dynamics.create(
-                "arm_" + self.name + "_fd", args, cs.vcat(out + [self.vn - v_next])
+                "arm_" + self.name + "_fd", cs.vcat(out + [self.vn - v_next])
             )
         else:
             tau = self.generalized_torque(self.tq)
             return moto.dense_dynamics.create(
                 "arm_" + self.name + "_id",
-                args,
                 cs.vcat(out + [self.rnea - tau * self.dt]),
             )
 
@@ -102,13 +92,12 @@ class ArmModel(PinocchioCasadiModel):
         ee_pos = self.data.oMf[self.ee_id]
         c: moto.pmm_constr = moto.constr.create(
             "arm_ee_constr",
-            self.pos_args + [self.r_des, self.quat_des],
             cpin.log6(ee_pos.inverse() * ee_des).np,
         )
         return c
 
     def get_state_cost(self):
-        q_nom_res = self.q_stack - self.q_nom
+        q_nom_res = self.q.symbolic_difference(self.q.sx, self.q_nom.sx)
         if self.is_floating_based:
             weight = np.r_[
                 np.full(self.nqb, 200.0),
@@ -118,25 +107,21 @@ class ArmModel(PinocchioCasadiModel):
             ]
         else:
             weight = np.full(q_nom_res.numel() + self.v_stack.numel(), 0.2)
-        state_args = self.pos_args + self.vel_args
         cost = moto.cost.from_vector(
-            "arm_state_cost", state_args + [self.q_nom],
+            "arm_state_cost",
             cs.vcat([q_nom_res, self.v_stack]), weight=weight
         )
         return cost
 
     def get_input_cost(self):
-        input_args = self.acc_args
-        return moto.cost.from_vector(
-            "arm_input_cost", input_args, self.tq, weight=2e-4
-        )
+        return moto.cost.from_vector("arm_input_cost", self.tq, weight=2e-4)
 
     def get_dt_reg(self, dt_nom):
         if not isinstance(self.dt, cs.SX):
             raise ValueError("dt is not a symbolic variable")
         return [
             moto.cost.from_scalar(
-                "arm_dt_reg", [self.dt, dt_nom], self.dt - dt_nom, weight=2e3
+                "arm_dt_reg", self.dt - dt_nom, weight=2e3
             ),
             moto.ineq.bounds("arm_dt_bound", self.dt, 1e-2, 0.1),
         ]

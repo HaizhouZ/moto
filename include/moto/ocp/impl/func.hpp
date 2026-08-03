@@ -54,6 +54,7 @@ class generic_func : public expr, protected field_layout_store<var_list> {
     std::set<size_t> skip_unused_arg_check_;
     std::vector<sp_info> jac_sp_;
     std::vector<std::vector<sp_info>> hess_sp_;
+    std::vector<indexed_sp_info> hess_panel_sp_;
 
     sparsity default_hess_sp_ = sparsity::dense;
     bool detect_jacobian_sparsity_ = true;
@@ -108,6 +109,8 @@ class generic_func : public expr, protected field_layout_store<var_list> {
 
   public:
     generic_func(const std::string &name, approx_order order, size_t dim, field_t field = __undefined);
+    generic_func(const std::string &name, const cs::SX &out,
+                 approx_order order, field_t field = __undefined);
     generic_func(const std::string &name, const var_inarg_list &in_args, const cs::SX &out,
                  approx_order order, field_t field = __undefined);
 
@@ -122,6 +125,7 @@ class generic_func : public expr, protected field_layout_store<var_list> {
 
     const auto &jac_sparsity() const { return jac_sp_; }
     const auto &hess_sparsity() const { return hess_sp_; }
+    const auto &hess_panel_sparsity() const { return hess_panel_sp_; }
 
     void set_jac_sparsity(const sym &arg, sp_info sp) {
         field_write_guard(arg.field());

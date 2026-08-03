@@ -68,6 +68,7 @@ struct func_approx_data : public func_arg_map {
     vector_ref v_;
     std::vector<matrix_ref> jac_;
     std::vector<std::vector<matrix_ref>> lag_hess_;
+    std::vector<matrix_ref> hess_panels_;
     func_approx_data(sym_data &primal, lag_data &raw, shared_data &shared, const generic_func &f);
     void setup_hessian();
     bool has_jacobian_block(size_t arg_idx) const;

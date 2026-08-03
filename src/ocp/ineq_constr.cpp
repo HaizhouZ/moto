@@ -133,9 +133,22 @@ constr ineq_constr::create(const std::string &name,
     const cs::SX lb_sx = normalize_bound(lb, "lower");
     const cs::SX ub_sx = normalize_bound(ub, "upper");
 
-    auto box = make_box_spec(args, out_vec, lb_sx, ub_sx);
+    var_list merged(args);
+    for (const var &arg : merged)
+        global_registry::add(arg);
+    const auto append_inferred = [&](const cs::SX &expression) {
+        for (var &arg : global_registry::infer_args(expression)) {
+            if (std::ranges::find(merged, arg) == merged.end())
+                merged.push_back(std::move(arg));
+        }
+    };
+    append_inferred(out_vec);
+    append_inferred(lb_sx);
+    append_inferred(ub_sx);
+    const var_inarg_list merged_args(merged);
+    auto box = make_box_spec(merged_args, out_vec, lb_sx, ub_sx);
 
-    auto c = std::make_shared<solver::ipm_constr>(name, args, out_vec, order, field);
+    auto c = std::make_shared<solver::ipm_constr>(name, merged_args, out_vec, order, field);
     c->set_box_info(std::move(box));
     return c;
 }

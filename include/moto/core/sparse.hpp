@@ -12,6 +12,11 @@ struct sp_info {
   size_t rows = std::numeric_limits<size_t>::max();
   size_t cols = std::numeric_limits<size_t>::max();
 };
+struct indexed_sp_info {
+  size_t row_arg = 0;
+  size_t col_arg = 0;
+  sp_info block;
+};
 struct sparse_block_spec {
   size_t row = 0, col = 0, rows = 0, cols = 0;
   sparsity pattern = sparsity::unknown;

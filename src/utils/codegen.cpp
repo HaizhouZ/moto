@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
+#include <numeric>
 #include <sys/file.h>
 #include <unistd.h>
 
@@ -119,6 +120,94 @@ void compress_jacobian(cs::SX &expr, sp_info *sp) {
     }
 }
 
+struct structured_piece {
+    sp_info sp;
+    cs::SX expression;
+};
+
+std::vector<structured_piece> split_hessian_blocks(const cs::SX &expression) {
+    cs::SX expr = cs::SX::sparsify(expression);
+    const size_t rows = static_cast<size_t>(expr.rows());
+    const size_t cols = static_cast<size_t>(expr.columns());
+    const auto one_piece = [&]() {
+        sp_info sp{sparsity::dense, 0, 0, rows, cols};
+        compress_structured_output(expr, &sp);
+        return std::vector<structured_piece>{{sp, std::move(expr)}};
+    };
+    if (rows != cols || rows == 0)
+        return one_piece();
+
+    std::vector<size_t> parent(rows);
+    std::iota(parent.begin(), parent.end(), 0);
+    const auto find = [&](size_t x) {
+        while (parent[x] != x) {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        return x;
+    };
+    const auto merge = [&](size_t a, size_t b) {
+        a = find(a);
+        b = find(b);
+        if (a != b) parent[b] = a;
+    };
+    const auto &structure = expr.sparsity();
+    const auto *row_indices = structure.row();
+    const auto *col_offsets = structure.colind();
+    for (casadi_int col = 0; col < structure.columns(); ++col)
+        for (casadi_int k = col_offsets[col]; k < col_offsets[col + 1]; ++k)
+            if (row_indices[k] != col)
+                merge(static_cast<size_t>(row_indices[k]),
+                      static_cast<size_t>(col));
+
+    std::vector<std::vector<size_t>> components(rows);
+    for (size_t i = 0; i < rows; ++i)
+        components[find(i)].push_back(i);
+    for (const auto &component : components) {
+        if (component.size() < 2) continue;
+        if (component.back() - component.front() + 1 != component.size())
+            return one_piece();
+        const auto start = static_cast<casadi_int>(component.front());
+        const auto end = static_cast<casadi_int>(component.back() + 1);
+        if (expr(cs::Slice(start, end), cs::Slice(start, end)).nnz() !=
+            static_cast<casadi_int>(component.size() * component.size()))
+            return one_piece();
+    }
+
+    std::vector<structured_piece> pieces;
+    for (size_t i = 0; i < rows;) {
+        const auto &component = components[find(i)];
+        if (component.size() > 1) {
+            const size_t count = component.size();
+            const auto begin = static_cast<casadi_int>(i);
+            const auto finish = static_cast<casadi_int>(i + count);
+            pieces.push_back({{sparsity::dense, i, i, count, count},
+                              expr(cs::Slice(begin, finish),
+                                   cs::Slice(begin, finish))});
+            i += count;
+            continue;
+        }
+        if (expr(static_cast<casadi_int>(i), static_cast<casadi_int>(i)).is_zero()) {
+            ++i;
+            continue;
+        }
+        size_t end = i + 1;
+        while (end < rows && components[find(end)].size() == 1 &&
+               !expr(static_cast<casadi_int>(end),
+                     static_cast<casadi_int>(end)).is_zero())
+            ++end;
+        const auto begin = static_cast<casadi_int>(i);
+        const auto finish = static_cast<casadi_int>(end);
+        cs::SX block = expr(cs::Slice(begin, finish),
+                            cs::Slice(begin, finish));
+        sparsity pattern;
+        compress_structured_output(block, &pattern);
+        pieces.push_back({{pattern, i, i, end - i, end - i}, std::move(block)});
+        i = end;
+    }
+    return pieces.empty() ? one_piece() : pieces;
+}
+
 namespace impl {
 // job_list jobs_{};
 std::mutex func_mutex_map_mutex_{};
@@ -182,7 +271,7 @@ std::string process_generated_code(const std::string &raw_c_code,
     const std::vector<cs::SX> &sx_outputs,
     bool append,
     bool with_aux) {
-    bool is_hessian = func_name.find("_hess") != std::string::npos;
+    const bool is_hessian = func_name.ends_with("_hess");
     // Pre-compute CCS to (row, col) index maps
     std::vector<std::vector<std::pair<int, int>>> ij_pairs_all;
     for (const auto &x : sx_inputs) {
@@ -193,7 +282,8 @@ std::string process_generated_code(const std::string &raw_c_code,
     }
     size_t n_in = sx_inputs.size();
 
-    bool is_jac = func_name.find("_jac") != std::string::npos;
+    const bool is_jac = func_name.ends_with("_jac") ||
+                        func_name.ends_with("_hess_panel");
 
     bool vec_out = !is_jac && !is_hessian;
 
@@ -574,12 +664,10 @@ void task::finalize(job_list &jobs_) {
     }
 
     auto get_dstep_ds = [](const sym &s) -> cs::SX {
-        /// @todo : this assumes affine dependence on step size, which may not be
-    /// true for all cases (i.e., hessian wrt step size will be zero) for
-    /// example if the integration is s + step ^ 2, the jacobian will contain
-    /// step which is not an input to the function (is it necessary?)
         auto step = cs::SX::sym(s.name() + "_step", s.tdim());
-        return cs::SX::jacobian(s.symbolic_integrate(s, step), step);
+        return cs::SX::substitute(
+            cs::SX::jacobian(s.symbolic_integrate(s, step), step), step,
+            cs::SX::zeros(s.tdim(), 1));
     };
 
     std::vector<cs::SX> jacs;
@@ -674,6 +762,9 @@ void task::finalize(job_list &jobs_) {
     // generate hessian
     std::vector<std::vector<cs::SX>> hess;
     if (gen_hessian) {
+        std::vector<cs::SX> hess_panel_outputs;
+        if (hess_panels != nullptr)
+            hess_panels->clear();
         hess.resize(sx_inputs.size());
         // use AD of vjp to compute hessian if merit_jac_for_hess is true
         auto lbd = merit_jac_for_hess ? cs::SX::sym(func_name + "_lbd", sx_output.rows()) : cs::SX();
@@ -688,23 +779,27 @@ void task::finalize(job_list &jobs_) {
             size_t idx_j = 0;
             for (size_t idx_j = 0; idx_j < sx_inputs.size(); ++idx_j) {
                 sym &j = sx_inputs[idx_j];
+                bool tangent_hessian = false;
                 if (excluded.contains(j.uid()) or i.field() < j.field()) {
                     continue;
                 }
                 if (!merit_jac_for_hess) {
                     if (external_hess.contains({i.uid(), j.uid()})) {
                         hess[idx_i][idx_j] = external_hess[{i.uid(), j.uid()}];
+                        tangent_hessian = true;
                         goto HESS_SETUP_SPARSITY;
                     } else if (external_hess.contains({j.uid(), i.uid()})) {
                         hess[idx_i][idx_j] = external_hess[{j.uid(), i.uid()}].T();
+                        tangent_hessian = true;
                         goto HESS_SETUP_SPARSITY;
                     }
                 } else if (i.field() == j.field() and idx_i > idx_j) {
                     // for i,j in same field, just copy
                     hess[idx_i][idx_j] = hess[idx_j][idx_i].T();
+                    tangent_hessian = true;
                     if (hess_sp != nullptr)
                         (*hess_sp)[idx_i][idx_j].pattern = (*hess_sp)[idx_j][idx_i].pattern;
-                    continue;
+                    goto HESS_SETUP_SPARSITY;
                 }
                 if (merit_jac_for_hess) {
                     hess[idx_i][idx_j] = cs::SX::sparsify(cs::SX::jacobian(merit_jac_, j));
@@ -717,13 +812,42 @@ void task::finalize(job_list &jobs_) {
                     if (hess_sp != nullptr)
                         (*hess_sp)[idx_i][idx_j].pattern = sparsity::unknown; // no hessian
                     continue;
-                } else if (j.has_non_trivial_integration()) { // apply integration
+                } else if (!tangent_hessian && j.has_non_trivial_integration()) {
                     hess[idx_i][idx_j] = cs::SX::mtimes(hess[idx_i][idx_j], get_dstep_ds(j));
                 }
-        compress_structured_output(
-            hess[idx_i][idx_j],
-            hess_sp != nullptr ? &(*hess_sp)[idx_i][idx_j] : nullptr);
+                if (hess_panels != nullptr) {
+                    auto pieces = split_hessian_blocks(hess[idx_i][idx_j]);
+                    for (auto &piece : pieces) {
+                        hess_panels->push_back({idx_i, idx_j, piece.sp});
+                        hess_panel_outputs.push_back(std::move(piece.expression));
+                    }
+                    if (hess_sp != nullptr)
+                        (*hess_sp)[idx_i][idx_j] = pieces.size() == 1
+                            ? pieces.front().sp
+                            : sp_info{sparsity::dense, 0, 0,
+                                      static_cast<size_t>(hess[idx_i][idx_j].rows()),
+                                      static_cast<size_t>(hess[idx_i][idx_j].columns())};
+                } else {
+                    compress_structured_output(
+                        hess[idx_i][idx_j],
+                        hess_sp != nullptr ? &(*hess_sp)[idx_i][idx_j] : nullptr);
+                }
             }
+        }
+        if (hess_panels != nullptr) {
+            jobs_.add(std::bind(&impl::run,
+                                full_func_name + "_hess_panel",
+                                sx_inputs,
+                                std::move(hess_panel_outputs),
+                                output_dir,
+                                hess_compile_flag,
+                                force_recompile,
+                                true,
+                                cs::Function(),
+                                keep_generated_src,
+                                verbose,
+                                lbd));
+            return;
         }
         // hess = [item for sublist in hess for item in sublist]
         std::vector<cs::SX> hess_flat;

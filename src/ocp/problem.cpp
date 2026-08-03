@@ -173,6 +173,18 @@ void ocp_base::build_linear_profile() {
                 continue;
             const auto target = ff == __cost ? linear_target::lag_hessian
                                              : linear_target::hessian_modification;
+            if (!f.hess_panel_sparsity().empty()) {
+                for (const auto &[i, j, sp] : f.hess_panel_sparsity()) {
+                    const auto fi = args[i]->field(), fj = args[j]->field();
+                    if (fi >= field::num_prim || fj >= field::num_prim || fi < fj ||
+                        !is_active(args[i]) || !is_active(args[j])) continue;
+                    add(target, fi, fj,
+                        {get_expr_start_tangent(args[i]) + sp.row_offset,
+                         get_expr_start_tangent(args[j]) + sp.col_offset,
+                         sp.rows, sp.cols, sp.pattern});
+                }
+                continue;
+            }
             for (size_t i : range(args.size())) for (size_t j : range(args.size())) {
                 const auto fi = args[i]->field(), fj = args[j]->field();
                 if (fi >= field::num_prim || fj >= field::num_prim || fi < fj ||

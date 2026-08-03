@@ -27,6 +27,13 @@ struct var : public utils::shared<sym>, public cs::SX {
         requires std::constructible_from<utils::shared<sym>, Args...>
     var(Args &&...args) : base(std::forward<Args>(args)...), cs::SX((sym &)*this) {}
 };
+
+class global_registry {
+  public:
+    static void add(const var &symbol);
+    static var track(var symbol);
+    static std::vector<var> infer_args(const cs::SX &expression);
+};
 /**
  * @brief pointer wrapper of symbolic expressions like primal variables or parameters
  */
@@ -114,21 +121,23 @@ class sym : public expr, public cs::SX {
     auto get_next_name() const { return name_ + next_suffix_; } ///< get the name of the next state variable
     /// @brief make a symbolic input
     static var inputs(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
-        return std::make_shared<sym>(name, dim, __u, default_val);
+        return global_registry::track(std::make_shared<sym>(name, dim, __u, default_val));
     }
     /// @brief make a symbolic parameter
     static var params(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
-        return std::make_shared<sym>(name, dim, __p, default_val);
+        return global_registry::track(std::make_shared<sym>(name, dim, __p, default_val));
     }
     /// @brief make a solver-managed slack storage symbol
     static var slacks(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
-        return std::make_shared<sym>(name, dim, __s, default_val);
+        return global_registry::track(std::make_shared<sym>(name, dim, __s, default_val));
     }
     /// @brief make a pair of symbolic state
     static auto states(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
         auto temp = var(std::make_shared<sym>(name, dim, __x, default_val));
         auto next = var(std::make_shared<sym>(temp->get_next_name(), dim, __y, default_val));
         setup_states(temp, next);
+        global_registry::add(temp);
+        global_registry::add(next);
         return std::make_pair(std::move(temp), std::move(next));
     }
     static auto state(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
@@ -153,11 +162,11 @@ class sym : public expr, public cs::SX {
     }
 
     static var usr_var(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
-        return std::make_shared<sym>(name, dim, __usr_var, default_val);
+        return global_registry::track(std::make_shared<sym>(name, dim, __usr_var, default_val));
     } ///< make a user defined variable
 
     static var symbol(const std::string &name, size_t dim = 1, field_t field = field_t::__undefined, default_val_t default_val = default_val_none_t()) {
-        return std::make_shared<sym>(name, dim, field, default_val);
+        return global_registry::track(std::make_shared<sym>(name, dim, field, default_val));
     } ///< make a symbolic primitive
 
     /// Clone into a new logical symbol with a fresh uid.
@@ -181,6 +190,12 @@ class sym : public expr, public cs::SX {
         setup_states(s, d);
         s->name() = name;
         d->name() = s->get_next_name();
+        const auto sx = cs::SX::sym(s->name(), s->dim());
+        const auto dx = cs::SX::sym(d->name(), d->dim());
+        static_cast<cs::SX &>(*s) = static_cast<cs::SX &>(s) = sx;
+        static_cast<cs::SX &>(*d) = static_cast<cs::SX &>(d) = dx;
+        global_registry::add(s);
+        global_registry::add(d);
         return s;
     }
 };

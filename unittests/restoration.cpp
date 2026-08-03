@@ -1129,18 +1129,21 @@ TEST_CASE("box helper rejects symbolic bounds that are not direct non-primal in_
         Catch::Matchers::ContainsSubstring("direct non-primal in_arg"));
 }
 
-TEST_CASE("box helper rejects symbolic bounds whose dependencies are missing from in_args") {
+TEST_CASE("box helper infers symbolic bound parameters missing from in_args") {
     auto [x, _y] = sym::states("x_missing_box", 2);
     auto p = sym::params("p_missing_box", 2);
 
-    REQUIRE_THROWS_WITH(
-        ineq_constr::create(
-            "x_missing_box_bound",
-            var_inarg_list{*x},
-            static_cast<const cs::SX &>(x),
-            -std::numeric_limits<scalar_t>::infinity(),
-            static_cast<const cs::SX &>(p)),
-        Catch::Matchers::ContainsSubstring("not listed in in_args"));
+    auto box = ineq_constr::create(
+        "x_missing_box_bound",
+        var_inarg_list{*x},
+        static_cast<const cs::SX &>(x),
+        -std::numeric_limits<scalar_t>::infinity(),
+        static_cast<const cs::SX &>(p));
+    REQUIRE(box->in_args().size() == 2);
+    REQUIRE(box->in_args()[1].get() == p.get());
+    const auto *spec = dynamic_cast<const ineq_constr &>(*box).box_info();
+    REQUIRE(spec != nullptr);
+    REQUIRE(spec->bound_var[box_side::ub].get() == p.get());
 }
 
 TEST_CASE("restoration overlay wraps box-lowered ipm inequality without special casing") {

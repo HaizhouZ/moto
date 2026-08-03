@@ -21,7 +21,6 @@ u = moto.sym.inputs("initial_state_demo_u", 1)
 
 dynamics = moto.dense_dynamics.create(
     "initial_state_demo_dynamics",
-    [x, xn, u],
     xn.sx - x.sx - u.sx,
 )
 control_cost = moto.cost.from_scalar(

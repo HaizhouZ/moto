@@ -8,9 +8,21 @@ cost generic_cost::make_tracking(const std::string &name,
                                  const cs::SX &value,
                                  tracking_param weight_arg,
                                  tracking_param reference_arg) {
-    const auto dim = static_cast<size_t>(value.numel());
-    const auto resolve = [dim](const std::string &param_name,
-                               tracking_param param) -> var {
+    const auto value_dim = static_cast<size_t>(value.numel());
+    var value_symbol;
+    for (const var &candidate : global_registry::infer_args(value)) {
+        const cs::SX &candidate_sx = static_cast<const cs::SX &>(*candidate);
+        if (candidate_sx.size1() == value.size1() &&
+            candidate_sx.size2() == value.size2() &&
+            cs::SX::is_equal(candidate_sx, value)) {
+            value_symbol = candidate;
+            break;
+        }
+    }
+    const auto residual_dim = value_symbol
+        ? static_cast<size_t>(value_symbol->tdim()) : value_dim;
+    const auto resolve = [](const std::string &param_name,
+                            size_t dim, tracking_param param) -> var {
         if (auto *symbol = std::get_if<var>(&param)) {
             if ((*symbol)->field() != __p)
                 throw std::runtime_error(fmt::format(
@@ -26,19 +38,23 @@ cost generic_cost::make_tracking(const std::string &name,
             return sym::params(param_name, dim, *scalar);
         return sym::params(param_name, dim, std::move(std::get<vector>(param)));
     };
-    auto weight = resolve(name + "_weight", std::move(weight_arg));
-    auto reference = resolve(name + "_reference", std::move(reference_arg));
+    auto weight = resolve(name + "_weight", residual_dim, std::move(weight_arg));
+    auto reference = resolve(name + "_reference", value_dim,
+                             std::move(reference_arg));
     var_inarg_list all_args = args;
     all_args.emplace_back(*weight);
     all_args.emplace_back(*reference);
-    const cs::SX residual = cs::SX::reshape(value, dim, 1) - reference;
-    const cs::SX output = dim == 1
+    const cs::SX value_vec = cs::SX::reshape(value, value_dim, 1);
+    const cs::SX residual = value_symbol
+        ? value_symbol->symbolic_difference(value_vec, reference)
+        : value_vec - reference;
+    const cs::SX output = residual_dim == 1
         ? scalar_t(0.5) * cs::SX::dot(residual, residual * weight)
         : residual;
     auto result = cost(new generic_cost(name, all_args, output));
     result->weight_ = std::move(weight);
     result->reference_ = std::move(reference);
-    if (dim > 1)
+    if (residual_dim > 1)
         result->gn_weight_ = result->weight_;
     return result;
 }
