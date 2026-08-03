@@ -100,29 +100,29 @@ semi_implicit_euler::approx_data::approx_data(generic_constr::approx_data &&rhs)
         block.rows, block.cols, block.pattern);
     jac_.push_back(ref);
   }
+  size_t x_col = 0, u_col = 0, shared = 0;
+  scratch_.reserve(func_.in_args().size());
+  for (const sym &arg : func_.in_args()) {
+    if (!in_field(arg.field(), std::array{__x, __u}))
+      continue;
+    if (!prob.is_active(arg)) {
+      scratch_.emplace_back(func_.dim(), arg.tdim());
+      jac_.emplace_back(scratch_.back());
+    } else if (arg.field() == __x) {
+      jac_.emplace_back(proj_f_x_.middleCols(x_col, arg.tdim()));
+      x_col += arg.tdim();
+    } else if (dyn.input_shared(arg)) {
+      jac_.emplace_back(proj_f_u_shared_[shared++]);
+    } else {
+      jac_.emplace_back(proj_f_u_exclusive_.middleCols(u_col, arg.tdim()));
+      u_col += arg.tdim();
+    }
+  }
   inverse_.resize(func_.dim(), func_.dim());
   for (const sp_info &block : dyn.inverse_panels_)
     jac_.push_back(inverse_.insert(block.row_offset, block.col_offset,
                                   block.rows, block.cols, block.pattern));
   inverse_pointers_ = linear_backend::panel_pointers(inverse_);
-  linear_backend::batch_product_spec products;
-  const auto layout = linear_backend::describe(inverse_);
-  const auto add_product = [&](matrix_ref input, matrix_ref output) {
-    if (!input.size()) return;
-    products.products.push_back(
-        {layout, linear_backend::product_op::times, func_.dim(),
-         static_cast<size_t>(input.cols()), func_.dim(),
-         static_cast<size_t>(output.cols())});
-    jacobian_pointers_.insert(jacobian_pointers_.end(),
-                              inverse_pointers_.begin(), inverse_pointers_.end());
-    jacobian_pointers_.push_back(input.data());
-    jacobian_pointers_.push_back(output.data());
-  };
-  add_product(f_x_, proj_f_x_);
-  add_product(f_u_exclusive_, proj_f_u_exclusive_);
-  for (size_t i = 0; i < f_u_shared_.size(); ++i)
-    add_product(f_u_shared_[i], proj_f_u_shared_[i]);
-  jacobian_ = linear_backend::compile_batch_product(std::move(products));
   residual_ = linear_backend::compile_product(
       {linear_backend::describe(inverse_), linear_backend::product_op::times,
        func_.dim(), 1, func_.dim(), 1});
@@ -133,12 +133,7 @@ semi_implicit_euler::approx_data::approx_data(generic_constr::approx_data &&rhs)
 }
 
 void semi_implicit_euler::compute_project_jacobians(func_approx_data &data) const {
-  auto &d = data.as<approx_data>();
-  d.proj_f_x_.setZero();
-  d.proj_f_u_exclusive_.setZero();
-  for (auto &projected : d.proj_f_u_shared_)
-    projected.setZero();
-  d.jacobian_(d.jacobian_pointers_);
+  (void)data;
 }
 
 void semi_implicit_euler::compute_project_residual(func_approx_data &data) const {
@@ -194,6 +189,11 @@ void semi_implicit_euler::prepare_dynamics_codegen() {
       {cs::SX::horzcat({a_inv, -cs::SX::mtimes(a_inv, b)}),
        cs::SX::horzcat({cs::SX::zeros(n, n), cs::SX::eye(n)})});
 
+  for (const sym &arg : in_args_)
+    if (arg.field() == __x || arg.field() == __u)
+      task->jac_outputs.push_back(cs::SX::mtimes(
+          inverse,
+          utils::cs_codegen::tangent_jacobian(task->sx_output, arg)));
   for (auto &[block, value] : split_panels(inverse)) {
     inverse_panels_.push_back(block);
     task->jac_outputs.push_back(std::move(value));

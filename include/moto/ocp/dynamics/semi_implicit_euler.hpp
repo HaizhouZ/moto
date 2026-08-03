@@ -19,9 +19,9 @@ public:
 
   struct approx_data : public generic_dynamics::approx_data {
     sparse_matrix inverse_;
-    linear_backend::batch_product_kernel jacobian_;
     linear_backend::product_kernel residual_, transpose_;
-    std::vector<scalar_t *> inverse_pointers_, jacobian_pointers_;
+    std::vector<scalar_t *> inverse_pointers_;
+    std::vector<matrix> scratch_;
     approx_data(generic_constr::approx_data &&rhs);
   };
 
