@@ -40,6 +40,7 @@ soft_constr::approx_data::approx_data(data_base &&rhs)
 
 void soft_constr::finalize_impl() {
     base::finalize_impl();
+    setup_hess();
     if (!skip_field_check && !in_field(field_, soft_constr_fields))
         throw std::runtime_error(fmt::format(
             "Soft constraint {} must have field in soft_constr_fields, but got {}", name_, field::name(field_)));

@@ -200,6 +200,7 @@ void node_data::prepare_soft_condensation(bool hessian) {
           auto view = sf.condensation(sd, hessian);
           if (view.residuals.empty())
             return;
+          const size_t pointer_start = phase.pointers.size();
           linear_backend::condensation_spec spec;
           spec.rows = sf.dim();
           spec.residual_signs = std::move(view.residual_signs);
@@ -235,6 +236,12 @@ void node_data::prepare_soft_condensation(bool hessian) {
               phase.pointers.push_back(sd.lag_hess_[i][j].data());
             }
           }
+          const linear_backend::condensation_kernel layout(spec, nullptr, {});
+          if (phase.pointers.size() - pointer_start != layout.pointer_count())
+            throw std::runtime_error(fmt::format(
+                "condensation pointer layout mismatch for {}: expected {}, got {}",
+                sf.name(), layout.pointer_count(),
+                phase.pointers.size() - pointer_start));
           batch.constraints.push_back(std::move(spec));
         });
     if (!batch.constraints.empty())

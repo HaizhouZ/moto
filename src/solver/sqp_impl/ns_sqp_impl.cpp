@@ -683,14 +683,12 @@ ns_sqp::result_type ns_sqp::update(size_t n_iter, bool verbose, bool profile) {
                 print_stats(kkt_last, iter_last, ls.step_cnt);
             }
 
-            const bool tiny_step_trigger =
+            const bool restoration_trigger =
                 action == line_search_action::failure &&
-                ls.failure_reason == filter_linesearch_per_iter_data::failure_reason_t::tiny_step &&
                 settings.restoration.enabled &&
-                kkt_last.primal.inf_res > settings.prim_tol &&
-                settings.ls.alpha_primal <= current_linesearch_alpha_min(ls);
+                kkt_last.primal.inf_res > settings.prim_tol;
 
-            if (tiny_step_trigger) {
+            if (restoration_trigger) {
                 auto resto = restoration_update(kkt_last, iter_last, ls, n_iter);
                 kkt_last = resto;
                 iter_last = resto.iter;

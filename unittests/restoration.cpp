@@ -439,6 +439,8 @@ TEST_CASE("restoration overlay problem keeps dyn and replaces non-dynamics with 
 
     auto iq = ineq_constr::create("iq", approx_order::second, 1);
     dynamic_cast<generic_func &>(*iq).add_argument(u);
+    dynamic_cast<generic_func &>(*iq).set_jac_sparsity(
+        std::vector<sp_info>{{sparsity::eye, 0, 0, 1, 1}});
     iq->value = [](func_approx_data &d) { d.v_(0) = d[0](0) - scalar_t(1.0); };
     iq->jacobian = [](func_approx_data &d) { d.jac_[0](0, 0) = 1.; };
     prob->add(*iq);
@@ -485,6 +487,8 @@ TEST_CASE("restoration overlay problem keeps dyn and replaces non-dynamics with 
     const auto *ineq_overlay = dynamic_cast<const resto_ineq_elastic_ipm_constr *>(resto->exprs(__ineq_xu).front().get());
     REQUIRE(ineq_overlay != nullptr);
     REQUIRE(ineq_overlay->source()->name() == iq->name());
+    REQUIRE(ineq_overlay->jac_sparsity()[0].pattern == sparsity::eye);
+    REQUIRE(ineq_overlay->hess_sparsity()[0][0].pattern == sparsity::diag);
 }
 
 TEST_CASE("restoration soft-equality overlays are built and keep synced multipliers through initialization") {
