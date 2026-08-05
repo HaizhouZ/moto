@@ -127,14 +127,33 @@ void *compile_source(const std::string &source,
 
 } // namespace
 
+template <int Alignment = Eigen::Unaligned>
+using const_strided_matrix_map =
+    Eigen::Map<const matrix, Alignment, Eigen::OuterStride<>>;
+template <int Alignment = Eigen::Unaligned>
+using strided_matrix_map = Eigen::Map<matrix, Alignment, Eigen::OuterStride<>>;
+
+template <int Alignment = Eigen::Unaligned>
+auto const_matrix_view(const double *data, size_t rows, size_t cols,
+                       size_t outer_stride) {
+  return const_strided_matrix_map<Alignment>(
+      data, rows, cols, Eigen::OuterStride<>(outer_stride));
+}
+
+template <int Alignment = Eigen::Unaligned>
+auto matrix_view(double *data, size_t rows, size_t cols, size_t outer_stride) {
+  return strided_matrix_map<Alignment>(data, rows, cols,
+                                       Eigen::OuterStride<>(outer_stride));
+}
+
 extern "C" __attribute__((visibility("default"))) void
 moto_linear_dense_times(const double *a, size_t ar, size_t ac, const double *b,
                         size_t br, size_t bc, double *o, size_t orows,
                         size_t ocols, size_t ro, size_t co, double alpha) {
   Eigen::Map<const matrix, Eigen::Aligned> A(a, ar, ac);
-  Eigen::Map<const matrix> B(b, br, bc);
-  Eigen::Map<matrix> O(o, orows, ocols);
-  O.block(ro, 0, ar, bc).noalias() += alpha * A * B.block(co, 0, ac, bc);
+  const auto B = const_matrix_view(b + co, ac, bc, br);
+  auto O = matrix_view(o + ro, ar, bc, orows);
+  O.noalias() += alpha * A * B;
 }
 
 extern "C" __attribute__((visibility("default"))) void
@@ -143,10 +162,9 @@ moto_linear_dense_transpose_times(const double *a, size_t ar, size_t ac,
                                   double *o, size_t orows, size_t ocols,
                                   size_t ro, size_t co, double alpha) {
   Eigen::Map<const matrix, Eigen::Aligned> A(a, ar, ac);
-  Eigen::Map<const matrix> B(b, br, bc);
-  Eigen::Map<matrix> O(o, orows, ocols);
-  O.block(co, 0, ac, bc).noalias() +=
-      alpha * A.transpose() * B.block(ro, 0, ar, bc);
+  const auto B = const_matrix_view(b + ro, ar, bc, br);
+  auto O = matrix_view(o + co, ac, bc, orows);
+  O.noalias() += alpha * A.transpose() * B;
 }
 
 extern "C" __attribute__((visibility("default"))) void
@@ -155,9 +173,9 @@ moto_linear_dense_right_times(const double *a, size_t ar, size_t ac,
                               size_t orows, size_t ocols, size_t ro, size_t co,
                               double alpha) {
   Eigen::Map<const matrix, Eigen::Aligned> A(a, ar, ac);
-  Eigen::Map<const matrix> B(b, br, bc);
-  Eigen::Map<matrix> O(o, orows, ocols);
-  O.block(0, co, br, ac).noalias() += alpha * B.block(0, ro, br, ar) * A;
+  const auto B = const_matrix_view(b + ro * br, br, ar, br);
+  auto O = matrix_view(o + co * orows, br, ac, orows);
+  O.noalias() += alpha * B * A;
 }
 
 extern "C" __attribute__((visibility("default"))) void
@@ -166,45 +184,48 @@ moto_linear_dense_right_transpose_times(const double *a, size_t ar, size_t ac,
                                         double *o, size_t orows, size_t ocols,
                                         size_t ro, size_t co, double alpha) {
   Eigen::Map<const matrix, Eigen::Aligned> A(a, ar, ac);
-  Eigen::Map<const matrix> B(b, br, bc);
-  Eigen::Map<matrix> O(o, orows, ocols);
-  O.block(0, co, bc, ac).noalias() +=
-      alpha * B.block(ro, 0, ar, bc).transpose() * A;
+  const auto B = const_matrix_view(b + ro, ar, bc, br);
+  auto O = matrix_view(o + co * orows, bc, ac, orows);
+  O.noalias() += alpha * B.transpose() * A;
 }
 
 template <product_op Op, bool Eye>
 void structured_product(const double *a, size_t n, const double *b, size_t br,
                         size_t bc, double *o, size_t orows, size_t ocols,
                         size_t ro, size_t co, double alpha) {
-  Eigen::Map<const matrix> B(b, br, bc);
-  Eigen::Map<matrix> O(o, orows, ocols);
   if constexpr (Op == product_op::times) {
+    const auto B = const_matrix_view(b + co, n, bc, br);
+    auto O = matrix_view(o + ro, n, bc, orows);
     if constexpr (Eye)
-      O.middleRows(ro, n) += alpha * B.middleRows(co, n);
+      O += alpha * B;
     else
-      O.middleRows(ro, n).noalias() +=
+      O.noalias() +=
           alpha * Eigen::Map<const vector, Eigen::Aligned>(a, n).asDiagonal() *
-          B.middleRows(co, n);
+          B;
   } else if constexpr (Op == product_op::transpose_times) {
+    const auto B = const_matrix_view(b + ro, n, bc, br);
+    auto O = matrix_view(o + co, n, bc, orows);
     if constexpr (Eye)
-      O.middleRows(co, n) += alpha * B.middleRows(ro, n);
+      O += alpha * B;
     else
-      O.middleRows(co, n).noalias() +=
+      O.noalias() +=
           alpha * Eigen::Map<const vector, Eigen::Aligned>(a, n).asDiagonal() *
-          B.middleRows(ro, n);
+          B;
   } else if constexpr (Op == product_op::right_times) {
+    const auto B = const_matrix_view(b + ro * br, br, n, br);
+    auto O = matrix_view(o + co * orows, br, n, orows);
     if constexpr (Eye)
-      O.middleCols(co, n) += alpha * B.middleCols(ro, n);
+      O += alpha * B;
     else
-      O.middleCols(co, n).noalias() +=
-          alpha * B.middleCols(ro, n) *
+      O.noalias() += alpha * B *
           Eigen::Map<const vector, Eigen::Aligned>(a, n).asDiagonal();
   } else {
+    const auto B = const_matrix_view(b + ro, n, bc, br);
+    auto O = matrix_view(o + co * orows, bc, n, orows);
     if constexpr (Eye)
-      O.middleCols(co, n) += alpha * B.middleRows(ro, n).transpose();
+      O += alpha * B.transpose();
     else
-      O.middleCols(co, n).noalias() +=
-          alpha * B.middleRows(ro, n).transpose() *
+      O.noalias() += alpha * B.transpose() *
           Eigen::Map<const vector, Eigen::Aligned>(a, n).asDiagonal();
   }
 }
@@ -214,38 +235,45 @@ void fused_pair_product(const double *a, const double *a1, size_t ar,
                         size_t ac, const double *b, size_t br, size_t bc,
                         double *o, size_t orows, size_t ocols, size_t ro,
                         size_t co, double alpha) {
-  Eigen::Map<const matrix> B(b, br, bc);
-  Eigen::Map<matrix> O(o, orows, ocols);
   if constexpr (Dense) {
     const Eigen::Map<const matrix, Eigen::Aligned> A(a, ar, ac), A1(a1, ar, ac);
-    if constexpr (Op == product_op::times)
-      O.block(ro, 0, ar, bc).noalias() +=
-          alpha * (A + A1) * B.block(co, 0, ac, bc);
-    else if constexpr (Op == product_op::transpose_times)
-      O.block(co, 0, ac, bc).noalias() +=
-          alpha * (A + A1).transpose() * B.block(ro, 0, ar, bc);
-    else if constexpr (Op == product_op::right_times)
-      O.block(0, co, br, ac).noalias() +=
-          alpha * B.block(0, ro, br, ar) * (A + A1);
-    else
-      O.block(0, co, bc, ac).noalias() +=
-          alpha * B.block(ro, 0, ar, bc).transpose() * (A + A1);
+    if constexpr (Op == product_op::times) {
+      const auto B = const_matrix_view(b + co, ac, bc, br);
+      auto O = matrix_view(o + ro, ar, bc, orows);
+      O.noalias() += alpha * (A + A1) * B;
+    } else if constexpr (Op == product_op::transpose_times) {
+      const auto B = const_matrix_view(b + ro, ar, bc, br);
+      auto O = matrix_view(o + co, ac, bc, orows);
+      O.noalias() += alpha * (A + A1).transpose() * B;
+    } else if constexpr (Op == product_op::right_times) {
+      const auto B = const_matrix_view(b + ro * br, br, ar, br);
+      auto O = matrix_view(o + co * orows, br, ac, orows);
+      O.noalias() += alpha * B * (A + A1);
+    } else {
+      const auto B = const_matrix_view(b + ro, ar, bc, br);
+      auto O = matrix_view(o + co * orows, bc, ac, orows);
+      O.noalias() += alpha * B.transpose() * (A + A1);
+    }
   } else {
     const auto d = Eigen::Map<const vector, Eigen::Aligned>(a, ar).array() +
                    Eigen::Map<const vector, Eigen::Aligned>(a1, ar).array();
-    if constexpr (Op == product_op::times)
-      O.middleRows(ro, ar).array() +=
-          alpha * (B.middleRows(co, ar).array().colwise() * d);
-    else if constexpr (Op == product_op::transpose_times)
-      O.middleRows(co, ar).array() +=
-          alpha * (B.middleRows(ro, ar).array().colwise() * d);
-    else if constexpr (Op == product_op::right_times)
-      O.middleCols(co, ar).array() +=
-          alpha * (B.middleCols(ro, ar).array().rowwise() * d.transpose());
-    else
-      O.middleCols(co, ar).array() +=
-          alpha * (B.middleRows(ro, ar).transpose().array().rowwise() *
-                   d.transpose());
+    if constexpr (Op == product_op::times) {
+      const auto B = const_matrix_view(b + co, ar, bc, br);
+      auto O = matrix_view(o + ro, ar, bc, orows);
+      O.array() += alpha * (B.array().colwise() * d);
+    } else if constexpr (Op == product_op::transpose_times) {
+      const auto B = const_matrix_view(b + ro, ar, bc, br);
+      auto O = matrix_view(o + co, ar, bc, orows);
+      O.array() += alpha * (B.array().colwise() * d);
+    } else if constexpr (Op == product_op::right_times) {
+      const auto B = const_matrix_view(b + ro * br, br, ar, br);
+      auto O = matrix_view(o + co * orows, br, ar, orows);
+      O.array() += alpha * (B.array().rowwise() * d.transpose());
+    } else {
+      const auto B = const_matrix_view(b + ro, ar, bc, br);
+      auto O = matrix_view(o + co * orows, bc, ar, orows);
+      O.array() += alpha * (B.transpose().array().rowwise() * d.transpose());
+    }
   }
 }
 
@@ -451,88 +479,118 @@ MOTO_DUMP_PAIR_WRAPPER(diag, false, accumulate)
 MOTO_DUMP_PAIR_WRAPPER(diag, true, overwrite)
 #undef MOTO_DUMP_PAIR_WRAPPER
 
-template <bool LhsTranspose, bool RhsTranspose>
+template <bool LhsTranspose, bool RhsTranspose,
+          int LhsAlignment = Eigen::Unaligned,
+          int RhsAlignment = Eigen::Unaligned>
 void pair_dense_dense(const double *a, size_t ar, size_t ac, size_t ak,
                       const double *b, size_t br, size_t bc, size_t bk,
                       double *out, size_t out_rows, size_t out_row,
                       size_t out_col, size_t n, double alpha) {
-  const Eigen::Map<const matrix, Eigen::Aligned> A(a, ar, ac);
-  const Eigen::Map<const matrix, Eigen::Aligned> B(b, br, bc);
-  Eigen::Map<matrix> O(out, out_rows, out_col + (RhsTranspose ? br : bc));
-  auto block =
-      O.block(out_row, out_col, LhsTranspose ? ac : ar, RhsTranspose ? br : bc);
+  const auto A = [&] {
+    if constexpr (LhsTranspose)
+      return const_matrix_view<LhsAlignment>(a + ak, n, ac, ar);
+    else
+      return const_matrix_view<LhsAlignment>(a + ak * ar, ar, n, ar);
+  }();
+  const auto B = [&] {
+    if constexpr (RhsTranspose)
+      return const_matrix_view<RhsAlignment>(b + bk * br, br, n, br);
+    else
+      return const_matrix_view<RhsAlignment>(b + bk, n, bc, br);
+  }();
+  auto O = matrix_view(out + out_row + out_col * out_rows,
+                       LhsTranspose ? ac : ar,
+                       RhsTranspose ? br : bc, out_rows);
   if constexpr (LhsTranspose && RhsTranspose)
-    block.noalias() += alpha * A.middleRows(ak, n).transpose() *
-                       B.middleCols(bk, n).transpose();
+    O.noalias() += alpha * A.transpose() * B.transpose();
   else if constexpr (LhsTranspose)
-    block.noalias() +=
-        alpha * A.middleRows(ak, n).transpose() * B.middleRows(bk, n);
+    O.noalias() += alpha * A.transpose() * B;
   else if constexpr (RhsTranspose)
-    block.noalias() +=
-        alpha * A.middleCols(ak, n) * B.middleCols(bk, n).transpose();
+    O.noalias() += alpha * A * B.transpose();
   else
-    block.noalias() += alpha * A.middleCols(ak, n) * B.middleRows(bk, n);
+    O.noalias() += alpha * A * B;
 }
 
-template <bool Eye, bool RhsTranspose>
+template <bool Eye, bool RhsTranspose, int LhsAlignment = Eigen::Unaligned,
+          int RhsAlignment = Eigen::Unaligned>
 void pair_struct_dense(const double *a, size_t ak, const double *b, size_t br,
                        size_t bc, size_t bk, double *out, size_t out_rows,
                        size_t out_row, size_t out_col, size_t n, double alpha) {
-  const Eigen::Map<const matrix, Eigen::Aligned> B(b, br, bc);
-  Eigen::Map<matrix> O(out, out_rows, out_col + (RhsTranspose ? br : bc));
-  auto target = O.block(out_row, out_col, n, RhsTranspose ? br : bc);
+  const auto B = [&] {
+    if constexpr (RhsTranspose)
+      return const_matrix_view<RhsAlignment>(b + bk * br, br, n, br);
+    else
+      return const_matrix_view<RhsAlignment>(b + bk, n, bc, br);
+  }();
+  auto O = matrix_view(out + out_row + out_col * out_rows, n,
+                       RhsTranspose ? br : bc, out_rows);
   if constexpr (RhsTranspose) {
     if constexpr (Eye)
-      target += alpha * B.middleCols(bk, n).transpose();
+      O += alpha * B.transpose();
     else
-      target.noalias() += alpha *
-                          Eigen::Map<const vector>(a + ak, n).asDiagonal() *
-                          B.middleCols(bk, n).transpose();
+      O.noalias() += alpha *
+                     Eigen::Map<const vector, LhsAlignment>(a + ak, n)
+                         .asDiagonal() *
+                     B.transpose();
   } else if constexpr (Eye) {
-    target += alpha * B.middleRows(bk, n);
+    O += alpha * B;
   } else {
-    target.noalias() += alpha *
-                        Eigen::Map<const vector>(a + ak, n).asDiagonal() *
-                        B.middleRows(bk, n);
+    O.noalias() += alpha *
+                   Eigen::Map<const vector, LhsAlignment>(a + ak, n)
+                       .asDiagonal() *
+                   B;
   }
 }
 
-template <bool LhsTranspose, bool Eye>
+template <bool LhsTranspose, bool Eye, int LhsAlignment = Eigen::Unaligned,
+          int RhsAlignment = Eigen::Unaligned>
 void pair_dense_struct(const double *a, size_t ar, size_t ac, size_t ak,
                        const double *b, size_t bk, double *out, size_t out_rows,
                        size_t out_row, size_t out_col, size_t n, double alpha) {
-  const Eigen::Map<const matrix, Eigen::Aligned> A(a, ar, ac);
-  Eigen::Map<matrix> O(out, out_rows, out_col + n);
-  auto target = O.block(out_row, out_col, LhsTranspose ? ac : ar, n);
+  const auto A = [&] {
+    if constexpr (LhsTranspose)
+      return const_matrix_view<LhsAlignment>(a + ak, n, ac, ar);
+    else
+      return const_matrix_view<LhsAlignment>(a + ak * ar, ar, n, ar);
+  }();
+  auto O = matrix_view(out + out_row + out_col * out_rows,
+                       LhsTranspose ? ac : ar, n, out_rows);
   if constexpr (LhsTranspose) {
     if constexpr (Eye)
-      target += alpha * A.middleRows(ak, n).transpose();
+      O += alpha * A.transpose();
     else
-      target.noalias() += alpha * A.middleRows(ak, n).transpose() *
-                          Eigen::Map<const vector>(b + bk, n).asDiagonal();
+      O.noalias() += alpha * A.transpose() *
+                     Eigen::Map<const vector, RhsAlignment>(b + bk, n)
+                         .asDiagonal();
   } else if constexpr (Eye) {
-    target += alpha * A.middleCols(ak, n);
+    O += alpha * A;
   } else {
-    target.noalias() += alpha * A.middleCols(ak, n) *
-                        Eigen::Map<const vector>(b + bk, n).asDiagonal();
+    O.noalias() += alpha * A *
+                   Eigen::Map<const vector, RhsAlignment>(b + bk, n)
+                       .asDiagonal();
   }
 }
 
-template <bool LhsEye, bool RhsEye>
+template <bool LhsEye, bool RhsEye, int LhsAlignment = Eigen::Unaligned,
+          int RhsAlignment = Eigen::Unaligned>
 void pair_struct_struct(const double *a, size_t ak, const double *b, size_t bk,
                         double *out, size_t out_rows, size_t out_row,
                         size_t out_col, size_t n, double alpha) {
-  Eigen::Map<matrix> O(out, out_rows, out_col + n);
-  auto diagonal = O.block(out_row, out_col, n, n).diagonal();
+  Eigen::Map<vector, Eigen::Unaligned, Eigen::InnerStride<>> diagonal(
+      out + out_row + out_col * out_rows, n,
+      Eigen::InnerStride<>(out_rows + 1));
   if constexpr (LhsEye && RhsEye)
     diagonal.array() += alpha;
   else if constexpr (LhsEye)
-    diagonal.array() += alpha * Eigen::Map<const vector>(b + bk, n).array();
+    diagonal.array() +=
+        alpha * Eigen::Map<const vector, RhsAlignment>(b + bk, n).array();
   else if constexpr (RhsEye)
-    diagonal.array() += alpha * Eigen::Map<const vector>(a + ak, n).array();
+    diagonal.array() +=
+        alpha * Eigen::Map<const vector, LhsAlignment>(a + ak, n).array();
   else
-    diagonal.array() += alpha * Eigen::Map<const vector>(a + ak, n).array() *
-                        Eigen::Map<const vector>(b + bk, n).array();
+    diagonal.array() +=
+        alpha * Eigen::Map<const vector, LhsAlignment>(a + ak, n).array() *
+        Eigen::Map<const vector, RhsAlignment>(b + bk, n).array();
 }
 
 #define MOTO_PAIR_WRAPPER(name, ...)                                           \
@@ -542,44 +600,72 @@ void pair_struct_struct(const double *a, size_t ak, const double *b, size_t bk,
       size_t out_row, size_t out_col, size_t n, double alpha) {                \
     __VA_ARGS__;                                                               \
   }
+#define MOTO_PAIR_DD_ONE(tag, lt, rt, suffix, la, ra)                          \
+  MOTO_PAIR_WRAPPER(moto_linear_pair_dense_dense_##tag##_##suffix,             \
+                    pair_dense_dense<lt, rt, la, ra>(                          \
+                        a, ar, ac, ak, b, br, bc, bk, out, out_rows, out_row, \
+                        out_col, n, alpha))
 #define MOTO_PAIR_DD(tag, lt, rt)                                              \
-  MOTO_PAIR_WRAPPER(moto_linear_pair_dense_dense_##tag,                        \
-                    pair_dense_dense<lt, rt>(a, ar, ac, ak, b, br, bc, bk,     \
-                                             out, out_rows, out_row, out_col,  \
-                                             n, alpha))
+  MOTO_PAIR_DD_ONE(tag, lt, rt, a_a, Eigen::Aligned, Eigen::Aligned)           \
+  MOTO_PAIR_DD_ONE(tag, lt, rt, a_u, Eigen::Aligned, Eigen::Unaligned)         \
+  MOTO_PAIR_DD_ONE(tag, lt, rt, u_a, Eigen::Unaligned, Eigen::Aligned)         \
+  MOTO_PAIR_DD_ONE(tag, lt, rt, u_u, Eigen::Unaligned, Eigen::Unaligned)
 MOTO_PAIR_DD(nn, false, false)
 MOTO_PAIR_DD(tn, true, false)
 MOTO_PAIR_DD(nt, false, true)
 MOTO_PAIR_DD(tt, true, true)
 #undef MOTO_PAIR_DD
-#define MOTO_PAIR_SD(lp, le, tag, rt)                                          \
-  MOTO_PAIR_WRAPPER(moto_linear_pair_##lp##_dense_##tag,                       \
-                    pair_struct_dense<le, rt>(a, ak, b, br, bc, bk, out,       \
-                                              out_rows, out_row, out_col, n,   \
-                                              alpha))
-MOTO_PAIR_SD(diag, false, n, false)
-MOTO_PAIR_SD(diag, false, t, true)
-MOTO_PAIR_SD(eye, true, n, false)
-MOTO_PAIR_SD(eye, true, t, true)
+#undef MOTO_PAIR_DD_ONE
+#define MOTO_PAIR_SD(lp, le, tag, rt, align_tag, la, ra)                       \
+  MOTO_PAIR_WRAPPER(moto_linear_pair_##lp##_dense_##tag##_##align_tag,         \
+                    pair_struct_dense<le, rt, la, ra>(                         \
+                        a, ak, b, br, bc, bk, out, out_rows, out_row, out_col, \
+                        n, alpha))
+#define MOTO_PAIR_SD_ALL(lp, le, tag, rt)                                      \
+  MOTO_PAIR_SD(lp, le, tag, rt, a_a, Eigen::Aligned, Eigen::Aligned)          \
+  MOTO_PAIR_SD(lp, le, tag, rt, a_u, Eigen::Aligned, Eigen::Unaligned)        \
+  MOTO_PAIR_SD(lp, le, tag, rt, u_a, Eigen::Unaligned, Eigen::Aligned)        \
+  MOTO_PAIR_SD(lp, le, tag, rt, u_u, Eigen::Unaligned, Eigen::Unaligned)
+MOTO_PAIR_SD_ALL(diag, false, n, false)
+MOTO_PAIR_SD_ALL(diag, false, t, true)
+MOTO_PAIR_SD(eye, true, n, false, x_a, Eigen::Unaligned, Eigen::Aligned)
+MOTO_PAIR_SD(eye, true, n, false, x_u, Eigen::Unaligned, Eigen::Unaligned)
+MOTO_PAIR_SD(eye, true, t, true, x_a, Eigen::Unaligned, Eigen::Aligned)
+MOTO_PAIR_SD(eye, true, t, true, x_u, Eigen::Unaligned, Eigen::Unaligned)
+#undef MOTO_PAIR_SD_ALL
 #undef MOTO_PAIR_SD
-#define MOTO_PAIR_DS(tag, lt, rp, re)                                          \
-  MOTO_PAIR_WRAPPER(moto_linear_pair_dense_##rp##_##tag,                       \
-                    pair_dense_struct<lt, re>(a, ar, ac, ak, b, bk, out,       \
-                                              out_rows, out_row, out_col, n,   \
-                                              alpha))
-MOTO_PAIR_DS(n, false, diag, false)
-MOTO_PAIR_DS(t, true, diag, false)
-MOTO_PAIR_DS(n, false, eye, true)
-MOTO_PAIR_DS(t, true, eye, true)
+#define MOTO_PAIR_DS(tag, lt, rp, re, align_tag, la, ra)                       \
+  MOTO_PAIR_WRAPPER(moto_linear_pair_dense_##rp##_##tag##_##align_tag,         \
+                    pair_dense_struct<lt, re, la, ra>(                         \
+                        a, ar, ac, ak, b, bk, out, out_rows, out_row, out_col, \
+                        n, alpha))
+#define MOTO_PAIR_DS_ALL(tag, lt, rp, re)                                      \
+  MOTO_PAIR_DS(tag, lt, rp, re, a_a, Eigen::Aligned, Eigen::Aligned)          \
+  MOTO_PAIR_DS(tag, lt, rp, re, a_u, Eigen::Aligned, Eigen::Unaligned)        \
+  MOTO_PAIR_DS(tag, lt, rp, re, u_a, Eigen::Unaligned, Eigen::Aligned)        \
+  MOTO_PAIR_DS(tag, lt, rp, re, u_u, Eigen::Unaligned, Eigen::Unaligned)
+MOTO_PAIR_DS_ALL(n, false, diag, false)
+MOTO_PAIR_DS_ALL(t, true, diag, false)
+MOTO_PAIR_DS(n, false, eye, true, a_x, Eigen::Aligned, Eigen::Unaligned)
+MOTO_PAIR_DS(n, false, eye, true, u_x, Eigen::Unaligned, Eigen::Unaligned)
+MOTO_PAIR_DS(t, true, eye, true, a_x, Eigen::Aligned, Eigen::Unaligned)
+MOTO_PAIR_DS(t, true, eye, true, u_x, Eigen::Unaligned, Eigen::Unaligned)
+#undef MOTO_PAIR_DS_ALL
 #undef MOTO_PAIR_DS
-#define MOTO_PAIR_SS(lp, le, rp, re)                                           \
-  MOTO_PAIR_WRAPPER(moto_linear_pair_##lp##_##rp,                              \
-                    pair_struct_struct<le, re>(a, ak, b, bk, out, out_rows,    \
-                                               out_row, out_col, n, alpha))
-MOTO_PAIR_SS(diag, false, diag, false)
-MOTO_PAIR_SS(diag, false, eye, true)
-MOTO_PAIR_SS(eye, true, diag, false)
-MOTO_PAIR_SS(eye, true, eye, true)
+#define MOTO_PAIR_SS(lp, le, rp, re, align_tag, la, ra)                        \
+  MOTO_PAIR_WRAPPER(moto_linear_pair_##lp##_##rp##_##align_tag,                \
+                    pair_struct_struct<le, re, la, ra>(                        \
+                        a, ak, b, bk, out, out_rows, out_row, out_col, n,      \
+                        alpha))
+MOTO_PAIR_SS(diag, false, diag, false, a_a, Eigen::Aligned, Eigen::Aligned)
+MOTO_PAIR_SS(diag, false, diag, false, a_u, Eigen::Aligned, Eigen::Unaligned)
+MOTO_PAIR_SS(diag, false, diag, false, u_a, Eigen::Unaligned, Eigen::Aligned)
+MOTO_PAIR_SS(diag, false, diag, false, u_u, Eigen::Unaligned, Eigen::Unaligned)
+MOTO_PAIR_SS(diag, false, eye, true, a_x, Eigen::Aligned, Eigen::Unaligned)
+MOTO_PAIR_SS(diag, false, eye, true, u_x, Eigen::Unaligned, Eigen::Unaligned)
+MOTO_PAIR_SS(eye, true, diag, false, x_a, Eigen::Unaligned, Eigen::Aligned)
+MOTO_PAIR_SS(eye, true, diag, false, x_u, Eigen::Unaligned, Eigen::Unaligned)
+MOTO_PAIR_SS(eye, true, eye, true, x_x, Eigen::Unaligned, Eigen::Unaligned)
 #undef MOTO_PAIR_SS
 #undef MOTO_PAIR_WRAPPER
 
@@ -1032,7 +1118,13 @@ matrix_layout describe(const ::moto::sparse_matrix &sparse) {
                                static_cast<size_t>(p.cols_)});
   };
   add(sparse.dense_panels_, sparsity::dense);
-  add(sparse.diag_panels_, sparsity::diag);
+  if (sparse.diagonal_segments_.empty()) {
+    add(sparse.diag_panels_, sparsity::diag);
+  } else {
+    for (const auto &p : sparse.diagonal_segments_)
+      layout.panels.push_back(
+          {sparsity::diag, p.row, p.col, p.rows, p.cols});
+  }
   add(sparse.eye_panels_, sparse.dynamic_eye_ ? sparsity::diag : sparsity::eye);
   return layout;
 }
@@ -1044,7 +1136,14 @@ std::vector<scalar_t *> panel_pointers(const ::moto::sparse_matrix &sparse) {
       pointers.push_back(const_cast<scalar_t *>(p.data_.data()));
   };
   add(sparse.dense_panels_);
-  add(sparse.diag_panels_);
+  if (sparse.diagonal_segments_.empty()) {
+    add(sparse.diag_panels_);
+  } else {
+    for (const auto &p : sparse.diagonal_segments_)
+      pointers.push_back(const_cast<scalar_t *>(
+          sparse.diag_panels_[p.storage_panel].data_.data() +
+          p.storage_offset));
+  }
   add(sparse.eye_panels_);
   return pointers;
 }
@@ -1281,8 +1380,12 @@ std::string emit_sparse_product_source(const matrix_layout &lhs,
            : p == sparsity::diag ? "diag"
                                  : "eye";
   };
+  const auto alignment_tag = [](size_t offset) {
+    return offset * sizeof(scalar_t) % EIGEN_MAX_ALIGN_BYTES == 0 ? 'a' : 'u';
+  };
   const auto helper_name = [&](const effective_panel &l,
-                               const effective_panel &r) {
+                               const effective_panel &r, size_t lk,
+                               size_t rk) {
     std::string name = "moto_linear_pair_";
     name += pattern_name(l.panel.pattern);
     name += '_';
@@ -1294,13 +1397,34 @@ std::string emit_sparse_product_source(const matrix_layout &lhs,
       if (!r.structured())
         name += r.transpose ? 't' : 'n';
     }
+    const auto view_alignment = [&](const effective_panel &p, size_t k,
+                                    bool lhs) {
+      if (p.panel.pattern == sparsity::eye)
+        return 'x';
+      size_t offset = k;
+      if (p.panel.pattern == sparsity::dense) {
+        if (lhs)
+          offset = p.transpose ? k : k * p.panel.rows;
+        else
+          offset = p.transpose ? k * p.panel.rows : k;
+      }
+      return alignment_tag(offset);
+    };
+    name += '_';
+    name += view_alignment(l, lk, true);
+    name += '_';
+    name += view_alignment(r, rk, false);
     return name;
   };
   s << "#include <cstddef>\n";
-  for (const auto &lp : lhs.panels)
-    for (const auto &rp : rhs.panels) {
+  for (const auto &lp : lhs.panels) for (const auto &rp : rhs.panels) {
       const effective_panel l{lp, lhs_transpose}, r{rp, rhs_transpose};
-      s << "extern \"C\" void " << helper_name(l, r)
+      const size_t begin = std::max(l.col(), r.row());
+      const size_t end = std::min(l.col() + l.cols(), r.row() + r.rows());
+      if (end <= begin)
+        continue;
+      const size_t lk = begin - l.col(), rk = begin - r.row();
+      s << "extern \"C\" void " << helper_name(l, r, lk, rk)
         << "(const double*,std::size_t,std::size_t,std::size_t,const "
            "double*,std::size_t,std::size_t,std::size_t,double*,std::size_t,"
            "std::size_t,std::size_t,std::size_t,double);\n";
@@ -1321,7 +1445,8 @@ std::string emit_sparse_product_source(const matrix_layout &lhs,
       const size_t oslot = lhs.panels.size() + rhs.panels.size();
       const size_t out_row = l.row() + (l.structured() ? lk : 0);
       const size_t out_col = r.col() + (r.structured() ? rk : 0);
-      s << "  " << helper_name(l, r) << "(p[" << li << "]," << l.panel.rows
+      s << "  " << helper_name(l, r, lk, rk) << "(p[" << li << "],"
+        << l.panel.rows
         << ',' << l.panel.cols << ',' << lk << ",p[" << rslot << "],"
         << r.panel.rows << ',' << r.panel.cols << ',' << rk << ",p[" << oslot
         << "]," << out_rows << ',' << out_row << ',' << out_col << ',' << n

@@ -177,10 +177,18 @@ void ocp_base::finalize() {
 
 void ocp_base::build_linear_profile() {
     linear_profile_ = {};
-    const auto add = [this](linear_target target, field_t a, field_t b,
-                            sparse_block_spec block) {
-        linear_profile_.blocks[ocp_linear_profile::key(target, a, b)].push_back(block);
+    std::unordered_map<size_t, std::vector<sparse_block_spec>> blocks;
+    const auto add = [&blocks](linear_target target, field_t a, field_t b,
+                               sparse_block_spec block) {
+        blocks[ocp_linear_profile::key(target, a, b)].push_back(block);
     };
+    for (const auto f : primal_fields) {
+        if (!tdim(f))
+            continue;
+        const sparse_block_spec diagonal{0, 0, tdim(f), tdim(f), sparsity::diag};
+        add(linear_target::lag_hessian, f, f, diagonal);
+        add(linear_target::hessian_modification, f, f, diagonal);
+    }
     for (const auto ff : func_fields) {
         for (const generic_func &f : exprs(ff)) {
             const auto &args = f.in_args();
@@ -223,6 +231,14 @@ void ocp_base::build_linear_profile() {
                      sp.rows, sp.cols, sp.pattern});
             }
         }
+    }
+    for (auto &[key, profile_blocks] : blocks) {
+        const auto target = static_cast<linear_target>(key / (field::num * field::num));
+        const auto mode = target == linear_target::jacobian
+                              ? sparse_plan_mode::distinct
+                              : sparse_plan_mode::additive;
+        linear_profile_.layouts.emplace(
+            key, make_sparse_layout_plan(profile_blocks, mode));
     }
 }
 void ocp_base::refresh_copy(const active_status_config &config) {

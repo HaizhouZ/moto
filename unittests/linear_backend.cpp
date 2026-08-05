@@ -227,6 +227,45 @@ TEST_CASE("sparse_matrix dispatches dense operands through JIT") {
   REQUIRE(sub.isApprox(expected, 1e-12));
 }
 
+TEST_CASE("precompiled direct-map sparse products match dense algebra") {
+  const auto make_sparse = [](size_t rows, size_t cols) {
+    sparse_matrix value;
+    value.resize(rows, cols);
+    const size_t diagonal = std::min(rows, cols);
+    if (rows >= 3 && cols >= 3)
+      value.insert(0, 0, 3, 3, sparsity::dense).setRandom();
+    if (diagonal >= 6)
+      value.insert(3, 2, 3, 3, sparsity::diag).setRandom();
+    if (rows >= 2 && cols >= 2)
+      value.insert(rows - 2, cols - 2, 2, 2, sparsity::eye);
+    return value;
+  };
+
+  auto a = make_sparse(8, 7);
+  auto rhs = make_sparse(7, 6);
+  matrix out = matrix::Zero(8, 6);
+  multiply(a, rhs, out);
+  REQUIRE(out.isApprox(a.dense() * rhs.dense(), 1e-12));
+
+  auto transpose_rhs = make_sparse(8, 6);
+  matrix transpose_out = matrix::Zero(7, 6);
+  transpose_multiply(a, transpose_rhs, transpose_out);
+  REQUIRE(transpose_out.isApprox(a.dense().transpose() * transpose_rhs.dense(),
+                                 1e-12));
+
+  auto lhs = make_sparse(5, 8);
+  matrix right_out = matrix::Zero(5, 7);
+  right_multiply(lhs, a, right_out);
+  REQUIRE(right_out.isApprox(lhs.dense() * a.dense(), 1e-12));
+
+  auto transpose_lhs = make_sparse(8, 5);
+  matrix right_transpose_out = matrix::Zero(5, 7);
+  right_transpose_multiply(transpose_lhs, a, right_transpose_out);
+  REQUIRE(right_transpose_out.isApprox(transpose_lhs.dense().transpose() *
+                                           a.dense(),
+                                       1e-12));
+}
+
 TEST_CASE("scaled eye panels use their dynamic diagonal values") {
   sparse_matrix sparse;
   sparse.resize(6, 6);
@@ -348,6 +387,113 @@ TEST_CASE("static profile physically fuses adjacent diagonal bindings") {
   vector expected(7);
   expected << d0, d1;
   REQUIRE(sparse.dense().diagonal().isApprox(expected, 1e-12));
+}
+
+TEST_CASE("static profile packs disjoint diagonal panels into one owner") {
+  sparse_matrix sparse;
+  sparse.resize(12, 9);
+  const std::array blocks{
+      sparse_block_spec{0, 0, 3, 3, sparsity::diag},
+      sparse_block_spec{5, 5, 4, 4, sparsity::diag},
+      sparse_block_spec{9, 0, 3, 3, sparsity::diag}};
+  auto layout = make_sparse_layout_plan(blocks);
+  layout.pack_diagonal_storage = true;
+  sparse.plan(layout);
+  auto d0 = sparse.bind(0, 0, 3, 3, sparsity::diag);
+  auto d1 = sparse.bind(5, 5, 4, 4, sparsity::diag);
+  auto d2 = sparse.bind(9, 0, 3, 3, sparsity::diag);
+  REQUIRE(sparse.diag_panels_.size() == 1);
+  REQUIRE(sparse.diagonal_segments_.size() == 3);
+  const auto aligned = [](const scalar_t *pointer) {
+    return reinterpret_cast<std::uintptr_t>(pointer) % EIGEN_MAX_ALIGN_BYTES ==
+           0;
+  };
+  REQUIRE(aligned(d0.data()));
+  REQUIRE(aligned(d1.data()));
+  REQUIRE(aligned(d2.data()));
+  REQUIRE(d1.data() >= d0.data() + d0.size());
+  REQUIRE(d2.data() >= d1.data() + d1.size());
+
+  d0.setRandom();
+  d1.setRandom();
+  d2.setRandom();
+  matrix expected = matrix::Zero(12, 9);
+  expected.block(0, 0, 3, 3).diagonal() = d0;
+  expected.block(5, 5, 4, 4).diagonal() = d1;
+  expected.block(9, 0, 3, 3).diagonal() = d2;
+  REQUIRE(sparse.dense().isApprox(expected, 1e-12));
+  matrix rhs = matrix::Random(9, 4), out = matrix::Zero(12, 4);
+  multiply(sparse, rhs, out);
+  REQUIRE(out.isApprox(expected * rhs, 1e-12));
+}
+
+TEST_CASE("additive layout aliases exactly overlapping diagonal bindings") {
+  sparse_matrix sparse;
+  sparse.resize(6, 6);
+  const std::array blocks{
+      sparse_block_spec{0, 0, 6, 6, sparsity::diag},
+      sparse_block_spec{0, 0, 6, 6, sparsity::diag}};
+  const auto layout =
+      make_sparse_layout_plan(blocks, sparse_plan_mode::additive);
+  sparse.plan(layout);
+  auto d0 = sparse.bind(0, 0, 6, 6, sparsity::diag);
+  auto d1 = sparse.bind(0, 0, 6, 6, sparsity::diag);
+  REQUIRE(sparse.diag_panels_.size() == 1);
+  REQUIRE(d0.data() == d1.data());
+  sparse.setZero();
+  d0.array() += 2.;
+  d1.array() += 3.;
+  REQUIRE(sparse.dense().diagonal().isConstant(5.));
+}
+
+TEST_CASE("additive layout aliases exactly overlapping dense bindings") {
+  sparse_matrix sparse;
+  sparse.resize(5, 4);
+  const std::array blocks{
+      sparse_block_spec{0, 0, 5, 4, sparsity::dense},
+      sparse_block_spec{0, 0, 5, 4, sparsity::dense}};
+  sparse.plan(make_sparse_layout_plan(blocks, sparse_plan_mode::additive));
+  auto a = sparse.bind(0, 0, 5, 4, sparsity::dense);
+  auto b = sparse.bind(0, 0, 5, 4, sparsity::dense);
+  REQUIRE(sparse.dense_panels_.size() == 1);
+  REQUIRE(a.data() == b.data());
+  sparse.setZero();
+  a.array() += 2.;
+  b.array() += 3.;
+  REQUIRE(sparse.dense().isConstant(5.));
+}
+
+TEST_CASE("identity Hessian shares the additive base diagonal") {
+  sparse_matrix sparse;
+  sparse.resize(5, 5);
+  const std::array blocks{
+      sparse_block_spec{0, 0, 5, 5, sparsity::diag},
+      sparse_block_spec{0, 0, 5, 5, sparsity::eye}};
+  sparse.plan(make_sparse_layout_plan(blocks, sparse_plan_mode::additive));
+  auto e0 = sparse.bind(0, 0, 5, 5, sparsity::diag);
+  auto e1 = sparse.bind(0, 0, 5, 5, sparsity::eye);
+  REQUIRE(sparse.eye_panels_.empty());
+  REQUIRE(sparse.diag_panels_.size() == 1);
+  REQUIRE(e0.data() == e1.data());
+  sparse.setZero();
+  e0.array() += 1.;
+  e1.array() += 1.;
+  REQUIRE(sparse.dense().diagonal().isConstant(2.));
+}
+
+TEST_CASE("distinct layout preserves exact overlaps and bind is strict") {
+  sparse_matrix sparse;
+  sparse.resize(4, 4);
+  const std::array blocks{
+      sparse_block_spec{0, 0, 4, 4, sparsity::diag},
+      sparse_block_spec{0, 0, 4, 4, sparsity::diag}};
+  sparse.plan(blocks);
+  auto d0 = sparse.bind(0, 0, 4, 4, sparsity::diag);
+  auto d1 = sparse.bind(0, 0, 4, 4, sparsity::diag);
+  REQUIRE(sparse.diag_panels_.size() == 2);
+  REQUIRE(d0.data() != d1.data());
+  REQUIRE_THROWS_AS(sparse.bind(0, 0, 4, 4, sparsity::diag),
+                    std::logic_error);
 }
 
 TEST_CASE("planned references survive fallback panel growth") {

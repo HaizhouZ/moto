@@ -66,7 +66,7 @@ func_approx_data::func_approx_data(sym_data &primal,
                     auto &jac = lag_data_->approx_[f_field].jac_[arg->field()];
                     const auto r_st = f_st + sp.row_offset;
                     const auto c_st = prob->get_expr_start_tangent(arg) + sp.col_offset;
-                    jac_.push_back(matrix_ref(jac.insert(r_st, c_st, sp.rows, sp.cols, sp.pattern)));
+                    jac_.push_back(matrix_ref(jac.bind(r_st, c_st, sp.rows, sp.cols, sp.pattern)));
                     continue;
                 }
             }
@@ -93,7 +93,7 @@ void func_approx_data::setup_hessian() {
                 if (fi >= fj && fi < field::num_prim && fj < field::num_prim &&
                     raw.prob_->is_active(in_args[i]) &&
                     raw.prob_->is_active(in_args[j])) {
-                    hess_panels_.push_back((*hessian)[fi][fj].insert(
+                    hess_panels_.push_back((*hessian)[fi][fj].bind(
                         raw.prob_->get_expr_start_tangent(in_args[i]) + sp.row_offset,
                         raw.prob_->get_expr_start_tangent(in_args[j]) + sp.col_offset,
                         sp.rows, sp.cols, sp.pattern));
@@ -121,7 +121,7 @@ void func_approx_data::setup_hessian() {
                             goto BIND_EMPTY_HESS;
                         } else if (field_1 >= field_2) {
                             const auto &hess_sp = func_.hess_sp_[i][j];
-                            lag_hess_[i].push_back((*hessian)[field_1][field_2].insert(
+                            lag_hess_[i].push_back((*hessian)[field_1][field_2].bind(
                                 raw.prob_->get_expr_start_tangent(in_args[i]) + hess_sp.row_offset,
                                 raw.prob_->get_expr_start_tangent(in_args[j]) + hess_sp.col_offset,
                                 hess_sp.rows, hess_sp.cols, hess_sp.pattern));

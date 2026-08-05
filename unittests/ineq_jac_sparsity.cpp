@@ -244,8 +244,8 @@ TEST_CASE("OCP finalize fuses structured blocks across callbacks") {
     REQUIRE(jac.eye_panels_.size() == 1);
     REQUIRE(jac.eye_panels_[0].rows_ == 6);
     const auto &hess = data.dense().lag_hess_[__x][__x];
-    REQUIRE(hess.diag_panels_.size() == 2);
-    REQUIRE(hess.diag_panels_[0].row_st_ == hess.diag_panels_[1].row_st_);
-    REQUIRE(hess.diag_panels_[0].rows_ == hess.diag_panels_[1].rows_);
+    REQUIRE(hess.diag_panels_.size() == 1);
+    REQUIRE(hess.diag_panels_[0].row_st_ == 0);
+    REQUIRE(hess.diag_panels_[0].rows_ == 6);
 }
 } // namespace

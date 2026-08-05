@@ -15,10 +15,7 @@ public:
                       state_t state = state_t::pos_vel,
                       approx_order order = approx_order::first);
 
-  struct jac_panel {
-    size_t argument = 0;
-    sp_info block;
-  };
+  using jac_panel = projection_panel;
 
   struct approx_data : public generic_dynamics::approx_data {
     sparse_matrix inverse_;
@@ -37,6 +34,9 @@ public:
   void apply_jac_y_inverse_transpose(func_approx_data &data, vector_ref v,
                                      vector_ref dst) const override;
   const auto &projected_profiles() const { return projected_profiles_; }
+  std::span<const projection_panel> projected_panel_sparsity() const override {
+    return projected_panels_;
+  }
 
 protected:
   clone_ptr clone() const override { return new semi_implicit_euler(*this); }

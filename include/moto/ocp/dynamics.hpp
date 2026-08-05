@@ -11,6 +11,10 @@ using dynamics = utils::shared<generic_dynamics>; ///< shared pointer type for g
 class generic_dynamics : public generic_constr {
   public:
     using base = generic_constr;
+    struct projection_panel {
+      size_t argument = 0;
+      sp_info block;
+    };
     struct approx_data : public base::approx_data {
 #define NULL_INIT_MAP(name) name(nullptr, 0, 0)
 #define NULL_INIT_VECMAP(name) name(nullptr, 0)
@@ -36,6 +40,9 @@ class generic_dynamics : public generic_constr {
     virtual void apply_jac_y_inverse_transpose(func_approx_data &data,
                                                vector_ref v,
                                                vector_ref dst) const { dst = v; }
+    virtual std::span<const projection_panel> projected_panel_sparsity() const {
+      return {};
+    }
 
   protected:
     var_list shared_inputs_;

@@ -9,6 +9,7 @@
 #include <moto/solver/ns_sqp.hpp>
 
 #include <chrono>
+#include <cstdint>
 
 namespace moto {
 namespace {
@@ -118,8 +119,13 @@ TEST_CASE("semi-implicit projections match dense dynamics") {
     size_t count = 0;
     for (const auto &panel : value.dense_panels_)
       count += panel.rows_ * panel.cols_;
-    for (const auto &panel : value.diag_panels_)
-      count += panel.rows_;
+    if (value.diagonal_segments_.empty()) {
+      for (const auto &panel : value.diag_panels_)
+        count += panel.rows_;
+    } else {
+      for (const auto &segment : value.diagonal_segments_)
+        count += segment.rows;
+    }
     for (const auto &panel : value.eye_panels_)
       count += panel.rows_;
     return count;
@@ -127,6 +133,20 @@ TEST_CASE("semi-implicit projections match dense dynamics") {
   REQUIRE(stored_nnz(f.semi_data->dense().proj_f_x()) ==
           profiles[0].nnz() + profiles[1].nnz());
   REQUIRE(stored_nnz(f.semi_data->dense().proj_f_u()) == profiles[2].nnz());
+  for (const auto *projected : {&f.semi_data->dense().proj_f_x(),
+                                &f.semi_data->dense().proj_f_u()}) {
+    if (!projected->diagonal_segments_.empty()) {
+      REQUIRE(projected->diag_panels_.size() == 1);
+      for (const auto &segment : projected->diagonal_segments_) {
+        const auto *pointer =
+            projected->diag_panels_[segment.storage_panel].data_.data() +
+            segment.storage_offset;
+        REQUIRE(reinterpret_cast<std::uintptr_t>(pointer) %
+                    EIGEN_MAX_ALIGN_BYTES ==
+                0);
+      }
+    }
+  }
 
   if (std::getenv("MOTO_BENCH_SEMI_IMPLICIT")) {
     constexpr size_t warmup = 1000, runs = 20000;

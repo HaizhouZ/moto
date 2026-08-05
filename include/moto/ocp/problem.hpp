@@ -36,14 +36,14 @@ enum class stage_expr_role : size_t {
 enum class linear_target : size_t { jacobian, lag_hessian, hessian_modification };
 
 struct ocp_linear_profile {
-    std::unordered_map<size_t, std::vector<sparse_block_spec>> blocks;
+    std::unordered_map<size_t, sparse_layout_plan> layouts;
     static constexpr size_t key(linear_target target, field_t a, field_t b) {
         return (static_cast<size_t>(target) * field::num + a) * field::num + b;
     }
-    const std::vector<sparse_block_spec> &get(linear_target target, field_t a, field_t b) const {
-        static const std::vector<sparse_block_spec> empty;
-        const auto it = blocks.find(key(target, a, b));
-        return it == blocks.end() ? empty : it->second;
+    const sparse_layout_plan &get(linear_target target, field_t a, field_t b) const {
+        static const sparse_layout_plan empty;
+        const auto it = layouts.find(key(target, a, b));
+        return it == layouts.end() ? empty : it->second;
     }
 };
 
