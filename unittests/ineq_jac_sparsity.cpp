@@ -68,6 +68,58 @@ TEST_CASE("tracking cost uses the value symbol manifold difference") {
     REQUIRE(cost->weight()->dim() == q->tdim());
 }
 
+TEST_CASE("relational equality and inequality expressions become residuals") {
+    auto [x, y] = sym::states("relational_constraint_x", 2);
+    (void)y;
+    const cs::SX x_sx = static_cast<const cs::SX &>(x);
+    const cs::SX rhs = cs::SX(cs::DM(std::vector<scalar_t>{2., 2.}));
+
+    auto equality = generic_constr::create(
+        "relational_equality", x_sx == rhs, approx_order::first);
+    auto inequality = ineq_constr::create(
+        "relational_inequality", var_inarg_list{}, x_sx > rhs,
+        approx_order::first);
+    auto prob = stage_ocp::create();
+    prob->add(*equality);
+    prob->add(*inequality);
+    prob->wait_until_ready();
+
+    REQUIRE(equality->field() == __eq_x);
+    REQUIRE(inequality->field() == __ineq_x);
+    REQUIRE(equality->jac_sparsity().front().pattern != sparsity::unknown);
+    REQUIRE(inequality->jac_sparsity().front().pattern != sparsity::unknown);
+
+    const cs::SX eq_residual = normalize_constraint_expression(
+        x_sx == rhs, constraint_relation::equality);
+    const cs::SX ineq_residual = normalize_constraint_expression(
+        x_sx > rhs, constraint_relation::inequality);
+    const cs::Function evaluate(
+        "evaluate_relational_residuals", {x_sx},
+        {eq_residual, ineq_residual,
+         cs::SX::jacobian(eq_residual, x_sx),
+         cs::SX::jacobian(ineq_residual, x_sx)});
+    const auto result = evaluate(std::vector<cs::DM>{cs::DM({1., 3.})});
+    REQUIRE(result[0](0).scalar() == -1.);
+    REQUIRE(result[0](1).scalar() == 1.);
+    REQUIRE(result[1](0).scalar() == 1.);
+    REQUIRE(result[1](1).scalar() == -1.);
+    REQUIRE(result[2](0, 0).scalar() == 1.);
+    REQUIRE(result[2](1, 1).scalar() == 1.);
+    REQUIRE(result[3](0, 0).scalar() == -1.);
+    REQUIRE(result[3](1, 1).scalar() == -1.);
+
+    REQUIRE_THROWS_AS(generic_constr::create(
+                          "bad_relational_equality", x_sx <= rhs),
+                      std::invalid_argument);
+    REQUIRE_THROWS_AS(ineq_constr::create(
+                          "bad_relational_inequality", var_inarg_list{},
+                          x_sx == rhs),
+                      std::invalid_argument);
+    REQUIRE_THROWS_AS(generic_constr::create(
+                          "unsupported_not_equal", x_sx != rhs),
+                      std::invalid_argument);
+}
+
 TEST_CASE("codegen splits mixed dense and diagonal cost Hessians") {
     auto [x, y] = sym::states("mixed_hessian_x", 8);
     (void)y;

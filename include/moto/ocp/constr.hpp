@@ -11,6 +11,15 @@
 namespace moto {
 class generic_constr;                         ///< forward declaration
 using constr = utils::shared<generic_constr>; ///< generic constr holder
+
+enum class constraint_relation { equality, inequality };
+
+/// Convert a CasADi relational expression into a smooth solver residual.
+/// Equality relations become lhs - rhs == 0; inequalities become
+/// lhs - rhs <= 0. Plain residual expressions are returned unchanged.
+cs::SX normalize_constraint_expression(const cs::SX &out,
+                                        constraint_relation expected,
+                                        std::string_view context = {});
 /**
  * @brief constraint approximation with multipliers (and slack variables)
  */
@@ -65,6 +74,14 @@ class generic_constr : public generic_func {
     using data_type = derived::approx_data; // constr_data_tpl<typename derived::approx_data, typename derived::approx_data>;
     using base = generic_func;
     using base::base; ///< inherit base constructor
+
+    static constr create(const std::string &name, const cs::SX &out,
+                         approx_order order = approx_order::first,
+                         field_t field = field_t::__undefined);
+    static constr create(const std::string &name,
+                         const var_inarg_list &args, const cs::SX &out,
+                         approx_order order = approx_order::first,
+                         field_t field = field_t::__undefined);
 
     /**
      * @brief make an approximation data for the constraint

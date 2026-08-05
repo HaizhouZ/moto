@@ -187,7 +187,8 @@ void register_submodule_functional(nb::module_ &m) {
         .def_static(
             "create",
             [](const std::string &name, const cs::SX &out, approx_order order, field_t field) {
-                return std::make_shared<generic_constr>(name, out, order, field);
+                return std::shared_ptr<generic_constr>(
+                    generic_constr::create(name, out, order, field));
             },
             nb::arg("name"), nb::arg("out"), nb::arg("order") = approx_order::first,
             nb::arg("field") = field_t::__undefined)
