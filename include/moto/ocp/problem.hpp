@@ -13,6 +13,7 @@
 
 #include <moto/core/expr.hpp>
 #include <moto/core/field_layout_store.hpp>
+#include <moto/core/linear_backend.hpp>
 #include <moto/core/sparse.hpp>
 #include <moto/ocp/sym.hpp>
 
@@ -33,10 +34,53 @@ enum class stage_expr_role : size_t {
     end_node,
 };
 
-enum class linear_target : size_t { jacobian, lag_hessian, hessian_modification };
+enum class linear_target : size_t {
+    jacobian,
+    lag_hessian,
+    hessian_modification,
+    lifted_projection,
+};
+
+struct lifted_intermediate_profile {
+    std::string name;
+    size_t rows = 0, cols = 0;
+    sparse_layout_plan layout;
+};
+
+struct lifted_graph_input_binding {
+    enum class kind { jacobian_panel, residual, parameter } source;
+    field_t equation = __undefined;
+    field_t variable = __undefined;
+    size_t panel = 0;
+    std::vector<size_t> panels;
+    size_t equation_uid = 0;
+    size_t variable_uid = 0;
+    var parameter;
+};
+
+struct lifted_graph_program {
+    std::string artifact_identity;
+    std::vector<cs::MX> inputs;
+    // Exact runtime panel layout for each logical MX input.  Empty entries
+    // use the translator's ordinary one-matrix layout.  Jacobian inputs keep
+    // the OCP layout so binding them never reconstructs a matrix in the graph.
+    std::vector<linear_backend::matrix_layout> input_layouts;
+    std::vector<cs::MX> projection_outputs;
+    std::vector<lifted_graph_input_binding> input_bindings;
+    cs::MX response_x;
+    cs::MX response_u;
+    cs::MX response_residual;
+    cs::MX action_rhs;
+    cs::MX action_output;
+    cs::MX transpose_rhs;
+    cs::MX transpose_output;
+    std::vector<cs::MX> spd_factors;
+};
 
 struct ocp_linear_profile {
     std::unordered_map<size_t, sparse_layout_plan> layouts;
+    std::vector<lifted_intermediate_profile> lifted_intermediates;
+    std::shared_ptr<lifted_graph_program> lifted_program;
     static constexpr size_t key(linear_target target, field_t a, field_t b) {
         return (static_cast<size_t>(target) * field::num + a) * field::num + b;
     }

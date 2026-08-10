@@ -10,6 +10,7 @@ PUBLIC_BINDINGS = {
     "field",
     "func",
     "ineq",
+    "lifted",
     "endpoint",
     "pmm_constr",
     "quaternion",

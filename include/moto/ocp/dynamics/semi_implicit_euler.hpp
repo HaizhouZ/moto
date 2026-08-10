@@ -31,13 +31,15 @@ public:
   }
   void compute_project_jacobians(func_approx_data &data) const override;
   void compute_project_residual(func_approx_data &data) const override;
-  void apply_jac_y_inverse_transpose(func_approx_data &data, vector_ref v,
-                                     vector_ref dst) const override;
+  void apply_lifted_jacobian_inverse_transpose(
+      func_approx_data &data, vector_ref v, vector_ref dst) const override;
   const auto &projected_profiles() const { return projected_profiles_; }
   std::span<const projection_panel> projected_panel_sparsity() const override {
     return projected_panels_;
   }
-
+  std::span<const projection_panel> jacobian_panel_sparsity() const override {
+    return jac_panels_;
+  }
 protected:
   clone_ptr clone() const override { return new semi_implicit_euler(*this); }
   void prepare_dynamics_codegen() override;

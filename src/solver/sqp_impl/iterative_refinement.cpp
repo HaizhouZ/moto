@@ -16,6 +16,7 @@ void ns_sqp::iterative_refinement() {
     struct MOTO_ALIGN_NO_SHARING inf_res_state_worker {
         scalar_t inf_kkt_stat_err_u = 0.;
         scalar_t inf_kkt_stat_err_y = 0.;
+        scalar_t inf_kkt_stat_err_l = 0.;
     };
     std::vector<inf_res_state_worker> thread_res(graph.n_jobs());
     detail_timed_block_start("iterative_refinement");
@@ -48,19 +49,28 @@ void ns_sqp::iterative_refinement() {
             if (d->kkt_stat_err_[__y].size() > 0) {
                 thread_res[tid].inf_kkt_stat_err_y = std::max(thread_res[tid].inf_kkt_stat_err_y, d->kkt_stat_err_[__y].cwiseAbs().maxCoeff());
             }
+            if (d->kkt_stat_err_[__l].size() > 0) {
+                thread_res[tid].inf_kkt_stat_err_l = std::max(
+                    thread_res[tid].inf_kkt_stat_err_l,
+                    d->kkt_stat_err_[__l].cwiseAbs().maxCoeff());
+            }
         });
         scalar_t inf_kkt_stat_err_u = 0.;
         scalar_t inf_kkt_stat_err_y = 0.;
+        scalar_t inf_kkt_stat_err_l = 0.;
         for (auto &w : thread_res) {
             inf_kkt_stat_err_u = std::max(inf_kkt_stat_err_u, w.inf_kkt_stat_err_u);
             inf_kkt_stat_err_y = std::max(inf_kkt_stat_err_y, w.inf_kkt_stat_err_y);
+            inf_kkt_stat_err_l = std::max(inf_kkt_stat_err_l, w.inf_kkt_stat_err_l);
         }
         if (settings.verbose) {
-            fmt::print("  iterative refinement {}, kkt_stat_err_u: {:.3e}, kkt_stat_err_y: {:.3e}\n",
-                       iter_refine, inf_kkt_stat_err_u, inf_kkt_stat_err_y);
+            fmt::print("  iterative refinement {}, kkt_stat_err_u: {:.3e}, kkt_stat_err_y: {:.3e}, kkt_stat_err_l: {:.3e}\n",
+                       iter_refine, inf_kkt_stat_err_u, inf_kkt_stat_err_y,
+                       inf_kkt_stat_err_l);
         }
         if (inf_kkt_stat_err_u < settings.rf.prim_res_tol &&
-            inf_kkt_stat_err_y < settings.rf.dual_res_tol) {
+            inf_kkt_stat_err_y < settings.rf.dual_res_tol &&
+            inf_kkt_stat_err_l < settings.rf.dual_res_tol) {
             break;
         }
         {
@@ -71,6 +81,7 @@ void ns_sqp::iterative_refinement() {
                     data->first_order_correction_start([data]() {
                         data->dense().lag_jac_corr_[__u] = data->kkt_stat_err_[__u];
                         data->dense().lag_jac_corr_[__y] = data->kkt_stat_err_[__y];
+                        data->dense().lag_jac_corr_[__l] = data->kkt_stat_err_[__l];
                     });
                 },
                 [this](ns_sqp::data *data) {

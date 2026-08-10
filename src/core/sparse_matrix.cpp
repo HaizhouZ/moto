@@ -1,6 +1,7 @@
 #include <moto/core/linear_backend.hpp>
 #include <moto/core/sparse_matrix.hpp>
 
+
 namespace moto {
 sparse_layout_plan
 make_sparse_layout_plan(std::span<const sparse_block_spec> blocks,
@@ -72,7 +73,7 @@ make_sparse_layout_plan(std::span<const sparse_block_spec> blocks,
     for (const auto bi : group.blocks)
       result.bindings.push_back({blocks[bi], g.pattern, panel,
                                  blocks[bi].row - g.row,
-                                 blocks[bi].col - g.col});
+                                 blocks[bi].col - g.col, bi});
   }
   return result;
 }
@@ -282,6 +283,33 @@ matrix_ref sparse_matrix::bind(size_t r_st, size_t c_st, size_t r, size_t c,
         return diag_panels_[segment.storage_panel].data_.segment(
             segment.storage_offset + binding.local_row, r);
       }();
+    return eye_panels_[binding.panel].data_.segment(binding.local_row, r);
+  }
+  throw std::logic_error("Sparse block is missing from the static layout plan");
+}
+matrix_ref sparse_matrix::view(size_t r_st, size_t c_st, size_t r, size_t c,
+                               sparsity sp) {
+  static matrix empty;
+  static vector empty_vec;
+  static row_vector empty_rvec;
+  if (r == 0 || c == 0)
+    if (c == 1 || sp == sparsity::eye || sp == sparsity::diag)
+      return empty_vec;
+    else if (r == 1)
+      return empty_rvec;
+    else
+      return empty;
+  const sparse_block_spec requested{r_st, c_st, r, c, sp};
+  for (const auto &binding : planned_) {
+    if (binding.block != requested) continue;
+    if (binding.storage_pattern == sparsity::dense)
+      return dense_panels_[binding.panel].data_.block(
+          binding.local_row, binding.local_col, r, c);
+    if (binding.storage_pattern == sparsity::diag) {
+      const auto &segment = diagonal_segments_[binding.panel];
+      return diag_panels_[segment.storage_panel].data_.segment(
+          segment.storage_offset + binding.local_row, r);
+    }
     return eye_panels_[binding.panel].data_.segment(binding.local_row, r);
   }
   throw std::logic_error("Sparse block is missing from the static layout plan");

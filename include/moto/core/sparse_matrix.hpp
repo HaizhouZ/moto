@@ -43,6 +43,9 @@ struct sparse_matrix {
   bool set_dynamic_eye(bool enabled);
   matrix_ref insert(size_t r_st, size_t c_st, size_t r, size_t c, sparsity sp);
   matrix_ref bind(size_t r_st, size_t c_st, size_t r, size_t c, sparsity sp);
+  /// Return a repeatable view of a statically planned binding. Unlike bind(),
+  /// this does not consume the binding and is intended for runtime callbacks.
+  matrix_ref view(size_t r_st, size_t c_st, size_t r, size_t c, sparsity sp);
   void plan(const sparse_layout_plan &layout);
   void plan(std::span<const sparse_block_spec> blocks,
             sparse_plan_mode mode = sparse_plan_mode::distinct);

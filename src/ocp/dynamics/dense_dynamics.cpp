@@ -37,15 +37,25 @@ dense_dynamics::approx_data::approx_data(generic_constr::approx_data &&rhs)
     }
 }
 
-void dense_dynamics::apply_jac_y_inverse_transpose(func_approx_data &data,
-                                                   vector_ref v,
-                                                   vector_ref dst) const {
+void dense_dynamics::apply_lifted_jacobian_inverse_transpose(
+    func_approx_data &data, vector_ref v, vector_ref dst) const {
+    if (owns_stage_elimination()) {
+        generic_dynamics::apply_lifted_jacobian_inverse_transpose(
+            data, v, dst);
+        return;
+    }
     auto &d = data.as<approx_data>();
     d.lu_->transpose_solve(v, dst);
 }
 
 void dense_dynamics::compute_project_jacobians(func_approx_data &data) const {
+    if (owns_stage_elimination()) {
+        generic_dynamics::compute_project_jacobians(data);
+        return;
+    }
     auto &d = data.as<approx_data>();
+    if (d.problem()->tdim(__l))
+        return;
     d.lu_->compute(d.f_y_);                                // LU decomposition of the dense Jacobian
     d.lu_->solve(d.f_x_, d.proj_f_x_);                     // Solve for the projection of f_x
     if (d.f_u_exclusive_.cols())
@@ -56,7 +66,13 @@ void dense_dynamics::compute_project_jacobians(func_approx_data &data) const {
 }
 
 void dense_dynamics::compute_project_residual(func_approx_data &data) const {
+    if (owns_stage_elimination()) {
+        generic_dynamics::compute_project_residual(data);
+        return;
+    }
     auto &d = data.as<approx_data>();
+    if (d.problem()->tdim(__l))
+        return;
     d.lu_->solve(d.v_, d.proj_f_res_); // Solve the function-local residual
 }
 void dense_dynamics::finalize_impl() {

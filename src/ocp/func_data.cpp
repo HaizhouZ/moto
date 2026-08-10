@@ -28,7 +28,14 @@ func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, const generic_
     }
 }
 
-vector_ref func_arg_map::operator[](const sym &in) const { return in_args_[func_.arg_idx(in)]; }
+vector_ref func_arg_map::operator[](const sym &in) const {
+    if (func_.has_arg(in)) return in_args_[func_.arg_idx(in)];
+    if (in.field() == __p && problem()->is_active(in))
+        return primal_->get(in);
+    throw std::out_of_range(fmt::format(
+        "symbol {} uid {} is neither an argument of function {} nor an "
+        "active factor parameter", in.name(), in.uid(), func_.name()));
+}
 vector_ref func_arg_map::operator[](size_t i) const { return in_args_.at(i); }
 const std::vector<vector_ref> &func_arg_map::in_arg_data() const { return in_args_; }
 const ocp *func_arg_map::problem() const { return shared_.prob_; }
@@ -62,12 +69,17 @@ func_approx_data::func_approx_data(sym_data &primal,
                     continue;
                 } else if (in_field(f_field, lag_data::stored_constr_fields)) {
                     const auto sp = func_.jac_sparsity()[i];
-                    const auto f_st = prob->get_expr_start(func_);
-                    auto &jac = lag_data_->approx_[f_field].jac_[arg->field()];
-                    const auto r_st = f_st + sp.row_offset;
-                    const auto c_st = prob->get_expr_start_tangent(arg) + sp.col_offset;
-                    jac_.push_back(matrix_ref(jac.bind(r_st, c_st, sp.rows, sp.cols, sp.pattern)));
-                    continue;
+                    if (sp.pattern != sparsity::unknown) {
+                        const auto f_st = prob->get_expr_start(func_);
+                        auto &jac =
+                            lag_data_->approx_[f_field].jac_[arg->field()];
+                        const auto r_st = f_st + sp.row_offset;
+                        const auto c_st =
+                            prob->get_expr_start_tangent(arg) + sp.col_offset;
+                        jac_.push_back(matrix_ref(jac.bind(
+                            r_st, c_st, sp.rows, sp.cols, sp.pattern)));
+                        continue;
+                    }
                 }
             }
             static matrix empty;

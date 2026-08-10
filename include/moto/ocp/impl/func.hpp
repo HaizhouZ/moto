@@ -158,6 +158,13 @@ class generic_func : public expr, protected field_layout_store<var_list> {
     void add_argument(const var &in);
     void add_arguments(const var_inarg_list &args);
 
+    /// Supply a symbolic tangent Jacobian for one argument. The expression
+    /// must have shape (dim(), arg.tdim()).
+    void set_analytic_jacobian(const sym &arg, const cs::SX &jacobian);
+    /// Supply a symbolic Hessian block for scalar-output functions.
+    void set_analytic_hessian(const sym &arg0, const sym &arg1,
+                              const cs::SX &hessian);
+
     const bool check_enable(ocp_base *prob) const;
     void enable_if_all(const expr_inarg_list &args);
     void disable_if_any(const expr_inarg_list &args);

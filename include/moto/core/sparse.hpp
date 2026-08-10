@@ -30,6 +30,7 @@ struct sparse_binding_spec {
   sparse_block_spec block;
   sparsity storage_pattern = sparsity::unknown;
   size_t panel = 0, local_row = 0, local_col = 0;
+  size_t source = 0;
 };
 struct sparse_layout_plan {
   std::vector<sparse_block_spec> panels;

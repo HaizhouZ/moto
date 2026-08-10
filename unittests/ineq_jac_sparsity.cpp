@@ -6,6 +6,7 @@
 #include <moto/ocp/impl/node_data.hpp>
 #include <moto/ocp/ineq_constr.hpp>
 #include <moto/ocp/cost.hpp>
+#include <moto/utils/codegen.hpp>
 
 namespace {
 const bool force_sync_codegen_for_test = []() {
@@ -118,6 +119,67 @@ TEST_CASE("relational equality and inequality expressions become residuals") {
     REQUIRE_THROWS_AS(generic_constr::create(
                           "unsupported_not_equal", x_sx != rhs),
                       std::invalid_argument);
+}
+
+TEST_CASE("inequalities involving lifted variables are interval constraints") {
+    auto [x, y] = sym::states("lifted_inequality_x", 2);
+    auto l = sym::lifted("lifted_inequality_l", 2);
+    (void)x;
+    auto inequality = ineq_constr::create(
+        "lifted_inequality", var_inarg_list{},
+        static_cast<const cs::SX &>(y) + static_cast<const cs::SX &>(l),
+        -vector::Ones(2), vector::Ones(2), approx_order::first);
+
+    REQUIRE(inequality->finalize());
+    REQUIRE(inequality->field() == __ineq_xu);
+}
+
+TEST_CASE("analytic Jacobians are accepted by generic generated functions") {
+    auto [x, y] = sym::states("analytic_jacobian_x", 3);
+    (void)y;
+    auto constraint = generic_constr::create(
+        "analytic_jacobian_constraint", cs::SX::sq(x),
+        approx_order::first);
+    constraint->set_analytic_jacobian(x, scalar_t(2) * cs::SX::diag(x));
+    REQUIRE(constraint->get_codegen_task()->ext_jac.size() == 1);
+
+    auto prob = stage_ocp::create();
+    prob->add(*constraint);
+    prob->wait_until_ready();
+    node_data data(prob);
+    data.sym_val().value_[__x] = vector::LinSpaced(3, 1., 3.);
+    data.update_approximation(node_data::update_mode::eval_all, true);
+    REQUIRE(data.dense().approx_[__eq_x].jac_[__x].dense().isApprox(
+        (vector::LinSpaced(3, 2., 6.)).asDiagonal().toDenseMatrix()));
+}
+
+TEST_CASE("analytic mixed Hessians preserve derivative orientation") {
+    auto [x, y] = sym::states("analytic_hessian_x", 2);
+    auto u = sym::inputs("analytic_hessian_u", 3);
+    (void)y;
+    const matrix coefficients =
+        (matrix(2, 3) << 1., 2., 3., 4., 5., 6.).finished();
+    const cs::SX symbolic_coefficients = cs::SX::reshape(
+        cs::SX(std::vector<scalar_t>{1., 4., 2., 5., 3., 6.}), 2, 3);
+    const cs::SX output = cs::SX::mtimes(
+        static_cast<const cs::SX &>(x).T(),
+        cs::SX::mtimes(symbolic_coefficients,
+                       static_cast<const cs::SX &>(u)));
+    auto cost = generic_cost::from_scalar(
+        "analytic_hessian_cost", var_inarg_list{}, output);
+    const cs::SX analytic = cs::SX::jacobian(
+        cs::SX::jacobian(output, static_cast<const cs::SX &>(x)),
+        static_cast<const cs::SX &>(u));
+    cost->set_analytic_hessian(x, u, analytic);
+
+    auto problem = stage_ocp::create();
+    problem->add(*cost);
+    problem->wait_until_ready();
+    node_data data(problem);
+    data.update_approximation(node_data::update_mode::eval_all, true);
+
+    REQUIRE(data.dense().lag_hess_[__u][__x].dense().isApprox(
+        coefficients.transpose()));
 }
 
 TEST_CASE("codegen splits mixed dense and diagonal cost Hessians") {

@@ -3,12 +3,19 @@
 
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
 
+#include <span>
+
 namespace moto {
 struct workspace_data;
 struct node_data;
 namespace solver {
 namespace ns_riccati {
 struct generic_solver {
+
+    /// Build the NSP executable graph once from the complete OCP layout and
+    /// attach lightweight runtime instances to its stages.
+    virtual void prepare_ocp_linear_graph(
+        std::span<ns_riccati_data *> stages);
 
     virtual ns_riccati_data create_data(node_data *full_data);
     /**
@@ -43,14 +50,17 @@ struct generic_solver {
      */
     virtual void riccati_recursion_correction(ns_riccati_data *cur, ns_riccati_data *prev);
     /**
-     * @brief compute the primal sensitivity for the current node
-     * @details will update the d_u and d_y sensitivity
+     * @brief compute the state sensitivity for the current node
+     * @details updates d_y in parallel after the backward pass. Input
+     *          sensitivity and the complete lifted direction are recovered
+     *          after the state rollout; no lifted feedback matrix is stored.
      * @param cur current node data
      */
     virtual void compute_primal_sensitivity(ns_riccati_data *cur);
     /**
-     * @brief compute the primal sensitivity correction for the current node
-     * @details will update the d_u and d_y sensitivity using the nullspace residual correction
+     * @brief compute the state-sensitivity correction for the current node
+     * @details updates d_y from the nullspace residual correction. Input and
+     *          lifted corrections are recovered after the state rollout.
      * @param cur current node data
      */
     virtual void compute_primal_sensitivity_correction(ns_riccati_data *cur);

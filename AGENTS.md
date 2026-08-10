@@ -54,6 +54,8 @@ Modeling and expressions:
 Dynamics and linear backend:
 
 - [`include/moto/ocp/dynamics.hpp`](/home/harper/Documents/moto/include/moto/ocp/dynamics.hpp)
+- [`include/moto/ocp/lifted.hpp`](/home/harper/Documents/moto/include/moto/ocp/lifted.hpp)
+- [`src/ocp/lifted.cpp`](/home/harper/Documents/moto/src/ocp/lifted.cpp)
 - [`include/moto/ocp/dynamics/semi_implicit_euler.hpp`](/home/harper/Documents/moto/include/moto/ocp/dynamics/semi_implicit_euler.hpp)
 - [`include/moto/ocp/dynamics/dense_dynamics.hpp`](/home/harper/Documents/moto/include/moto/ocp/dynamics/dense_dynamics.hpp)
 - [`include/moto/core/sparse_matrix.hpp`](/home/harper/Documents/moto/include/moto/core/sparse_matrix.hpp)
@@ -139,6 +141,7 @@ Primary primal fields:
 - `__x`: current state
 - `__u`: interval input
 - `__y`: predicted next-state copy used by solver algebra
+- `__l`: explicit user-authored lifted primal variables
 
 Other symbol storage:
 
@@ -149,12 +152,15 @@ Other symbol storage:
 Main function fields:
 
 - `__dyn`: dynamics residual
+- `__lift`: grouped lifted-variable equality residual
 - `__cost`: costs
 - `__eq_x`, `__eq_xu`: hard equalities
 - `__ineq_x`, `__ineq_xu`: inequalities
 - `__eq_x_soft`, `__eq_xu_soft`: soft equalities
 
-Do not treat `__s` as a public primal block. `primal_fields` is `x/u/y`.
+Do not treat `__s` as a public primal block. `x/u` are unlifted, while `y/l`
+are eliminated relative to them in the local QP. All four remain explicit
+nonlinear primal fields.
 
 ## Public Modeling Surface
 
@@ -274,7 +280,25 @@ remaps intentionally reuse those artifacts.
 Do not put graph topology decisions into `generic_func::finalize_impl()` or
 `ocp_base::finalize()`; neither has enough context to place endpoint terms.
 
-## Structured Euler And Dense Dynamics
+## Lifted Groups, Structured Euler, And Dense Dynamics
+
+`generic_dynamics` is the common dynamics/lifting group. Its active `__y`
+arguments and any explicitly marked `__l` arguments remain authored nonlinear
+primals, while their local QP directions are eliminated relative to `x/u`.
+Remap/substitution must preserve that lifted identity.
+
+A stage with explicit `__l` owns grouped `__lift` subconstraints and must
+provide one MX elimination graph for the coupled rows `[__dyn; __lift]` and
+columns `[__y; __l]`. The graph supplies projected `x/u/residual` responses and
+a forward linear action; the transpose action is derived from the same graph.
+CasADi supplies symbolic DAG and sparsity metadata only. The linear backend
+owns panel storage, factor reuse, lowering, and runtime execution. Do not add a
+second dense assembled-pivot fallback.
+
+The nullspace solver consumes those projected responses, contracts all
+`x/u/y/l` gradient and Hessian contributions, and recovers explicit `l` steps
+and both multiplier blocks after rollout. Lifting never performs symbolic
+nonlinear substitution or removes the authored primal/dual variables.
 
 All dynamics implement the `generic_dynamics` projection interface consumed by
 the solver:

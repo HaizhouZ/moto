@@ -60,6 +60,28 @@ struct type_caster<cs::SX> {
         return py_cs_sx.release();
     }
 };
+
+template <>
+struct type_caster<cs::MX> {
+    NB_TYPE_CASTER(cs::MX, const_name("casadi.MX"));
+
+    bool from_python(handle src, uint8_t, cleanup_list *) {
+        value = cs::MX();
+        auto swig_obj = get_PySwigObject(src.ptr());
+        if (!swig_obj) return false;
+        value = *reinterpret_cast<cs::MX *>(swig_obj->ptr);
+        return true;
+    }
+
+    static handle from_cpp(const cs::MX &src, rv_policy, cleanup_list *) {
+        object module = nb::module_::import_("casadi");
+        object result = module.attr("MX")();
+        auto swig_obj = get_PySwigObject(result.ptr());
+        assert(swig_obj != nullptr);
+        *reinterpret_cast<cs::MX *>(swig_obj->ptr) = src;
+        return result.release();
+    }
+};
 } // namespace detail
 } // namespace nanobind
 

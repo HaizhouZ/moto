@@ -106,6 +106,7 @@ void sync_equality_init_overlay_primal(node_data &outer, node_data &overlay) {
 
 void sync_equality_init_overlay_duals(node_data &outer, node_data &overlay) {
     solver::overlay::copy_dense_dual_if_present(outer, overlay, __dyn);
+    solver::overlay::copy_dense_dual_if_present(outer, overlay, __lift);
   solver::overlay::copy_source_multipliers<eq_init_pmm_constr>(
       outer, overlay, std::array{__eq_x, __eq_xu});
     sync_soft_overlay_dual_field(outer, overlay, __eq_x_soft);
@@ -116,6 +117,7 @@ void sync_equality_init_overlay_duals(node_data &outer, node_data &overlay) {
 
 void commit_equality_init_overlay_duals(node_data &outer, node_data &overlay) {
     solver::overlay::copy_dense_dual_if_present(overlay, outer, __dyn);
+    solver::overlay::copy_dense_dual_if_present(overlay, outer, __lift);
   solver::overlay::commit_source_multipliers<eq_init_pmm_constr>(
       outer, overlay, std::array{__eq_x, __eq_xu});
     commit_soft_overlay_dual_field(outer, overlay, __eq_x_soft);

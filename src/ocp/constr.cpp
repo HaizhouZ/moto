@@ -96,9 +96,9 @@ void generic_constr::approx_data::map_lag_jac_from_raw(decltype(lag_data::lag_ja
 
 void generic_constr::finalize_impl() {
     if (field_ == __undefined) {
-        bool has_[3] = {false, false, false};
+        bool has_[field::num_prim] = {};
         for (const sym &arg : in_args_) {
-            if (arg.field() <= __y)
+            if (arg.field() < field::num_prim)
                 has_[arg.field()] = true;
         }
         auto &_field = field_;
@@ -106,17 +106,24 @@ void generic_constr::finalize_impl() {
             throw std::runtime_error(fmt::format("generic_constr {} eq/ineq hint unset; use ineq_constr::create or pass an explicit constraint field", name_));
         }
         if (field_hint_.is_eq) {
-            if (has_[__u] && !has_[__y])
-                _field = field_hint_.is_soft ? __eq_xu_soft : __eq_xu;
-            else if (has_[__x] && has_[__y] && !field_hint_.is_soft)
+            if (has_[__x] && has_[__y] && !field_hint_.is_soft)
                 _field = __dyn;
+            else if (has_[__l])
+                throw std::runtime_error(fmt::format(
+                    "constraint {} contains lifted variables; construct it with "
+                    "moto.lifted.create() so its elimination group is explicit",
+                    name_));
+            else if (has_[__u] && !has_[__y])
+                _field = field_hint_.is_soft ? __eq_xu_soft : __eq_xu;
             else if (!has_[__u] && (has_[__x] || has_[__y]))
                 _field = field_hint_.is_soft ? __eq_x_soft : __eq_x;
             else
                 throw std::runtime_error(fmt::format("unsupported eq generic_constr \"{}\" type has_x: {}, has_u: {}, has_y: {}, soft: {}. Did you set _field or hints?",
                                                      name_, has_[__x], has_[__u], has_[__y], field_hint_.is_soft));
         } else {
-            if (has_[__u] && !has_[__y])
+            if (has_[__l])
+                _field = __ineq_xu;
+            else if (has_[__u] && !has_[__y])
                 _field = __ineq_xu;
             else if (!has_[__u] && (has_[__x] || has_[__y]))
                 _field = __ineq_x;

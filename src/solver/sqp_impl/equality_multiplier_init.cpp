@@ -7,7 +7,7 @@ namespace {
 
 bool graph_has_equality_targets(ns_sqp::storage_type &graph) {
     for (node_data *node : graph.nodes()) {
-        for (auto field : std::array{__dyn, __eq_x, __eq_xu, __eq_x_soft, __eq_xu_soft}) {
+        for (auto field : std::array{__dyn, __lift, __eq_x, __eq_xu, __eq_x_soft, __eq_xu_soft}) {
             if (node->problem().dim(field) > 0) {
                 return true;
             }

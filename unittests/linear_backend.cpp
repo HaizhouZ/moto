@@ -1,10 +1,18 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <moto/core/linear_backend.hpp>
+
+#include <Eigen/Cholesky>
+#include <moto/core/linear_egraph.hpp>
 #include <moto/core/sparse_matrix.hpp>
 
 #include <casadi/casadi.hpp>
+#include <Eigen/LU>
+#include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <cstdlib>
+#include <iostream>
 
 namespace moto::linear_backend {
 namespace {
@@ -264,6 +272,171 @@ TEST_CASE("precompiled direct-map sparse products match dense algebra") {
   REQUIRE(right_transpose_out.isApprox(transpose_lhs.dense().transpose() *
                                            a.dense(),
                                        1e-12));
+}
+
+TEST_CASE("SpMM analysis is canonical across panel layouts and association") {
+  const matrix_layout whole{
+      4, 4, {{sparsity::dense, 0, 0, 4, 4}}};
+  const matrix_layout split{
+      4,
+      4,
+      {{sparsity::dense, 0, 0, 4, 2},
+       {sparsity::dense, 0, 2, 4, 2}}};
+  const auto whole_pattern = analyze_pattern(whole);
+  const auto split_pattern = analyze_pattern(split);
+  REQUIRE(whole_pattern == split_pattern);
+  REQUIRE(sparse_pattern_hash{}(whole_pattern) ==
+          sparse_pattern_hash{}(split_pattern));
+
+  const matrix_layout a{
+      6,
+      5,
+      {{sparsity::dense, 0, 0, 3, 3},
+       {sparsity::diag, 3, 2, 3, 3}}};
+  const matrix_layout b{
+      5,
+      4,
+      {{sparsity::dense, 0, 0, 3, 2},
+       {sparsity::diag, 2, 1, 3, 3}}};
+  const matrix_layout c{
+      4,
+      3,
+      {{sparsity::diag, 0, 0, 3, 3},
+       {sparsity::dense, 3, 2, 1, 1}}};
+  const auto ab = analyze_spmm({a}, {b});
+  const auto ab_c =
+      analyze_spmm({ab.output_layout, false, ab.output_pattern}, {c});
+  const auto bc = analyze_spmm({b}, {c});
+  const auto a_bc =
+      analyze_spmm({a}, {bc.output_layout, false, bc.output_pattern});
+  REQUIRE(ab_c.output_pattern == a_bc.output_pattern);
+  REQUIRE(ab.scalar_products() > 0);
+  REQUIRE(ab.products.size() == 4);
+}
+
+TEST_CASE("linear e-graph saturates matrix chains and extracts lower work") {
+  const auto dense = [](size_t rows, size_t cols) {
+    return matrix_layout{
+        rows, cols, {{sparsity::dense, 0, 0, rows, cols}}};
+  };
+  linear_egraph graph;
+  const auto a = graph.add_leaf(0, dense(100, 2));
+  const auto b = graph.add_leaf(1, dense(2, 100));
+  const auto c = graph.add_leaf(2, dense(100, 2));
+  const auto root = graph.add_multiply(graph.add_multiply(a, b), c);
+  const auto saturation = graph.saturate();
+  REQUIRE(saturation.saturated);
+  REQUIRE(saturation.nodes > 5);
+
+  const auto extracted = graph.extract(root);
+  const auto &term = extracted.at(extracted.root);
+  REQUIRE(term.cost.scalar_products == 800);
+  REQUIRE(term.op == linear_egraph_op::multiply);
+  REQUIRE(extracted.at(term.children[0]).leaf == 0);
+  REQUIRE(extracted.at(term.children[1]).op == linear_egraph_op::multiply);
+}
+
+TEST_CASE("linear e-graph eliminates identities and double transposes") {
+  const matrix_layout layout{
+      4, 3, {{sparsity::dense, 0, 0, 4, 3}}};
+  linear_egraph graph;
+  const auto a = graph.add_leaf(7, layout);
+  const auto identity = graph.add_identity(3);
+  const auto product = graph.add_multiply(a, identity);
+  const auto root = graph.add_transpose(graph.add_transpose(product));
+  REQUIRE(graph.saturate().saturated);
+  const auto extracted = graph.extract(root);
+  REQUIRE(extracted.at(extracted.root).op == linear_egraph_op::leaf);
+  REQUIRE(extracted.at(extracted.root).leaf == 7);
+  REQUIRE(extracted.at(extracted.root).cost.scalar_products == 0);
+}
+
+TEST_CASE("analyzed SpMM compiles inferred panels including two transposes") {
+  const auto allocate = [](const matrix_layout &layout) {
+    sparse_matrix value;
+    value.resize(layout.rows, layout.cols);
+    for (const auto &panel : layout.panels)
+      value.insert(panel.row_offset, panel.col_offset, panel.rows, panel.cols,
+                   panel.pattern);
+    return value;
+  };
+  const auto run = [&](const sparse_matrix &lhs, bool lhs_transpose,
+                       const sparse_matrix &rhs, bool rhs_transpose) {
+    const auto analysis = analyze_spmm(
+        {describe(lhs), lhs_transpose}, {describe(rhs), rhs_transpose});
+    auto output = allocate(analysis.output_layout);
+    auto pointers = panel_pointers(lhs);
+    const auto rhs_pointers = panel_pointers(rhs);
+    const auto output_pointers = panel_pointers(output);
+    pointers.insert(pointers.end(), rhs_pointers.begin(), rhs_pointers.end());
+    pointers.insert(pointers.end(), output_pointers.begin(),
+                    output_pointers.end());
+    compile_sparse_product(analysis)(pointers);
+    matrix left = lhs.dense();
+    matrix right = rhs.dense();
+    if (lhs_transpose) left.transposeInPlace();
+    if (rhs_transpose) right.transposeInPlace();
+    REQUIRE(output.dense().isApprox(left * right, 1e-12));
+
+    output.setZero();
+    std::vector<scalar_t *> indexed(pointers.size() + 3);
+    std::vector<size_t> lhs_slots, rhs_slots, output_slots;
+    size_t slot = 1;
+    for (auto *pointer : panel_pointers(lhs)) {
+      lhs_slots.push_back(slot);
+      indexed[slot++] = pointer;
+    }
+    ++slot;
+    for (auto *pointer : panel_pointers(rhs)) {
+      rhs_slots.push_back(slot);
+      indexed[slot++] = pointer;
+    }
+    for (auto *pointer : panel_pointers(output)) {
+      output_slots.push_back(slot);
+      indexed[slot++] = pointer;
+    }
+    compile_indexed_sparse_product(analysis, 1., indexed.size(), lhs_slots,
+                                   rhs_slots, output_slots)(indexed);
+    REQUIRE(output.dense().isApprox(left * right, 1e-12));
+  };
+
+  sparse_matrix lhs, rhs;
+  lhs.resize(5, 4);
+  lhs.insert(0, 0, 3, 2, sparsity::dense).setRandom();
+  lhs.insert(2, 1, 3, 3, sparsity::diag).setRandom();
+  rhs.resize(3, 5);
+  rhs.insert(0, 0, 2, 3, sparsity::dense).setRandom();
+  rhs.insert(0, 2, 3, 3, sparsity::diag).setRandom();
+  run(lhs, true, rhs, true);
+
+  sparse_matrix ordinary_rhs;
+  ordinary_rhs.resize(4, 3);
+  ordinary_rhs.insert(0, 0, 2, 2, sparsity::dense).setRandom();
+  ordinary_rhs.insert(1, 0, 3, 3, sparsity::diag).setRandom();
+  run(lhs, false, ordinary_rhs, false);
+}
+
+TEST_CASE("sparse products bind directly to sparse output panels") {
+  sparse_matrix lhs, rhs, output;
+  lhs.resize(4, 5);
+  rhs.resize(5, 4);
+  output.resize(4, 4);
+
+  lhs.insert(0, 0, 2, 3, sparsity::dense).setRandom();
+  lhs.insert(2, 3, 2, 2, sparsity::diag).setRandom();
+  rhs.insert(0, 0, 3, 2, sparsity::dense).setRandom();
+  rhs.insert(3, 2, 2, 2, sparsity::diag).setRandom();
+  output.insert(0, 0, 2, 2, sparsity::dense);
+  output.insert(2, 2, 2, 2, sparsity::diag);
+
+  const matrix expected = lhs.dense() * rhs.dense();
+  run_sparse_product(lhs, rhs, product_op::times, 1., output);
+  REQUIRE(output.dense().isApprox(expected, 1e-12));
+
+  // Exercise the cached plan and verify that it owns output zeroing.
+  for (auto *panel : panel_pointers(output)) panel[0] = 42.;
+  run_sparse_product(lhs, rhs, product_op::times, 1., output);
+  REQUIRE(output.dense().isApprox(expected, 1e-12));
 }
 
 TEST_CASE("scaled eye panels use their dynamic diagonal values") {
@@ -614,6 +787,625 @@ TEST_CASE("OCP batch fuses quadruped limits and friction") {
   REQUIRE(jqdx.isApprox(expected_jqdx, 1e-12));
   REQUIRE(jtdx.isApprox(dxt, 1e-12));
   REQUIRE(jfdx.isApprox(jf * dxf, 1e-12));
+}
+
+TEST_CASE("MX graph lowers matrix products to the linear backend") {
+  constexpr casadi_int n = 4, middle = 3, cols = 2;
+  const casadi::MX a = casadi::MX::sym("a", casadi::Sparsity::diag(n));
+  const casadi::MX b = casadi::MX::sym("b", n, middle);
+  const casadi::MX c = casadi::MX::sym("c", n, middle);
+  const casadi::MX d = casadi::MX::sym("d", middle, cols);
+  const casadi::MX first = casadi::MX::mtimes(a, b) + c;
+  const casadi::MX second = casadi::MX::mtimes(first, d);
+  const auto kernel = compile_graph({a, b, c, d}, {first, second});
+
+  vector av = vector::Random(n);
+  matrix bv = matrix::Random(n, middle), cv = matrix::Random(n, middle);
+  matrix dv = matrix::Random(middle, cols);
+  matrix first_value(n, middle), second_value(n, cols);
+  std::vector<scalar_t *> pointers{av.data(), bv.data(), cv.data(), dv.data(),
+                                   first_value.data(), second_value.data()};
+  kernel(pointers);
+  const matrix expected_first = av.asDiagonal() * bv + cv;
+  REQUIRE(first_value.isApprox(expected_first, 1e-12));
+  REQUIRE(second_value.isApprox(expected_first * dv, 1e-12));
+}
+
+TEST_CASE("MX graph e-graph optimizes a dense matrix chain") {
+  constexpr casadi_int outer = 20, thin = 2;
+  const casadi::MX a = casadi::MX::sym("chain_a", outer, thin);
+  const casadi::MX b = casadi::MX::sym("chain_b", thin, outer);
+  const casadi::MX c = casadi::MX::sym("chain_c", outer, thin);
+  const casadi::MX original =
+      casadi::MX::mtimes(casadi::MX::mtimes(a, b), c);
+  const auto kernel = compile_graph({a, b, c}, {original});
+
+  const matrix av = matrix::Random(outer, thin);
+  const matrix bv = matrix::Random(thin, outer);
+  const matrix cv = matrix::Random(outer, thin);
+  matrix output(outer, thin);
+  std::vector<scalar_t *> pointers{
+      const_cast<scalar_t *>(av.data()), const_cast<scalar_t *>(bv.data()),
+      const_cast<scalar_t *>(cv.data()), output.data()};
+  kernel(pointers);
+  REQUIRE(output.isApprox(av * (bv * cv), 1e-12));
+}
+
+TEST_CASE("sparse product consumes strided and transposed panel views") {
+  matrix storage = matrix::Random(6, 5);
+  constexpr size_t offset = 1 + 6;
+
+  matrix rhs = matrix::Random(4, 2), output(3, 2);
+  matrix_layout view{3, 4,
+                     {{sparsity::dense, 0, 0, 3, 4, false, offset, 6}}};
+  matrix_layout rhs_layout{4, 2,
+                           {{sparsity::dense, 0, 0, 4, 2}}};
+  matrix_layout output_layout{3, 2,
+                              {{sparsity::dense, 0, 0, 3, 2}}};
+  auto kernel = compile_sparse_product(view, rhs_layout, product_op::times,
+                                       1., output_layout);
+  std::vector<scalar_t *> pointers{storage.data(), rhs.data(), output.data()};
+  kernel(pointers);
+  REQUIRE(output.isApprox(storage.block(1, 1, 3, 4) * rhs, 1e-12));
+
+  matrix transpose_rhs = matrix::Random(3, 2), transpose_output(4, 2);
+  matrix_layout transpose_view{
+      4, 3,
+      {{sparsity::dense, 0, 0, 4, 3, true, offset, 6}}};
+  matrix_layout transpose_rhs_layout{
+      3, 2, {{sparsity::dense, 0, 0, 3, 2}}};
+  matrix_layout transpose_output_layout{
+      4, 2, {{sparsity::dense, 0, 0, 4, 2}}};
+  auto transpose_kernel = compile_sparse_product(
+      transpose_view, transpose_rhs_layout, product_op::times, 1.,
+      transpose_output_layout);
+  pointers = {storage.data(), transpose_rhs.data(), transpose_output.data()};
+  transpose_kernel(pointers);
+  REQUIRE(transpose_output.isApprox(
+      storage.block(1, 1, 3, 4).transpose() * transpose_rhs, 1e-12));
+}
+
+TEST_CASE("MX graph lowers submatrix products to backend panel views") {
+  const casadi::MX storage = casadi::MX::sym("view_storage", 6, 5);
+  const casadi::MX rhs = casadi::MX::sym("view_rhs", 4, 2);
+  const casadi::MX transpose_rhs =
+      casadi::MX::sym("view_transpose_rhs", 3, 2);
+  const casadi::MX block =
+      storage(casadi::Slice(1, 4), casadi::Slice(1, 5));
+  const auto kernel = compile_graph(
+      {storage, rhs, transpose_rhs},
+      {casadi::MX::mtimes(block, rhs),
+       casadi::MX::mtimes(block.T(), transpose_rhs)});
+
+  matrix storage_value = matrix::Random(6, 5);
+  matrix rhs_value = matrix::Random(4, 2);
+  matrix transpose_rhs_value = matrix::Random(3, 2);
+  matrix output(3, 2), transpose_output(4, 2);
+  std::vector<scalar_t *> pointers{
+      storage_value.data(), rhs_value.data(), transpose_rhs_value.data(),
+      output.data(), transpose_output.data()};
+  kernel(pointers);
+  REQUIRE(output.isApprox(
+      storage_value.block(1, 1, 3, 4) * rhs_value, 1e-12));
+  REQUIRE(transpose_output.isApprox(
+      storage_value.block(1, 1, 3, 4).transpose() * transpose_rhs_value,
+      1e-12));
+}
+
+TEST_CASE("MX lazy product fusion preserves intermediate addend order") {
+  constexpr casadi_int n = 5;
+  const casadi::MX a = casadi::MX::sym("ordered_a", n, n);
+  const casadi::MX b = casadi::MX::sym("ordered_b", n, n);
+  const casadi::MX c = casadi::MX::sym("ordered_c", n, n);
+  const casadi::MX d = casadi::MX::sym("ordered_d", n, n);
+  const casadi::MX lhs = casadi::MX::mtimes(a, b);
+  const casadi::MX addend = casadi::MX::mtimes(c, d);
+  const auto kernel = compile_graph(
+      {a, b, c, d}, {casadi::MX::densify(lhs + addend)});
+
+  matrix av = matrix::Random(n, n), bv = matrix::Random(n, n);
+  matrix cv = matrix::Random(n, n), dv = matrix::Random(n, n);
+  matrix output(n, n);
+  std::vector<scalar_t *> pointers{av.data(), bv.data(), cv.data(),
+                                   dv.data(), output.data()};
+  kernel(pointers);
+  REQUIRE(output.isApprox(av * bv + cv * dv, 1e-12));
+}
+
+TEST_CASE("MX product accumulation chains share one result") {
+  constexpr casadi_int n = 5;
+  const casadi::MX a = casadi::MX::sym("accum_a", n, n);
+  const casadi::MX b = casadi::MX::sym("accum_b", n, n);
+  const casadi::MX c = casadi::MX::sym("accum_c", n, n);
+  const casadi::MX d = casadi::MX::sym("accum_d", n, n);
+  const casadi::MX e = casadi::MX::sym("accum_e", n, n);
+  const casadi::MX f = casadi::MX::sym("accum_f", n, n);
+  const casadi::MX diagonal =
+      casadi::MX::sym("accum_diagonal", casadi::Sparsity::diag(n));
+  const casadi::MX result =
+      casadi::MX::densify(diagonal) + casadi::MX::mtimes(a, b) -
+      casadi::MX::mtimes(c, d) + casadi::MX::mtimes(e, f);
+  const auto kernel = compile_graph({a, b, c, d, e, f, diagonal}, {result});
+
+  matrix av = matrix::Random(n, n), bv = matrix::Random(n, n);
+  matrix cv = matrix::Random(n, n), dv = matrix::Random(n, n);
+  matrix ev = matrix::Random(n, n), fv = matrix::Random(n, n);
+  vector diagonal_value = vector::Random(n);
+  matrix output(n, n);
+  std::vector<scalar_t *> pointers{
+      av.data(), bv.data(), cv.data(), dv.data(), ev.data(), fv.data(),
+      diagonal_value.data(), output.data()};
+  kernel(pointers);
+  matrix expected = diagonal_value.asDiagonal();
+  expected.noalias() += av * bv;
+  expected.noalias() -= cv * dv;
+  expected.noalias() += ev * fv;
+  REQUIRE(output.isApprox(expected, 1e-12));
+}
+
+TEST_CASE("MX graph lowers sparse views without a CasADi runtime") {
+  const casadi::Sparsity pattern = casadi::Sparsity::triplet(
+      4, 3, std::vector<casadi_int>{0, 2, 3},
+      std::vector<casadi_int>{0, 1, 2});
+  const casadi::MX sparse = casadi::MX::sym("sparse", pattern);
+  const casadi::MX repeated = casadi::MX::repmat(sparse, 1, 2);
+  const auto kernel = compile_graph(
+      {sparse}, {casadi::MX::densify(sparse),
+                 casadi::MX::densify(sparse.T()),
+                 casadi::MX::densify(repeated)});
+
+  vector values = vector::Random(pattern.nnz());
+  matrix dense = matrix::Zero(4, 3), dense_output(4, 3), transpose_output(3, 4),
+         repeat_output(4, 6);
+  for (casadi_int col = 0; col < pattern.size2(); ++col)
+    for (casadi_int nz = pattern.colind(col); nz < pattern.colind(col + 1);
+         ++nz)
+      dense(pattern.row(nz), col) = values[nz];
+  std::vector<scalar_t *> pointers{values.data(), dense_output.data(),
+                                   transpose_output.data(),
+                                   repeat_output.data()};
+  kernel(pointers);
+  matrix expected_repeat(4, 6);
+  expected_repeat << dense, dense;
+  REQUIRE(dense_output.isApprox(dense, 1e-12));
+  REQUIRE(transpose_output.isApprox(dense.transpose(), 1e-12));
+  REQUIRE(repeat_output.isApprox(expected_repeat, 1e-12));
+}
+
+TEST_CASE("MX graph binds one logical input to existing sparse panels") {
+  const casadi::Sparsity pattern = casadi::Sparsity::triplet(
+      4, 4, std::vector<casadi_int>{0, 1, 0, 1, 2, 3},
+      std::vector<casadi_int>{0, 0, 1, 1, 2, 3});
+  const casadi::MX sparse = casadi::MX::sym("panel_sparse", pattern);
+  const casadi::MX rhs = casadi::MX::sym("panel_rhs", 4, 2);
+  matrix_layout layout{
+      4, 4,
+      {{sparsity::dense, 0, 0, 2, 2},
+       {sparsity::diag, 2, 2, 2, 2}}};
+  const std::array<matrix_layout, 2> input_layouts{layout, matrix_layout{}};
+  const auto kernel = compile_graph(
+      {sparse, rhs},
+      std::vector<std::vector<casadi::MX>>{
+          {casadi::MX::densify(casadi::MX::mtimes(sparse, rhs))}},
+      input_layouts, nullptr);
+
+  matrix dense_panel = matrix::Random(2, 2);
+  vector diagonal = vector::Random(2);
+  matrix rhs_value = matrix::Random(4, 2), output(4, 2);
+  std::vector<scalar_t *> pointers{dense_panel.data(), diagonal.data(),
+                                   rhs_value.data(), output.data()};
+  kernel(pointers);
+
+  matrix expected_matrix = matrix::Zero(4, 4);
+  expected_matrix.topLeftCorner(2, 2) = dense_panel;
+  expected_matrix.bottomRightCorner(2, 2) = diagonal.asDiagonal();
+  REQUIRE(kernel.input_count() == 3);
+  REQUIRE(output.isApprox(expected_matrix * rhs_value, 1e-12));
+}
+
+TEST_CASE("MX graph lowers a multi-RHS solve as one scheduled operation") {
+  constexpr casadi_int n = 5, rhs_cols = 2;
+  const casadi::MX a = casadi::MX::sym("a", n, n);
+  const casadi::MX b = casadi::MX::sym("b", n, rhs_cols);
+  const auto kernel = compile_graph({a, b}, {casadi::MX::solve(a, b)});
+  matrix av = matrix::Random(n, n);
+  av.diagonal().array() += 4.;
+  matrix bv = matrix::Random(n, rhs_cols), output(n, rhs_cols);
+  std::vector<scalar_t *> pointers{av.data(), bv.data(), output.data()};
+  kernel(pointers);
+  REQUIRE(output.isApprox(av.partialPivLu().solve(bv), 1e-12));
+}
+
+TEST_CASE("MX graph lazily applies one shared factor to products and actions") {
+  constexpr casadi_int n = 5, cols = 3;
+  const casadi::MX a = casadi::MX::sym("inverse_a", n, n);
+  const casadi::MX b = casadi::MX::sym("inverse_b", n, cols);
+  const casadi::MX c = casadi::MX::sym("inverse_c", n, cols);
+  const casadi::MX inverse =
+      casadi::MX::solve(a, casadi::MX::eye(n));
+  const auto kernel = compile_graph(
+      {a, b, c},
+      std::vector<std::vector<casadi::MX>>{
+          {casadi::MX::mtimes(inverse, b)},
+          {casadi::MX::mtimes(inverse.T(), c)}},
+      nullptr);
+
+  matrix av = matrix::Random(n, n);
+  av.diagonal().array() += 5.;
+  matrix bv = matrix::Random(n, cols), cv = matrix::Random(n, cols);
+  const matrix expected_inverse = av.inverse();
+  matrix first(n, cols), second(n, cols);
+  std::vector<scalar_t *> pointers{av.data(), bv.data(), cv.data(),
+                                   first.data(), second.data()};
+
+  kernel(0, pointers);
+  REQUIRE(first.isApprox(expected_inverse * bv, 1e-12));
+  kernel(1, pointers);
+  REQUIRE(second.isApprox(expected_inverse.transpose() * cv, 1e-12));
+}
+
+TEST_CASE("MX graph preserves an SPD factor declaration across graph CSE") {
+  constexpr casadi_int n = 5, cols = 3;
+  const casadi::MX a = casadi::MX::sym("spd_a", n, n);
+  const casadi::MX b = casadi::MX::sym("spd_b", n, cols);
+  const casadi::MX inverse = casadi::MX::inv(a);
+  const std::array<casadi::MX, 1> spd{inverse};
+  const auto kernel = compile_graph(
+      {}, {a, b},
+      std::vector<std::vector<casadi::MX>>{
+          {casadi::MX::mtimes(inverse, b)}},
+      {}, nullptr, "gen/linear_backend", spd);
+
+  const matrix seed = matrix::Random(n, n);
+  const matrix av = seed.transpose() * seed + matrix::Identity(n, n);
+  const matrix bv = matrix::Random(n, cols);
+  matrix output(n, cols);
+  std::vector<scalar_t *> pointers{
+      const_cast<scalar_t *>(av.data()), const_cast<scalar_t *>(bv.data()),
+      output.data()};
+  kernel(pointers);
+  REQUIRE(output.isApprox(av.llt().solve(bv), 1e-12));
+}
+
+TEST_CASE("MX graph directly solves fixed matrices up to three by three") {
+  constexpr casadi_int n = 3, cols = 2;
+  const casadi::MX a = casadi::MX::sym("small_a", n, n);
+  const casadi::MX b = casadi::MX::sym("small_b", n, cols);
+  const auto kernel = compile_graph({a, b}, {casadi::MX::solve(a, b)});
+
+  matrix av = matrix::Random(n, n);
+  av.diagonal().array() += 4.;
+  const matrix bv = matrix::Random(n, cols);
+  matrix output(n, cols);
+  std::vector<scalar_t *> pointers{
+      av.data(), const_cast<scalar_t *>(bv.data()), output.data()};
+  kernel(pointers);
+  REQUIRE(output.isApprox(av.partialPivLu().solve(bv), 1e-12));
+}
+
+TEST_CASE("Go2-sized elimination graph matches one fused Eigen routine") {
+  constexpr casadi_int nq = 18, ny = 36, nl = 30, nf = 12;
+  constexpr casadi_int nx_active = 30, nu = 18, nr = 1;
+  constexpr casadi_int rhs_cols = nx_active + nu + nr;
+
+  std::vector<casadi_int> rows, cols;
+  const auto add_diag = [&](casadi_int begin, casadi_int count) {
+    for (casadi_int i = 0; i < count; ++i) {
+      rows.push_back(begin + i);
+      cols.push_back(begin + i);
+    }
+  };
+  add_diag(0, 3);
+  for (casadi_int col = 3; col < 6; ++col)
+    for (casadi_int row = 3; row < 6; ++row) {
+      rows.push_back(row);
+      cols.push_back(col);
+    }
+  add_diag(6, 12);
+  for (casadi_int col = nq; col < ny; ++col)
+    for (casadi_int row = 0; row < nq; ++row) {
+      rows.push_back(row);
+      cols.push_back(col);
+    }
+  add_diag(nq, nq);
+  const casadi::Sparsity euler_pattern =
+      casadi::Sparsity::triplet(ny, ny, rows, cols);
+
+  const casadi::MX euler = casadi::MX::sym("bench_euler", euler_pattern);
+  const casadi::MX dyn_l = casadi::MX::sym("bench_dyn_l", ny, nl);
+  const casadi::MX lift_y = casadi::MX::sym("bench_lift_y", nl, ny);
+  const casadi::MX lift_l = casadi::MX::sym("bench_lift_l", nl, nl);
+  const casadi::MX h_x = casadi::MX::sym("bench_h_x", ny + nl, nx_active);
+  const casadi::MX h_u = casadi::MX::sym("bench_h_u", ny + nl, nu);
+  const casadi::MX h_r = casadi::MX::sym("bench_h_r", ny + nl, nr);
+
+  const auto euler_solve = [&](const casadi::MX &rhs) {
+    const casadi::MX q_rhs =
+        rhs(casadi::Slice(0, nq), casadi::Slice()) -
+        casadi::MX::mtimes(
+            euler(casadi::Slice(0, nq), casadi::Slice(nq, ny)),
+            rhs(casadi::Slice(nq, ny), casadi::Slice()));
+    const casadi::MX diagonal = casadi::MX::diag(euler);
+    const auto diagonal_solve = [&](casadi_int begin, casadi_int end) {
+      return q_rhs(casadi::Slice(begin, end), casadi::Slice()) /
+             casadi::MX::repmat(
+                 diagonal(casadi::Slice(begin, end), casadi::Slice()), 1,
+                 rhs.size2());
+    };
+    return casadi::MX::vertcat(
+        {diagonal_solve(0, 3),
+         casadi::MX::solve(
+             euler(casadi::Slice(3, 6), casadi::Slice(3, 6)),
+             q_rhs(casadi::Slice(3, 6), casadi::Slice())),
+         diagonal_solve(6, nq),
+         rhs(casadi::Slice(nq, ny), casadi::Slice())});
+  };
+
+  const casadi::MX euler_l = euler_solve(dyn_l);
+  const casadi::MX reduced_l =
+      lift_l - casadi::MX::mtimes(lift_y, euler_l);
+  const casadi::MX gaa =
+      reduced_l(casadi::Slice(0, nq), casadi::Slice(0, nq));
+  const casadi::MX gaf =
+      reduced_l(casadi::Slice(0, nq), casadi::Slice(nq, nl));
+  const casadi::MX gca =
+      reduced_l(casadi::Slice(nq, nl), casadi::Slice(0, nq));
+  const casadi::MX gcf =
+      reduced_l(casadi::Slice(nq, nl), casadi::Slice(nq, nl)) +
+      1e-3 * casadi::MX::eye(nf);
+  const casadi::MX rnea_force = casadi::MX::solve(gaa, gaf);
+  const casadi::MX contact_schur =
+      gcf - casadi::MX::mtimes(gca, rnea_force);
+  const casadi::MX rhs = casadi::MX::horzcat({h_x, h_u, h_r});
+  const casadi::MX y_base = euler_solve(
+      rhs(casadi::Slice(0, ny), casadi::Slice()));
+  const casadi::MX reduced =
+      rhs(casadi::Slice(ny, ny + nl), casadi::Slice()) -
+      casadi::MX::mtimes(lift_y, y_base);
+  const casadi::MX a_base = casadi::MX::solve(
+      gaa, reduced(casadi::Slice(0, nq), casadi::Slice()));
+  const casadi::MX force = casadi::MX::solve(
+      contact_schur,
+      reduced(casadi::Slice(nq, nl), casadi::Slice()) -
+          casadi::MX::mtimes(gca, a_base));
+  const casadi::MX lifted = casadi::MX::vertcat(
+      {a_base - casadi::MX::mtimes(rnea_force, force), force});
+  const casadi::MX result = casadi::MX::vertcat(
+      {y_base - casadi::MX::mtimes(euler_l, lifted), lifted});
+
+  const matrix_layout euler_layout{
+      ny,
+      ny,
+      {{sparsity::diag, 0, 0, 3, 3},
+       {sparsity::dense, 3, 3, 3, 3},
+       {sparsity::diag, 6, 6, 12, 12},
+       {sparsity::dense, 0, nq, nq, nq},
+       {sparsity::eye, nq, nq, nq, nq}}};
+  const std::array<matrix_layout, 7> input_layouts{
+      euler_layout, matrix_layout{}, matrix_layout{}, matrix_layout{},
+      matrix_layout{}, matrix_layout{}, matrix_layout{}};
+  auto graph = compile_graph(
+      {euler, dyn_l, lift_y, lift_l, h_x, h_u, h_r},
+      std::vector<std::vector<casadi::MX>>{{result}}, input_layouts, nullptr);
+
+  vector q_diag_head = vector::Random(3).cwiseAbs().array() + 1.;
+  matrix orientation = matrix::Random(3, 3);
+  orientation.diagonal().array() += 4.;
+  vector q_diag_tail = vector::Random(12).cwiseAbs().array() + 1.;
+  matrix coupling = matrix::Random(nq, nq) * .05;
+  matrix dyn_l_value = matrix::Random(ny, nl) * .05;
+  matrix lift_y_value = matrix::Random(nl, ny) * .05;
+  matrix lift_l_value = matrix::Random(nl, nl) * .05;
+  lift_l_value.topLeftCorner(nq, nq).diagonal().array() += 6.;
+  lift_l_value.bottomRightCorner(nf, nf).diagonal().array() += 5.;
+  matrix hx_value = matrix::Random(ny + nl, nx_active) * .05;
+  matrix hu_value = matrix::Random(ny + nl, nu) * .05;
+  matrix hr_value = matrix::Random(ny + nl, nr) * .05;
+  matrix graph_output(ny + nl, rhs_cols);
+  scalar_t unused_eye_storage = 0.;
+  std::vector<scalar_t *> pointers{
+      q_diag_head.data(), orientation.data(), q_diag_tail.data(),
+      coupling.data(), &unused_eye_storage, dyn_l_value.data(),
+      lift_y_value.data(), lift_l_value.data(), hx_value.data(),
+      hu_value.data(), hr_value.data(), graph_output.data()};
+  // The exact input layout contributes five physical pointers in place of
+  // the first logical MX input.
+  REQUIRE(pointers.size() == graph.pointer_count());
+
+  struct fused_workspace {
+    fused_workspace(casadi_int nq, casadi_int ny, casadi_int nl,
+                    casadi_int nf, casadi_int rhs_cols)
+        : euler_l(ny, nl), y_base(ny, rhs_cols), reduced_l(nl, nl),
+          rnea_force(nq, nf), contact_schur(nf, nf),
+          reduced(nl, rhs_cols), a_base(nq, rhs_cols),
+          force(nf, rhs_cols), lifted(nl, rhs_cols),
+          rhs(ny + nl, rhs_cols), output(ny + nl, rhs_cols) {}
+    matrix euler_l;
+    matrix y_base;
+    matrix reduced_l;
+    matrix rnea_force;
+    matrix contact_schur;
+    matrix reduced;
+    matrix a_base;
+    matrix force;
+    matrix lifted;
+    matrix rhs;
+    matrix output;
+    Eigen::PartialPivLU<matrix> orientation_factor;
+    Eigen::PartialPivLU<matrix> gaa_factor;
+    Eigen::PartialPivLU<matrix> contact_factor;
+  } fused(nq, ny, nl, nf, rhs_cols);
+
+  const auto run_fused = [&] {
+    fused.rhs << hx_value, hu_value, hr_value;
+    fused.orientation_factor.compute(orientation);
+    const auto solve_euler = [&](const auto &input, matrix &output) {
+      output.bottomRows(nq) = input.bottomRows(nq);
+      output.topRows(nq).noalias() =
+          input.topRows(nq) - coupling * input.bottomRows(nq);
+      output.topRows(3).array().colwise() /= q_diag_head.array();
+      output.middleRows(3, 3) = fused.orientation_factor.solve(
+          output.middleRows(3, 3).eval());
+      output.middleRows(6, 12).array().colwise() /= q_diag_tail.array();
+    };
+    solve_euler(dyn_l_value, fused.euler_l);
+    fused.reduced_l.noalias() = lift_l_value - lift_y_value * fused.euler_l;
+    fused.gaa_factor.compute(fused.reduced_l.topLeftCorner(nq, nq));
+    fused.rnea_force = fused.gaa_factor.solve(
+        fused.reduced_l.topRightCorner(nq, nf));
+    fused.contact_schur.noalias() =
+        fused.reduced_l.bottomRightCorner(nf, nf) -
+        fused.reduced_l.bottomLeftCorner(nf, nq) * fused.rnea_force;
+    fused.contact_schur.diagonal().array() += 1e-3;
+    fused.contact_factor.compute(fused.contact_schur);
+    solve_euler(fused.rhs.topRows(ny), fused.y_base);
+    fused.reduced.noalias() =
+        fused.rhs.bottomRows(nl) - lift_y_value * fused.y_base;
+    fused.a_base = fused.gaa_factor.solve(fused.reduced.topRows(nq));
+    fused.force = fused.contact_factor.solve(
+        (fused.reduced.bottomRows(nf) -
+         fused.reduced_l.bottomLeftCorner(nf, nq) * fused.a_base)
+            .eval());
+    fused.lifted.topRows(nq).noalias() =
+        fused.a_base - fused.rnea_force * fused.force;
+    fused.lifted.bottomRows(nf) = fused.force;
+    fused.output.topRows(ny).noalias() =
+        fused.y_base - fused.euler_l * fused.lifted;
+    fused.output.bottomRows(nl) = fused.lifted;
+  };
+
+  graph(pointers);
+  run_fused();
+  REQUIRE(graph_output.isApprox(fused.output, 1e-10));
+
+  if (std::getenv("MOTO_BENCH_LIFTED_ELIMINATION")) {
+    constexpr size_t warmup = 200, iterations = 2000, rounds = 9;
+    for (size_t i = 0; i < warmup; ++i) {
+      graph(pointers);
+      run_fused();
+    }
+    const auto measure = [&](auto &&function) {
+      std::vector<double> samples;
+      samples.reserve(rounds);
+      for (size_t round = 0; round < rounds; ++round) {
+        const auto begin = std::chrono::steady_clock::now();
+        for (size_t i = 0; i < iterations; ++i) function();
+        const auto end = std::chrono::steady_clock::now();
+        samples.push_back(
+            std::chrono::duration<double, std::micro>(end - begin).count() /
+            iterations);
+      }
+      std::ranges::sort(samples);
+      return samples[samples.size() / 2];
+    };
+    const double graph_us = measure([&] { graph(pointers); });
+    const double fused_us = measure(run_fused);
+    std::cerr << "Go2-sized lifted elimination: graph=" << graph_us
+              << " us fused=" << fused_us
+              << " us ratio=" << graph_us / fused_us << "x\n";
+  }
+}
+
+TEST_CASE("MX graph entries reuse branch values and cached factors") {
+  constexpr casadi_int n = 4, cols = 2;
+  const casadi::MX a = casadi::MX::sym("entry_a", n, n);
+  const casadi::MX c = casadi::MX::sym("entry_c", n, cols);
+  const casadi::MX b = casadi::MX::sym("entry_b", n, cols);
+  const casadi::MX shared = casadi::MX::mtimes(a, c);
+  const casadi::MX first = casadi::MX::solve(a, shared);
+  const casadi::MX second = casadi::MX::solve(a, shared + b);
+  const auto kernel = compile_graph(
+      {a, c, b}, std::vector<std::vector<casadi::MX>>{{first}, {second}},
+      nullptr);
+
+  matrix av = matrix::Random(n, n);
+  av.diagonal().array() += 5.;
+  matrix cv = matrix::Random(n, cols), bv = matrix::Random(n, cols);
+  const matrix cached_a = av;
+  const matrix cached_shared = av * cv;
+  matrix first_value(n, cols), second_value(n, cols);
+  std::vector<scalar_t *> pointers{av.data(), cv.data(), bv.data(),
+                                   first_value.data(), second_value.data()};
+
+  kernel(0, pointers);
+  REQUIRE(first_value.isApprox(cv, 1e-12));
+
+  av = matrix::Identity(n, n) * 17.;
+  cv.setRandom();
+  bv.setRandom();
+  kernel(1, pointers);
+  REQUIRE(second_value.isApprox(
+      cached_a.partialPivLu().solve(cached_shared + bv), 1e-12));
+}
+
+TEST_CASE("MX graph presolve materializes branches shared only by actions") {
+  constexpr casadi_int n = 4, cols = 2;
+  const casadi::MX a = casadi::MX::sym("branch_a", n, n);
+  const casadi::MX b = casadi::MX::sym("branch_b", n, cols);
+  const casadi::MX c = casadi::MX::sym("branch_c", n, cols);
+  const casadi::MX shared = casadi::MX::mtimes(a, b);
+  const auto kernel = compile_graph(
+      {a, b, c},
+      std::vector<std::vector<casadi::MX>>{
+          {a(casadi::Slice(0, 1), casadi::Slice(0, 1))},
+          {casadi::MX::solve(a, shared)},
+          {casadi::MX::solve(a, shared + c)}},
+      nullptr);
+
+  matrix av = matrix::Random(n, n);
+  av.diagonal().array() += 5.;
+  matrix bv = matrix::Random(n, cols), cv = matrix::Random(n, cols);
+  scalar_t presolve_output = 0.;
+  matrix first(n, cols), second(n, cols);
+  std::vector<scalar_t *> pointers{av.data(), bv.data(), cv.data(),
+                                   &presolve_output, first.data(),
+                                   second.data()};
+
+  kernel(0, pointers);
+  kernel(2, pointers);
+  REQUIRE(second.isApprox(
+      av.partialPivLu().solve(av * bv + cv), 1e-12));
+}
+
+TEST_CASE("MX graph statically lowers a general sparse product") {
+  const casadi::Sparsity a_pattern = casadi::Sparsity::triplet(
+      4, 5, std::vector<casadi_int>{0, 2, 3, 1, 3},
+      std::vector<casadi_int>{0, 0, 1, 3, 4});
+  const casadi::Sparsity b_pattern = casadi::Sparsity::triplet(
+      5, 3, std::vector<casadi_int>{0, 3, 1, 4},
+      std::vector<casadi_int>{0, 0, 1, 2});
+  const casadi::MX a = casadi::MX::sym("a", a_pattern);
+  const casadi::MX b = casadi::MX::sym("b", b_pattern);
+  const casadi::MX product = casadi::MX::mtimes(a, b);
+  const auto kernel = compile_graph({a, b}, {product});
+
+  vector av = vector::Random(a_pattern.nnz());
+  vector bv = vector::Random(b_pattern.nnz());
+  vector output(product.nnz());
+  matrix a_dense = matrix::Zero(4, 5), b_dense = matrix::Zero(5, 3);
+  for (casadi_int col = 0; col < a_pattern.size2(); ++col)
+    for (casadi_int nz = a_pattern.colind(col);
+         nz < a_pattern.colind(col + 1); ++nz)
+      a_dense(a_pattern.row(nz), col) = av[nz];
+  for (casadi_int col = 0; col < b_pattern.size2(); ++col)
+    for (casadi_int nz = b_pattern.colind(col);
+         nz < b_pattern.colind(col + 1); ++nz)
+      b_dense(b_pattern.row(nz), col) = bv[nz];
+  std::vector<scalar_t *> pointers{av.data(), bv.data(), output.data()};
+  kernel(pointers);
+  const matrix expected_dense = a_dense * b_dense;
+  vector expected(product.nnz());
+  const auto output_pattern = product.sparsity();
+  for (casadi_int col = 0; col < output_pattern.size2(); ++col)
+    for (casadi_int nz = output_pattern.colind(col);
+         nz < output_pattern.colind(col + 1); ++nz)
+      expected[nz] = expected_dense(output_pattern.row(nz), col);
+  REQUIRE(output.isApprox(expected, 1e-12));
+}
+
+TEST_CASE("MX graph rejects unsupported ordinary operations") {
+  const casadi::MX input = casadi::MX::sym("input", 3, 1);
+  REQUIRE_THROWS(compile_graph({input}, {casadi::MX::sin(input)}));
 }
 
 } // namespace moto::linear_backend

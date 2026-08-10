@@ -2,6 +2,7 @@
 #include <moto/ocp/constr.hpp>
 #include <moto/ocp/cost.hpp>
 #include <moto/ocp/ineq_constr.hpp>
+#include <moto/ocp/lifted.hpp>
 #include <moto/ocp/sym.hpp>
 #include <moto/solver/soft_constr/pmm_constr.hpp>
 #include <type_cast.hpp>
@@ -159,6 +160,7 @@ void register_submodule_functional(nb::module_ &m) {
         .def_static("symbol", &sym::symbol, nb::arg("name"), nb::arg("dim") = 1, nb::arg("field") = field_t::__undefined, nb::arg("default_val") = nb::none())
         .def_static("states", &sym::states, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
         .def_static("inputs", &sym::inputs, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
+        .def_static("lifted", &sym::lifted, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
         .def_static("params", &sym::params, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none());
 
     nb::class_<generic_func, expr>(m, "func")
@@ -174,6 +176,16 @@ void register_submodule_functional(nb::module_ &m) {
         .def("enable_if_any", [](generic_func &self, const expr_inarg_list &args) { self.enable_if_any(args); }, nb::arg("args"))
         .def("add_argument", [](generic_func &self, py_var_inarg_wrapper v) { self.add_argument((sym &)v); }, nb::arg("in"))
         .def("add_arguments", [](generic_func &self, const var_inarg_list &args) { self.add_arguments(args); })
+        .def("set_analytic_jacobian",
+             [](generic_func &self, py_var_inarg_wrapper arg,
+                const cs::SX &jacobian) {
+                 self.set_analytic_jacobian((sym &)arg, jacobian);
+             }, nb::arg("arg"), nb::arg("jacobian"))
+        .def("set_analytic_hessian",
+             [](generic_func &self, py_var_inarg_wrapper arg0,
+                py_var_inarg_wrapper arg1, const cs::SX &hessian) {
+                 self.set_analytic_hessian((sym &)arg0, (sym &)arg1, hessian);
+             }, nb::arg("arg0"), nb::arg("arg1"), nb::arg("hessian"))
         .def("remap_arguments",
              [](generic_func &self, const py_remap &remap) {
                  return ready_func(self.remap_arguments(cast_remap(remap)));
@@ -204,6 +216,137 @@ void register_submodule_functional(nb::module_ &m) {
                 return std::shared_ptr<generic_constr>(self.cast_soft(type_name));
             },
             nb::arg("type_name") = "pmm_constr");
+
+    auto lifted_class = nb::class_<generic_lifted, generic_constr>(m, "lifted");
+    nb::class_<lifted_symbolic_partition>(lifted_class, "partition")
+        .def_ro("name", &lifted_symbolic_partition::name)
+        .def_ro("field", &lifted_symbolic_partition::field)
+        .def_ro("offset", &lifted_symbolic_partition::offset)
+        .def_ro("size", &lifted_symbolic_partition::size);
+    nb::class_<lifted_symbolic_block>(lifted_class, "block")
+        .def_prop_ro("mx",
+                     [](const lifted_symbolic_block &block) {
+                         return block.value;
+                     })
+        .def(
+            "param",
+            [](const lifted_symbolic_block &block,
+               const nb::handle &default_value, const std::string &name,
+               size_t dim) {
+                return block.param(
+                    nb::cast<sym::default_val_t>(default_value), name, dim);
+            },
+            nb::arg("default_val") = nb::none(), nb::arg("name") = "",
+            nb::arg("dim") = 1)
+        .def(
+            "add_diag",
+            [](const lifted_symbolic_block &block, const nb::handle &value,
+               const std::string &name, size_t dim) {
+                if (nb::isinstance<sym>(value) ||
+                    nb::hasattr(value, "__sym__"))
+                    return block.add_diag(*get_var_handle(value));
+                var parameter = block.param(
+                    nb::cast<sym::default_val_t>(value), name, dim);
+                return block.add_diag(*parameter);
+            },
+            nb::arg("parameter"), nb::arg("name") = "",
+            nb::arg("dim") = 1);
+    nb::class_<lifted_symbolic_factor>(lifted_class, "factor")
+        .def_prop_ro("matrix",
+                     [](const lifted_symbolic_factor &factor) {
+                         return factor.matrix;
+                     })
+        .def("solve", &lifted_symbolic_factor::solve,
+             nb::arg("rhs"));
+    nb::class_<lifted_symbolic_system>(lifted_class, "system")
+        .def_prop_ro("dyn_residual",
+                     [](const lifted_symbolic_system &s) { return s.dyn_residual; })
+        .def_prop_ro("lift_residual",
+                     [](const lifted_symbolic_system &s) { return s.lift_residual; })
+        .def_prop_ro("action_rhs",
+                     [](const lifted_symbolic_system &s) { return s.action_rhs; })
+        .def("jac",
+             [](const lifted_symbolic_system &system,
+                const cs::SX &equation, py_var_inarg_wrapper variable) {
+                 return system.jac(equation, (sym &)variable);
+             },
+             nb::arg("equation"), nb::arg("variable"))
+        .def("residual",
+             [](const lifted_symbolic_system &system,
+                const std::string &equation) {
+                 return system.residual(equation);
+             },
+             nb::arg("equation"))
+        .def_ro("equations", &lifted_symbolic_system::equations)
+        .def_ro("variables", &lifted_symbolic_system::variables)
+        .def("h_l", &lifted_symbolic_system::h_l)
+        .def("h_x", &lifted_symbolic_system::h_x)
+        .def("h_u", &lifted_symbolic_system::h_u)
+        .def("h", &lifted_symbolic_system::h)
+        .def("solve", &lifted_symbolic_system::solve,
+             nb::arg("matrix"), nb::arg("spd") = false);
+    nb::class_<lifted_symbolic_intermediate>(lifted_class, "intermediate")
+        .def(nb::init<std::string, cs::MX>(), nb::arg("name"),
+             nb::arg("value"))
+        .def_rw("name", &lifted_symbolic_intermediate::name)
+        .def_rw("value", &lifted_symbolic_intermediate::value);
+    nb::class_<lifted_symbolic_projection>(lifted_class, "elimination")
+        .def(nb::init<cs::MX, cs::MX, cs::MX,
+                      std::vector<lifted_symbolic_intermediate>, cs::MX>(),
+             nb::arg("response_x"), nb::arg("response_u"),
+             nb::arg("response_residual"),
+             nb::arg("intermediates"), nb::arg("response_action"))
+        .def_rw("response_x", &lifted_symbolic_projection::response_x)
+        .def_rw("response_u", &lifted_symbolic_projection::response_u)
+        .def_rw("response_residual",
+                &lifted_symbolic_projection::response_residual)
+        .def_rw("intermediates",
+                &lifted_symbolic_projection::intermediates)
+        .def_rw("response_action",
+                &lifted_symbolic_projection::response_action);
+    lifted_class
+        .def_static(
+            "create",
+            [](const std::string &name, const cs::SX &out,
+               const var_inarg_list &lifted_args, approx_order order) {
+                return std::shared_ptr<generic_lifted>(
+                    std::make_shared<implicit_lifted>(name, out, lifted_args,
+                                                      order));
+            },
+            nb::arg("name"), nb::arg("out"), nb::arg("lifted_args"),
+            nb::arg("order") = approx_order::second)
+        .def(
+            "set_elimination_graph",
+            [](generic_lifted &self, lifted_elimination_builder builder) {
+                lifted result =
+                    self.set_elimination_graph(std::move(builder));
+                return std::shared_ptr<generic_dynamics>(result);
+            },
+            nb::arg("builder"))
+        .def(
+            "add_subconstraint",
+            [](generic_dynamics &self,
+               const std::shared_ptr<generic_constr> &constraint) {
+                self.add_subconstraint(constraint);
+            },
+            nb::arg("constraint"))
+        .def_prop_ro(
+            "subconstraints",
+            [](generic_dynamics &self) {
+                return self.subconstraints();
+            })
+        .def_prop_ro(
+            "lifted_args",
+            [](generic_lifted &self) -> const std::vector<var> & {
+                return self.lifted_args();
+            },
+            nb::rv_policy::reference_internal)
+        .def_prop_ro(
+            "elimination_parameters",
+            [](generic_lifted &self) -> const std::vector<var> & {
+                return self.elimination_parameters();
+            },
+            nb::rv_policy::reference_internal);
 
     nb::class_<ineq_constr, generic_constr>(m, "ineq")
         .def_static(
@@ -282,7 +425,7 @@ void register_submodule_functional(nb::module_ &m) {
         .def_prop_ro("weight", &generic_cost::weight)
         .def_prop_ro("reference", &generic_cost::reference);
 
-    nb::class_<dense_dynamics, generic_constr>(m, "dense_dynamics")
+    nb::class_<dense_dynamics, generic_dynamics>(m, "dense_dynamics")
         .def_static(
             "create",
             [](const std::string &name, const cs::SX &out, approx_order order) {
@@ -297,7 +440,7 @@ void register_submodule_functional(nb::module_ &m) {
             nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd)
         .def("mark_shared_inputs", &dense_dynamics::mark_shared_inputs, nb::arg("shared_inputs"));
 
-    auto euler = nb::class_<semi_implicit_euler, generic_constr>(
+    auto euler = nb::class_<semi_implicit_euler, generic_dynamics>(
         m, "semi_implicit_euler");
     nb::enum_<semi_implicit_euler::state_t>(euler, "state")
         .value("pos", semi_implicit_euler::state_t::pos)

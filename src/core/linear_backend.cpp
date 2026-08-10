@@ -1,11 +1,17 @@
 #include <moto/core/linear_backend.hpp>
 
+#include "casadi_mx_graph_translator.hpp"
+#include "casadi_mx_egraph.hpp"
+
 #include <moto/core/external_function.hpp>
 #include <moto/core/sparse_matrix.hpp>
 #include <moto/utils/codegen.hpp>
 
+#include <Eigen/Cholesky>
+#include <Eigen/LU>
+
 #include <algorithm>
-#include <cstdlib>
+#include <bit>
 #include <dlfcn.h>
 #include <fstream>
 #include <iomanip>
@@ -15,7 +21,9 @@
 #include <mutex>
 #include <numeric>
 #include <sstream>
+#include <set>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace moto::linear_backend {
 namespace {
@@ -28,6 +36,364 @@ std::mutex batch_mutex;
 std::unordered_map<std::string, batch_product_kernel> batch_kernels;
 std::unordered_map<std::string, batch_condensation_kernel> condensation_kernels;
 std::unordered_map<std::string, batch_product_kernel> jacobian_product_kernels;
+std::mutex graph_mutex;
+std::unordered_map<std::string,
+                   std::weak_ptr<const detail::casadi_mx_graph_plan>>
+    graph_plans;
+std::unordered_map<std::string, std::shared_ptr<std::mutex>> graph_compile_locks;
+
+void collect_mx_solves(
+    const casadi::MX &expression,
+    std::unordered_set<const casadi::MXNode *> &visited,
+    std::vector<casadi::MX> &solves) {
+  if (!expression.get() || !visited.insert(expression.get()).second) return;
+  if (expression.op() == casadi::OP_SOLVE) solves.push_back(expression);
+  for (casadi_int i = 0; i < expression.n_dep(); ++i)
+    collect_mx_solves(expression.dep(i), visited, solves);
+}
+
+void collect_mx_products(
+    const casadi::MX &expression,
+    std::unordered_set<const casadi::MXNode *> &visited,
+    std::vector<casadi::MX> &products) {
+  if (!expression.get() || !visited.insert(expression.get()).second) return;
+  if (expression.op() == casadi::OP_MTIMES && expression.n_dep() == 3 &&
+      expression.dep(0).is_zero())
+    products.push_back(expression);
+  for (casadi_int i = 0; i < expression.n_dep(); ++i)
+    collect_mx_products(expression.dep(i), visited, products);
+}
+
+using mx_parent_map =
+    std::unordered_map<const casadi::MXNode *, std::vector<casadi::MX>>;
+
+void collect_mx_parents(const casadi::MX &expression,
+                        std::unordered_set<const casadi::MXNode *> &visited,
+                        mx_parent_map &parents) {
+  if (!expression.get() || !visited.insert(expression.get()).second) return;
+  for (casadi_int i = 0; i < expression.n_dep(); ++i) {
+    const casadi::MX dependency = expression.dep(i);
+    parents[dependency.get()].push_back(expression);
+    collect_mx_parents(dependency, visited, parents);
+  }
+}
+
+bool mx_contains_node(const casadi::MX &expression,
+                      const casadi::MXNode *target,
+                      std::unordered_set<const casadi::MXNode *> &visited) {
+  if (!expression.get()) return false;
+  if (expression.get() == target) return true;
+  if (!visited.insert(expression.get()).second) return false;
+  for (casadi_int i = 0; i < expression.n_dep(); ++i)
+    if (mx_contains_node(expression.dep(i), target, visited)) return true;
+  return false;
+}
+
+std::string mx_structural_key(
+    const casadi::MX &expression,
+    std::unordered_map<const casadi::MXNode *, std::string> &cache) {
+  if (const auto found = cache.find(expression.get()); found != cache.end())
+    return found->second;
+  std::ostringstream description;
+  description << expression.op() << ':' << expression.size1() << ':'
+              << expression.size2() << ':';
+  if (expression.is_symbolic()) description << expression.name();
+  if (expression.is_constant())
+    for (const double value : casadi::MX::evalf(expression).nonzeros())
+      description << value << ',';
+  for (const auto &[name, value] : expression.info())
+    description << name << '=' << value << ';';
+  const auto &sparsity = expression.sparsity();
+  for (const casadi_int value : sparsity.get_colind())
+    description << value << ',';
+  description << ':';
+  for (const casadi_int value : sparsity.get_row())
+    description << value << ',';
+  for (casadi_int i = 0; i < expression.n_dep(); ++i)
+    description << ':' << mx_structural_key(expression.dep(i), cache);
+  const std::string key =
+      utils::compute_md5_from_bytes(description.str());
+  cache.emplace(expression.get(), key);
+  return key;
+}
+
+std::vector<std::vector<casadi::MX>> batch_independent_mx_solves(
+    std::vector<std::vector<casadi::MX>> output_entries) {
+  struct solve_record {
+    casadi::MX representative;
+    std::vector<casadi::MX> nodes;
+    uint64_t usage = 0;
+  };
+  std::set<std::string> batched_matrix_groups;
+  std::unordered_map<const casadi::MXNode *, std::string> structural_keys;
+  for (;;) {
+    std::vector<solve_record> records;
+    std::unordered_map<std::string, size_t> record_by_key;
+    for (size_t entry = 0; entry < output_entries.size(); ++entry) {
+      std::unordered_set<const casadi::MXNode *> visited;
+      std::vector<casadi::MX> entry_solves;
+      for (const auto &output : output_entries[entry])
+        collect_mx_solves(output, visited, entry_solves);
+      for (const auto &solve : entry_solves) {
+        const std::string expression_key =
+            mx_structural_key(solve, structural_keys);
+        const auto [found, inserted] =
+            record_by_key.try_emplace(expression_key, records.size());
+        if (inserted) records.push_back({solve, {}, 0});
+        auto &record = records[found->second];
+        record.nodes.push_back(solve);
+        record.usage |= uint64_t{1} << entry;
+      }
+    }
+    struct solve_group {
+      std::string key;
+      std::vector<solve_record *> records;
+    };
+    std::vector<solve_group> groups;
+    std::unordered_map<std::string, size_t> group_by_key;
+    for (auto &record : records) {
+      const auto &solve = record.representative;
+      const auto info = solve.info();
+      const bool transpose =
+          info.contains("tr") && info.at("tr").to_bool();
+      if (transpose) continue;
+      const std::string matrix_key =
+          mx_structural_key(solve.dep(1), structural_keys);
+      const std::string group_key =
+          std::to_string(record.usage) + ':' + matrix_key;
+      if (batched_matrix_groups.contains(group_key)) continue;
+      const auto [found, inserted] =
+          group_by_key.try_emplace(group_key, groups.size());
+      if (inserted) groups.push_back({group_key, {}});
+      groups[found->second].records.push_back(&record);
+    }
+
+    bool updated = false;
+    for (auto group_it = groups.rbegin(); group_it != groups.rend();
+         ++group_it) {
+      auto &[key, group] = *group_it;
+      if (group.size() < 2) continue;
+      bool independent = true;
+      for (size_t i = 0; i < group.size() && independent; ++i)
+        for (size_t j = 0; j < group.size(); ++j) {
+          if (i == j) continue;
+          std::unordered_set<const casadi::MXNode *> dependency_visited;
+          const auto &lhs = group[i]->representative;
+          const auto &rhs = group[j]->representative;
+          if (mx_contains_node(lhs.dep(0), rhs.get(),
+                               dependency_visited) ||
+              mx_contains_node(lhs.dep(1), rhs.get(),
+                               dependency_visited)) {
+            independent = false;
+            break;
+          }
+        }
+      if (!independent) continue;
+
+      std::vector<casadi::MX> right_hand_sides;
+      right_hand_sides.reserve(group.size());
+      for (const auto *record : group)
+        right_hand_sides.push_back(record->representative.dep(0));
+      const casadi::MX batched = casadi::MX::solve(
+          group.front()->representative.dep(1),
+          casadi::MX::horzcat(right_hand_sides));
+      std::vector<casadi::MX> targets, replacements;
+      casadi_int column = 0;
+      for (const auto *record : group) {
+        const auto &solve = record->representative;
+        const casadi::MX replacement = batched(
+            casadi::Slice(),
+            casadi::Slice(column, column + solve.size2()));
+        for (const auto &node : record->nodes) {
+          targets.push_back(node);
+          replacements.push_back(replacement);
+        }
+        column += solve.size2();
+      }
+      for (auto &outputs : output_entries)
+        outputs =
+            casadi::MX::graph_substitute(outputs, targets, replacements);
+      batched_matrix_groups.insert(key);
+      updated = true;
+      break;
+    }
+    if (!updated) return output_entries;
+  }
+}
+
+std::vector<std::vector<casadi::MX>> batch_independent_mx_products(
+    std::vector<std::vector<casadi::MX>> output_entries) {
+  struct product_record {
+    casadi::MX representative;
+    std::vector<casadi::MX> nodes;
+    uint64_t usage = 0;
+  };
+  std::set<std::string> batched_left_groups;
+  std::unordered_map<const casadi::MXNode *, std::string> structural_keys;
+  for (;;) {
+    mx_parent_map parents;
+    {
+      std::unordered_set<const casadi::MXNode *> visited;
+      for (const auto &outputs : output_entries)
+        for (const auto &output : outputs)
+          collect_mx_parents(output, visited, parents);
+    }
+    std::vector<product_record> records;
+    std::unordered_map<std::string, size_t> record_by_key;
+    for (size_t entry = 0; entry < output_entries.size(); ++entry) {
+      std::unordered_set<const casadi::MXNode *> visited;
+      std::vector<casadi::MX> entry_products;
+      for (const auto &output : output_entries[entry])
+        collect_mx_products(output, visited, entry_products);
+      for (const auto &product : entry_products) {
+        const std::string expression_key =
+            mx_structural_key(product, structural_keys);
+        const auto [found, inserted] =
+            record_by_key.try_emplace(expression_key, records.size());
+        if (inserted) records.push_back({product, {}, 0});
+        auto &record = records[found->second];
+        record.nodes.push_back(product);
+        record.usage |= uint64_t{1} << entry;
+      }
+    }
+
+    struct product_group {
+      std::string key;
+      std::vector<product_record *> records;
+    };
+    std::vector<product_group> groups;
+    std::unordered_map<std::string, size_t> group_by_key;
+    for (auto &record : records) {
+      const auto &product = record.representative;
+      const std::string left_key =
+          mx_structural_key(product.dep(1), structural_keys);
+      const std::string group_key =
+          std::to_string(record.usage) + ':' + left_key;
+      if (batched_left_groups.contains(group_key)) continue;
+      const auto [found, inserted] =
+          group_by_key.try_emplace(group_key, groups.size());
+      if (inserted) groups.push_back({group_key, {}});
+      groups[found->second].records.push_back(&record);
+    }
+
+    bool updated = false;
+    for (auto group_it = groups.rbegin(); group_it != groups.rend();
+         ++group_it) {
+      auto &[key, group] = *group_it;
+      if (group.size() < 2) continue;
+      bool independent = true;
+      for (size_t i = 0; i < group.size() && independent; ++i)
+        for (size_t j = 0; j < group.size(); ++j) {
+          if (i == j) continue;
+          std::unordered_set<const casadi::MXNode *> dependency_visited;
+          if (mx_contains_node(group[i]->representative.dep(2),
+                               group[j]->representative.get(),
+                               dependency_visited)) {
+            independent = false;
+            break;
+          }
+        }
+      if (!independent) continue;
+
+      std::vector<casadi::MX> right_operands;
+      right_operands.reserve(group.size());
+      struct fma_record {
+        casadi::MX addend;
+        double product_sign = 1.;
+        std::vector<casadi::MX> parents;
+      };
+      std::vector<fma_record> fma;
+      fma.reserve(group.size());
+      bool all_fma = true;
+      for (const auto *record : group) {
+        fma_record item;
+        bool initialized = false;
+        for (const auto &node : record->nodes) {
+          const auto found = parents.find(node.get());
+          if (found == parents.end() || found->second.size() != 1) {
+            all_fma = false;
+            break;
+          }
+          const casadi::MX parent = found->second.front();
+          if (parent.op() != casadi::OP_ADD &&
+              parent.op() != casadi::OP_SUB) {
+            all_fma = false;
+            break;
+          }
+          const bool product_is_lhs = parent.dep(0).get() == node.get();
+          const bool product_is_rhs = parent.dep(1).get() == node.get();
+          if (!product_is_lhs && !product_is_rhs) {
+            all_fma = false;
+            break;
+          }
+          casadi::MX addend = product_is_lhs ? parent.dep(1) : parent.dep(0);
+          double addend_sign = 1., product_sign = 1.;
+          if (parent.op() == casadi::OP_SUB) {
+            if (product_is_lhs)
+              addend_sign = -1.;
+            else
+              product_sign = -1.;
+          }
+          if (addend_sign < 0.) addend = -addend;
+          if (!initialized) {
+            item.addend = addend;
+            item.product_sign = product_sign;
+            initialized = true;
+          } else if (item.product_sign != product_sign ||
+                     mx_structural_key(item.addend, structural_keys) !=
+                         mx_structural_key(addend, structural_keys)) {
+            all_fma = false;
+            break;
+          }
+          item.parents.push_back(parent);
+        }
+        if (!all_fma) break;
+        fma.push_back(std::move(item));
+      }
+      for (size_t i = 0; i < group.size(); ++i) {
+        casadi::MX right = group[i]->representative.dep(2);
+        if (all_fma && fma[i].product_sign < 0.) right = -right;
+        right_operands.push_back(std::move(right));
+      }
+      const casadi::MX batched_rhs = casadi::MX::horzcat(right_operands);
+      const casadi::MX batched =
+          all_fma
+              ? casadi::MX::mac(group.front()->representative.dep(1),
+                                batched_rhs,
+                                casadi::MX::horzcat([&] {
+                                  std::vector<casadi::MX> addends;
+                                  addends.reserve(fma.size());
+                                  for (const auto &item : fma)
+                                    addends.push_back(item.addend);
+                                  return addends;
+                                }()))
+              : casadi::MX::mtimes(group.front()->representative.dep(1),
+                                    batched_rhs);
+      std::vector<casadi::MX> targets, replacements;
+      casadi_int column = 0;
+      for (size_t i = 0; i < group.size(); ++i) {
+        const auto *record = group[i];
+        const auto &product = record->representative;
+        const casadi::MX replacement = batched(
+            casadi::Slice(),
+            casadi::Slice(column, column + product.size2()));
+        const auto &nodes = all_fma ? fma[i].parents : record->nodes;
+        for (const auto &node : nodes) {
+          targets.push_back(node);
+          replacements.push_back(replacement);
+        }
+        column += product.size2();
+      }
+      for (auto &outputs : output_entries)
+        outputs =
+            casadi::MX::graph_substitute(outputs, targets, replacements);
+      batched_left_groups.insert(key);
+      updated = true;
+      break;
+    }
+    if (!updated) return output_entries;
+  }
+}
 
 std::string shell_quote(const std::filesystem::path &path) {
   std::string out = "'";
@@ -126,6 +492,303 @@ void *compile_source(const std::string &source,
 }
 
 } // namespace
+
+void *detail::compile_casadi_mx_graph_source(
+    const std::string &source, const std::filesystem::path &cache_dir) {
+  return compile_source(source, cache_dir);
+}
+
+namespace {
+
+template <class Callback>
+void dispatch_graph_flags4(unsigned flags, Callback &&callback) {
+  switch (flags & 15U) {
+  case 0: callback(std::false_type{}, std::false_type{}, std::false_type{}, std::false_type{}); break;
+  case 1: callback(std::true_type{},  std::false_type{}, std::false_type{}, std::false_type{}); break;
+  case 2: callback(std::false_type{}, std::true_type{},  std::false_type{}, std::false_type{}); break;
+  case 3: callback(std::true_type{},  std::true_type{},  std::false_type{}, std::false_type{}); break;
+  case 4: callback(std::false_type{}, std::false_type{}, std::true_type{},  std::false_type{}); break;
+  case 5: callback(std::true_type{},  std::false_type{}, std::true_type{},  std::false_type{}); break;
+  case 6: callback(std::false_type{}, std::true_type{},  std::true_type{},  std::false_type{}); break;
+  case 7: callback(std::true_type{},  std::true_type{},  std::true_type{},  std::false_type{}); break;
+  case 8: callback(std::false_type{}, std::false_type{}, std::false_type{}, std::true_type{}); break;
+  case 9: callback(std::true_type{},  std::false_type{}, std::false_type{}, std::true_type{}); break;
+  case 10: callback(std::false_type{}, std::true_type{},  std::false_type{}, std::true_type{}); break;
+  case 11: callback(std::true_type{},  std::true_type{},  std::false_type{}, std::true_type{}); break;
+  case 12: callback(std::false_type{}, std::false_type{}, std::true_type{},  std::true_type{}); break;
+  case 13: callback(std::true_type{},  std::false_type{}, std::true_type{},  std::true_type{}); break;
+  case 14: callback(std::false_type{}, std::true_type{},  std::true_type{},  std::true_type{}); break;
+  case 15: callback(std::true_type{},  std::true_type{},  std::true_type{},  std::true_type{}); break;
+  }
+}
+
+template <class Callback>
+void dispatch_graph_flags3(unsigned flags, Callback &&callback) {
+  dispatch_graph_flags4(flags, [&](auto a, auto b, auto c, auto) {
+    callback(a, b, c);
+  });
+}
+
+template <bool LT, bool RT, int LA, int RA>
+void graph_pair_dd(const double *a, size_t ar, size_t ac, size_t ald,
+                   size_t ak, const double *b, size_t br, size_t bc,
+                   size_t bld, size_t bk, double *out, size_t orows,
+                   size_t oi, size_t oj, size_t n, double alpha) {
+  using CA = Eigen::Map<const matrix, LA, Eigen::OuterStride<>>;
+  using CB = Eigen::Map<const matrix, RA, Eigen::OuterStride<>>;
+  auto A = LT ? CA(a + ak, n, ac, Eigen::OuterStride<>(ald))
+              : CA(a + ak * ald, ar, n, Eigen::OuterStride<>(ald));
+  auto B = RT ? CB(b + bk * bld, br, n, Eigen::OuterStride<>(bld))
+              : CB(b + bk, n, bc, Eigen::OuterStride<>(bld));
+  Eigen::Map<matrix, Eigen::Unaligned, Eigen::OuterStride<>> O(
+      out + oi + oj * orows, LT ? ac : ar, RT ? br : bc,
+      Eigen::OuterStride<>(orows));
+  if constexpr (LT && RT) O.noalias() += alpha * A.transpose() * B.transpose();
+  else if constexpr (LT) O.noalias() += alpha * A.transpose() * B;
+  else if constexpr (RT) O.noalias() += alpha * A * B.transpose();
+  else O.noalias() += alpha * A * B;
+}
+
+template <bool Eye, bool RT, int RA>
+void graph_pair_sd(const double *a, size_t ak, const double *b, size_t br,
+                   size_t bc, size_t bld, size_t bk, double *out,
+                   size_t orows, size_t oi, size_t oj, size_t n,
+                   double alpha) {
+  using CB = Eigen::Map<const matrix, RA, Eigen::OuterStride<>>;
+  auto B = RT ? CB(b + bk * bld, br, n, Eigen::OuterStride<>(bld))
+              : CB(b + bk, n, bc, Eigen::OuterStride<>(bld));
+  Eigen::Map<matrix, Eigen::Unaligned, Eigen::OuterStride<>> O(
+      out + oi + oj * orows, n, RT ? br : bc,
+      Eigen::OuterStride<>(orows));
+  if constexpr (Eye && RT) O += alpha * B.transpose();
+  else if constexpr (Eye) O += alpha * B;
+  else if constexpr (RT)
+    O.noalias() += alpha * Eigen::Map<const Eigen::VectorXd>(a + ak, n)
+                               .asDiagonal() * B.transpose();
+  else
+    O.noalias() += alpha * Eigen::Map<const Eigen::VectorXd>(a + ak, n)
+                               .asDiagonal() * B;
+}
+
+template <bool LT, bool Eye, int LA>
+void graph_pair_ds(const double *a, size_t ar, size_t ac, size_t ald,
+                   size_t ak, const double *b, size_t bk, double *out,
+                   size_t orows, size_t oi, size_t oj, size_t n,
+                   double alpha) {
+  using CA = Eigen::Map<const matrix, LA, Eigen::OuterStride<>>;
+  auto A = LT ? CA(a + ak, n, ac, Eigen::OuterStride<>(ald))
+              : CA(a + ak * ald, ar, n, Eigen::OuterStride<>(ald));
+  Eigen::Map<matrix, Eigen::Unaligned, Eigen::OuterStride<>> O(
+      out + oi + oj * orows, LT ? ac : ar, n,
+      Eigen::OuterStride<>(orows));
+  if constexpr (LT && Eye) O += alpha * A.transpose();
+  else if constexpr (Eye) O += alpha * A;
+  else if constexpr (LT)
+    O.noalias() += alpha * A.transpose() *
+                   Eigen::Map<const Eigen::VectorXd>(b + bk, n).asDiagonal();
+  else
+    O.noalias() += alpha * A *
+                   Eigen::Map<const Eigen::VectorXd>(b + bk, n).asDiagonal();
+}
+
+template <bool LE, bool RE, int LA, int RA>
+void graph_pair_ss(const double *a, size_t ak, const double *b, size_t bk,
+                   double *out, size_t orows, size_t oi, size_t oj, size_t n,
+                   double alpha) {
+  Eigen::Map<Eigen::VectorXd, Eigen::Unaligned, Eigen::InnerStride<>> O(
+      out + oi + oj * orows, n,
+      Eigen::InnerStride<>(orows ? orows + 1 : 1));
+  if constexpr (LE && RE) O.array() += alpha;
+  else if constexpr (LE)
+    O.array() += alpha * Eigen::Map<const Eigen::VectorXd, RA>(b + bk, n).array();
+  else if constexpr (RE)
+    O.array() += alpha * Eigen::Map<const Eigen::VectorXd, LA>(a + ak, n).array();
+  else
+    O.array() += alpha * Eigen::Map<const Eigen::VectorXd, LA>(a + ak, n).array() *
+                 Eigen::Map<const Eigen::VectorXd, RA>(b + bk, n).array();
+}
+
+struct graph_factor_state {
+  struct factor {
+    Eigen::PartialPivLU<matrix> lu;
+    Eigen::LLT<matrix> llt;
+    bool spd = false;
+
+    void compute(const Eigen::Ref<const matrix> &value, bool use_spd) {
+      spd = use_spd;
+      if (spd) {
+        llt.compute(value);
+        if (llt.info() != Eigen::Success)
+          throw std::runtime_error(
+              "declared SPD graph factor is not positive definite");
+      } else {
+        lu.compute(value);
+      }
+    }
+    matrix inverse() const {
+      if (spd)
+        return llt.solve(matrix::Identity(llt.rows(), llt.cols()));
+      return lu.inverse();
+    }
+  };
+  size_t epoch = 1;
+  std::vector<size_t> factor_epoch;
+  std::vector<factor> factors;
+  explicit graph_factor_state(size_t count)
+      : factor_epoch(count), factors(count) {}
+};
+
+} // namespace
+
+namespace {
+template <int N>
+void graph_small_inverse(const double *a, double *output) {
+  using small_matrix = Eigen::Matrix<double, N, N>;
+  const Eigen::Map<const small_matrix> value(a);
+  Eigen::Map<small_matrix> inverse(output);
+  inverse = value.partialPivLu().inverse();
+}
+
+template <int N>
+void graph_small_solve(const double *a, bool transpose, const double *rhs,
+                       size_t cols, size_t rhs_leading, double *output,
+                       size_t output_leading) {
+  using small_matrix = Eigen::Matrix<double, N, N>;
+  using rhs_matrix = Eigen::Matrix<double, N, Eigen::Dynamic>;
+  const Eigen::PartialPivLU<small_matrix> factor{
+      Eigen::Map<const small_matrix>(a)};
+  const Eigen::Map<const rhs_matrix, Eigen::Unaligned,
+                   Eigen::OuterStride<>> b(
+      rhs, N, cols, Eigen::OuterStride<>(rhs_leading));
+  Eigen::Map<rhs_matrix, Eigen::Unaligned, Eigen::OuterStride<>> x(
+      output, N, cols, Eigen::OuterStride<>(output_leading));
+  if (transpose) x = factor.transpose().solve(b);
+  else x = factor.solve(b);
+}
+} // namespace
+
+extern "C" __attribute__((visibility("default"))) void
+moto_graph_small_inverse(const double *a, double *output, size_t n) {
+  if (n == 1) {
+    output[0] = 1. / a[0];
+    return;
+  }
+  if (n == 2) {
+    graph_small_inverse<2>(a, output);
+    return;
+  }
+  graph_small_inverse<3>(a, output);
+}
+
+extern "C" __attribute__((visibility("default"))) void
+moto_graph_small_solve(const double *a, bool transpose, const double *rhs,
+                       size_t n, size_t cols, size_t rhs_leading,
+                       double *output, size_t output_leading) {
+  if (n == 1) {
+    for (size_t col = 0; col < cols; ++col)
+      output[col * output_leading] = rhs[col * rhs_leading] / a[0];
+  } else if (n == 2) {
+    graph_small_solve<2>(a, transpose, rhs, cols, rhs_leading, output,
+                         output_leading);
+  } else {
+    graph_small_solve<3>(a, transpose, rhs, cols, rhs_leading, output,
+                         output_leading);
+  }
+}
+
+extern "C" __attribute__((visibility("default"))) void moto_graph_pair_dd(
+    unsigned flags, const double *a, size_t ar, size_t ac, size_t ald,
+    size_t ak, const double *b, size_t br, size_t bc, size_t bld, size_t bk,
+    double *out, size_t orows, size_t oi, size_t oj, size_t n, double alpha) {
+  dispatch_graph_flags4(flags, [&](auto lt, auto rt, auto la, auto ra) {
+    graph_pair_dd<decltype(lt)::value, decltype(rt)::value,
+                  decltype(la)::value ? Eigen::Aligned : Eigen::Unaligned,
+                  decltype(ra)::value ? Eigen::Aligned : Eigen::Unaligned>(
+        a, ar, ac, ald, ak, b, br, bc, bld, bk, out, orows, oi, oj, n,
+        alpha);
+  });
+}
+
+extern "C" __attribute__((visibility("default"))) void moto_graph_pair_sd(
+    unsigned flags, const double *a, size_t, size_t, size_t, size_t ak,
+    const double *b, size_t br, size_t bc, size_t bld, size_t bk,
+    double *out, size_t orows, size_t oi, size_t oj, size_t n,
+    double alpha) {
+  dispatch_graph_flags3(flags, [&](auto eye, auto rt, auto ra) {
+    graph_pair_sd<decltype(eye)::value, decltype(rt)::value,
+                  decltype(ra)::value ? Eigen::Aligned : Eigen::Unaligned>(
+        a, ak, b, br, bc, bld, bk, out, orows, oi, oj, n, alpha);
+  });
+}
+
+extern "C" __attribute__((visibility("default"))) void moto_graph_pair_ds(
+    unsigned flags, const double *a, size_t ar, size_t ac, size_t ald,
+    size_t ak, const double *b, size_t, size_t, size_t, size_t bk,
+    double *out, size_t orows, size_t oi, size_t oj, size_t n,
+    double alpha) {
+  dispatch_graph_flags3(flags, [&](auto lt, auto eye, auto la) {
+    graph_pair_ds<decltype(lt)::value, decltype(eye)::value,
+                  decltype(la)::value ? Eigen::Aligned : Eigen::Unaligned>(
+        a, ar, ac, ald, ak, b, bk, out, orows, oi, oj, n, alpha);
+  });
+}
+
+extern "C" __attribute__((visibility("default"))) void moto_graph_pair_ss(
+    unsigned flags, const double *a, size_t, size_t, size_t, size_t ak,
+    const double *b, size_t, size_t, size_t, size_t bk, double *out,
+    size_t orows, size_t oi, size_t oj, size_t n, double alpha) {
+  dispatch_graph_flags4(flags, [&](auto le, auto re, auto la, auto ra) {
+    graph_pair_ss<decltype(le)::value, decltype(re)::value,
+                  decltype(la)::value ? Eigen::Aligned : Eigen::Unaligned,
+                  decltype(ra)::value ? Eigen::Aligned : Eigen::Unaligned>(
+        a, ak, b, bk, out, orows, oi, oj, n, alpha);
+  });
+}
+
+extern "C" __attribute__((visibility("default"))) void *
+moto_graph_factor_state_create(size_t factors) {
+  return new graph_factor_state(factors);
+}
+
+extern "C" __attribute__((visibility("default"))) void
+moto_graph_factor_state_destroy(void *opaque) {
+  delete static_cast<graph_factor_state *>(opaque);
+}
+
+extern "C" __attribute__((visibility("default"))) void
+moto_graph_factor_next_epoch(void *opaque) {
+  ++static_cast<graph_factor_state *>(opaque)->epoch;
+}
+
+extern "C" __attribute__((visibility("default"))) void moto_graph_factor(
+    void *opaque, size_t slot, bool spd, const double *a, size_t n) {
+  auto &state = *static_cast<graph_factor_state *>(opaque);
+  if (state.factor_epoch[slot] == state.epoch) return;
+  const Eigen::Map<const matrix> value(a, n, n);
+  state.factors[slot].compute(value, spd);
+  state.factor_epoch[slot] = state.epoch;
+}
+
+extern "C" __attribute__((visibility("default"))) void moto_graph_inverse(
+    void *opaque, size_t slot, double *output, size_t n) {
+  auto &factor = static_cast<graph_factor_state *>(opaque)->factors[slot];
+  Eigen::Map<matrix> inverse(output, n, n);
+  inverse = factor.inverse();
+}
+
+extern "C" __attribute__((visibility("default"))) void moto_graph_solve(
+    void *opaque, size_t slot, bool transpose, const double *rhs, size_t n,
+    size_t cols, size_t rhs_leading, double *output,
+    size_t output_leading) {
+  auto &factor = static_cast<graph_factor_state *>(opaque)->factors[slot];
+  Eigen::Map<const matrix, Eigen::Unaligned, Eigen::OuterStride<>> b(
+      rhs, n, cols, Eigen::OuterStride<>(rhs_leading));
+  Eigen::Map<matrix, Eigen::Unaligned, Eigen::OuterStride<>> x(
+      output, n, cols, Eigen::OuterStride<>(output_leading));
+  if (factor.spd) x = factor.llt.solve(b);
+  else if (transpose) x = factor.lu.transpose().solve(b);
+  else x = factor.lu.solve(b);
+}
 
 template <int Alignment = Eigen::Unaligned>
 using const_strided_matrix_map =
@@ -482,21 +1145,22 @@ MOTO_DUMP_PAIR_WRAPPER(diag, true, overwrite)
 template <bool LhsTranspose, bool RhsTranspose,
           int LhsAlignment = Eigen::Unaligned,
           int RhsAlignment = Eigen::Unaligned>
-void pair_dense_dense(const double *a, size_t ar, size_t ac, size_t ak,
-                      const double *b, size_t br, size_t bc, size_t bk,
+void pair_dense_dense(const double *a, size_t ar, size_t ac, size_t ald,
+                      size_t ak, const double *b, size_t br, size_t bc,
+                      size_t bld, size_t bk,
                       double *out, size_t out_rows, size_t out_row,
                       size_t out_col, size_t n, double alpha) {
   const auto A = [&] {
     if constexpr (LhsTranspose)
-      return const_matrix_view<LhsAlignment>(a + ak, n, ac, ar);
+      return const_matrix_view<LhsAlignment>(a + ak, n, ac, ald);
     else
-      return const_matrix_view<LhsAlignment>(a + ak * ar, ar, n, ar);
+      return const_matrix_view<LhsAlignment>(a + ak * ald, ar, n, ald);
   }();
   const auto B = [&] {
     if constexpr (RhsTranspose)
-      return const_matrix_view<RhsAlignment>(b + bk * br, br, n, br);
+      return const_matrix_view<RhsAlignment>(b + bk * bld, br, n, bld);
     else
-      return const_matrix_view<RhsAlignment>(b + bk, n, bc, br);
+      return const_matrix_view<RhsAlignment>(b + bk, n, bc, bld);
   }();
   auto O = matrix_view(out + out_row + out_col * out_rows,
                        LhsTranspose ? ac : ar,
@@ -514,13 +1178,14 @@ void pair_dense_dense(const double *a, size_t ar, size_t ac, size_t ak,
 template <bool Eye, bool RhsTranspose, int LhsAlignment = Eigen::Unaligned,
           int RhsAlignment = Eigen::Unaligned>
 void pair_struct_dense(const double *a, size_t ak, const double *b, size_t br,
-                       size_t bc, size_t bk, double *out, size_t out_rows,
+                       size_t bc, size_t bld, size_t bk, double *out,
+                       size_t out_rows,
                        size_t out_row, size_t out_col, size_t n, double alpha) {
   const auto B = [&] {
     if constexpr (RhsTranspose)
-      return const_matrix_view<RhsAlignment>(b + bk * br, br, n, br);
+      return const_matrix_view<RhsAlignment>(b + bk * bld, br, n, bld);
     else
-      return const_matrix_view<RhsAlignment>(b + bk, n, bc, br);
+      return const_matrix_view<RhsAlignment>(b + bk, n, bc, bld);
   }();
   auto O = matrix_view(out + out_row + out_col * out_rows, n,
                        RhsTranspose ? br : bc, out_rows);
@@ -544,14 +1209,15 @@ void pair_struct_dense(const double *a, size_t ak, const double *b, size_t br,
 
 template <bool LhsTranspose, bool Eye, int LhsAlignment = Eigen::Unaligned,
           int RhsAlignment = Eigen::Unaligned>
-void pair_dense_struct(const double *a, size_t ar, size_t ac, size_t ak,
+void pair_dense_struct(const double *a, size_t ar, size_t ac, size_t ald,
+                       size_t ak,
                        const double *b, size_t bk, double *out, size_t out_rows,
                        size_t out_row, size_t out_col, size_t n, double alpha) {
   const auto A = [&] {
     if constexpr (LhsTranspose)
-      return const_matrix_view<LhsAlignment>(a + ak, n, ac, ar);
+      return const_matrix_view<LhsAlignment>(a + ak, n, ac, ald);
     else
-      return const_matrix_view<LhsAlignment>(a + ak * ar, ar, n, ar);
+      return const_matrix_view<LhsAlignment>(a + ak * ald, ar, n, ald);
   }();
   auto O = matrix_view(out + out_row + out_col * out_rows,
                        LhsTranspose ? ac : ar, n, out_rows);
@@ -595,15 +1261,17 @@ void pair_struct_struct(const double *a, size_t ak, const double *b, size_t bk,
 
 #define MOTO_PAIR_WRAPPER(name, ...)                                           \
   extern "C" __attribute__((visibility("default"))) void name(                 \
-      const double *a, size_t ar, size_t ac, size_t ak, const double *b,       \
-      size_t br, size_t bc, size_t bk, double *out, size_t out_rows,           \
+      const double *a, size_t ar, size_t ac, size_t ald, size_t ak,             \
+      const double *b, size_t br, size_t bc, size_t bld, size_t bk,            \
+      double *out, size_t out_rows,                                             \
       size_t out_row, size_t out_col, size_t n, double alpha) {                \
     __VA_ARGS__;                                                               \
   }
 #define MOTO_PAIR_DD_ONE(tag, lt, rt, suffix, la, ra)                          \
   MOTO_PAIR_WRAPPER(moto_linear_pair_dense_dense_##tag##_##suffix,             \
                     pair_dense_dense<lt, rt, la, ra>(                          \
-                        a, ar, ac, ak, b, br, bc, bk, out, out_rows, out_row, \
+                        a, ar, ac, ald, ak, b, br, bc, bld, bk, out,           \
+                        out_rows, out_row,                                      \
                         out_col, n, alpha))
 #define MOTO_PAIR_DD(tag, lt, rt)                                              \
   MOTO_PAIR_DD_ONE(tag, lt, rt, a_a, Eigen::Aligned, Eigen::Aligned)           \
@@ -619,7 +1287,8 @@ MOTO_PAIR_DD(tt, true, true)
 #define MOTO_PAIR_SD(lp, le, tag, rt, align_tag, la, ra)                       \
   MOTO_PAIR_WRAPPER(moto_linear_pair_##lp##_dense_##tag##_##align_tag,         \
                     pair_struct_dense<le, rt, la, ra>(                         \
-                        a, ak, b, br, bc, bk, out, out_rows, out_row, out_col, \
+                        a, ak, b, br, bc, bld, bk, out, out_rows, out_row,     \
+                        out_col,                                                \
                         n, alpha))
 #define MOTO_PAIR_SD_ALL(lp, le, tag, rt)                                      \
   MOTO_PAIR_SD(lp, le, tag, rt, a_a, Eigen::Aligned, Eigen::Aligned)          \
@@ -637,7 +1306,8 @@ MOTO_PAIR_SD(eye, true, t, true, x_u, Eigen::Unaligned, Eigen::Unaligned)
 #define MOTO_PAIR_DS(tag, lt, rp, re, align_tag, la, ra)                       \
   MOTO_PAIR_WRAPPER(moto_linear_pair_dense_##rp##_##tag##_##align_tag,         \
                     pair_dense_struct<lt, re, la, ra>(                         \
-                        a, ar, ac, ak, b, bk, out, out_rows, out_row, out_col, \
+                        a, ar, ac, ald, ak, b, bk, out, out_rows, out_row,     \
+                        out_col,                                                \
                         n, alpha))
 #define MOTO_PAIR_DS_ALL(tag, lt, rp, re)                                      \
   MOTO_PAIR_DS(tag, lt, rp, re, a_a, Eigen::Aligned, Eigen::Aligned)          \
@@ -971,7 +1641,8 @@ compile_batch_product(batch_product_spec spec,
     for (const auto &panel : product.sparse.panels)
       signature << static_cast<int>(panel.pattern) << ',' << panel.row_offset
                 << ',' << panel.col_offset << ',' << panel.rows << ','
-                << panel.cols << ';';
+                << panel.cols << ',' << panel.transposed << ','
+                << panel.storage_offset << ',' << panel.storage_rows << ';';
     signature << '|';
   }
   const auto key = signature.str();
@@ -1002,6 +1673,170 @@ compile_batch_product(batch_product_spec spec,
   return batch_kernels.emplace(key, kernel).first->second;
 }
 
+graph_kernel::graph_kernel(
+    std::unique_ptr<detail::casadi_mx_graph_instance> instance)
+    : instance_(std::move(instance)) {
+  if (instance_) {
+    inputs_ = detail::casadi_mx_graph_inputs(*instance_->plan);
+    outputs_ = detail::casadi_mx_graph_outputs(*instance_->plan);
+    entries_ = detail::casadi_mx_graph_entries(*instance_->plan);
+  }
+}
+graph_kernel::graph_kernel() = default;
+graph_kernel::graph_kernel(graph_kernel &&) noexcept = default;
+graph_kernel &graph_kernel::operator=(graph_kernel &&) noexcept = default;
+graph_kernel::~graph_kernel() = default;
+size_t graph_kernel::input_count() const { return inputs_; }
+size_t graph_kernel::output_count() const { return outputs_; }
+
+graph_kernel graph_kernel::instantiate(
+    std::vector<sparse_matrix> *workspace) const {
+  if (!instance_) return {};
+  return graph_kernel(std::make_unique<detail::casadi_mx_graph_instance>(
+      instance_->plan, workspace));
+}
+
+void graph_kernel::operator()(std::span<scalar_t *> pointers) const {
+  (*this)(0, pointers);
+}
+
+void graph_kernel::operator()(size_t entry,
+                              std::span<scalar_t *> pointers) const {
+  if (!instance_ || pointers.size() != pointer_count())
+    throw std::invalid_argument("invalid linear graph kernel invocation");
+  instance_->run(entry, pointers);
+}
+size_t graph_kernel::entry_count() const { return entries_; }
+
+graph_kernel compile_graph(const std::vector<casadi::MX> &inputs,
+                           const std::vector<casadi::MX> &outputs,
+                           std::vector<sparse_matrix> *workspace,
+                           const std::filesystem::path &cache_dir) {
+  return compile_graph(inputs, std::vector<std::vector<casadi::MX>>{outputs},
+                       workspace, cache_dir);
+}
+
+graph_kernel compile_graph(
+    const std::vector<casadi::MX> &inputs,
+    const std::vector<std::vector<casadi::MX>> &output_entries,
+    std::vector<sparse_matrix> *workspace,
+    const std::filesystem::path &cache_dir) {
+  return compile_graph(inputs, output_entries, {}, workspace, cache_dir);
+}
+
+graph_kernel compile_graph(
+    const std::vector<casadi::MX> &inputs,
+    const std::vector<std::vector<casadi::MX>> &output_entries,
+    std::span<const matrix_layout> input_layouts,
+    std::vector<sparse_matrix> *workspace,
+    const std::filesystem::path &cache_dir) {
+  return compile_graph({}, inputs, output_entries, input_layouts, workspace,
+                       cache_dir, {});
+}
+
+graph_kernel compile_graph(
+    std::string_view artifact_identity,
+    const std::vector<casadi::MX> &inputs,
+    const std::vector<std::vector<casadi::MX>> &output_entries,
+    std::span<const matrix_layout> input_layouts,
+    std::vector<sparse_matrix> *workspace,
+    const std::filesystem::path &cache_dir,
+    std::span<const casadi::MX> spd_factors) {
+  std::vector<casadi::MX> raw_outputs;
+  std::vector<size_t> entry_outputs;
+  for (const auto &entry : output_entries) {
+    entry_outputs.push_back(entry.size());
+    raw_outputs.insert(raw_outputs.end(), entry.begin(), entry.end());
+  }
+  if (raw_outputs.empty()) return {};
+  raw_outputs.insert(raw_outputs.end(), spd_factors.begin(),
+                     spd_factors.end());
+  std::string serialized = artifact_identity.empty()
+                               ? "casadi_mx_translator_v5:"
+                               : "casadi_mx_translator_named_v2:";
+  if (artifact_identity.empty()) {
+    const casadi::Function raw_function(
+        "moto_casadi_linear_graph_input", inputs, raw_outputs);
+    serialized += raw_function.serialize();
+  } else {
+    serialized += artifact_identity;
+    for (const auto &input : inputs)
+      serialized += ":in:" + std::to_string(input.size1()) + ',' +
+                    std::to_string(input.size2()) + ',' +
+                    std::to_string(input.nnz());
+    for (const auto &output : raw_outputs)
+      serialized += ":out:" + std::to_string(output.size1()) + ',' +
+                    std::to_string(output.size2()) + ',' +
+                    std::to_string(output.nnz());
+  }
+  for (const size_t count : entry_outputs)
+    serialized += ':' + std::to_string(count);
+  serialized += ":spd:" + std::to_string(spd_factors.size());
+  if (!spd_factors.empty())
+    serialized += casadi::Function("moto_spd_properties", inputs,
+                                   std::vector<casadi::MX>(
+                                       spd_factors.begin(),
+                                       spd_factors.end())).serialize();
+  for (const auto &layout : input_layouts) {
+    serialized += ":layout:" + std::to_string(layout.rows) + ':' +
+                  std::to_string(layout.cols);
+    for (const auto &panel : layout.panels)
+      serialized += ':' + std::to_string(static_cast<int>(panel.pattern)) +
+                    ',' + std::to_string(panel.row_offset) + ',' +
+                    std::to_string(panel.col_offset) + ',' +
+                    std::to_string(panel.rows) + ',' +
+                    std::to_string(panel.cols) + ',' +
+                    std::to_string(panel.transposed) + ',' +
+                    std::to_string(panel.storage_offset) + ',' +
+                    std::to_string(panel.storage_rows);
+  }
+  const std::string key = utils::compute_md5_from_bytes(serialized);
+  std::shared_ptr<const detail::casadi_mx_graph_plan> plan;
+  std::shared_ptr<std::mutex> key_mutex;
+  {
+    std::lock_guard lock(graph_mutex);
+    if (auto found = graph_plans.find(key); found != graph_plans.end())
+      plan = found->second.lock();
+    if (plan)
+      return graph_kernel(std::make_unique<detail::casadi_mx_graph_instance>(
+          std::move(plan), workspace));
+    auto &slot = graph_compile_locks[key];
+    if (!slot)
+      slot = std::make_shared<std::mutex>();
+    key_mutex = slot;
+  }
+  std::lock_guard key_lock(*key_mutex);
+  {
+    std::lock_guard lock(graph_mutex);
+    if (auto found = graph_plans.find(key); found != graph_plans.end())
+      plan = found->second.lock();
+  }
+  if (!plan) {
+    const casadi::Function raw_function(
+        "moto_casadi_linear_graph_input", inputs, raw_outputs);
+    auto graph_entries = output_entries;
+    if (!spd_factors.empty())
+      graph_entries.emplace_back(spd_factors.begin(), spd_factors.end());
+    const auto batched_entries = batch_independent_mx_products(
+        batch_independent_mx_solves(graph_entries));
+    const auto optimized_entries = detail::optimize_casadi_mx_graph(
+        inputs, batched_entries, input_layouts);
+    std::vector<casadi::MX> outputs;
+    for (const auto &entry : optimized_entries)
+      outputs.insert(outputs.end(), entry.begin(), entry.end());
+    outputs = casadi::MX::cse(outputs);
+    const casadi::Function function("moto_casadi_linear_graph", inputs,
+                                    outputs);
+    plan = detail::translate_casadi_mx_graph(
+        function, entry_outputs, input_layouts, cache_dir,
+        spd_factors.size());
+    (void)cache_dir;
+    std::lock_guard lock(graph_mutex);
+    graph_plans[key] = plan;
+  }
+  return graph_kernel(std::make_unique<detail::casadi_mx_graph_instance>(
+      std::move(plan), workspace));
+}
 ccs_layout analyze_sparsity(const casadi::Sparsity &sp) {
   ccs_layout output{static_cast<size_t>(sp.size1()),
                     static_cast<size_t>(sp.size2())};
@@ -1079,6 +1914,7 @@ struct cached_product {
 
 struct cached_sparse_product {
   const sparse_matrix *other;
+  const sparse_matrix *output = nullptr;
   product_op op;
   scalar_t sign;
   size_t out_rows;
@@ -1239,6 +2075,9 @@ void run_product(const ::moto::sparse_matrix &sparse, product_op op,
                  scalar_t sign, const scalar_t *other, size_t other_rows,
                  size_t other_cols, scalar_t *out, size_t out_rows,
                  size_t out_cols) {
+  if (sparse.is_empty() || !other_rows || !other_cols || !out_rows ||
+      !out_cols)
+    return;
   if (!sparse.jit_cache_)
     sparse.jit_cache_ = std::make_shared<matrix_cache>();
   auto &cache = *sparse.jit_cache_;
@@ -1362,18 +2201,139 @@ void prepare_products(std::span<const product_request> requests) {
 namespace {
 struct effective_panel {
   panel_layout panel;
-  bool transpose;
-  size_t row() const { return transpose ? panel.col_offset : panel.row_offset; }
-  size_t col() const { return transpose ? panel.row_offset : panel.col_offset; }
-  size_t rows() const { return transpose ? panel.cols : panel.rows; }
-  size_t cols() const { return transpose ? panel.rows : panel.cols; }
+  bool operation_transpose;
+  bool transpose() const { return panel.transposed != operation_transpose; }
+  size_t row() const {
+    return operation_transpose ? panel.col_offset : panel.row_offset;
+  }
+  size_t col() const {
+    return operation_transpose ? panel.row_offset : panel.col_offset;
+  }
+  size_t rows() const { return operation_transpose ? panel.cols : panel.rows; }
+  size_t cols() const { return operation_transpose ? panel.rows : panel.cols; }
+  size_t physical_rows() const {
+    return panel.transposed ? panel.cols : panel.rows;
+  }
+  size_t physical_cols() const {
+    return panel.transposed ? panel.rows : panel.cols;
+  }
+  size_t leading_rows() const {
+    return panel.storage_rows
+               ? panel.storage_rows
+               : physical_rows();
+  }
   bool structured() const { return panel.pattern != sparsity::dense; }
 };
+
+size_t panel_program_operands(panel_program_op op) {
+  return op == panel_program_op::fill ? size_t{0}
+         : op == panel_program_op::copy ? size_t{1}
+                                        : size_t{2};
+}
+
+panel_program_spec coalesce_panel_program(panel_program_spec spec) {
+  spec.validate();
+  std::vector<panel_program_instruction> regions;
+  regions.reserve(spec.instructions.size());
+  const auto contiguous = [](const panel_program_operand &tail,
+                             const panel_program_operand &next,
+                             size_t count) {
+    return tail.pointer == next.pointer &&
+           next.offset == tail.offset + count;
+  };
+  for (const auto &instruction : spec.instructions) {
+    if (regions.empty() || instruction.count != 1) {
+      regions.push_back(instruction);
+      continue;
+    }
+    auto &tail = regions.back();
+    const size_t sources = panel_program_operands(instruction.op);
+    const bool merge = tail.op == instruction.op &&
+                       tail.scalar == instruction.scalar &&
+                       (tail.count == 1 || tail.destination.stride == 1) &&
+                       contiguous(tail.destination, instruction.destination,
+                                  tail.count) &&
+                       (!sources ||
+                        ((tail.count == 1 || tail.lhs.stride == 1) &&
+                         contiguous(tail.lhs, instruction.lhs,
+                                    tail.count))) &&
+                       (sources < 2 ||
+                        ((tail.count == 1 || tail.rhs.stride == 1) &&
+                         contiguous(tail.rhs, instruction.rhs,
+                                    tail.count)));
+    if (!merge) {
+      regions.push_back(instruction);
+      continue;
+    }
+    tail.destination.stride = 1;
+    if (sources) tail.lhs.stride = 1;
+    if (sources > 1) tail.rhs.stride = 1;
+    ++tail.count;
+  }
+  spec.instructions = std::move(regions);
+  return spec;
+}
+
+void emit_panel_program_body(std::ostringstream &source,
+                             const panel_program_spec &spec) {
+  const auto address = [&](const panel_program_operand &operand,
+                           std::string_view index) {
+    std::ostringstream expression;
+    expression << "p[" << operand.pointer << "][" << operand.offset;
+    if (operand.stride)
+      expression << "+(" << index << ")*(" << operand.stride << ')';
+    expression << ']';
+    return expression.str();
+  };
+  source << std::setprecision(17);
+  for (const auto &instruction : spec.instructions) {
+    if (!instruction.count) continue;
+    const bool loop = instruction.count > 1;
+    if (loop) {
+      source << "  #pragma omp simd\n";
+      source << "  for (std::ptrdiff_t i=0; i<" << instruction.count
+             << "; ++i) {\n";
+    }
+    const std::string index = loop ? "i" : "0";
+    source << (loop ? "    " : "  ")
+           << address(instruction.destination, index) << " = ";
+    switch (instruction.op) {
+    case panel_program_op::fill:
+      source << instruction.scalar;
+      break;
+    case panel_program_op::copy:
+      if (instruction.scalar != 1.) source << instruction.scalar << '*';
+      source << address(instruction.lhs, index);
+      break;
+    case panel_program_op::add:
+    case panel_program_op::sub:
+    case panel_program_op::mul:
+    case panel_program_op::div:
+      source << address(instruction.lhs, index)
+             << (instruction.op == panel_program_op::add ? "+"
+                 : instruction.op == panel_program_op::sub ? "-"
+                 : instruction.op == panel_program_op::mul ? "*"
+                                                            : "/")
+             << address(instruction.rhs, index);
+      break;
+    }
+    source << ";\n";
+    if (loop) source << "  }\n";
+  }
+}
 
 std::string emit_sparse_product_source(const matrix_layout &lhs,
                                        const matrix_layout &rhs,
                                        bool lhs_transpose, bool rhs_transpose,
-                                       scalar_t sign, size_t out_rows) {
+                                       scalar_t sign, size_t out_rows,
+                                       const matrix_layout *sparse_output =
+                                           nullptr,
+                                       std::span<const size_t> lhs_slots = {},
+                                       std::span<const size_t> rhs_slots = {},
+                                       std::span<const size_t> output_slots =
+                                           {},
+                                       const panel_program_spec *initialization =
+                                           nullptr) {
   std::ostringstream s;
   const auto pattern_name = [](sparsity p) {
     return p == sparsity::dense  ? "dense"
@@ -1393,9 +2353,9 @@ std::string emit_sparse_product_source(const matrix_layout &lhs,
     if (!l.structured() || !r.structured()) {
       name += '_';
       if (!l.structured())
-        name += l.transpose ? 't' : 'n';
+        name += l.transpose() ? 't' : 'n';
       if (!r.structured())
-        name += r.transpose ? 't' : 'n';
+        name += r.transpose() ? 't' : 'n';
     }
     const auto view_alignment = [&](const effective_panel &p, size_t k,
                                     bool lhs) {
@@ -1404,11 +2364,11 @@ std::string emit_sparse_product_source(const matrix_layout &lhs,
       size_t offset = k;
       if (p.panel.pattern == sparsity::dense) {
         if (lhs)
-          offset = p.transpose ? k : k * p.panel.rows;
+          offset = p.transpose() ? k : k * p.leading_rows();
         else
-          offset = p.transpose ? k * p.panel.rows : k;
+          offset = p.transpose() ? k * p.leading_rows() : k;
       }
-      return alignment_tag(offset);
+      return alignment_tag(p.panel.storage_offset + offset);
     };
     name += '_';
     name += view_alignment(l, lk, true);
@@ -1417,6 +2377,8 @@ std::string emit_sparse_product_source(const matrix_layout &lhs,
     return name;
   };
   s << "#include <cstddef>\n";
+  if (sparse_output)
+    s << "extern \"C\" void moto_linear_zero(double*,std::size_t);\n";
   for (const auto &lp : lhs.panels) for (const auto &rp : rhs.panels) {
       const effective_panel l{lp, lhs_transpose}, r{rp, rhs_transpose};
       const size_t begin = std::max(l.col(), r.row());
@@ -1425,12 +2387,39 @@ std::string emit_sparse_product_source(const matrix_layout &lhs,
         continue;
       const size_t lk = begin - l.col(), rk = begin - r.row();
       s << "extern \"C\" void " << helper_name(l, r, lk, rk)
-        << "(const double*,std::size_t,std::size_t,std::size_t,const "
-           "double*,std::size_t,std::size_t,std::size_t,double*,std::size_t,"
+        << "(const double*,std::size_t,std::size_t,std::size_t,std::size_t,"
+           "const double*,std::size_t,std::size_t,std::size_t,std::size_t,"
+           "double*,std::size_t,"
            "std::size_t,std::size_t,std::size_t,double);\n";
     }
   s << "extern \"C\" __attribute__((visibility(\"default\"))) void "
     << symbol_name << "(double *const *p) {\n";
+  const auto lhs_slot = [&](size_t panel) {
+    return lhs_slots.empty() ? panel : lhs_slots[panel];
+  };
+  const auto rhs_slot = [&](size_t panel) {
+    return rhs_slots.empty() ? lhs.panels.size() + panel : rhs_slots[panel];
+  };
+  const auto output_slot = [&](size_t panel) {
+    return output_slots.empty()
+               ? lhs.panels.size() + rhs.panels.size() + panel
+               : output_slots[panel];
+  };
+  if (initialization) {
+    emit_panel_program_body(s, *initialization);
+  } else if (sparse_output) {
+    for (size_t oi = 0; oi < sparse_output->panels.size(); ++oi) {
+      const auto &panel = sparse_output->panels[oi];
+      if (panel.pattern == sparsity::eye)
+        throw std::invalid_argument(
+            "sparse product cannot write a constant eye panel");
+      const size_t storage = panel.pattern == sparsity::dense
+                                 ? panel.rows * panel.cols
+                                 : panel.rows;
+      s << "  moto_linear_zero(p[" << output_slot(oi) << "]," << storage
+        << ");\n";
+    }
+  }
   for (size_t li = 0; li < lhs.panels.size(); ++li) {
     const effective_panel l{lhs.panels[li], lhs_transpose};
     for (size_t ri = 0; ri < rhs.panels.size(); ++ri) {
@@ -1441,21 +2430,264 @@ std::string emit_sparse_product_source(const matrix_layout &lhs,
         continue;
       const size_t n = end - begin;
       const size_t lk = begin - l.col(), rk = begin - r.row();
-      const size_t rslot = lhs.panels.size() + ri;
-      const size_t oslot = lhs.panels.size() + rhs.panels.size();
+      const size_t rslot = rhs_slot(ri);
       const size_t out_row = l.row() + (l.structured() ? lk : 0);
       const size_t out_col = r.col() + (r.structured() ? rk : 0);
-      s << "  " << helper_name(l, r, lk, rk) << "(p[" << li << "],"
-        << l.panel.rows
-        << ',' << l.panel.cols << ',' << lk << ",p[" << rslot << "],"
-        << r.panel.rows << ',' << r.panel.cols << ',' << rk << ",p[" << oslot
-        << "]," << out_rows << ',' << out_row << ',' << out_col << ',' << n
+      size_t oslot = output_slot(0);
+      size_t destination_rows = out_rows;
+      size_t destination_row = out_row;
+      size_t destination_col = out_col;
+      size_t destination_offset = 0;
+      if (sparse_output) {
+        const size_t result_rows = l.structured() ? n : l.rows();
+        const size_t result_cols = r.structured() ? n : r.cols();
+        const bool diagonal_result = l.structured() && r.structured();
+        bool found = false;
+        for (size_t oi = 0; oi < sparse_output->panels.size(); ++oi) {
+          const auto &panel = sparse_output->panels[oi];
+          if (panel.pattern == sparsity::dense &&
+              panel.row_offset <= out_row && panel.col_offset <= out_col &&
+              out_row + result_rows <= panel.row_offset + panel.rows &&
+              out_col + result_cols <= panel.col_offset + panel.cols) {
+            oslot = output_slot(oi);
+            destination_rows = panel.rows;
+            destination_row = out_row - panel.row_offset;
+            destination_col = out_col - panel.col_offset;
+            found = true;
+            break;
+          }
+          if (panel.pattern == sparsity::diag && diagonal_result &&
+              panel.row_offset <= out_row && panel.col_offset <= out_col &&
+              out_row - panel.row_offset == out_col - panel.col_offset &&
+              out_row + n <= panel.row_offset + panel.rows &&
+              out_col + n <= panel.col_offset + panel.cols) {
+            oslot = output_slot(oi);
+            destination_offset = out_row - panel.row_offset;
+            destination_rows = 0;
+            destination_row = destination_col = 0;
+            found = true;
+            break;
+          }
+        }
+        if (!found)
+          throw std::invalid_argument(
+              "sparse product contribution is not covered by one output panel");
+      }
+      s << "  " << helper_name(l, r, lk, rk) << "(p[" << lhs_slot(li)
+        << "]+"
+        << l.panel.storage_offset << ',' << l.physical_rows()
+        << ',' << l.physical_cols() << ',' << l.leading_rows() << ',' << lk
+        << ",p[" << rslot << "]+"
+        << r.panel.storage_offset << ',' << r.physical_rows() << ','
+        << r.physical_cols() << ',' << r.leading_rows() << ',' << rk << ",p["
+        << oslot
+        << "]+" << destination_offset << ',' << destination_rows << ','
+        << destination_row << ',' << destination_col << ',' << n
         << ',' << sign << ");\n";
     }
   }
   return s.str() + "}\n";
 }
 } // namespace
+
+panel_program_spec coalesce_panel_program_spec(panel_program_spec spec) {
+  return coalesce_panel_program(std::move(spec));
+}
+
+batch_product_kernel compile_sparse_product(
+    matrix_layout lhs, matrix_layout rhs, product_op op, scalar_t sign,
+    matrix_layout output, const std::filesystem::path &cache_dir) {
+  const bool transpose = op == product_op::transpose_times ||
+                         op == product_op::right_transpose_times;
+  const bool swap = op == product_op::right_times ||
+                    op == product_op::right_transpose_times;
+  if (swap)
+    std::swap(lhs, rhs);
+  const size_t rows = transpose ? lhs.cols : lhs.rows;
+  const size_t cols = rhs.cols;
+  if (rows != output.rows || cols != output.cols)
+    throw std::invalid_argument("sparse product output shape mismatch");
+  const std::string source = emit_sparse_product_source(
+      lhs, rhs, transpose, false, sign, rows, &output);
+  auto function = reinterpret_cast<batch_product_kernel::function_type>(
+      compile_source(source, cache_dir));
+  return batch_product_kernel(lhs.panels.size() + rhs.panels.size() +
+                                  output.panels.size(),
+                              function);
+}
+
+batch_product_kernel compile_sparse_product(
+    const spmm_analysis &analysis, scalar_t sign,
+    const std::filesystem::path &cache_dir) {
+  const auto expected = analyze_spmm(analysis.lhs, analysis.rhs);
+  if (analysis.output_pattern != expected.output_pattern ||
+      analysis.output_layout != expected.output_layout ||
+      analysis.products != expected.products)
+    throw std::invalid_argument("inconsistent SpMM analysis");
+  const std::string source = emit_sparse_product_source(
+      analysis.lhs.layout, analysis.rhs.layout, analysis.lhs.transpose,
+      analysis.rhs.transpose, sign, analysis.output_layout.rows,
+      &analysis.output_layout);
+  auto function = reinterpret_cast<batch_product_kernel::function_type>(
+      compile_source(source, cache_dir));
+  return batch_product_kernel(analysis.lhs.layout.panels.size() +
+                                  analysis.rhs.layout.panels.size() +
+                                  analysis.output_layout.panels.size(),
+                              function);
+}
+
+batch_product_kernel compile_indexed_sparse_product(
+    matrix_layout lhs, matrix_layout rhs, product_op op, scalar_t sign,
+    matrix_layout output, size_t pointer_count,
+    std::span<const size_t> lhs_slots, std::span<const size_t> rhs_slots,
+    std::span<const size_t> output_slots,
+    const std::filesystem::path &cache_dir) {
+  if (lhs_slots.size() != lhs.panels.size() ||
+      rhs_slots.size() != rhs.panels.size() ||
+      output_slots.size() != output.panels.size())
+    throw std::invalid_argument("indexed sparse product slot mismatch");
+  const auto valid = [&](std::span<const size_t> slots) {
+    return std::ranges::all_of(slots,
+                               [&](size_t slot) { return slot < pointer_count; });
+  };
+  if (!valid(lhs_slots) || !valid(rhs_slots) || !valid(output_slots))
+    throw std::invalid_argument("indexed sparse product slot out of range");
+  const bool transpose = op == product_op::transpose_times ||
+                         op == product_op::right_transpose_times;
+  const bool swap = op == product_op::right_times ||
+                    op == product_op::right_transpose_times;
+  std::vector<size_t> left_slots(lhs_slots.begin(), lhs_slots.end());
+  std::vector<size_t> right_slots(rhs_slots.begin(), rhs_slots.end());
+  if (swap) {
+    std::swap(lhs, rhs);
+    std::swap(left_slots, right_slots);
+  }
+  const size_t rows = transpose ? lhs.cols : lhs.rows;
+  const size_t cols = rhs.cols;
+  if (rows != output.rows || cols != output.cols)
+    throw std::invalid_argument("indexed sparse product output shape mismatch");
+  const std::string source = emit_sparse_product_source(
+      lhs, rhs, transpose, false, sign, rows, &output, left_slots,
+      right_slots, output_slots);
+  auto function = reinterpret_cast<batch_product_kernel::function_type>(
+      compile_source(source, cache_dir));
+  return batch_product_kernel(pointer_count, function);
+}
+
+batch_product_kernel compile_indexed_sparse_product(
+    const spmm_analysis &analysis, scalar_t sign, size_t pointer_count,
+    std::span<const size_t> lhs_slots, std::span<const size_t> rhs_slots,
+    std::span<const size_t> output_slots,
+    const std::filesystem::path &cache_dir) {
+  const auto expected = analyze_spmm(analysis.lhs, analysis.rhs);
+  if (analysis.output_pattern != expected.output_pattern ||
+      analysis.output_layout != expected.output_layout ||
+      analysis.products != expected.products)
+    throw std::invalid_argument("inconsistent indexed SpMM analysis");
+  if (lhs_slots.size() != analysis.lhs.layout.panels.size() ||
+      rhs_slots.size() != analysis.rhs.layout.panels.size() ||
+      output_slots.size() != analysis.output_layout.panels.size())
+    throw std::invalid_argument("indexed analyzed SpMM slot mismatch");
+  const auto valid = [&](std::span<const size_t> slots) {
+    return std::ranges::all_of(slots,
+                               [&](size_t slot) { return slot < pointer_count; });
+  };
+  if (!valid(lhs_slots) || !valid(rhs_slots) || !valid(output_slots))
+    throw std::invalid_argument("indexed analyzed SpMM slot out of range");
+  const std::string source = emit_sparse_product_source(
+      analysis.lhs.layout, analysis.rhs.layout, analysis.lhs.transpose,
+      analysis.rhs.transpose, sign, analysis.output_layout.rows,
+      &analysis.output_layout, lhs_slots, rhs_slots, output_slots);
+  auto function = reinterpret_cast<batch_product_kernel::function_type>(
+      compile_source(source, cache_dir));
+  return batch_product_kernel(pointer_count, function);
+}
+
+batch_product_kernel compile_indexed_sparse_product_lazy(
+    matrix_layout lhs, matrix_layout rhs, product_op op, scalar_t sign,
+    matrix_layout output, size_t pointer_count,
+    std::span<const size_t> lhs_slots, std::span<const size_t> rhs_slots,
+    std::span<const size_t> output_slots,
+    panel_program_spec initialization,
+    const std::filesystem::path &cache_dir) {
+  if (lhs_slots.size() != lhs.panels.size() ||
+      rhs_slots.size() != rhs.panels.size() ||
+      output_slots.size() != output.panels.size())
+    throw std::invalid_argument("indexed lazy product slot mismatch");
+  const auto valid = [&](std::span<const size_t> slots) {
+    return std::ranges::all_of(slots,
+                               [&](size_t slot) { return slot < pointer_count; });
+  };
+  if (!valid(lhs_slots) || !valid(rhs_slots) || !valid(output_slots) ||
+      initialization.pointers != pointer_count)
+    throw std::invalid_argument("indexed lazy product slot out of range");
+  initialization = coalesce_panel_program(std::move(initialization));
+  const bool transpose = op == product_op::transpose_times ||
+                         op == product_op::right_transpose_times;
+  const bool swap = op == product_op::right_times ||
+                    op == product_op::right_transpose_times;
+  std::vector<size_t> left_slots(lhs_slots.begin(), lhs_slots.end());
+  std::vector<size_t> right_slots(rhs_slots.begin(), rhs_slots.end());
+  if (swap) {
+    std::swap(lhs, rhs);
+    std::swap(left_slots, right_slots);
+  }
+  const size_t rows = transpose ? lhs.cols : lhs.rows;
+  const size_t cols = rhs.cols;
+  if (rows != output.rows || cols != output.cols)
+    throw std::invalid_argument("indexed lazy product output shape mismatch");
+  const std::string source = emit_sparse_product_source(
+      lhs, rhs, transpose, false, sign, rows, &output, left_slots,
+      right_slots, output_slots, &initialization);
+  auto function = reinterpret_cast<batch_product_kernel::function_type>(
+      compile_source(source, cache_dir));
+  return batch_product_kernel(pointer_count, function);
+}
+
+void panel_program_spec::validate() const {
+  const auto validate_operand = [&](const panel_program_operand &operand,
+                                    bool optional) {
+    if (operand.pointer == panel_program_operand::invalid) {
+      if (!optional)
+        throw std::invalid_argument("missing panel-program operand");
+      return;
+    }
+    if (operand.pointer >= pointers)
+      throw std::invalid_argument("panel-program pointer is out of range");
+  };
+  for (const auto &instruction : instructions) {
+    if (!instruction.count) continue;
+    validate_operand(instruction.destination, false);
+    const bool fill = instruction.op == panel_program_op::fill;
+    validate_operand(instruction.lhs, fill);
+    const bool binary = instruction.op == panel_program_op::add ||
+                        instruction.op == panel_program_op::sub ||
+                        instruction.op == panel_program_op::mul ||
+                        instruction.op == panel_program_op::div;
+    validate_operand(instruction.rhs, !binary);
+  }
+}
+
+void panel_program_kernel::operator()(
+    std::span<scalar_t *> pointers) const {
+  if (!function_ || pointers.size() < pointers_)
+    throw std::invalid_argument("invalid panel-program invocation");
+  function_(pointers.data());
+}
+
+panel_program_kernel compile_panel_program(
+    panel_program_spec spec, const std::filesystem::path &cache_dir) {
+  spec = coalesce_panel_program(std::move(spec));
+  std::ostringstream source;
+  source << "#include <cstddef>\n"
+         << "extern \"C\" void " << symbol_name
+         << "(double* const* p) {\n";
+  emit_panel_program_body(source, spec);
+  source << "}\n";
+  auto function = reinterpret_cast<panel_program_kernel::function_type>(
+      compile_source(source.str(), cache_dir));
+  return panel_program_kernel(spec.pointers, function);
+}
 
 void run_sparse_product(const sparse_matrix &sparse, const sparse_matrix &other,
                         product_op op, scalar_t sign, scalar_t *out,
@@ -1464,7 +2696,8 @@ void run_sparse_product(const sparse_matrix &sparse, const sparse_matrix &other,
     sparse.jit_cache_ = std::make_shared<matrix_cache>();
   auto &cache = *sparse.jit_cache_;
   const auto matches = [&](const auto &entry) {
-    return entry.other == &other && entry.op == op && entry.sign == sign &&
+    return entry.other == &other && entry.output == nullptr &&
+           entry.op == op && entry.sign == sign &&
            entry.out_rows == out_rows && entry.out_cols == out_cols;
   };
   if (auto found = std::ranges::find_if(cache.sparse_products, matches);
@@ -1494,8 +2727,66 @@ void run_sparse_product(const sparse_matrix &sparse, const sparse_matrix &other,
   batch_product_kernel kernel(pointers.size(), function);
   if (out)
     kernel(pointers);
-  cache.sparse_products.push_back({&other, op, sign, out_rows, out_cols,
+  cache.sparse_products.push_back({&other, nullptr, op, sign, out_rows, out_cols,
                                    std::move(kernel), std::move(pointers)});
+}
+
+void run_sparse_product(const sparse_matrix &sparse,
+                        const sparse_matrix &other, product_op op,
+                        scalar_t sign, sparse_matrix &out) {
+  if (sparse.is_empty() || other.is_empty() || out.is_empty()) {
+    out.setZero();
+    return;
+  }
+  if (!sparse.jit_cache_)
+    sparse.jit_cache_ = std::make_shared<matrix_cache>();
+  auto &cache = *sparse.jit_cache_;
+  const auto matches = [&](const auto &entry) {
+    return entry.other == &other && entry.output == &out && entry.op == op &&
+           entry.sign == sign && entry.out_rows == out.rows() &&
+           entry.out_cols == out.cols();
+  };
+  if (auto found = std::ranges::find_if(cache.sparse_products, matches);
+      found != cache.sparse_products.end()) {
+    found->kernel(found->pointers);
+    return;
+  }
+  std::lock_guard lock(cache.mutex);
+  if (auto found = std::ranges::find_if(cache.sparse_products, matches);
+      found != cache.sparse_products.end()) {
+    found->kernel(found->pointers);
+    return;
+  }
+
+  const bool transpose = op == product_op::transpose_times ||
+                         op == product_op::right_transpose_times;
+  const bool swap = op == product_op::right_times ||
+                    op == product_op::right_transpose_times;
+  const sparse_matrix &lhs_matrix = swap ? other : sparse;
+  const sparse_matrix &rhs_matrix = swap ? sparse : other;
+  const auto lhs = describe(lhs_matrix);
+  const auto rhs = describe(rhs_matrix);
+  const auto output = describe(out);
+  const size_t product_rows = transpose ? lhs.cols : lhs.rows;
+  const size_t product_cols = rhs.cols;
+  if (product_rows != out.rows() || product_cols != out.cols())
+    throw std::invalid_argument("sparse product output shape mismatch");
+
+  auto pointers = panel_pointers(lhs_matrix);
+  auto rhs_pointers = panel_pointers(rhs_matrix);
+  auto output_pointers = panel_pointers(out);
+  pointers.insert(pointers.end(), rhs_pointers.begin(), rhs_pointers.end());
+  pointers.insert(pointers.end(), output_pointers.begin(),
+                  output_pointers.end());
+  const auto source = emit_sparse_product_source(
+      lhs, rhs, transpose, false, sign, out.rows(), &output);
+  auto function = reinterpret_cast<batch_product_kernel::function_type>(
+      compile_source(source, "gen/linear_backend"));
+  batch_product_kernel kernel(pointers.size(), function);
+  kernel(pointers);
+  cache.sparse_products.push_back({&other, &out, op, sign, out.rows(),
+                                   out.cols(), std::move(kernel),
+                                   std::move(pointers)});
 }
 
 void prepare_sparse_product(const sparse_matrix &sparse,
@@ -1504,6 +2795,17 @@ void prepare_sparse_product(const sparse_matrix &sparse,
   if (sparse.is_empty() || other.is_empty() || !out_rows || !out_cols)
     return;
   run_sparse_product(sparse, other, op, sign, nullptr, out_rows, out_cols);
+}
+
+void prepare_sparse_product(const sparse_matrix &sparse,
+                            const sparse_matrix &other, product_op op,
+                            scalar_t sign, sparse_matrix &out) {
+  if (sparse.is_empty() || other.is_empty() || out.is_empty())
+    return;
+  // Compiling executes once because the sparse-output kernel also performs
+  // deterministic zeroing. Graph construction calls this only after all
+  // source panels have valid storage.
+  run_sparse_product(sparse, other, op, sign, out);
 }
 
 void run_dense_write(const sparse_matrix &sparse, scalar_t *out,

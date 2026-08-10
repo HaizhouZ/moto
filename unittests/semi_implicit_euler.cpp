@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
 #include <moto/ocp/dynamics/semi_implicit_euler.hpp>
@@ -13,6 +14,20 @@
 
 namespace moto {
 namespace {
+
+class mock_lifted final : public generic_lifted {
+public:
+  using generic_lifted::generic_lifted;
+  void compute_project_jacobians(func_approx_data &) const override {}
+  void compute_project_residual(func_approx_data &) const override {}
+  void apply_lifted_jacobian_inverse_transpose(
+      func_approx_data &, vector_ref v, vector_ref dst) const override {
+    dst = v;
+  }
+
+protected:
+  clone_ptr clone() const override { return new mock_lifted(*this); }
+};
 
 struct fixture {
   var q, qn, v, vn, u;
@@ -72,8 +87,244 @@ struct fixture {
 
 } // namespace
 
+TEST_CASE("generic lifted groups declare arbitrary primal lifted arguments") {
+  auto lifted_input = sym::lifted("generic_lifted_l", 2);
+  auto free_input = sym::inputs("generic_lifted_u", 1);
+  const cs::SX &sl = lifted_input, &su = free_input;
+  const cs::SX residual = sl + cs::SX::vertcat({su, 2. * su});
+  auto group = std::make_shared<mock_lifted>(
+      "generic_lifted_group", residual, approx_order::first, __lift);
+  group->mark_lifted({lifted_input});
+
+  auto problem = ocp::create();
+  problem->add(*group);
+  problem->wait_until_ready();
+
+  REQUIRE(group->lifted_tdim() == 2);
+  REQUIRE(group->lifted_args().size() == 1);
+  REQUIRE(group->is_lifted(lifted_input));
+  REQUIRE_FALSE(group->is_lifted(free_input));
+
+  auto remapped_lifted = sym::lifted("generic_lifted_l_remapped", 2);
+  auto remapped_handle = group->remap_arguments(
+      {{lifted_input, remapped_lifted}});
+  const auto *remapped = dynamic_cast<const mock_lifted *>(
+      remapped_handle.get());
+  REQUIRE(remapped != nullptr);
+  REQUIRE(remapped->is_lifted(remapped_lifted));
+  REQUIRE_FALSE(remapped->is_lifted(lifted_input));
+
+  auto invalid_lifted = sym::lifted("generic_lifted_invalid", 1);
+  const cs::SX &si = invalid_lifted;
+  auto invalid = std::make_shared<mock_lifted>(
+      "generic_lifted_non_square", cs::SX::vertcat({si, si}),
+      approx_order::first, __lift);
+  invalid->mark_lifted({invalid_lifted});
+  auto invalid_problem = ocp::create();
+  REQUIRE_THROWS_WITH(
+      invalid_problem->add(*invalid),
+      Catch::Matchers::ContainsSubstring("requires a square lifted Jacobian"));
+}
+
+TEST_CASE("lifted MX elimination graph preserves zero blocks and parameters") {
+  auto [x, y] = sym::states("lifted_graph_x", 2);
+  auto u = sym::inputs("lifted_graph_u", 2);
+  auto l = sym::lifted("lifted_graph_l", 2);
+  var regularization;
+  const cs::SX &sx = x, &sy = y, &su = u, &sl = l;
+  const cs::SX dynamics_equation = sy - sx - sl;
+  const cs::SX group_equation = sy - su;
+
+  dynamics dyn = std::make_shared<semi_implicit_euler>(
+      "lifted_graph_dynamics", dynamics_equation,
+      semi_implicit_euler::state_t::pos, approx_order::first);
+  const dynamics source = dyn;
+  auto group = std::make_shared<implicit_lifted>(
+      "lifted_graph_constraint", group_equation,
+      var_inarg_list{l}, approx_order::first);
+
+  bool saw_shaped_zero = false;
+  dyn->add_subconstraint(group);
+  dyn = dyn->set_elimination_graph(
+      [&](const lifted_symbolic_system &system) {
+        const auto dyn_l = system.jac(dynamics_equation, *l);
+        const auto dyn_l_again = system.jac(dynamics_equation, *l);
+        const auto dyn_y = system.jac(dynamics_equation, *y);
+        const auto lift_y = system.jac(group_equation, *y);
+        const auto lift_l = system.jac(group_equation, *l);
+        saw_shaped_zero = system.lift_l.size1() == 2 &&
+                          system.lift_l.size2() == 2 &&
+                          system.lift_l.nnz() == 0 &&
+                          lift_l.value.nnz() == 0 &&
+                          dyn_l_again.value.sparsity() ==
+                              dyn_l.value.sparsity() &&
+                          system.residual("lifted_graph_constraint").size1() ==
+                              2;
+        regularization = lift_l.param(1e-4);
+        const cs::MX regularized_lift_l =
+            lift_l.add_diag(*regularization);
+        const cs::MX h_l = cs::MX::vertcat(std::vector<cs::MX>{
+            cs::MX::horzcat(
+                std::vector<cs::MX>{dyn_y.value, dyn_l.value}),
+            cs::MX::horzcat(
+                std::vector<cs::MX>{lift_y.value, regularized_lift_l})});
+        const auto factor = system.solve(h_l);
+        const auto solve = [&](const cs::MX &rhs) {
+          return factor.solve(rhs);
+        };
+        return lifted_symbolic_projection{
+            .response_x = solve(system.h_x()),
+            .response_u = solve(system.h_u()),
+            .response_residual = solve(system.h()),
+            .intermediates = {{"regularized_lift_l", regularized_lift_l}},
+            .response_action = solve(system.action_rhs),
+        };
+      });
+
+  REQUIRE(dyn.get() != source.get());
+  REQUIRE_FALSE(source->has_elimination_graph());
+  REQUIRE(dyn->has_elimination_graph());
+
+  auto problem = ocp::create();
+  problem->add(*dyn);
+  problem->wait_until_ready();
+
+  REQUIRE(problem->contains(*group));
+  REQUIRE(dyn->subconstraints().size() == 1);
+  REQUIRE(dyn->owns_subconstraint(*group));
+  REQUIRE(saw_shaped_zero);
+  REQUIRE(regularization);
+  REQUIRE(regularization->name() ==
+          "lifted_graph_constraint_lifted_graph_l_regularization");
+  REQUIRE(regularization->field() == __p);
+  REQUIRE(problem->contains(*regularization));
+  REQUIRE_FALSE(dyn->has_arg(*regularization));
+  REQUIRE(dyn->elimination_parameters().size() == 1);
+  const auto &profile = problem->linear_profile();
+  const auto fine_binding = std::ranges::find_if(
+      profile.lifted_program->input_bindings,
+      [&](const lifted_graph_input_binding &binding) {
+          return binding.equation_uid == dyn->uid() &&
+                 binding.variable_uid == l->uid();
+      });
+  REQUIRE(fine_binding != profile.lifted_program->input_bindings.end());
+  REQUIRE(std::ranges::count_if(
+              profile.lifted_program->input_bindings,
+              [&](const lifted_graph_input_binding &binding) {
+                  return binding.equation_uid == dyn->uid() &&
+                         binding.variable_uid == l->uid();
+              }) == 1);
+  REQUIRE_FALSE(fine_binding->panels.empty());
+  REQUIRE_FALSE(profile.get(linear_target::lifted_projection, __y, __u)
+                    .empty());
+  REQUIRE_FALSE(profile.get(linear_target::lifted_projection, __l, __x)
+                    .empty());
+  REQUIRE(profile.lifted_intermediates.size() == 1);
+  const auto &intermediate = profile.lifted_intermediates.front();
+  REQUIRE(intermediate.name == "regularized_lift_l");
+  REQUIRE(intermediate.rows == 2);
+  REQUIRE(intermediate.cols == 2);
+  REQUIRE(intermediate.layout.panels.size() == 1);
+  REQUIRE(intermediate.layout.panels.front().pattern == sparsity::diag);
+  node_data runtime(problem);
+  REQUIRE(runtime.sym_val().get(regularization)(0) == 1e-4);
+  REQUIRE(runtime.data(dynamics(dyn))[*regularization](0) == 1e-4);
+  REQUIRE(runtime.data(lifted(group))[*regularization](0) == 1e-4);
+  runtime.sym_val().get(x) << 0.2, -0.3;
+  runtime.sym_val().get(y) << 0.5, 0.7;
+  runtime.sym_val().get(u) << -0.4, 0.6;
+  runtime.sym_val().get(l) << 0.1, -0.2;
+  runtime.update_approximation(node_data::update_mode::eval_all);
+  auto &dyn_data = runtime.data(dynamics(dyn));
+  dyn->compute_project_derivatives(dyn_data);
+  auto &projected = dyn_data.as<generic_dynamics::approx_data>();
+  matrix pivot(4, 4), rhs(4, 5);
+  pivot << runtime.dense().approx_[__dyn].jac_[__y].dense(),
+      runtime.dense().approx_[__dyn].jac_[__l].dense(),
+      runtime.dense().approx_[__lift].jac_[__y].dense(),
+      runtime.dense().approx_[__lift].jac_[__l].dense() +
+          1e-4 * matrix::Identity(2, 2);
+  rhs << runtime.dense().approx_[__dyn].jac_[__x].dense(),
+      runtime.dense().approx_[__dyn].jac_[__u].dense(),
+      runtime.dense().approx_[__dyn].v_,
+      runtime.dense().approx_[__lift].jac_[__x].dense(),
+      runtime.dense().approx_[__lift].jac_[__u].dense(),
+      runtime.dense().approx_[__lift].v_;
+  const matrix expected = pivot.fullPivLu().solve(rhs);
+  REQUIRE(runtime.dense().proj_f_x().dense().isApprox(
+      expected.topLeftCorner(2, 2), 1e-9));
+  REQUIRE(runtime.dense().proj_f_u().dense().isApprox(
+      expected.block(0, 2, 2, 2), 1e-9));
+  REQUIRE(runtime.dense().proj_f_res().isApprox(expected.block(0, 4, 2, 1),
+                                                1e-9));
+  REQUIRE(projected.proj_l_x_.dense().isApprox(
+      expected.bottomLeftCorner(2, 2), 1e-9));
+  REQUIRE(projected.proj_l_u_.dense().isApprox(
+      expected.block(2, 2, 2, 2), 1e-9));
+  REQUIRE(projected.proj_l_res_.isApprox(expected.block(2, 4, 2, 1),
+                                         1e-10));
+  matrix action_rhs = matrix::Random(4, 2), action, transpose;
+  dyn->solve_stage_lifted_system(dyn_data, action_rhs, action, false);
+  dyn->solve_stage_lifted_system(dyn_data, action_rhs, transpose, true);
+  REQUIRE(action.isApprox(pivot.fullPivLu().solve(action_rhs), 1e-10));
+  REQUIRE(transpose.isApprox(
+      pivot.transpose().fullPivLu().solve(action_rhs), 1e-10));
+}
+
+TEST_CASE("lifted graph artifact identity includes elimination algebra") {
+  auto [x, y] = sym::states("lifted_identity_x", 2);
+  auto u = sym::inputs("lifted_identity_u", 2);
+  auto l = sym::lifted("lifted_identity_l", 2);
+  const cs::SX &sx = x, &sy = y, &su = u, &sl = l;
+  dynamics source = std::make_shared<semi_implicit_euler>(
+      "lifted_identity_dynamics", sy - sx - sl,
+      semi_implicit_euler::state_t::pos, approx_order::first);
+  auto constraint = std::make_shared<implicit_lifted>(
+      "lifted_identity_constraint", sy - su, var_inarg_list{l},
+      approx_order::first);
+  source->add_subconstraint(constraint);
+
+  const auto make_problem = [&](scalar_t response_scale) {
+    dynamics generated = source->set_elimination_graph(
+        [response_scale](const lifted_symbolic_system &system) {
+          const auto factor = system.solve(system.h_l());
+          return lifted_symbolic_projection{
+              .response_x = response_scale * factor.solve(system.h_x()),
+              .response_u = factor.solve(system.h_u()),
+              .response_residual = factor.solve(system.h()),
+              .response_action = factor.solve(system.action_rhs),
+          };
+        });
+    auto problem = ocp::create();
+    problem->add(*generated);
+    problem->wait_until_ready();
+    return problem;
+  };
+
+  const auto first = make_problem(1.);
+  const auto equivalent = make_problem(1.);
+  const auto different = make_problem(2.);
+  const auto &first_identity =
+      first->linear_profile().lifted_program->artifact_identity;
+  REQUIRE_FALSE(first_identity.empty());
+  REQUIRE(equivalent->linear_profile().lifted_program->artifact_identity ==
+          first_identity);
+  REQUIRE(different->linear_profile().lifted_program->artifact_identity !=
+          first_identity);
+}
+
 TEST_CASE("semi-implicit projections match dense dynamics") {
   fixture f;
+  for (const dynamics &dyn : {f.semi, f.dense}) {
+    const auto *group = dynamic_cast<const generic_lifted *>(dyn.get());
+    REQUIRE(group != nullptr);
+    REQUIRE(group->lifted_tdim() == 12);
+    REQUIRE(group->lifted_args().size() == 2);
+    for (const sym &arg : group->lifted_args()) {
+      REQUIRE(arg.field() == __y);
+      REQUIRE(group->is_lifted(arg));
+    }
+  }
   const auto &semi_approx = f.semi_data->data(f.semi).as<
       semi_implicit_euler::approx_data>();
   INFO("inverse error = " <<

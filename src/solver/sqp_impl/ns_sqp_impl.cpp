@@ -190,6 +190,10 @@ ns_sqp::kkt_info ns_sqp::initialize(storage_type &graph) {
             cur->prepare_linear_plan();
             cur->prepare_linear_backend();
         });
+        std::vector<ns_riccati_data *> nsp_stages;
+        nsp_stages.reserve(graph.nodes().size());
+        for (data *cur : graph.nodes()) nsp_stages.push_back(cur);
+        riccati_solver_.prepare_ocp_linear_graph(nsp_stages);
         solver::for_each(solver::par, graph, [this](data *cur) {
             cur->update_approximation(node_data::update_mode::eval_all);
         });
@@ -631,6 +635,9 @@ void ns_sqp::update_stat_info(kkt_info &kkt) {
             });
             if (cur->dense().lag_jac_[__u].size() > 0) {
                 update_dual_inf_res(cur->dense().lag_jac_[__u]);
+            }
+            if (cur->dense().lag_jac_[__l].size() > 0) {
+                update_dual_inf_res(cur->dense().lag_jac_[__l]);
             }
             if (next != nullptr) [[likely]] {
                 projected_y_stat.resize(next->dense().lag_jac_[__x].cols());

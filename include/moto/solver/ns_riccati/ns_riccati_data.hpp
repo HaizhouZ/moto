@@ -5,10 +5,14 @@
 #include <Eigen/Cholesky>
 #include <Eigen/LU>
 #include <moto/utils/blasfeo_factorizer/blasfeo_llt.hpp>
+#include <memory>
+#include <unordered_map>
 
 
 namespace moto {
 struct node_data;
+class generic_dynamics;
+struct func_approx_data;
 namespace solver {
 namespace ns_riccati {
 enum rank_status : int { unconstrained = 0,
@@ -17,6 +21,7 @@ enum rank_status : int { unconstrained = 0,
 
 // fwd declaration
 struct nullspace_data;
+struct nsp_linear_plan;
 
 struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
     // dim
@@ -34,6 +39,7 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
         matrix Q_zz;  ///< nullspace u hessian
         matrix Z_u;   ///< nullspace basis for u
         matrix Z_y;   ///< nullspace basis for y
+        matrix Z_l;   ///< lifted-primal rows of the nullspace basis
         vector z_0_k; ///< residual\f$ z_u = \bar{u}_0 - U \delta u_y \f$
         vector z_k;   ///< \f$u_z\f$ nullspace solution
         matrix z_0_K; ///< sa as @ref z_u_k
@@ -45,6 +51,8 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
         matrix u_0_p_K;     ///< same meas @ref u_0_p_k
         vector y_0_p_k;     ///< \f$y_0\f$ projected
         matrix y_0_p_K;     ///< same meas @ref y_0_p_k
+        vector l_0_p_k;     ///< lifted-local projected gradient
+        matrix l_0_p_K;     ///< lifted-local projected state derivative
         vector s_0_p_k;     ///< \f$s_0\f$ projected
         matrix s_0_p_K;     ///< same meas @ref s_0_p_k
         // vector F_0_k;          ///< \f$s_yf\f$
@@ -55,6 +63,8 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
         matrix u_y_K;                    ///< same as @ref u_y_k
         vector y_y_k;                    ///< \f$y_y\f$ pseudo y
         matrix y_y_K;                    ///< same as @ref y_y_k
+        vector l_y_k;                    ///< lifted-primal particular solution
+        matrix l_y_K;                    ///< lifted-primal state sensitivity
         Eigen::FullPivLU<matrix> lu_eq_; ///< LU factorizer of the eq constraints
         // Eigen::LLT<matrix> llt_ns_;      ///< LLT solver of the projected hessian
         utils::blasfeo_llt llt_ns_; ///< LLT solver of the projected hessian
@@ -62,11 +72,7 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
     } nsp_;
 
     node_data *full_data_;
-    struct aux_data {
-        virtual ~aux_data() = default;
-    };
-    std::unique_ptr<aux_data> aux_; // auxiliary data pointer, can be used to store custom data
-
+    std::shared_ptr<nsp_linear_plan> linear_plan_;
     rank_status rank_status_;
     // sensitivity for sqp step
     struct sensitivity {
@@ -77,14 +83,41 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
     // multiplier sensitivity
     vector d_lbd_f, d_lbd_s_c_pre_solve, d_lbd_s_c;
 
+    struct lifting_operator_data {
+        size_t ny = 0, nl = 0;
+        const generic_dynamics *function = nullptr;
+        func_approx_data *data = nullptr;
+        sparse_matrix empty_l_x, empty_l_u;
+        vector empty_l_0;
+        matrix dual_rhs, dual;
+        sparse_matrix *projected_l_x = nullptr, *projected_l_u = nullptr;
+        vector *projected_l_0 = nullptr;
+
+        sparse_matrix &l_x() const { return *projected_l_x; }
+        sparse_matrix &l_u() const { return *projected_l_u; }
+        vector &l_0() const { return *projected_l_0; }
+    } lifting_;
+
     ns_riccati_data(node_data *full_data);
     ns_riccati_data(const ns_riccati_data &rhs) = delete;
     ns_riccati_data(ns_riccati_data &&rhs) = default;
 
     void update_projected_dynamics();
     void update_projected_dynamics_residual();
-    void apply_jac_y_inverse_transpose(vector &v, vector &dst);
+    void apply_jac_y_inverse_transpose(vector_ref v, vector &dst);
+    void prepare_lifting_operator();
+    void update_lifting_residual();
+    void update_lifted_basis_K();
+    void update_lifted_basis_k();
+    void build_lifted_hard_geometry(matrix *C_u, matrix *C_x, vector *c_0);
+    void recover_lifted_dual(vector_ref projected_y_rhs);
     void prepare_linear_backend();
+    bool has_unconstrained_presolve_graph() const;
+    bool has_integrated_presolve_graph() const;
+    bool uses_sparse_lifted_basis() const;
+    void run_unconstrained_presolve_graph();
+    void solve_integrated_lifted_system(
+        const matrix &rhs, matrix &destination, bool transpose);
 };
 } // namespace ns_riccati
 } // namespace solver

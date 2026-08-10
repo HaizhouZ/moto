@@ -34,12 +34,22 @@ lag_data::lag_data(ocp *prob) : prob_(prob) {
     dynamics_data_.proj_f_x_.resize(prob_->dim(__dyn), prob_->tdim(__x));
     dynamics_data_.proj_f_u_.resize(prob_->dim(__dyn), prob_->tdim(__u));
     std::vector<sparse_block_spec> projected_x, projected_u;
-    for (const auto &entry : prob_->exprs(__dyn)) {
-        const auto *dyn = dynamic_cast<const generic_dynamics *>(entry.get());
-        if (!dyn) continue;
-        const size_t f_st = prob_->get_expr_start(*dyn);
-        for (const auto &[argument, block] : dyn->projected_panel_sparsity()) {
-            const sym &arg = dyn->in_args(argument);
+    if (prob_->tdim(__l)) {
+        auto projected_x_layout = profile.get(
+            linear_target::lifted_projection, __y, __x);
+        auto projected_u_layout = profile.get(
+            linear_target::lifted_projection, __y, __u);
+        projected_x_layout.pack_diagonal_storage = true;
+        projected_u_layout.pack_diagonal_storage = true;
+        dynamics_data_.proj_f_x_.plan(projected_x_layout);
+        dynamics_data_.proj_f_u_.plan(projected_u_layout);
+    }
+    if (!prob_->tdim(__l)) for (const auto &entry : prob_->exprs(__dyn)) {
+        const auto *group = dynamic_cast<const generic_lifted *>(entry.get());
+        if (!group) continue;
+        const size_t f_st = prob_->get_expr_start(*group);
+        for (const auto &[argument, block] : group->projected_panel_sparsity()) {
+            const sym &arg = group->in_args(argument);
             if (!prob_->is_active(arg)) continue;
             auto &target = arg.field() == __x ? projected_x : projected_u;
             target.push_back({f_st + block.row_offset,
@@ -55,8 +65,10 @@ lag_data::lag_data(ocp *prob) : prob_(prob) {
         layout.pack_diagonal_storage = true;
         target.plan(layout);
     };
-    plan_projected(dynamics_data_.proj_f_x_, projected_x);
-    plan_projected(dynamics_data_.proj_f_u_, projected_u);
+    if (!prob_->tdim(__l)) {
+        plan_projected(dynamics_data_.proj_f_x_, projected_x);
+        plan_projected(dynamics_data_.proj_f_u_, projected_u);
+    }
     // complementarity
     for (auto f : ineq_constr_fields) {
         comp_[f].resize(prob_->dim(f));

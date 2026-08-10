@@ -10,9 +10,11 @@ enum field_t : size_t {
     __x = 0,
     __u,
     __y,
+    __l,          // user-authored lifted primal variables
     __s,          // solver-managed shared slack storage (non-primal)
     __p,          // non-decision parameters
     __dyn,        // dynamic model
+    __lift,       // grouped lifted-variable equality constraints
     __eq_x,       // "state equality constraints"
     __eq_xu,      // "input-state equality constraints"
     __ineq_x,     // "state inequality constraints"
@@ -30,8 +32,10 @@ enum field_t : size_t {
     __undefined,
 };
 
-constexpr auto primal_fields = std::array{__x, __u, __y};
-constexpr auto hard_constr_fields = std::array{__dyn, __eq_x, __eq_xu};
+constexpr auto unlifted_fields = std::array{__x, __u};
+constexpr auto lifted_fields = std::array{__y, __l};
+constexpr auto primal_fields = std::array{__x, __u, __y, __l};
+constexpr auto hard_constr_fields = std::array{__dyn, __lift, __eq_x, __eq_xu};
 constexpr auto hard_constr_fields_non_dyn = std::array{__eq_x, __eq_xu};
 constexpr auto ineq_constr_fields = std::array{__ineq_x, __ineq_xu};
 constexpr auto soft_constr_fields = std::array{__eq_x_soft, __eq_xu_soft};
