@@ -106,7 +106,6 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
     void update_projected_dynamics_residual();
     void apply_jac_y_inverse_transpose(vector_ref v, vector &dst);
     void prepare_lifting_operator();
-    void update_lifting_residual();
     void update_lifted_basis_K();
     void update_lifted_basis_k();
     void build_lifted_hard_geometry(matrix *C_u, matrix *C_x, vector *c_0);

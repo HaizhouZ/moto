@@ -2,9 +2,6 @@
 
 #include <moto/utils/codegen.hpp>
 
-#include <Eigen/Cholesky>
-#include <Eigen/LU>
-
 #include <algorithm>
 #include <array>
 #include <cstdlib>
@@ -20,41 +17,6 @@
 #include <unordered_map>
 
 namespace moto::linear_backend::detail {
-struct cached_factor {
-  Eigen::PartialPivLU<matrix> lu;
-  Eigen::LLT<matrix> llt;
-  size_t epoch = 0;
-  bool spd = false;
-
-  template <typename value_type>
-  void compute(value_type &value, bool use_spd) {
-    spd = use_spd;
-    if (spd) {
-      llt.compute(value);
-      if (llt.info() != Eigen::Success)
-        throw std::runtime_error(
-            "declared SPD graph factor is not positive definite");
-    } else {
-      lu.compute(value);
-    }
-  }
-  template <typename rhs_type, typename result_type>
-  void solve(const rhs_type &rhs, result_type &result) {
-    if (spd) result = llt.solve(rhs);
-    else result = lu.solve(rhs);
-  }
-  template <typename rhs_type, typename result_type>
-  void transpose_solve(const rhs_type &rhs, result_type &result) {
-    if (spd) result = llt.solve(rhs);
-    else result = lu.transpose().solve(rhs);
-  }
-  template <typename result_type>
-  void inverse(result_type &result) {
-    if (spd) result = llt.solve(matrix::Identity(llt.rows(), llt.cols()));
-    else result = lu.inverse();
-  }
-};
-
 namespace {
 
 using index_t = casadi_int;
@@ -345,39 +307,20 @@ std::vector<index_t> coordinate_map(const casadi::Sparsity &output,
   return map;
 }
 
-struct execution_context;
-
 struct operation {
   uint64_t entries = 0;
   virtual ~operation() = default;
-  virtual void execute(execution_context &) const = 0;
   virtual bool binding_only() const { return false; }
 };
 
 struct casadi_mx_graph_plan_impl;
 
-struct execution_context {
-  const casadi_mx_graph_plan_impl &plan;
-  const casadi_mx_graph_instance &instance;
-  std::span<scalar_t *> external;
-  size_t entry;
-
-  scalar_t read(size_t value, index_t nz) const;
-  void write(size_t value, size_t nz, scalar_t scalar) const;
-  void zero(size_t value) const;
-  std::vector<scalar_t *> &pointers(size_t value) const {
-    return instance.slot_pointers[value];
-  }
-};
-
 struct casadi_mx_graph_plan_impl {
   using whole_kernel_registry = void *(*)(size_t, void *, size_t, scalar_t **);
   size_t inputs = 0, external_inputs = 0, outputs = 0;
   std::vector<size_t> input_pointer_offsets;
-  std::vector<size_t> input_values;
   std::vector<size_t> entry_outputs;
   std::vector<size_t> output_entries;
-  casadi::Function reference;
   std::vector<value_layout> values;
   std::vector<std::unique_ptr<operation>> operations;
   std::vector<size_t> panel_pointer_offsets;
@@ -401,42 +344,10 @@ struct operation_entry_scope {
   }
 };
 
-scalar_t execution_context::read(size_t value, index_t nz) const {
-  if (nz < 0) return 0.;
-  const auto &address = plan.values[value].csc[nz];
-  if (address.panel == no_value) return 0.;
-  return pointers(value)[address.panel][address.offset];
-}
-
-void execution_context::write(size_t value, size_t nz, scalar_t scalar) const {
-  const auto &address = plan.values[value].csc[nz];
-  if (address.panel == no_value)
-    throw std::logic_error("cannot write an MX virtual zero");
-  pointers(value)[address.panel][address.offset] = scalar;
-}
-
-void execution_context::zero(size_t value) const {
-  const auto &layout = plan.values[value].matrix;
-  auto &bound = pointers(value);
-  for (size_t i = 0; i < layout.panels.size(); ++i) {
-    const auto &panel = layout.panels[i];
-    if (panel.pattern == sparsity::eye) continue;
-    std::fill_n(bound[i], panel.pattern == sparsity::dense
-                             ? panel.rows * panel.cols
-                             : panel.rows,
-                0.);
-  }
-}
-
 struct backend_program_operation final : operation {
   panel_program_spec spec;
-  panel_program_kernel kernel;
-  backend_program_operation(panel_program_spec spec,
-                            panel_program_kernel kernel)
-      : spec(std::move(spec)), kernel(std::move(kernel)) {}
-  void execute(execution_context &context) const override {
-    kernel(context.instance.backend_pointers);
-  }
+  explicit backend_program_operation(panel_program_spec spec)
+      : spec(std::move(spec)) {}
 };
 
 struct input_operation final : operation {
@@ -444,19 +355,6 @@ struct input_operation final : operation {
   bool direct = false;
   input_operation(size_t output, size_t input, bool direct)
       : output(output), input(input), direct(direct) {}
-  void execute(execution_context &context) const override {
-    const size_t begin = context.plan.input_pointer_offsets[input];
-    const size_t end = context.plan.input_pointer_offsets[input + 1];
-    if (direct) {
-      auto &bound = context.pointers(output);
-      bound.assign(context.external.begin() + begin,
-                   context.external.begin() + end);
-      return;
-    }
-    const scalar_t *source = context.external[begin];
-    for (size_t nz = 0; nz < context.plan.values[output].csc.size(); ++nz)
-      context.write(output, nz, source[nz]);
-  }
   bool binding_only() const override { return direct; }
 };
 
@@ -465,16 +363,6 @@ struct output_operation final : operation {
   bool direct = false;
   output_operation(size_t input, size_t output, size_t offset)
       : input(input), output(output), offset(offset) {}
-  void execute(execution_context &context) const override {
-    scalar_t *destination =
-        context.external[context.plan.external_inputs + output] + offset;
-    const auto &layout = context.plan.values[input];
-    if (layout.direct_csc_panel() &&
-        context.pointers(input)[0] == destination)
-      return;
-    for (size_t nz = 0; nz < layout.csc.size(); ++nz)
-      destination[nz] = context.read(input, nz);
-  }
   bool binding_only() const override { return direct; }
 };
 
@@ -483,10 +371,6 @@ struct constant_operation final : operation {
   std::vector<double> values;
   constant_operation(size_t output, std::vector<double> values)
       : output(output), values(std::move(values)) {}
-  void execute(execution_context &context) const override {
-    for (size_t i = 0; i < values.size(); ++i)
-      context.write(output, i, values[i]);
-  }
   bool binding_only() const override { return true; }
 };
 
@@ -507,48 +391,12 @@ struct copy_operation final : operation {
                  double scale, index_t source_op)
       : input(input), output(output), segments(std::move(segments)),
         scale(scale), source_op(source_op) {}
-  void execute(execution_context &context) const override {
-    auto &destination = context.pointers(output);
-    const auto &source = context.pointers(input);
-    for (const auto &segment : segments) {
-      scalar_t *dst = destination[segment.destination.panel] +
-                      segment.destination.offset;
-      if (segment.zero) {
-        for (size_t i = 0; i < segment.count; ++i)
-          dst[static_cast<ptrdiff_t>(i) * segment.destination_stride] = 0.;
-        continue;
-      }
-      const scalar_t *src = source[segment.source.panel] +
-                            segment.source.offset;
-      for (size_t i = 0; i < segment.count; ++i)
-        dst[static_cast<ptrdiff_t>(i) * segment.destination_stride] =
-            scale * src[static_cast<ptrdiff_t>(i) * segment.source_stride];
-    }
-  }
 };
 
 struct transpose_operation final : operation {
   size_t input, output;
   transpose_operation(size_t input, size_t output)
       : input(input), output(output) {}
-  void execute(execution_context &context) const override {
-    const auto &input_layout = context.plan.values[input].matrix;
-    const auto &output_layout = context.plan.values[output].matrix;
-    const auto &source = context.pointers(input);
-    auto &destination = context.pointers(output);
-    for (size_t panel = 0; panel < input_layout.panels.size(); ++panel) {
-      const auto &in = input_layout.panels[panel];
-      const auto &out = output_layout.panels[panel];
-      if (in.pattern == sparsity::eye) continue;
-      if (in.pattern == sparsity::diag) {
-        std::copy_n(source[panel], in.rows, destination[panel]);
-        continue;
-      }
-      Eigen::Map<const matrix> input_view(source[panel], in.rows, in.cols);
-      Eigen::Map<matrix> output_view(destination[panel], out.rows, out.cols);
-      output_view.noalias() = input_view.transpose();
-    }
-  }
 };
 
 struct panel_alias {
@@ -563,14 +411,6 @@ struct alias_operation final : operation {
   std::vector<panel_alias> aliases;
   alias_operation(size_t output, std::vector<panel_alias> aliases)
       : output(output), aliases(std::move(aliases)) {}
-  void execute(execution_context &context) const override {
-    auto &destination = context.pointers(output);
-    destination.resize(aliases.size());
-    for (const auto &alias : aliases)
-      destination[alias.output_panel] =
-          context.pointers(alias.input_value)[alias.input_panel] +
-          alias.input_offset;
-  }
   bool binding_only() const override { return true; }
 };
 
@@ -805,17 +645,6 @@ struct binary_operation final : operation {
                    std::vector<index_t> rhs_map)
       : lhs(lhs), rhs(rhs), output(output), op(op),
         lhs_map(std::move(lhs_map)), rhs_map(std::move(rhs_map)) {}
-  void execute(execution_context &context) const override {
-    for (size_t i = 0; i < lhs_map.size(); ++i) {
-      const double a = context.read(lhs, lhs_map[i]);
-      const double b = context.read(rhs, rhs_map[i]);
-      const double value = op == casadi::OP_ADD ? a + b
-                           : op == casadi::OP_SUB ? a - b
-                           : op == casadi::OP_MUL ? a * b
-                                                  : a / b;
-      context.write(output, i, value);
-    }
-  }
 };
 
 struct scatter_operation final : operation {
@@ -828,17 +657,6 @@ struct scatter_operation final : operation {
       : base(base), source(source), output(output),
         base_map(std::move(base_map)), destination(std::move(destination)),
         add(add), scalar(scalar) {}
-  void execute(execution_context &context) const override {
-    for (size_t i = 0; i < base_map.size(); ++i)
-      context.write(output, i, context.read(base, base_map[i]));
-    for (size_t i = 0; i < destination.size(); ++i) {
-      if (destination[i] < 0) continue;
-      const double value = context.read(source, scalar ? 0 : i);
-      if (add) context.write(output, destination[i],
-                             context.read(output, destination[i]) + value);
-      else context.write(output, destination[i], value);
-    }
-  }
 };
 
 struct concat_operation final : operation {
@@ -849,27 +667,16 @@ struct concat_operation final : operation {
                    std::vector<std::vector<index_t>> destinations)
       : output(output), inputs(std::move(inputs)),
         destinations(std::move(destinations)) {}
-  void execute(execution_context &context) const override {
-    for (size_t dep = 0; dep < inputs.size(); ++dep)
-      for (size_t nz = 0; nz < destinations[dep].size(); ++nz)
-        context.write(output, destinations[dep][nz],
-                      context.read(inputs[dep], nz));
-  }
 };
 
 struct product_operation final : operation {
   size_t addend, lhs, rhs, output;
-  batch_product_kernel kernel;
   std::vector<index_t> addend_map;
   double addend_scale = 1., product_scale = 1.;
   product_operation(size_t addend, size_t lhs, size_t rhs, size_t output,
-                    batch_product_kernel kernel,
                     std::vector<index_t> addend_map)
       : addend(addend), lhs(lhs), rhs(rhs), output(output),
-        kernel(std::move(kernel)), addend_map(std::move(addend_map)) {}
-  void execute(execution_context &context) const override {
-    kernel(context.instance.backend_pointers);
-  }
+        addend_map(std::move(addend_map)) {}
 };
 
 struct solve_operation final : operation {
@@ -881,7 +688,6 @@ struct solve_operation final : operation {
   };
   size_t rhs = no_value, matrix_value = no_value, output = no_value;
   size_t factor_slot = no_value;
-  size_t workspace_slot = no_value;
   std::vector<index_t> active_columns;
   std::vector<segment> segments;
   bool transpose = false, identity_rhs = false, spd = false;
@@ -889,101 +695,42 @@ struct solve_operation final : operation {
                   bool identity_rhs)
       : rhs(rhs), matrix_value(matrix), output(output),
         transpose(transpose), identity_rhs(identity_rhs) {}
-  void execute(execution_context &context) const override {
-    const auto &matrix_layout = context.plan.values[matrix_value];
-    const size_t n = matrix_layout.matrix.rows;
-    const auto &rhs_layout = context.plan.values[rhs];
-    const sparse_index bi(rhs_layout.sparsity);
-    if (active_columns.empty()) {
-      context.zero(output);
-      return;
-    }
-    const size_t cols = active_columns.size();
-    auto &cache = *context.instance.factors.at(factor_slot);
-    if (cache.epoch != context.instance.factor_epoch) {
-      if (matrix_layout.direct_csc_panel()) {
-        Eigen::Map<matrix> a(context.pointers(matrix_value)[0], n, n);
-        cache.compute(a, spd);
-      } else {
-        matrix a = matrix::Zero(n, n);
-        const sparse_index ai(matrix_layout.sparsity);
-        for (size_t col = 0; col < n; ++col)
-          for (index_t nz = ai.colind[col]; nz < ai.colind[col + 1]; ++nz)
-            a(ai.row[nz], col) = context.read(matrix_value, nz);
-        cache.compute(a, spd);
-      }
-      cache.epoch = context.instance.factor_epoch;
-    }
-    const auto &output_layout = context.plan.values[output];
-    if (identity_rhs && output_layout.direct_csc_panel()) {
-      Eigen::Map<matrix> x(context.pointers(output)[0], n, n);
-      cache.inverse(x);
-      return;
-    }
-    if (rhs_layout.direct_csc_panel() &&
-        output_layout.direct_csc_panel() &&
-        active_columns.size() == static_cast<size_t>(bi.cols)) {
-      Eigen::Map<const matrix> b(context.pointers(rhs)[0], n, cols);
-      Eigen::Map<matrix> x(context.pointers(output)[0], n, cols);
-      if (transpose)
-        cache.transpose_solve(b, x);
-      else
-        cache.solve(b, x);
-      return;
-    }
-    if (!segments.empty()) {
-      using const_view = Eigen::Map<const matrix, Eigen::Unaligned,
-                                    Eigen::OuterStride<>>;
-      using view = Eigen::Map<matrix, Eigen::Unaligned,
-                              Eigen::OuterStride<>>;
-      for (const auto &segment : segments) {
-        const_view b(context.pointers(rhs)[segment.rhs_panel] +
-                         segment.rhs_offset,
-                     n, segment.cols,
-                     Eigen::OuterStride<>(segment.rhs_leading));
-        view x(context.pointers(output)[segment.output_panel] +
-                   segment.output_offset,
-               n, segment.cols,
-               Eigen::OuterStride<>(segment.output_leading));
-        if (transpose)
-          cache.transpose_solve(b, x);
-        else
-          cache.solve(b, x);
-      }
-      return;
-    }
-    matrix &b = context.instance.solve_rhs_buffers[workspace_slot];
-    b.resize(n, cols);
-    b.setZero();
-    for (size_t packed = 0; packed < active_columns.size(); ++packed) {
-      const index_t col = active_columns[packed];
-      for (index_t nz = bi.colind[col]; nz < bi.colind[col + 1]; ++nz)
-        b(bi.row[nz], packed) = context.read(rhs, nz);
-    }
-    if (output_layout.direct_csc_panel() &&
-        active_columns.size() == static_cast<size_t>(bi.cols)) {
-      Eigen::Map<matrix> x(context.pointers(output)[0], n, cols);
-      if (transpose)
-        cache.transpose_solve(b, x);
-      else
-        cache.solve(b, x);
-      return;
-    }
-    context.zero(output);
-    matrix &x = context.instance.solve_output_buffers[workspace_slot];
-    x.resize(n, cols);
-    if (transpose)
-      cache.transpose_solve(b, x);
-    else
-      cache.solve(b, x);
-    const sparse_index oi(output_layout.sparsity);
-    for (size_t packed = 0; packed < active_columns.size(); ++packed) {
-      const index_t col = active_columns[packed];
-      for (index_t nz = oi.colind[col]; nz < oi.colind[col + 1]; ++nz)
-        context.write(output, nz, x(oi.row[nz], packed));
-    }
-  }
 };
+
+void write_value(const casadi_mx_graph_plan_impl &plan,
+                 const casadi_mx_graph_instance &instance,
+                 size_t value, size_t nz, scalar_t scalar) {
+  const auto &address = plan.values[value].csc[nz];
+  if (address.panel == no_value)
+    throw std::logic_error("cannot write an MX virtual zero");
+  instance.slot_pointers[value][address.panel][address.offset] = scalar;
+}
+
+void bind_operation(const casadi_mx_graph_plan_impl &plan,
+                    const casadi_mx_graph_instance &instance,
+                    std::span<scalar_t *> external,
+                    const operation &operation) {
+  if (const auto *input = dynamic_cast<const input_operation *>(&operation)) {
+    if (!input->direct) return;
+    const size_t begin = plan.input_pointer_offsets[input->input];
+    const size_t end = plan.input_pointer_offsets[input->input + 1];
+    instance.slot_pointers[input->output].assign(external.begin() + begin,
+                                                 external.begin() + end);
+  } else if (const auto *constant =
+                 dynamic_cast<const constant_operation *>(&operation)) {
+    for (size_t i = 0; i < constant->values.size(); ++i)
+      write_value(plan, instance, constant->output, i, constant->values[i]);
+  } else if (const auto *alias =
+                 dynamic_cast<const alias_operation *>(&operation)) {
+    auto &destination = instance.slot_pointers[alias->output];
+    destination.resize(alias->aliases.size());
+    for (const auto &source : alias->aliases)
+      destination[source.output_panel] =
+          instance.slot_pointers[source.input_value][source.input_panel] +
+          source.input_offset;
+  }
+  // Direct outputs are bound through plan.direct_outputs before this pass.
+}
 
 panel_program_operand panel_operand(const casadi_mx_graph_plan_impl &plan,
                                     size_t value, index_t nz) {
@@ -1631,42 +1378,14 @@ void build_entry_schedules(casadi_mx_graph_plan_impl &plan) {
   const size_t original_operations = plan.operations.size();
   const size_t pointer_count = plan.value_panel_pointers +
                                plan.external_inputs + plan.outputs;
-  const auto slots = [&](size_t value) {
-    std::vector<size_t> result(plan.values[value].matrix.panels.size());
-    std::iota(result.begin(), result.end(),
-              plan.panel_pointer_offsets[value]);
-    return result;
-  };
-  for (size_t index = 0; index < original_operations; ++index) {
-    auto *product =
-        dynamic_cast<product_operation *>(plan.operations[index].get());
-    if (!product) continue;
-    const auto lhs_slots = slots(product->lhs);
-    const auto rhs_slots = slots(product->rhs);
-    const auto output_slots = slots(product->output);
-    panel_program_spec initialization{.pointers = pointer_count};
-    if (product->addend != product->output)
-      for (size_t nz = 0; nz < product->addend_map.size(); ++nz)
-        append_assignment(
-            initialization, panel_operand(plan, product->output, nz),
-            panel_operand(plan, product->addend, product->addend_map[nz]),
-            product->addend_scale);
-    product->kernel = compile_indexed_sparse_product_lazy(
-        plan.values[product->lhs].matrix,
-        plan.values[product->rhs].matrix, product_op::times,
-        product->product_scale,
-        plan.values[product->output].matrix, pointer_count,
-        lhs_slots, rhs_slots, output_slots, std::move(initialization));
-  }
   plan.entry_schedules.resize(plan.entry_outputs.size());
   for (size_t entry = 0; entry < plan.entry_outputs.size(); ++entry) {
     auto &schedule = plan.entry_schedules[entry];
     panel_program_spec program{.pointers = pointer_count};
     const auto flush = [&] {
       if (program.instructions.empty()) return;
-      panel_program_spec retained = coalesce_panel_program_spec(program);
       auto compiled = std::make_unique<backend_program_operation>(
-          std::move(retained), compile_panel_program(std::move(program)));
+          coalesce_panel_program_spec(program));
       compiled->entries = uint64_t{1} << entry;
       schedule.push_back(compiled.get());
       plan.operations.push_back(std::move(compiled));
@@ -2159,22 +1878,19 @@ casadi_mx_graph_plan_impl::whole_kernel_registry compile_generated_graph(
       } else if (const auto *solve =
                      dynamic_cast<const solve_operation *>(base)) {
         if (!emit_generated_solve(source, plan, *solve)) {
-          if (std::getenv("MOTO_TRACE_GRAPH_LOWERING"))
-            std::cerr << "whole graph JIT rejected solve: matrix_direct="
-                      << plan.values[solve->matrix_value].direct_csc_panel()
-                      << " rhs_direct="
-                      << plan.values[solve->rhs].direct_csc_panel()
-                      << " output_direct="
-                      << plan.values[solve->output].direct_csc_panel()
-                      << " segments=" << solve->segments.size()
-                      << " active_columns=" << solve->active_columns.size()
-                      << '\n';
-          return nullptr;
+          std::ostringstream message;
+          message << "cannot generate graph solve: matrix_direct="
+                  << plan.values[solve->matrix_value].direct_csc_panel()
+                  << " rhs_direct="
+                  << plan.values[solve->rhs].direct_csc_panel()
+                  << " output_direct="
+                  << plan.values[solve->output].direct_csc_panel()
+                  << " segments=" << solve->segments.size()
+                  << " active_columns=" << solve->active_columns.size();
+          throw std::runtime_error(message.str());
         }
       } else {
-        if (std::getenv("MOTO_TRACE_GRAPH_LOWERING"))
-          std::cerr << "whole graph JIT rejected operation\n";
-        return nullptr;
+        throw std::runtime_error("cannot generate graph operation");
       }
     }
     source.line("break;");
@@ -2252,7 +1968,6 @@ translate_casadi_mx_graph(const casadi::Function &function,
     runtime_inputs.push_back(std::move(layout));
     direct_inputs.push_back(direct);
   }
-  plan->input_values.assign(plan->inputs, no_value);
   if (entry_outputs.empty()) entry_outputs.push_back(plan->outputs);
   if (entry_outputs.size() > 64 ||
       std::accumulate(entry_outputs.begin(), entry_outputs.end(), size_t{0}) !=
@@ -2264,7 +1979,6 @@ translate_casadi_mx_graph(const casadi::Function &function,
   for (size_t entry = 0; entry < plan->entry_outputs.size(); ++entry)
     for (size_t i = 0; i < plan->entry_outputs[entry]; ++i)
       plan->output_entries[output_cursor++] = entry;
-  plan->reference = function;
   std::vector<size_t> current;
   std::vector<size_t> output_offset(function.n_out());
   index_t maximum_slot = -1;
@@ -2373,7 +2087,6 @@ translate_casadi_mx_graph(const casadi::Function &function,
         fail(instruction, "split MX inputs are not supported");
       plan->values[outputs[0]] = runtime_inputs.at(input);
       plan->values[outputs[0]].allocate = !direct_inputs[input];
-      plan->input_values[input] = outputs[0];
       plan->operations.push_back(std::make_unique<input_operation>(
           input_operation{outputs[0], input, direct_inputs[input]}));
       continue;
@@ -2499,7 +2212,7 @@ translate_casadi_mx_graph(const casadi::Function &function,
                               plan->values[inputs[2]]);
       plan->operations.push_back(std::make_unique<product_operation>(
           product_operation{
-              inputs[0], inputs[1], inputs[2], outputs[0], {},
+              inputs[0], inputs[1], inputs[2], outputs[0],
               coordinate_map(node.sparsity(), node.dep(0).sparsity())}));
       continue;
     }
@@ -2696,7 +2409,6 @@ translate_casadi_mx_graph(const casadi::Function &function,
                   << plan->values[solve->output].fingerprint << '\n';
   }
   std::unordered_map<std::string, size_t> factor_slot_by_value;
-  size_t solve_workspace = 0;
   for (const auto &operation : plan->operations) {
     auto *solve = dynamic_cast<solve_operation *>(operation.get());
     if (!solve) continue;
@@ -2716,7 +2428,6 @@ translate_casadi_mx_graph(const casadi::Function &function,
   for (const auto &operation : plan->operations) {
     auto *solve = dynamic_cast<solve_operation *>(operation.get());
     if (!solve) continue;
-    solve->workspace_slot = solve_workspace++;
     const sparse_index rhs(plan->values[solve->rhs].sparsity);
     for (index_t col = 0; col < rhs.cols; ++col)
       if (rhs.colind[col] != rhs.colind[col + 1])
@@ -2814,8 +2525,9 @@ translate_casadi_mx_graph(const casadi::Function &function,
     output->direct = true;
   }
   build_entry_schedules(*plan);
-  if (!std::getenv("MOTO_DISABLE_LINEAR_GRAPH_WHOLE_JIT"))
-    plan->whole_kernel = compile_generated_graph(*plan, cache_dir);
+  plan->whole_kernel = compile_generated_graph(*plan, cache_dir);
+  if (!plan->whole_kernel)
+    throw std::runtime_error("MX graph did not lower to a generated kernel");
   return plan;
 }
 
@@ -2830,7 +2542,7 @@ casadi_mx_graph_instance::casadi_mx_graph_instance(
   workspace = external_workspace;
   workspace_slots.reserve(plan->values.size());
   for (const auto &layout : plan->values) {
-    if (layout.allocate && !(plan->whole_kernel && layout.local_entries)) {
+    if (layout.allocate && !layout.local_entries) {
       workspace_slots.push_back(workspace->size());
       workspace->push_back(make_storage(layout));
       workspace->back().setZero();
@@ -2841,21 +2553,11 @@ casadi_mx_graph_instance::casadi_mx_graph_instance(
   slot_pointers.resize(plan->values.size());
   backend_pointers.resize(plan->value_panel_pointers +
                           plan->external_inputs + plan->outputs);
-  factors.reserve(plan->factor_values.size());
-  for (size_t i = 0; i < plan->factor_values.size(); ++i)
-    factors.push_back(std::make_unique<cached_factor>());
-  const size_t solves = std::ranges::count_if(
-      plan->operations, [](const auto &operation) {
-        return dynamic_cast<const solve_operation *>(operation.get());
-      });
-  solve_rhs_buffers.resize(solves);
-  solve_output_buffers.resize(solves);
-  if (plan->whole_kernel)
-    whole_kernel_state = plan->whole_kernel(0, nullptr, 0, nullptr);
+  whole_kernel_state = plan->whole_kernel(0, nullptr, 0, nullptr);
 }
 
 casadi_mx_graph_instance::~casadi_mx_graph_instance() {
-  if (plan && plan->whole_kernel && whole_kernel_state)
+  if (plan && whole_kernel_state)
     plan->whole_kernel(1, whole_kernel_state, 0, nullptr);
 }
 
@@ -2905,11 +2607,10 @@ void casadi_mx_graph_instance::run(size_t entry,
     bound[binding.panel] =
         pointers[plan->external_inputs + binding.output] + binding.offset;
   }
-  if (entry == 0) ++factor_epoch;
-  execution_context context{*plan, *this, pointers, entry};
   if (bind_workspace || bind_external) {
     for (const auto &operation : plan->operations)
-      if (operation->binding_only()) operation->execute(context);
+      if (operation->binding_only())
+        bind_operation(*plan, *this, pointers, *operation);
     for (size_t value = 0; value < plan->values.size(); ++value) {
       const size_t offset = plan->panel_pointer_offsets[value];
       std::copy(slot_pointers[value].begin(), slot_pointers[value].end(),
@@ -2920,63 +2621,7 @@ void casadi_mx_graph_instance::run(size_t entry,
     workspace_bound = true;
     bound_external.assign(pointers.begin(), pointers.end());
   }
-  if (plan->whole_kernel) {
-    plan->whole_kernel(2, whole_kernel_state, entry,
-                       backend_pointers.data());
-  } else {
-    for (const operation *operation : plan->entry_schedules[entry])
-      operation->execute(context);
-  }
-  if (std::getenv("MOTO_CHECK_SPARSE_GRAPH")) {
-    std::vector<casadi::DM> arguments;
-    arguments.reserve(plan->inputs);
-    for (size_t input = 0; input < plan->inputs; ++input) {
-      std::vector<double> values(plan->reference.nnz_in(input), 0.);
-      if (plan->input_values[input] != no_value)
-        for (size_t nz = 0; nz < values.size(); ++nz)
-          values[nz] = context.read(plan->input_values[input], nz);
-      arguments.emplace_back(plan->reference.sparsity_in(input), values,
-                             false);
-    }
-    const auto expected = plan->reference(arguments);
-    for (size_t output = 0; output < plan->outputs; ++output) {
-      if (plan->output_entries[output] != entry) continue;
-      const auto values = expected[output].nonzeros();
-      for (size_t nz = 0; nz < values.size(); ++nz) {
-        const double actual =
-            pointers[plan->external_inputs + output][nz];
-        const double error = std::abs(actual - values[nz]);
-        if (!(error <= 1e-9 * (1. + std::abs(values[nz])))) {
-          std::ostringstream message;
-          message << std::setprecision(17)
-                  << "sparse graph mismatch: inputs=" << plan->inputs
-                  << " outputs=" << plan->outputs << " output=" << output
-                  << " nz=" << nz << " actual=" << actual
-                  << " expected=" << values[nz] << " error=" << error;
-          if (!std::isfinite(values[nz])) {
-            message << " inputs:";
-            for (size_t input = 0; input < arguments.size(); ++input) {
-              const auto data = arguments[input].nonzeros();
-              double maximum = 0.;
-              size_t finite = 0, nonzero = 0;
-              for (const double value : data) {
-                if (std::isfinite(value)) ++finite;
-                if (value != 0.) ++nonzero;
-                if (std::isfinite(value))
-                  maximum = std::max(maximum, std::abs(value));
-              }
-              message << ' ' << plan->reference.name_in(input) << '['
-                      << plan->reference.size1_in(input) << 'x'
-                      << plan->reference.size2_in(input) << ",nnz="
-                      << data.size() << ",live=" << nonzero
-                      << ",finite=" << finite << ",max=" << maximum << ']';
-            }
-          }
-          throw std::runtime_error(message.str());
-        }
-      }
-    }
-  }
+  plan->whole_kernel(2, whole_kernel_state, entry, backend_pointers.data());
 }
 
 size_t casadi_mx_graph_inputs(const casadi_mx_graph_plan &plan) {

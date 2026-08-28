@@ -12,10 +12,9 @@
 namespace moto::linear_backend::detail {
 
 struct casadi_mx_graph_plan;
-struct cached_factor;
 
-void *compile_casadi_mx_graph_source(
-    const std::string &source, const std::filesystem::path &cache_dir);
+void *compile_casadi_mx_graph_source(const std::string &source,
+                                     const std::filesystem::path &cache_dir);
 
 struct casadi_mx_graph_instance {
   std::shared_ptr<const casadi_mx_graph_plan> plan;
@@ -28,10 +27,6 @@ struct casadi_mx_graph_instance {
   mutable std::vector<scalar_t *> backend_pointers;
   mutable std::vector<scalar_t *> bound_external;
   mutable bool workspace_bound = false;
-  mutable std::vector<std::unique_ptr<cached_factor>> factors;
-  mutable size_t factor_epoch = 1;
-  mutable std::vector<matrix> solve_rhs_buffers;
-  mutable std::vector<matrix> solve_output_buffers;
   mutable void *whole_kernel_state = nullptr;
 
   casadi_mx_graph_instance(std::shared_ptr<const casadi_mx_graph_plan> plan,
@@ -40,13 +35,11 @@ struct casadi_mx_graph_instance {
   void run(size_t entry, std::span<scalar_t *> pointers) const;
 };
 
-std::shared_ptr<const casadi_mx_graph_plan>
-translate_casadi_mx_graph(const casadi::Function &function,
-                          std::vector<size_t> entry_outputs,
-                          std::span<const matrix_layout> input_layouts = {},
-                          const std::filesystem::path &cache_dir =
-                              "gen/linear_backend",
-                          size_t spd_outputs = 0);
+std::shared_ptr<const casadi_mx_graph_plan> translate_casadi_mx_graph(
+    const casadi::Function &function, std::vector<size_t> entry_outputs,
+    std::span<const matrix_layout> input_layouts = {},
+    const std::filesystem::path &cache_dir = "gen/linear_backend",
+    size_t spd_outputs = 0);
 
 size_t casadi_mx_graph_inputs(const casadi_mx_graph_plan &plan);
 size_t casadi_mx_graph_outputs(const casadi_mx_graph_plan &plan);

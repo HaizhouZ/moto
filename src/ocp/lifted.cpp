@@ -164,6 +164,7 @@ class generated_lifted final : public generic_dynamics {
     clone_ptr clone() const override { return new generated_lifted(*this); }
     void prepare_dynamics_codegen() override;
     void value_impl(func_approx_data &data) const override;
+    void jacobian_impl(func_approx_data &data) const override;
 
   private:
     std::vector<projection_panel> jacobian_panels_;
@@ -264,6 +265,11 @@ void generated_lifted::prepare_dynamics_codegen() {
 
 void generated_lifted::value_impl(func_approx_data &base) const {
     generic_dynamics::value_impl(base);
+    base.as<data>().projection_ready = false;
+}
+
+void generated_lifted::jacobian_impl(func_approx_data &base) const {
+    generic_dynamics::jacobian_impl(base);
     base.as<data>().projection_ready = false;
 }
 

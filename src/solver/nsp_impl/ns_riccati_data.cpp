@@ -419,11 +419,6 @@ void ns_riccati_data::prepare_lifting_operator() {
     }
 }
 
-void ns_riccati_data::update_lifting_residual() {
-    // The unified dynamics update already refreshed both y and l residual
-    // projections through compute_project_residual().
-}
-
 void ns_riccati_data::update_lifted_basis_K() {
     if (rank_status_ == rank_status::unconstrained) {
         nsp_.Z_y.setZero(ny, nu);
@@ -566,14 +561,10 @@ void ns_riccati_data::prepare_linear_backend() {
 
   dump(F_x, F_x.rows());
   dump(F_x, F_x.rows(), -1.);
-  product(F_x, product_op::right_times, -1., ny, ny, ny, nx);
-  product(F_x, product_op::right_transpose_times, -1., ny, 1, 1, nx);
-  product(F_x, product_op::right_transpose_times, -1., ny, nx, nx, nx);
   product(F_u, product_op::times, -1., nu, 1, ny, 1);
   product(F_u, product_op::times, -1., nu, nx, ny, nx);
   product(F_u, product_op::transpose_times, -1., ny, 1, nu, 1);
   product(F_u, product_op::transpose_times, -1., ny, nx, nu, nx);
-  prepare_weighted_gram(F_u);
 
   if (const size_t lifted_dim = dense_->prob_->tdim(__l)) {
     dump(Q_ll, lifted_dim);
@@ -585,17 +576,6 @@ void ns_riccati_data::prepare_linear_backend() {
       product(lifting_.l_u(), product_op::times, -1., nu, cols,
               lifted_dim, cols);
     }
-    for (const auto field : hard_constr_fields_non_dyn) {
-      const size_t rows = dense_->approx_[field].v_.size();
-      if (!rows) continue;
-      product(F_u, product_op::right_times, -1., rows, ny, rows, nu);
-      product(F_x, product_op::right_times, -1., rows, ny, rows, nx);
-      product(lifting_.l_u(), product_op::right_times, -1., rows,
-              lifted_dim, rows, nu);
-      product(lifting_.l_x(), product_op::right_times, -1., rows,
-              lifted_dim, rows, nx);
-    }
-
     constexpr auto fields = std::array{__u, __y, __l};
     const std::array<size_t, 3> dim{nu, ny, lifted_dim};
     for (size_t row = 0; row < 3; ++row) {
@@ -621,11 +601,26 @@ void ns_riccati_data::prepare_linear_backend() {
     }
   }
 
+  for (const auto field : hard_constr_fields_non_dyn) {
+    const size_t rows = dense_->approx_[field].v_.size();
+    if (!rows) continue;
+    const auto &jac_y = dense_->approx_[field].jac_[__y];
+    prepare_sparse_product(F_u, jac_y, product_op::right_times, -1., rows,
+                           nu);
+    prepare_sparse_product(F_x, jac_y, product_op::right_times, -1., rows,
+                           nx);
+    if (dense_->prob_->tdim(__l)) {
+      const auto &jac_l = dense_->approx_[field].jac_[__l];
+      prepare_sparse_product(lifting_.l_u(), jac_l,
+                             product_op::right_times, -1., rows, nu);
+      prepare_sparse_product(lifting_.l_x(), jac_l,
+                             product_op::right_times, -1., rows, nx);
+    }
+  }
+
   if (ns) {
     product(s_y, product_op::times, -1., ny, 1, ns, 1);
     product(s_y, product_op::transpose_times, -1., ns, 1, ny, 1);
-    prepare_sparse_product(s_y, F_u, product_op::times, -1., ns, nu);
-    prepare_sparse_product(s_y, F_x, product_op::times, -1., ns, nx);
     dump(s_x, ns);
   }
   if (nc) {
@@ -642,10 +637,6 @@ void ns_riccati_data::prepare_linear_backend() {
     product(Q_uu_mod, product_op::times, -1., nu, cols, nu, cols);
     product(F_u, product_op::times, -1., nu, cols, ny, cols);
   }
-  prepare_sparse_product(F_x, Q_yx, product_op::transpose_times, -1., nx, nx);
-  prepare_sparse_product(F_x, Q_yx_mod, product_op::transpose_times, -1., nx,
-                         nx);
-
   for (auto f : primal_fields)
     for (auto constr : constr_fields) {
       const auto &jac = dense_->approx_[constr].jac_[f];
@@ -756,9 +747,6 @@ ns_riccati_data::ns_riccati_data(node_data *full_data)
     } else {
         nz = nu - ncstr;
     }
-    // nsp_->F_0_k.resize(nx);
-    // nsp_->F_0_K.resize(nx, nx);
-    // nsp_->F_u.resize(nx, nu);
     nsp_.Q_zz.resize(nu, nu);
     nsp_.s_0_p_k.resize(ns);
     nsp_.s_0_p_K.resize(ns, nx);
@@ -788,8 +776,6 @@ ns_riccati_data::ns_riccati_data(node_data *full_data)
     lifting_.projected_l_u = &lifting_.empty_l_u;
     lifting_.projected_l_0 = &lifting_.empty_l_0;
     prepare_lifting_operator();
-    // if (nsp_->sparse_factorizer_)
-    // nsp_->sparse_factorizer_->init(nsp_);
 }
 
 } // namespace ns_riccati

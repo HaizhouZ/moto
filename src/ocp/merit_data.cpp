@@ -7,7 +7,6 @@ namespace moto {
 lag_data::lag_data(ocp *prob) : prob_(prob) {
     prob->wait_until_ready();
     const auto &profile = prob_->linear_profile();
-    size_t n_dyn = prob_->exprs(__dyn).size();
     for (auto i : constr_fields) {
         if (prob_->exprs(i).empty()) {
             continue;
@@ -20,8 +19,6 @@ lag_data::lag_data(ocp *prob) : prob_(prob) {
                 approx_[i].jac_[f].resize(dim, prob_->tdim(f));
                 approx_[i].jac_[f].plan(
                     profile.get(linear_target::jacobian, i, f));
-                // fmt::println("prob {} lag_data: approx jacobian for constr field {} w.r.t. primal field {} has dim {}x{}",
-                //              prob_->uid(), field::name(i), field::name(f), dim, prob_->tdim(f));
             }
         }
         // dual variables
@@ -87,7 +84,6 @@ lag_data::lag_data(ocp *prob) : prob_(prob) {
             hessian_modification_[j][i].resize(prob_->tdim(j), prob_->tdim(i));
             hessian_modification_[j][i].plan(
                 profile.get(linear_target::hessian_modification, fj, fi));
-            // lag_hess_[j][i].setZero();
         }
         lag_hess_[i][i].bind(0, 0, prob_->tdim(i), prob_->tdim(i),
                              sparsity::diag);

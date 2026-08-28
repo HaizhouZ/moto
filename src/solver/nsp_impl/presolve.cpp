@@ -17,7 +17,6 @@ void generic_solver::ns_factorization_correction(ns_riccati_data *cur) {
 
     if (!(d.has_integrated_presolve_graph() && !d.ncstr))
         d.update_projected_dynamics_residual();
-    d.update_lifting_residual();
 
     nsp.u_0_p_k = d.Q_u.transpose();
     nsp.y_0_p_k.setZero();

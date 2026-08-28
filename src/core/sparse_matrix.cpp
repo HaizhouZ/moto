@@ -135,18 +135,18 @@ void sparse_matrix::resize(size_t rows, size_t cols) {
   jit_cache_.reset();
   // check consistency
   for (const auto &panel : dense_panels_) {
-    assert(panel.row_st_ + panel.rows_ < rows &&
-           panel.col_st_ + panel.cols_ < cols &&
+    assert(panel.row_st_ + panel.rows_ <= rows &&
+           panel.col_st_ + panel.cols_ <= cols &&
            "Dense panel size exceeds new matrix size");
   }
   for (const auto &panel : diag_panels_) {
-    assert(panel.row_st_ + panel.rows_ < rows &&
-           panel.col_st_ + panel.cols_ < cols &&
+    assert(panel.row_st_ + panel.rows_ <= rows &&
+           panel.col_st_ + panel.cols_ <= cols &&
            "Diagonal panel size exceeds new matrix size");
   }
   for (const auto &panel : eye_panels_) {
-    assert(panel.row_st_ + panel.rows_ < rows &&
-           panel.col_st_ + panel.cols_ < cols &&
+    assert(panel.row_st_ + panel.rows_ <= rows &&
+           panel.col_st_ + panel.cols_ <= cols &&
            "Eye panel size exceeds new matrix size");
   }
   rows_ = rows;
@@ -168,10 +168,12 @@ bool sparse_matrix::set_dynamic_eye(bool enabled) {
   jit_cache_.reset();
   return true;
 }
+sparse_matrix::sparse_matrix(const sparse_matrix &other) { *this = other; }
+
 sparse_matrix &sparse_matrix::operator=(const sparse_matrix &other) {
-  if (this != &other)
-    jit_cache_.reset();
-  if (this != &other && this->is_empty()) {
+  if (this == &other) return *this;
+  jit_cache_.reset();
+  if (this->is_empty()) {
     rows_ = other.rows_;
     cols_ = other.cols_;
     dense_panels_ = other.dense_panels_;
@@ -180,6 +182,7 @@ sparse_matrix &sparse_matrix::operator=(const sparse_matrix &other) {
     diagonal_segments_ = other.diagonal_segments_;
     packed_diagonal_storage_ = other.packed_diagonal_storage_;
     dynamic_eye_ = other.dynamic_eye_;
+    planned_ = other.planned_;
   } else {
     assert(rows_ == other.rows_ && cols_ == other.cols_);
     assert(dense_panels_.size() == other.dense_panels_.size());

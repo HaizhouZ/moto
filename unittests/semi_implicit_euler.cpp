@@ -269,6 +269,22 @@ TEST_CASE("lifted MX elimination graph preserves zero blocks and parameters") {
   REQUIRE(action.isApprox(pivot.fullPivLu().solve(action_rhs), 1e-10));
   REQUIRE(transpose.isApprox(
       pivot.transpose().fullPivLu().solve(action_rhs), 1e-10));
+
+  runtime.sym_val().get(regularization)(0) = 2e-2;
+  runtime.update_approximation(node_data::update_mode::eval_derivatives);
+  dyn->compute_project_derivatives(dyn_data);
+  pivot.bottomRightCorner(2, 2) =
+      runtime.dense().approx_[__lift].jac_[__l].dense() +
+      2e-2 * matrix::Identity(2, 2);
+  rhs.leftCols(4) << runtime.dense().approx_[__dyn].jac_[__x].dense(),
+      runtime.dense().approx_[__dyn].jac_[__u].dense(),
+      runtime.dense().approx_[__lift].jac_[__x].dense(),
+      runtime.dense().approx_[__lift].jac_[__u].dense();
+  const matrix refreshed = pivot.fullPivLu().solve(rhs.leftCols(4));
+  REQUIRE(runtime.dense().proj_f_x().dense().isApprox(
+      refreshed.topLeftCorner(2, 2), 1e-9));
+  REQUIRE(runtime.dense().proj_f_u().dense().isApprox(
+      refreshed.block(0, 2, 2, 2), 1e-9));
 }
 
 TEST_CASE("lifted graph artifact identity includes elimination algebra") {

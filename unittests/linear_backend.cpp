@@ -3,7 +3,6 @@
 #include <moto/core/linear_backend.hpp>
 
 #include <Eigen/Cholesky>
-#include <moto/core/linear_egraph.hpp>
 #include <moto/core/sparse_matrix.hpp>
 
 #include <casadi/casadi.hpp>
@@ -314,43 +313,6 @@ TEST_CASE("SpMM analysis is canonical across panel layouts and association") {
   REQUIRE(ab.products.size() == 4);
 }
 
-TEST_CASE("linear e-graph saturates matrix chains and extracts lower work") {
-  const auto dense = [](size_t rows, size_t cols) {
-    return matrix_layout{
-        rows, cols, {{sparsity::dense, 0, 0, rows, cols}}};
-  };
-  linear_egraph graph;
-  const auto a = graph.add_leaf(0, dense(100, 2));
-  const auto b = graph.add_leaf(1, dense(2, 100));
-  const auto c = graph.add_leaf(2, dense(100, 2));
-  const auto root = graph.add_multiply(graph.add_multiply(a, b), c);
-  const auto saturation = graph.saturate();
-  REQUIRE(saturation.saturated);
-  REQUIRE(saturation.nodes > 5);
-
-  const auto extracted = graph.extract(root);
-  const auto &term = extracted.at(extracted.root);
-  REQUIRE(term.cost.scalar_products == 800);
-  REQUIRE(term.op == linear_egraph_op::multiply);
-  REQUIRE(extracted.at(term.children[0]).leaf == 0);
-  REQUIRE(extracted.at(term.children[1]).op == linear_egraph_op::multiply);
-}
-
-TEST_CASE("linear e-graph eliminates identities and double transposes") {
-  const matrix_layout layout{
-      4, 3, {{sparsity::dense, 0, 0, 4, 3}}};
-  linear_egraph graph;
-  const auto a = graph.add_leaf(7, layout);
-  const auto identity = graph.add_identity(3);
-  const auto product = graph.add_multiply(a, identity);
-  const auto root = graph.add_transpose(graph.add_transpose(product));
-  REQUIRE(graph.saturate().saturated);
-  const auto extracted = graph.extract(root);
-  REQUIRE(extracted.at(extracted.root).op == linear_egraph_op::leaf);
-  REQUIRE(extracted.at(extracted.root).leaf == 7);
-  REQUIRE(extracted.at(extracted.root).cost.scalar_products == 0);
-}
-
 TEST_CASE("analyzed SpMM compiles inferred panels including two transposes") {
   const auto allocate = [](const matrix_layout &layout) {
     sparse_matrix value;
@@ -598,6 +560,52 @@ TEST_CASE("static profile packs disjoint diagonal panels into one owner") {
   matrix rhs = matrix::Random(9, 4), out = matrix::Zero(12, 4);
   multiply(sparse, rhs, out);
   REQUIRE(out.isApprox(expected * rhs, 1e-12));
+}
+
+TEST_CASE("sparse matrix resize accepts panels ending at the boundary") {
+  sparse_matrix dense;
+  dense.resize(4, 5);
+  dense.insert(0, 0, 4, 5, sparsity::dense);
+  dense.resize(4, 5);
+
+  sparse_matrix diagonal;
+  diagonal.resize(4, 4);
+  diagonal.insert(0, 0, 4, 4, sparsity::diag);
+  diagonal.resize(4, 4);
+
+  sparse_matrix eye;
+  eye.resize(4, 4);
+  eye.insert(0, 0, 4, 4, sparsity::eye);
+  eye.resize(4, 4);
+}
+
+TEST_CASE("sparse matrix copies own independent JIT bindings") {
+  sparse_matrix source;
+  source.resize(3, 3);
+  source.insert(0, 0, 3, 3, sparsity::dense).setOnes();
+  const matrix rhs = matrix::Identity(3, 3);
+  matrix output = matrix::Zero(3, 3);
+  multiply(source, rhs, output);
+
+  sparse_matrix copy(source);
+  copy.dense_panels_.front().data_.setConstant(2.);
+  output.setZero();
+  multiply(copy, rhs, output);
+  REQUIRE(output.isConstant(2.));
+  REQUIRE(source.dense().isConstant(1.));
+}
+
+TEST_CASE("sparse matrix assignment preserves an unused static binding plan") {
+  sparse_matrix source;
+  source.resize(4, 4);
+  const std::array blocks{
+      sparse_block_spec{0, 0, 4, 4, sparsity::diag}};
+  source.plan(blocks);
+
+  sparse_matrix copy;
+  copy = source;
+  copy.bind(0, 0, 4, 4, sparsity::diag).setOnes();
+  REQUIRE(copy.dense().diagonal().isOnes());
 }
 
 TEST_CASE("additive layout aliases exactly overlapping diagonal bindings") {

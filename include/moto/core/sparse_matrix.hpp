@@ -33,10 +33,13 @@ struct sparse_matrix {
   };
   std::vector<planned_binding> planned_;
   sparse_matrix() = default;
+  sparse_matrix(const sparse_matrix &other);
+  sparse_matrix(sparse_matrix &&) noexcept = default;
   bool is_empty() const {
     return dense_panels_.empty() && diag_panels_.empty() && eye_panels_.empty();
   }
   sparse_matrix &operator=(const sparse_matrix &other);
+  sparse_matrix &operator=(sparse_matrix &&) noexcept = default;
   void setZero();
   void resize(size_t rows, size_t cols);
   bool valid() const;
@@ -54,13 +57,6 @@ struct sparse_matrix {
     return insert(r_st, c_st, dim, dim, Sp);
   }
   matrix dense() const;
-  template <typename rhs_type> sparse_matrix &operator=(const rhs_type &rhs) {
-    for (auto &panel : dense_panels_) {
-      if (panel.rows_ == rhs.rows())
-        panel.data_.noalias() = rhs.middleCols(panel.col_st_, panel.cols_);
-    }
-    return *this;
-  }
 };
 
 } // namespace moto
