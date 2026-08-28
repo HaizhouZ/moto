@@ -27,6 +27,8 @@ void register_submodule_node_data(nb::module_ &m) {
              "Copy the stage container while sharing expression handles")
         .def("with_status", &stage_ocp::copy, nb::arg("config"),
              "Copy the stage with a different active-expression selection")
+        .def("update_active_status", &stage_ocp::update_active_status, nb::arg("config"),
+             "Update active expressions on this stage")
         .def("add", [](stage_ocp &self, expr_inarg_list &&exprs) { self.add(exprs); }, nb::arg("exprs"), "Add stage expressions")
         .def("add", [](stage_ocp &self, expr_handle ex) { self.add(std::move(ex)); }, nb::arg("ex"), "Add a stage expression")
         .def_prop_ro("st", [](stage_ocp &self) { return self.st(); }, "Start-node view")

@@ -15,11 +15,8 @@ import pinocchio.casadi as cpin
 from example.helpers import (
     PinocchioCasadiModel,
     ViserRobot,
-    add_terms,
     animate_trajectory,
-    collect_state_trajectory,
     frame_placement,
-    visit_nodes,
 )
 from example_robot_data import load
 
@@ -146,20 +143,17 @@ def build_sqp(n_job: int = 4):
     state_cost = model.get_state_cost()
 
     stage_prob = moto.stage()
-    add_terms(stage_prob, model.dyn, torque_limit_constr, model.get_input_cost())
-    add_terms(stage_prob.st, joint_limit_constr, state_cost)
+    stage_prob.add([model.dyn, torque_limit_constr, model.get_input_cost()])
+    stage_prob.st.add([joint_limit_constr, state_cost])
 
     stage_prob.print_summary()
     print("--" * 15)
 
     horizon = 50
     sqp = moto.sqp(n_job=n_job)
-    stages = sqp.add_stage(stage_prob, horizon)
-    add_terms(
-        stages[-1].ed,
-        joint_limit_constr,
-        state_cost,
-        model.make_ee_pos_constr(),
+    sqp.stages.extend([stage_prob.copy() for _ in range(horizon)])
+    sqp.ed.add(
+        [joint_limit_constr, state_cost, model.make_ee_pos_constr()]
     )
 
     cfg = [
@@ -191,7 +185,9 @@ def build_sqp(n_job: int = 4):
             if hasattr(model, "W_ee_cost"):
                 data.value[model.W_ee_cost] = np.ones(6) * 1e8
 
-    nodes = visit_nodes(sqp.nodes, set_initial_state)
+    nodes = sqp.nodes
+    for index, node in enumerate(nodes):
+        set_initial_state(node, index)
 
     sqp.settings.ipm.mu0 = 0.1
     # sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
@@ -243,7 +239,9 @@ def main():
     print(f"comp_res     : {kkt.inf_comp_res:.3e}")
     print(f"solved       : {kkt.solved}")
 
-    q_res, dt_res = collect_state_trajectory(nodes, model.q, model.qn, dt)
+    q_res = [np.array(node.value[model.q], copy=True) for node in nodes]
+    q_res.append(np.array(nodes[-1].value[model.qn], copy=True))
+    dt_res = [float(dt)] * len(nodes)
 
     eef = frame_placement(model.fmodel, q_res[-1], model.ee_id)
     eef_des = pin.XYZQUATToSE3(cfg[0])

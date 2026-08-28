@@ -340,16 +340,18 @@ for gait, (idx_cfg, cfg) in tqdm(
         )
         return phase_prob
 
-    segment_lengths = [stance_length]
-    segment_lengths.extend([nodes_per_step] * steps)
-    segment_lengths.append(stance_length)
+    phase_lengths = [stance_length]
+    phase_lengths.extend([nodes_per_step] * steps)
+    phase_lengths.append(stance_length)
 
-    segment_start_nodes = [prob]
-    segment_start_nodes.extend(create_phase_problem(step) for step in range(1, steps + 1))
-    segment_start_nodes.append(prob.clone())
+    phase_prototypes = [prob]
+    phase_prototypes.extend(create_phase_problem(step) for step in range(1, steps + 1))
+    phase_prototypes.append(prob.clone())
     graph_stages = []
-    for start_prob, n_edges in zip(segment_start_nodes, segment_lengths):
-        graph_stages.extend(sqp.add_stage(start_prob, n_edges))
+    for prototype, n_edges in zip(phase_prototypes, phase_lengths):
+        phase = [prototype.copy() for _ in range(n_edges)]
+        sqp.stages.extend(phase)
+        graph_stages.extend(phase)
     graph_stages[-1].ed.add(model.kin_constr)
     if not benchmark.args.full:
         graph_stages[-1].ed.add(model.kin_cost)

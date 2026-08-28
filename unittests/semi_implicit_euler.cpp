@@ -582,8 +582,9 @@ TEST_CASE("multiple dynamics support regrouped phases and optimized initial stat
   second->add(*running);
   ns_sqp sqp(1);
   sqp.settings.initial_state = ns_sqp::initial_state_mode::optimized;
-  sqp.add_stage(first, 1);
-  sqp.add_stage(second, 2);
+  sqp.stages().push_back(first->copy());
+  sqp.stages().push_back(second->copy());
+  sqp.stages().push_back(second->copy());
   auto &nodes = sqp.solver_nodes();
   for (auto *node : nodes) {
     node->sym_val().get(x1)(0) = 1.;

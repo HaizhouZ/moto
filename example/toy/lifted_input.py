@@ -55,8 +55,8 @@ def main():
     stage.add(moto.cost.from_scalar("lifted_demo_l_cost", lifted))
 
     sqp = moto.sqp(n_job=1)
-    stages = sqp.add_stage(stage, 1)
-    stages[-1].ed.add(
+    sqp.stages.append(stage.copy())
+    sqp.ed.add(
         moto.cost.from_scalar(
             "lifted_demo_target_cost", x, reference=TARGET
         )

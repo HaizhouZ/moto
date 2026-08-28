@@ -11,8 +11,6 @@ import casadi as cs
 import moto
 import numpy as np
 
-from example.helpers import add_terms, collect_node_values, visit_nodes
-
 np.set_printoptions(precision=4, suppress=True)
 
 nx, nu = 2, 1
@@ -50,10 +48,10 @@ def build_sqp():
     sqp = moto.sqp(n_job=1)
 
     stage_prob = moto.stage()
-    add_terms(stage_prob, dyn, running_cost, u_box)
+    stage_prob.add([dyn, running_cost, u_box])
 
-    stages = sqp.add_stage(stage_prob, N)
-    stages[-1].ed.add(terminal_cost)
+    sqp.stages.extend([stage_prob.copy() for _ in range(N)])
+    sqp.ed.add(terminal_cost)
 
     nodes = sqp.nodes
     print("Stage problem")
@@ -66,7 +64,8 @@ def build_sqp():
         if node.prob.dim(moto.field.field___y) > 0:
             node.value[xn] = x0.copy()
 
-    visit_nodes(nodes, init)
+    for index, node in enumerate(nodes):
+        init(node, index)
     sqp.settings.prim_tol = 1e-8
     sqp.settings.dual_tol = 1e-8
     sqp.settings.comp_tol = 1e-8
@@ -79,9 +78,8 @@ def main():
     kkt = sqp.update(50, verbose=True)
     sys.stdout.flush()
 
-    x_values, u_values = collect_node_values(nodes, x, u)
-    x_values = [value.reshape(-1) for value in x_values]
-    u_values = [value.reshape(-1) for value in u_values]
+    x_values = [np.array(node.value[x], copy=True).reshape(-1) for node in nodes]
+    u_values = [np.array(node.value[u], copy=True).reshape(-1) for node in nodes]
 
     print(f"result   : {kkt.result}")
     print(f"num_iter : {kkt.num_iter}")

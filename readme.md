@@ -109,8 +109,8 @@ stage.add(running)
 stage.add(u_box)
 
 sqp = moto.sqp(n_job=4)
-stages = sqp.add_stage(stage, 12)
-stages[-1].ed.add(terminal)
+sqp.stages.extend([stage.copy() for _ in range(12)])
+sqp.ed.add(terminal)
 
 # Accessing nodes realizes the graph. Finish editing stages before this point.
 nodes = sqp.nodes

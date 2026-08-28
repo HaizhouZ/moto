@@ -89,14 +89,27 @@ graph_composer::interval_snapshot graph_composer::compose(const graph_model &mod
         }
         auto intervals = std::make_shared<std::vector<ocp_ptr_t>>();
         std::vector<cache_entry> next;
+        std::vector<bool> used(entries_.size(), false);
         intervals->reserve(topology.intervals->size());
         next.reserve(topology.intervals->size());
         for (size_t i = 0; i < topology.intervals->size(); ++i) {
             const auto deps = dependencies((*topology.intervals)[i]);
-            if (i < entries_.size() && entries_[i].composed && entries_[i].dependencies == deps) {
-                next.push_back(entries_[i]);
+            size_t match = entries_.size();
+            if (i < entries_.size() && !used[i] && entries_[i].composed && entries_[i].dependencies == deps) {
+                match = i;
             } else {
+                for (size_t j = 0; j < entries_.size(); ++j) {
+                    if (!used[j] && entries_[j].composed && entries_[j].dependencies == deps) {
+                        match = j;
+                        break;
+                    }
+                }
+            }
+            if (match == entries_.size()) {
                 next.push_back({deps, compose_stage((*topology.intervals)[i])});
+            } else {
+                used[match] = true;
+                next.push_back(entries_[match]);
             }
             intervals->push_back(next.back().composed);
         }

@@ -64,7 +64,7 @@ def main():
     stage = moto.stage()
     stage.add(dynamics)
     sqp = moto.sqp(n_job=1)
-    sqp.add_stage(stage, 2)
+    sqp.stages.extend([stage.copy() for _ in range(2)])
     _ = sqp.nodes
 
     parameters = dynamics.elimination_parameters

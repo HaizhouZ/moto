@@ -349,18 +349,10 @@ struct ns_sqp {
     using storage_type = linear_runtime_graph<node_type>;
 
     node_view start_node() const { return model_graph_.start_node(); }
-    std::vector<stage_ocp_ptr_t> add_stage(const stage_ocp_ptr_t &stage, size_t n_stages) {
-        return model_graph_.add_stage(stage, n_stages);
-    }
-    std::vector<stage_ocp_ptr_t> add_stages(const node_view &start_node,
-                                            const stage_ocp_ptr_t &stage,
-                                            size_t n_stages) {
-        return model_graph_.add_stages(start_node, stage, n_stages);
-    }
-    std::vector<std::vector<stage_ocp_ptr_t>> add_phases(
-        const std::vector<graph_model::phase> &phases) {
-        return model_graph_.add_phases(phases);
-    }
+    node_view st() const { return model_graph_.st(); }
+    node_view ed() const { return model_graph_.ed(); }
+    std::vector<stage_ocp_ptr_t> &stages() { return model_graph_.stages(); }
+    const std::vector<stage_ocp_ptr_t> &stages() const { return model_graph_.stages(); }
     std::vector<data *> &solver_nodes();
 
   private:

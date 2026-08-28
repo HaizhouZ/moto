@@ -171,8 +171,8 @@ sqp = moto.sqp(n_job=6)
 stage = moto.stage()
 stage.add(dynamics)
 stage.add(interval_cost)
-stages = sqp.add_stage(stage, horizon)
-stages[-1].ed.add(terminal_cost)
+sqp.stages.extend([stage.copy() for _ in range(horizon)])
+sqp.ed.add(terminal_cost)
 nodes = sqp.nodes
 ```
 
@@ -183,15 +183,18 @@ Placement rules:
 - `stage.st.add(...)`: state-only term on the phase start boundary
 - `stage.ed.add(...)`: state-only term on the phase end boundary
 - `sqp.start_node.add(...)`: state-only term on the graph's initial state
+- `sqp.ed.add(...)`: state-only term on the stable graph terminal boundary
 
 Endpoint views reject terms involving `u`, authored `y`, or dynamics. Users
 write endpoint expressions on `x`; graph composition performs the necessary
 solver-storage lowering.
 
-`sqp.add_stage(stage, N)` appends `N` graph-owned stage copies from the current
-tail. `sqp.add_stages(node, stage, N)` appends from an explicit graph boundary.
-Returned stages are mutable graph-owned copies; editing them invalidates cached
-realization. Editing the original prototype later does not mutate those copies.
+`sqp.stages` is the mutable graph-owned stage vector. Insert independent
+`stage.copy()` objects directly; there is no separate stage/phase insertion
+API. Editing graph-owned stages invalidates cached realization, while editing a
+prototype later does not mutate existing copies. Use ordinary
+index/delete/insert/append operations for range replacement and horizon shift.
+`sqp.st` and `sqp.ed` expose graph boundaries separately.
 
 `sqp.nodes` realizes and returns the ordered solver-stage list for initialization
 and debugging. It is not the modeling API and should not absorb graph semantic

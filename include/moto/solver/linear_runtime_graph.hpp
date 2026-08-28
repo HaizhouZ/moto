@@ -43,12 +43,25 @@ class linear_runtime_graph {
     template <typename DesiredRange, typename Matches, typename Factory>
     void reconcile(const DesiredRange &desired, Matches &&matches, Factory &&factory) {
         std::vector<node> next;
+        std::vector<bool> used(nodes_.size(), false);
         next.reserve(desired.size());
         for (size_t i = 0; i < desired.size(); ++i) {
-            if (i < nodes_.size() && std::invoke(matches, nodes_[i], desired[i])) {
-                next.emplace_back(std::move(nodes_[i]));
+            size_t match = nodes_.size();
+            if (i < nodes_.size() && !used[i] && std::invoke(matches, nodes_[i], desired[i])) {
+                match = i;
             } else {
+                for (size_t j = 0; j < nodes_.size(); ++j) {
+                    if (!used[j] && std::invoke(matches, nodes_[j], desired[i])) {
+                        match = j;
+                        break;
+                    }
+                }
+            }
+            if (match == nodes_.size()) {
                 next.emplace_back(std::invoke(factory, desired[i]));
+            } else {
+                used[match] = true;
+                next.emplace_back(std::move(nodes_[match]));
             }
         }
         nodes_ = std::move(next);

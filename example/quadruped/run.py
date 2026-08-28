@@ -9,65 +9,21 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import moto
-import casadi as cs
 import numpy as np
-import pinocchio as pin
 
 from example.helpers import (
-    ContactRobotModel,
-    GO2_FOOT_FRAMES,
     ViserRobot,
-    add_stage_segments,
-    add_terms,
-    add_time_step_regularization,
     animate_trajectory,
     build_floating_base_model,
-    collect_state_trajectory,
-    print_graph_layout,
-    visit_nodes,
 )
+from example.quadruped.lifted_contact_elimination import (
+    configure_lifted_contact_elimination,
+)
+from example.quadruped.model import QuadrupedModel, add_gait_phases, swing_feet
 from example_robot_data import load
 
 
-class QuadrupedModel(ContactRobotModel):
-    def __init__(
-        self,
-        model: pin.Model,
-        name: str = "",
-        dt: cs.SX | float = 0.01,
-        q_nom: np.ndarray | None = None,
-        foot_frames=GO2_FOOT_FRAMES,
-        use_fwd_dyn: bool = False,
-        configuration_velocity: str = "predicted",
-        acceleration_control: bool = False,
-    ):
-        super().__init__(
-            model,
-            name=name,
-            dt=dt,
-            q_nom=q_nom,
-            contact_frames=foot_frames,
-            use_forward_dynamics=use_fwd_dyn,
-            configuration_velocity=configuration_velocity,
-            acceleration_control=acceleration_control,
-        )
-
-    def get_state_cost(self):
-        q_stack = self.q_stack
-        v_stack = self.v_stack
-        q_nom_res = self.q.symbolic_difference(self.q.sx, self.q_nom.sx)
-        residual = cs.vcat([q_nom_res, v_stack])
-        weight = np.r_[
-            np.full(6, 200.0),
-            np.full(q_nom_res.numel() - 6, 2.0),
-            np.full(6, 2.0),
-            np.full(v_stack.numel() - 6, 0.02),
-        ]
-        cost = moto.cost.from_vector("c", residual, weight=weight)
-        return cost
-
-
-def main():
+def main(*, lifted_contact_default=False):
     parser = argparse.ArgumentParser(
         description="Run the quadruped trajectory optimization example"
     )
@@ -93,6 +49,22 @@ def main():
         ),
     )
     parser.add_argument(
+        "--lifted-contact",
+        action=argparse.BooleanOptionalAction,
+        default=lifted_contact_default,
+        help="lift contact force and eliminate it through the supplied graph",
+    )
+    parser.add_argument(
+        "--explicit-rnea-contact",
+        action="store_true",
+        help="use explicit contact-force input with RNEA and contact constraints",
+    )
+    parser.add_argument(
+        "--lifted-acceleration",
+        action="store_true",
+        help="also lift acceleration in the lifted-contact formulation",
+    )
+    parser.add_argument(
         "--max-iter",
         type=int,
         default=(
@@ -112,6 +84,21 @@ def main():
         default=os.getenv("MOTO_PROFILE_SQP") is not None,
     )
     args = parser.parse_args()
+    if args.acceleration_control and (
+        args.explicit_rnea_contact or args.lifted_acceleration
+    ):
+        parser.error(
+            "--acceleration-control is exclusive with contact formulation options"
+        )
+    if args.explicit_rnea_contact and args.lifted_acceleration:
+        parser.error("--explicit-rnea-contact and --lifted-acceleration are exclusive")
+    lifted_contact = (
+        args.lifted_contact
+        and not args.acceleration_control
+        and not args.explicit_rnea_contact
+    )
+    if args.lifted_acceleration and not lifted_contact:
+        parser.error("--lifted-acceleration requires --lifted-contact")
 
     dt_nom = moto.sym.params("dt_nom", 1, default_val=0.02)
     dt = 0.02
@@ -128,89 +115,68 @@ def main():
         model,
         dt=dt,
         q_nom=q_d,
-        use_fwd_dyn=True,
+        use_forward_dynamics=(
+            not args.acceleration_control
+            and not lifted_contact
+            and not args.explicit_rnea_contact
+        ),
         configuration_velocity=(
-            "next" if args.acceleration_control else args.configuration_velocity
+            "next"
+            if args.acceleration_control or lifted_contact or args.explicit_rnea_contact
+            else args.configuration_velocity
         ),
         acceleration_control=args.acceleration_control,
+        lifted_contact=lifted_contact,
+        lifted_acceleration=args.lifted_acceleration,
     )
-    model.joint_limit_constr = model.joint_limit_constraint(model.q, model.v)
-    model.input_limit_constr = (
-        moto.ineq.bounds("a_limit", model.a, -50.0, 50.0)
-        if args.acceleration_control
-        else model.torque_limit_constraint(model.tq)
-    )
-    model.state_cost = model.get_state_cost()
+    if model.lifted_contact:
+        configure_lifted_contact_elimination(model)
+    model.prepare_problem_terms()
     print(
         "dynamics mode: "
         + (
             "acceleration-only semi-implicit Euler"
             if args.acceleration_control
-            else f"contact dynamics ({args.configuration_velocity} configuration velocity)"
+            else (
+                "lifted acceleration/RNEA/contact + semi-implicit Euler"
+                if args.lifted_acceleration
+                else (
+                    "lifted RNEA/contact + semi-implicit Euler"
+                    if model.lifted_contact
+                    else (
+                        "explicit RNEA/contact + semi-implicit Euler"
+                        if args.explicit_rnea_contact
+                        else f"contact dynamics ({args.configuration_velocity} configuration velocity)"
+                    )
+                )
+            )
         )
     )
 
-    def build_stage_prob(robot: QuadrupedModel):
-        stage_prob = moto.stage()
-        add_terms(
-            stage_prob,
-            robot.dyn,
-            robot.input_limit_constr,
-            robot.input_cost(),
-        )
-        robot.contacts.add_to_stage(stage_prob)
-        add_time_step_regularization(stage_prob, robot.dt, dt_nom)
-        add_terms(stage_prob.st, robot.joint_limit_constr, robot.state_cost)
-        return stage_prob
-
-    def add_end_node_terms(node, robot: QuadrupedModel):
-        robot.contacts.add_to_endpoint(node)
-        add_terms(node, robot.joint_limit_constr, robot.state_cost)
-
-    stage_proto = build_stage_prob(model)
+    stage_proto = model.create_stage(dt_nom)
 
     N_horizon = args.horizon
 
     # setup gait
     steps = args.steps
     nodes_per_step = args.nodes_per_step
-    total_gait_steps = steps * nodes_per_step
-    if total_gait_steps > N_horizon:
-        parser.error("horizon must be at least steps * nodes-per-step")
-    stance_length = int((N_horizon - total_gait_steps) / 2)
-    print(f"stance_length: {stance_length}, nodes_per_step: {nodes_per_step}")
-
-    gait_setting = [1, 1, 0, 0]
     sqp = moto.sqp(n_job=args.n_job)
-
-    def create_phase_config(step):
-        constr_to_disable = []
-        phase_terms = (
-            model.contacts.kinematic_constraints
-            if args.acceleration_control
-            else model.contacts.impulses
+    try:
+        head_stance, tail_stance = add_gait_phases(
+            sqp,
+            stage_proto,
+            model,
+            horizon=N_horizon,
+            steps=steps,
+            nodes_per_step=nodes_per_step,
         )
-        for idx, f in enumerate([0, 3, 1, 2]):
-            if step % 2 == 0:
-                if not gait_setting[idx]:
-                    constr_to_disable.append(phase_terms[f])
-            else:
-                if gait_setting[idx]:
-                    constr_to_disable.append(phase_terms[f])
-        return moto.active_status_config(deactivate_list=constr_to_disable)
-
-    segment_lengths = [stance_length]
-    segment_lengths.extend([nodes_per_step] * steps)
-    segment_lengths.append(stance_length)
-
-    segment_start_nodes = [stage_proto]
-    segment_start_nodes.extend(
-        stage_proto.with_status(create_phase_config(step)) for step in range(1, steps + 1)
+    except ValueError as error:
+        parser.error(str(error))
+    print(
+        f"stance_length: {head_stance}+{tail_stance}, nodes_per_step: {nodes_per_step}"
     )
-    segment_start_nodes.append(stage_proto.copy())
-    graph_stages = add_stage_segments(sqp, segment_start_nodes, segment_lengths)
 
-    add_end_node_terms(graph_stages[-1].ed, model)
+    model.add_terminal_terms(sqp.ed)
     nodes = sqp.nodes
 
     if os.getenv("MOTO_DEBUG_SOLVER_PROBS"):
@@ -224,7 +190,14 @@ def main():
 
     if os.getenv("MOTO_DEBUG_GRAPH_LAYOUT"):
         print("Flattened solver graph layout:")
-        print_graph_layout(nodes)
+        for index, node in enumerate(nodes):
+            prob = node.prob
+            print(
+                f"  node[{index}] "
+                f"x={prob.dim(moto.field.field___x)} "
+                f"u={prob.dim(moto.field.field___u)} "
+                f"y={prob.dim(moto.field.field___y)}"
+            )
     sqp.settings.ipm.mu0 = 1.0
     sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.monotonic_decrease
     sqp.settings.ipm_conditional_corrector = True
@@ -259,8 +232,8 @@ def main():
     def gait_setup(data: moto.sqp.data_type, node_index):
         ref_node_idx = min(node_index + 1, N_horizon)
         ref_step = 0
-        if ref_node_idx >= stance_length:
-            ref_step = min(steps, 1 + (ref_node_idx - stance_length) // nodes_per_step)
+        if ref_node_idx >= head_stance:
+            ref_step = min(steps, 1 + (ref_node_idx - head_stance) // nodes_per_step)
         node_progress = ref_node_idx / N_horizon
         if 1 <= ref_step <= 2:
             data.value[model.q_nom][0] = node_progress * cfg[0][0]
@@ -272,8 +245,15 @@ def main():
             data.value[model.q_nom][1] = cfg[0][1] + node_progress * (
                 cfg[1][1] - cfg[0][1]
             )
+        if model.lifted_contact:
+            active = np.ones(len(model.contacts.impulses))
+            if ref_step > 0:
+                active[list(swing_feet(ref_step))] = 0.0
+            for value, parameter in zip(active, model.contact_activation):
+                data.value[parameter] = value
 
-    visit_nodes(nodes, gait_setup)
+    for index, node in enumerate(nodes):
+        gait_setup(node, index)
 
     cnt = 0
     iters = 0
@@ -290,6 +270,7 @@ def main():
     elapsed = time.perf_counter() - start
 
     sys.stdout.flush()
+    print(f"result: {res.result}, solved={res.solved}, iterations={res.num_iter}")
     print(f"sqp.update() took {elapsed / cnt:.3f} seconds")
     if iters > 0:
         print(f"per iteration took {elapsed / iters * 1000:.3f} ms")
@@ -319,16 +300,16 @@ def main():
                 f"trial_evals={it.trial_evaluations:3d}"
             )
 
-    q_res, dt_res = collect_state_trajectory(nodes, model.q, model.qn, dt)
+    q_res = [np.array(node.value[model.q], copy=True) for node in nodes]
+    q_res.append(np.array(nodes[-1].value[model.qn], copy=True))
+    dt_res = [float(dt)] * len(nodes)
     if not display:
         return
 
     viewer = ViserRobot(go2.urdf, floating_base=True)
     colors = [(0, 255, 0), (255, 0, 0)]
     for index, target in enumerate(cfg):
-        viewer.add_target(
-            str(index), np.r_[target[:2], 0.3], color=colors[index]
-        )
+        viewer.add_target(str(index), np.r_[target[:2], 0.3], color=colors[index])
     animate_trajectory(viewer, q_res, dt_res)
 
 

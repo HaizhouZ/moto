@@ -8,7 +8,7 @@ from example_robot_data import load
 from benchmark_tool import benchmark_tool
 from example.helpers import pinocchio_states
 
-import argparse, json
+import json
 
 
 benchmark = benchmark_tool()
@@ -211,14 +211,13 @@ output_file = args.output_file
 with open(args.config, "r") as f:
     config = json.load(f)
 from tqdm import tqdm
-import time
 
 for idx_cfg, cfg in tqdm(enumerate(config), total=len(config)):
     sqp = moto.sqp(n_job=4)
-    stages = sqp.add_stage(prob, N_horizon)
-    stages[-1].ed.add(joint_limit_constr)
-    stages[-1].ed.add(model.make_ee_pos_constr(soft=args.soft, cost=args.cost))
-    stages[-1].ed.add(state_cost)
+    sqp.stages.extend([prob.copy() for _ in range(N_horizon)])
+    sqp.ed.add(joint_limit_constr)
+    sqp.ed.add(model.make_ee_pos_constr(soft=args.soft, cost=args.cost))
+    sqp.ed.add(state_cost)
     nodes = sqp.nodes
 
     nodes[-1].value[model.r_des] = np.array(cfg[0][:3])

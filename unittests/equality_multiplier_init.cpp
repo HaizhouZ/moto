@@ -128,8 +128,9 @@ void configure_solver(ns_sqp &sqp, bool enable_eq_init, size_t n_edges) {
     sqp.settings.eq_init.enabled = enable_eq_init;
     sqp.settings.eq_init.rho_eq = 10.0;
 
-    auto stages = sqp.add_stage(stage_prob, n_edges);
-    stages.back()->ed().add(*cost(new generic_cost("terminal_cost_eq_init", var_list{x}, x * x, approx_order::second)));
+    for (size_t i = 0; i < n_edges; ++i)
+        sqp.stages().push_back(stage_prob->copy());
+    sqp.ed().add(*cost(new generic_cost("terminal_cost_eq_init", var_list{x}, x * x, approx_order::second)));
 
     seed_primal_state(sqp, n_edges);
 }
