@@ -15,3 +15,6 @@ log
 build-*
 docs/_build/
 docs/site/reference/api/
+docs/contracts/
+docs/math/
+docs/records/
