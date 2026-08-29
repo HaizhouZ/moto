@@ -7,7 +7,8 @@ generic_dynamics::approx_data::approx_data(base::approx_data &&rhs)
     : approx_data(std::move(rhs), false) {}
 
 generic_dynamics::approx_data::approx_data(base::approx_data &&rhs,
-                                           bool sparse_projection)
+                                           bool sparse_projection,
+                                           bool sparse_raw_jacobian)
     : base::approx_data(std::move(rhs)),
       proj_f_res_(problem()->extract(lag_data_->dynamics_data_.proj_f_res_, func_)) {
     approx_ = &lag_data_->approx_[__dyn];
@@ -15,11 +16,32 @@ generic_dynamics::approx_data::approx_data(base::approx_data &&rhs,
     const auto &dyn = static_cast<const generic_dynamics &>(func_);
     auto &prob = *lag_data_->prob_;
     const size_t f_st = prob.get_expr_start(func_);
+    if (const size_t nl = prob.tdim(__l); nl && dyn.owns_stage_elimination()) {
+        const auto &profile = prob.linear_profile();
+        proj_l_x_.resize(nl, prob.tdim(__x));
+        proj_l_u_.resize(nl, prob.tdim(__u));
+        proj_l_x_.plan(profile.get(linear_target::lifted_projection,
+                                   __l, __x));
+        proj_l_u_.plan(profile.get(linear_target::lifted_projection,
+                                   __l, __u));
+        proj_l_res_.setZero(nl);
+        for (const auto &spec : profile.lifted_intermediates) {
+            auto [it, inserted] =
+                lifted_intermediates_.try_emplace(spec.name);
+            if (!inserted)
+                throw std::logic_error(
+                    "duplicate lifted intermediate runtime storage");
+            it->second.resize(spec.rows, spec.cols);
+            it->second.plan(spec.layout);
+        }
+    }
+    if (sparse_raw_jacobian)
+        return;
     const sym &first_x = func_.in_args(__x).front();
     f_x_.reset(approx_->jac_[__x].insert(
         f_st, prob.get_expr_start_tangent(first_x), func_.dim(),
         func_.arg_tdim(__x), sparsity::dense));
-    if (!sparse_projection)
+    if (!sparse_projection && !prob.tdim(__l))
         proj_f_x_.reset(dyn_proj_->proj_f_x_.insert(
             f_st, prob.get_expr_start_tangent(first_x), func_.dim(),
             func_.arg_tdim(__x), sparsity::dense));
@@ -37,7 +59,7 @@ generic_dynamics::approx_data::approx_data(base::approx_data &&rhs,
         f_u_exclusive_.reset(approx_->jac_[__u].insert(
             f_st, prob.get_expr_start_tangent(*first_exclusive_u), func_.dim(),
             exclusive_dim, sparsity::dense));
-        if (!sparse_projection)
+        if (!sparse_projection && !prob.tdim(__l))
             proj_f_u_exclusive_.reset(dyn_proj_->proj_f_u_.insert(
             f_st, prob.get_expr_start_tangent(*first_exclusive_u), func_.dim(),
             exclusive_dim,
@@ -56,49 +78,24 @@ generic_dynamics::approx_data::approx_data(base::approx_data &&rhs,
                 f_st, prob.get_expr_start_tangent(arg), func_.dim(), arg.tdim(),
                 sparsity::dense));
             new (&jac_[i]) matrix_ref(f_u_shared_.back());
-            if (!sparse_projection)
+            if (!sparse_projection && !prob.tdim(__l))
                 proj_f_u_shared_.emplace_back(dyn_proj_->proj_f_u_.insert(
                     f_st, prob.get_expr_start_tangent(arg), func_.dim(), arg.tdim(),
                     sparsity::dense));
         } else if (arg.field() == __u) {
             new (&jac_[i]) matrix_ref(f_u_exclusive_.middleCols(u_col, arg.tdim()));
             u_col += arg.tdim();
+        } else if (arg.field() == __l) {
+            auto ref = approx_->jac_[__l].insert(
+                f_st, prob.get_expr_start_tangent(arg), func_.dim(), arg.tdim(),
+                sparsity::dense);
+            new (&jac_[i]) matrix_ref(ref);
         }
     }
 }
 
 bool generic_dynamics::input_shared(const sym &s) const {
     return shared_inputs_indices_.contains(s.uid());
-}
-
-void generic_dynamics::substitute(const sym &arg, const sym &rhs) {
-    generic_constr::substitute(arg, rhs);
-    if (!input_shared(arg))
-        return;
-    std::replace(shared_inputs_.begin(), shared_inputs_.end(), arg, rhs);
-    shared_inputs_indices_.erase(arg.uid());
-    shared_inputs_indices_.insert(rhs.uid());
-}
-
-void generic_dynamics::finalize_impl() {
-    var_list reordered;
-    reordered.reserve(shared_inputs_.size());
-    for (const sym &s : shared_inputs_)
-        if (auto it = std::find(in_args_.begin(), in_args_.end(), s); it != in_args_.end())
-            reordered.emplace_back(std::move(*it));
-    std::erase_if(in_args_, [](const auto &arg) { return !arg; });
-    for (auto &arg : reordered)
-        in_args_.emplace_back(std::move(arg));
-    prepare_dynamics_codegen();
-    generic_constr::finalize_impl();
-    reordered.clear();
-    shared_inputs_indices_.clear();
-    for (var &s : shared_inputs_)
-        if (has_arg(s)) {
-            reordered.emplace_back(std::move(s));
-            shared_inputs_indices_.insert(reordered.back()->uid());
-        }
-    shared_inputs_.swap(reordered);
 }
 
 void generic_dynamics::mark_shared_inputs(const var_inarg_list &args) {

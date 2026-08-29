@@ -123,6 +123,10 @@ class sym : public expr, public cs::SX {
     static var inputs(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
         return global_registry::track(std::make_shared<sym>(name, dim, __u, default_val));
     }
+    /// @brief make an explicit lifted primal variable
+    static var lifted(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
+        return global_registry::track(std::make_shared<sym>(name, dim, __l, default_val));
+    }
     /// @brief make a symbolic parameter
     static var params(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
         return global_registry::track(std::make_shared<sym>(name, dim, __p, default_val));

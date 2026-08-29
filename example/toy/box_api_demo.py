@@ -60,6 +60,8 @@ def main():
         weight=np.arange(1.0, 5.0), reference=np.zeros(4),
     )
     inferred_constr = moto.constr.create("inferred_constr", x[0] + dt)
+    relational_eq = moto.constr.create("relational_eq", x == p_ub)
+    relational_ineq = moto.ineq.create("relational_ineq", x > p_lb)
     inferred_dynamics = moto.dense_dynamics.create(
         "inferred_dynamics", xn.sx - x.sx - u.sx
     )
@@ -71,8 +73,15 @@ def main():
     assert vector_cost.reference.uid == vector_reference.uid
     assert numeric_vector_cost.weight.dim == numeric_vector_cost.reference.dim == 4
     assert {arg.uid for arg in inferred_constr.in_args} == {x.uid, dt.uid}
+    assert {arg.uid for arg in relational_eq.in_args} == {x.uid, p_ub.uid}
+    assert {arg.uid for arg in relational_ineq.in_args} == {x.uid, p_lb.uid}
+    assert relational_eq.dim == relational_ineq.dim == 4
     assert {arg.uid for arg in inferred_dynamics.in_args} == {x.uid, xn.uid, u.uid}
     assert not hasattr(moto.cost, "create")
+
+    relational_stage = moto.stage()
+    relational_stage.add([relational_eq, relational_ineq])
+    relational_stage.wait_until_ready()
 
     sel = cs.vertcat(x.sx[0], x.sx[3])
     boxes.append(

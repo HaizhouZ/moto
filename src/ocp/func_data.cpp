@@ -28,7 +28,14 @@ func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, const generic_
     }
 }
 
-vector_ref func_arg_map::operator[](const sym &in) const { return in_args_[func_.arg_idx(in)]; }
+vector_ref func_arg_map::operator[](const sym &in) const {
+    if (const auto index = func_.runtime_arg_idx(in)) return in_args_[*index];
+    if (in.field() == __p && problem()->is_active(in))
+        return primal_->get(in);
+    throw std::out_of_range(fmt::format(
+        "symbol {} uid {} is neither an argument of function {} nor an "
+        "active factor parameter", in.name(), in.uid(), func_.name()));
+}
 vector_ref func_arg_map::operator[](size_t i) const { return in_args_.at(i); }
 const std::vector<vector_ref> &func_arg_map::in_arg_data() const { return in_args_; }
 const ocp *func_arg_map::problem() const { return shared_.prob_; }
@@ -62,12 +69,17 @@ func_approx_data::func_approx_data(sym_data &primal,
                     continue;
                 } else if (in_field(f_field, lag_data::stored_constr_fields)) {
                     const auto sp = func_.jac_sparsity()[i];
-                    const auto f_st = prob->get_expr_start(func_);
-                    auto &jac = lag_data_->approx_[f_field].jac_[arg->field()];
-                    const auto r_st = f_st + sp.row_offset;
-                    const auto c_st = prob->get_expr_start_tangent(arg) + sp.col_offset;
-                    jac_.push_back(matrix_ref(jac.insert(r_st, c_st, sp.rows, sp.cols, sp.pattern)));
-                    continue;
+                    if (sp.pattern != sparsity::unknown) {
+                        const auto f_st = prob->get_expr_start(func_);
+                        auto &jac =
+                            lag_data_->approx_[f_field].jac_[arg->field()];
+                        const auto r_st = f_st + sp.row_offset;
+                        const auto c_st =
+                            prob->get_expr_start_tangent(arg) + sp.col_offset;
+                        jac_.push_back(matrix_ref(jac.bind(
+                            r_st, c_st, sp.rows, sp.cols, sp.pattern)));
+                        continue;
+                    }
                 }
             }
             static matrix empty;
@@ -93,7 +105,7 @@ void func_approx_data::setup_hessian() {
                 if (fi >= fj && fi < field::num_prim && fj < field::num_prim &&
                     raw.prob_->is_active(in_args[i]) &&
                     raw.prob_->is_active(in_args[j])) {
-                    hess_panels_.push_back((*hessian)[fi][fj].insert(
+                    hess_panels_.push_back((*hessian)[fi][fj].bind(
                         raw.prob_->get_expr_start_tangent(in_args[i]) + sp.row_offset,
                         raw.prob_->get_expr_start_tangent(in_args[j]) + sp.col_offset,
                         sp.rows, sp.cols, sp.pattern));
@@ -121,7 +133,7 @@ void func_approx_data::setup_hessian() {
                             goto BIND_EMPTY_HESS;
                         } else if (field_1 >= field_2) {
                             const auto &hess_sp = func_.hess_sp_[i][j];
-                            lag_hess_[i].push_back((*hessian)[field_1][field_2].insert(
+                            lag_hess_[i].push_back((*hessian)[field_1][field_2].bind(
                                 raw.prob_->get_expr_start_tangent(in_args[i]) + hess_sp.row_offset,
                                 raw.prob_->get_expr_start_tangent(in_args[j]) + hess_sp.col_offset,
                                 hess_sp.rows, hess_sp.cols, hess_sp.pattern));
@@ -140,6 +152,8 @@ void func_approx_data::setup_hessian() {
 }
 
 bool func_approx_data::has_jacobian_block(size_t arg_idx) const { return arg_idx < jac_.size() && jac_[arg_idx].size() != 0; }
-matrix_ref func_approx_data::jac(const sym &in) const { return jac_[func_.arg_idx(in)]; }
+matrix_ref func_approx_data::jac(const sym &in) const {
+    return jac_[func_.runtime_arg_idx(in).value()];
+}
 matrix_ref func_approx_data::jac(size_t i) const { return jac_.at(i); }
 } // namespace moto

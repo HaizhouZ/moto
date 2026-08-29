@@ -13,7 +13,7 @@ namespace solver {
  * @note this class can be used as base class for other solver data (optional)
  */
 struct MOTO_ALIGN_NO_SHARING data_base {
-    size_t nx, nu, ny; ///< dimensions of the problem
+    size_t nx, nu, ny, nl; ///< dimensions of the problem
     sym_data *sym_;
     lag_data *dense_; ///< pointer to the dense approximation data
     // Active stage gradient used by the current linear solve.
@@ -26,11 +26,14 @@ struct MOTO_ALIGN_NO_SHARING data_base {
     row_vector &Q_x;
     row_vector &Q_u;
     row_vector &Q_y;
+    row_vector &Q_l;
     sparse_matrix &Q_xx, &Q_xx_mod;
     sparse_matrix &Q_ux, &Q_ux_mod;
     sparse_matrix &Q_uu, &Q_uu_mod;
     sparse_matrix &Q_yx, &Q_yx_mod;
     sparse_matrix &Q_yy, &Q_yy_mod;
+    sparse_matrix &Q_lx, &Q_lx_mod;
+    sparse_matrix &Q_ll, &Q_ll_mod;
     // Snapshot of the base stage Lagrangian gradient before any pending
     // reduced-system correction in lag_jac_corr_ is activated.
     //

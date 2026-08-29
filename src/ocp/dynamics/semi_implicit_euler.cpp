@@ -38,7 +38,7 @@ std::vector<piece> split_panels(const cs::SX &input) {
       for (size_t i = r; i < r + rows; ++i) used[i + j * nr] = 1;
   };
   std::vector<piece> out;
-  // Extract non-trivial dense rectangles first (quaternion and ordinary dense blocks).
+  // Extract non-trivial dense rectangles first (manifold and ordinary dense blocks).
   for (size_t r = 0; r < nr; ++r)
     for (size_t c = 0; c < nc; ++c) {
       if (!live(r, c)) continue;
@@ -87,28 +87,22 @@ semi_implicit_euler::semi_implicit_euler(const std::string &name,
     : base(name, out, order), state_(state) {}
 
 semi_implicit_euler::approx_data::approx_data(generic_constr::approx_data &&rhs)
-    : generic_dynamics::approx_data(std::move(rhs), true) {
+    : generic_dynamics::approx_data(std::move(rhs), true, true) {
   const auto &dyn = static_cast<const semi_implicit_euler &>(func_);
-  auto argument_refs = jac_;
   jac_.clear();
   const auto &prob = *lag_data_->prob_;
   const size_t f_st = prob.get_expr_start(func_);
   for (const auto &[argument, block] : dyn.jac_panels_) {
     const sym &arg = func_.in_args(argument);
-    if (arg.field() != __y) {
-      jac_.push_back(argument_refs[argument]);
-      continue;
-    }
-    auto ref = approx_->jac_[__y].insert(
-        f_st + block.row_offset,
-        prob.get_expr_start_tangent(arg) + block.col_offset,
-        block.rows, block.cols, block.pattern);
-    jac_.push_back(ref);
+    jac_.push_back(approx_->jac_[arg.field()].insert(
+          f_st + block.row_offset,
+          prob.get_expr_start_tangent(arg) + block.col_offset,
+          block.rows, block.cols, block.pattern));
   }
   scratch_.reserve(dyn.projected_panels_.size());
   for (const auto &[argument, block] : dyn.projected_panels_) {
     const sym &arg = func_.in_args(argument);
-    if (!prob.is_active(arg)) {
+    if (!prob.is_active(arg) || prob.tdim(__l)) {
       scratch_.emplace_back(block.rows,
                             block.pattern == sparsity::dense ? block.cols : 1);
       jac_.emplace_back(scratch_.back());
@@ -136,17 +130,26 @@ semi_implicit_euler::approx_data::approx_data(generic_constr::approx_data &&rhs)
 }
 
 void semi_implicit_euler::compute_project_jacobians(func_approx_data &data) const {
-  (void)data;
+  if (owns_stage_elimination())
+    generic_dynamics::compute_project_jacobians(data);
 }
 
 void semi_implicit_euler::compute_project_residual(func_approx_data &data) const {
+  if (owns_stage_elimination()) {
+    generic_dynamics::compute_project_residual(data);
+    return;
+  }
   auto &d = data.as<approx_data>();
   d.proj_f_res_.setZero();
   d.residual_(d.inverse_pointers_, d.v_.data(), d.proj_f_res_.data());
 }
 
-void semi_implicit_euler::apply_jac_y_inverse_transpose(
+void semi_implicit_euler::apply_lifted_jacobian_inverse_transpose(
     func_approx_data &data, vector_ref v, vector_ref dst) const {
+  if (owns_stage_elimination()) {
+    generic_dynamics::apply_lifted_jacobian_inverse_transpose(data, v, dst);
+    return;
+  }
   auto &d = data.as<approx_data>();
   dst.setZero();
   d.transpose_(d.inverse_pointers_, v.data(), dst.data());
@@ -187,14 +190,19 @@ void semi_implicit_euler::prepare_dynamics_codegen() {
   jac_panels_.clear();
   projected_panels_.clear();
   inverse_panels_.clear();
-  projected_profiles_.clear();
   task->jac_outputs.clear();
+  const auto jacobian_for = [&](const sym &arg) {
+    if (auto it = std::ranges::find_if(task->ext_jac, [&](const auto &entry) {
+          return entry.first->uid() == arg.uid();
+        }); it != task->ext_jac.end())
+      return it->second;
+    return utils::cs_codegen::tangent_jacobian(task->sx_output, arg);
+  };
   std::vector<cs::SX> fy_blocks;
   for (size_t i = 0; i < in_args_.size(); ++i) {
     const sym &arg = in_args_[i];
     if (!in_field(arg.field(), primal_fields)) continue;
-    cs::SX jac = cs::SX::sparsify(
-        utils::cs_codegen::tangent_jacobian(task->sx_output, arg));
+    cs::SX jac = cs::SX::sparsify(jacobian_for(arg));
     if (arg.field() == __y) {
       fy_blocks.push_back(jac);
       for (auto &[block, value] : split_panels(jac)) {
@@ -202,10 +210,10 @@ void semi_implicit_euler::prepare_dynamics_codegen() {
         task->jac_outputs.push_back(std::move(value));
       }
     } else {
-      jac_panels_.push_back({i, {sparsity::dense, 0, 0,
-                                 static_cast<size_t>(jac.rows()),
-                                 static_cast<size_t>(jac.columns())}});
-      task->jac_outputs.push_back(std::move(jac));
+      for (auto &[block, value] : split_panels(jac)) {
+        jac_panels_.push_back({i, block});
+        task->jac_outputs.push_back(std::move(value));
+      }
     }
   }
   const cs::SX fy = cs::SX::horzcat(fy_blocks);
@@ -215,18 +223,13 @@ void semi_implicit_euler::prepare_dynamics_codegen() {
     const sym &arg = in_args_[i];
     if (arg.field() != __x && arg.field() != __u)
       continue;
-    cs::SX jac = cs::SX::sparsify(
-        utils::cs_codegen::tangent_jacobian(task->sx_output, arg));
+    cs::SX jac = cs::SX::sparsify(jacobian_for(arg));
     cs::SX projected = cs::SX::mtimes(inverse, jac);
-    projected_profiles_.push_back(
-        linear_backend::analyze_sparsity(projected.sparsity()));
     if (std::getenv("MOTO_DEBUG_DYNAMICS_PROFILE")) {
-      const auto &profile = projected_profiles_.back();
-      fmt::println("{} P*F_{}: {}x{}, nnz={}/{}, blocks={}", name(),
-                   arg.name(), profile.rows, profile.cols, profile.nnz(),
-                   profile.rows * profile.cols,
-                   profile.row_blocks.empty() ? 0
-                                              : profile.row_blocks.size() - 1);
+      const auto profile = projected.sparsity();
+      fmt::println("{} P*F_{}: {}x{}, nnz={}/{}", name(),
+                   arg.name(), profile.size1(), profile.size2(), profile.nnz(),
+                   profile.numel());
     }
     for (auto &[block, value] : split_panels(projected)) {
       projected_panels_.push_back({i, block});

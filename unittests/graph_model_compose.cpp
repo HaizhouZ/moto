@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <string>
@@ -14,6 +15,7 @@
 #include <moto/ocp/cost.hpp>
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
 #include <moto/ocp/graph_model.hpp>
+#include <moto/ocp/graph_composer.hpp>
 #include <moto/ocp/ineq_constr.hpp>
 #include <moto/solver/ns_sqp.hpp>
 
@@ -126,6 +128,23 @@ const moto::generic_func &require_func_named_prefix(const moto::ocp_base_ptr_t &
     return *func;
 }
 
+template <typename Work>
+std::pair<double, double> timing_percentiles(size_t trials, Work work) {
+    using clock = std::chrono::steady_clock;
+    std::vector<double> elapsed;
+    elapsed.reserve(trials);
+    bool valid = true;
+    for (size_t trial = 0; trial < trials; ++trial) {
+        const auto start = clock::now();
+        valid &= work(trial);
+        elapsed.push_back(std::chrono::duration<double, std::micro>(
+                              clock::now() - start).count());
+    }
+    REQUIRE(valid);
+    std::sort(elapsed.begin(), elapsed.end());
+    return {elapsed[trials / 2], elapsed[trials * 95 / 100]};
+}
+
 moto::stage_ocp_ptr_t make_stage(const std::string &tag,
                                  const moto::sym &x,
                                  const moto::sym &y,
@@ -151,7 +170,8 @@ TEST_CASE("stage graph maps stage, start-node, and end-node terms to solver fiel
     stage->ed().add(*layout_cost("cost_ed_node_stage", var_list{x}));
 
     ns_sqp sqp;
-    sqp.add_stage(stage, 3);
+    for (size_t i = 0; i < 3; ++i)
+        sqp.stages().push_back(stage->copy());
 
     auto &flat = sqp.solver_nodes();
     REQUIRE(flat.size() == 3);
@@ -176,8 +196,9 @@ TEST_CASE("graph start terms are explicit while stage starts lower through incom
     stage->st().add(*layout_cost("cost_stage_start_graph_start_rule", var_list{x}));
 
     ns_sqp sqp;
-    sqp.start_node().add(*layout_cost("cost_graph_start_rule", var_list{x}));
-    sqp.add_stage(stage, 2);
+    sqp.st().add(*layout_cost("cost_graph_start_rule", var_list{x}));
+    for (size_t i = 0; i < 2; ++i)
+        sqp.stages().push_back(stage->copy());
 
     auto &flat = sqp.solver_nodes();
     REQUIRE(flat.size() == 2);
@@ -189,6 +210,70 @@ TEST_CASE("graph start terms are explicit while stage starts lower through incom
     REQUIRE_FALSE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_stage_start_graph_start_rule"));
 }
 
+TEST_CASE("connected stage start and current state placements give the same SQP step", "[graph][mapping][solver]") {
+    using namespace moto;
+
+    struct solution {
+        vector x, y, u;
+        scalar_t primal = 0.;
+        scalar_t dual = 0.;
+    };
+    const auto solve = [](const std::string &tag, bool boundary) {
+        auto [x, y] = sym::states("x_placement_equivalence_" + tag, 1);
+        auto u = sym::inputs("u_placement_equivalence_" + tag, 1);
+        auto prototype = stage_ocp::create();
+        prototype->add(*callback_linear_dynamics(
+            "dyn_placement_equivalence_" + tag, x, y, u));
+        prototype->add(*callback_quadratic_cost(
+            "input_placement_equivalence_" + tag, u));
+        auto first = prototype->copy();
+        auto second = prototype->copy();
+        auto state_cost = callback_quadratic_cost(
+            "state_placement_equivalence_" + tag, x, 2.);
+        if (boundary)
+            second->st().add(*state_cost);
+        else
+            second->add(*state_cost);
+
+        ns_sqp sqp;
+        sqp.stages().push_back(first);
+        sqp.stages().push_back(second);
+        auto &nodes = sqp.solver_nodes();
+        for (auto *node : nodes) {
+            node->sym_val()[x].setZero();
+            node->sym_val()[y].setZero();
+            node->sym_val()[u].setZero();
+        }
+        sqp.settings.restoration.enabled = false;
+        sqp.settings.prim_tol = 1e-10;
+        sqp.settings.dual_tol = 1e-10;
+        sqp.settings.comp_tol = 1e-10;
+        const auto result = sqp.update(5, false);
+        REQUIRE(result.iter.result == ns_sqp::iter_result_t::success);
+
+        solution out;
+        out.x.resize(2);
+        out.y.resize(2);
+        out.u.resize(2);
+        for (Eigen::Index i = 0; i < 2; ++i) {
+            out.x(i) = nodes[i]->sym_val()[x](0);
+            out.y(i) = nodes[i]->sym_val()[y](0);
+            out.u(i) = nodes[i]->sym_val()[u](0);
+        }
+        out.primal = result.primal.inf_res;
+        out.dual = result.dual.inf_res;
+        return out;
+    };
+
+    const auto direct = solve("direct", false);
+    const auto boundary = solve("boundary", true);
+    REQUIRE(direct.x.isApprox(boundary.x, 1e-12));
+    REQUIRE(direct.y.isApprox(boundary.y, 1e-12));
+    REQUIRE(direct.u.isApprox(boundary.u, 1e-12));
+    REQUIRE(std::abs(direct.primal - boundary.primal) < 1e-12);
+    REQUIRE(std::abs(direct.dual - boundary.dual) < 1e-12);
+}
+
 TEST_CASE("graph_model reuses cached lowered function entities across stages", "[graph][remap]") {
     using namespace moto;
 
@@ -198,7 +283,8 @@ TEST_CASE("graph_model reuses cached lowered function entities across stages", "
     stage->ed().add(*layout_cost("cost_ed_reuse_lowered", var_list{x}));
 
     ns_sqp sqp;
-    sqp.add_stage(stage, 4);
+    for (size_t i = 0; i < 4; ++i)
+        sqp.stages().push_back(stage->copy());
 
     auto &flat = sqp.solver_nodes();
     REQUIRE(flat.size() == 4);
@@ -224,7 +310,8 @@ TEST_CASE("graph_model realized stages are stable under concurrent readers", "[g
     auto stage = make_stage("concurrent_realize", x, xn, u);
 
     ns_sqp sqp;
-    sqp.add_stage(stage, 4);
+    for (size_t i = 0; i < 4; ++i)
+        sqp.stages().push_back(stage->copy());
 
     std::atomic<size_t> observed{0};
     std::vector<std::thread> threads;
@@ -340,13 +427,11 @@ TEST_CASE("expression and endpoint handles have explicit identity semantics",
         auto stage = stage_ocp::create();
         endpoint = stage->ed();
     }
-    REQUIRE(bool(endpoint));
-    REQUIRE(endpoint.stage() != nullptr);
     REQUIRE_NOTHROW(endpoint.add(*layout_cost(
         "endpoint_owned_handle_cost", var_list{x})));
 }
 
-TEST_CASE("sqp add_stage appends repeated stage segments from the graph tail", "[graph][path]") {
+TEST_CASE("sqp stages is the graph-owned stage vector", "[graph][path]") {
     using namespace moto;
 
     auto [x, xn] = sym::states("x_append_stage", 1);
@@ -355,14 +440,13 @@ TEST_CASE("sqp add_stage appends repeated stage segments from the graph tail", "
     auto stage_b = make_stage("append_b", x, xn, u);
 
     ns_sqp sqp;
-    auto first = sqp.add_stage(stage_a, 1);
+    sqp.stages().push_back(stage_a->copy());
 
     REQUIRE(sqp.solver_nodes().size() == 1);
 
-    auto second = sqp.add_stage(stage_b, 2);
-    REQUIRE(first.size() == 1);
-    REQUIRE(second.size() == 2);
-
+    sqp.stages().push_back(stage_b->copy());
+    sqp.stages().push_back(stage_b->copy());
+    REQUIRE(sqp.stages().size() == 3);
     auto &flat = sqp.solver_nodes();
     REQUIRE(flat.size() == 3);
     REQUIRE(contains_name_prefix(expr_names(flat.front()->problem(), __cost), "cost_u_append_a"));
@@ -373,26 +457,25 @@ TEST_CASE("sqp add_stage appends repeated stage segments from the graph tail", "
     REQUIRE(stage_cost.in_args().front()->field() == __x);
 }
 
-TEST_CASE("sqp add_phases builds one linear transaction and preserves unchanged runtime nodes", "[graph][path][cache]") {
+TEST_CASE("appending stage copies preserves unchanged runtime nodes", "[graph][path][cache]") {
     using namespace moto;
 
-    auto [x, xn] = sym::states("x_add_phases", 1);
-    auto u = sym::inputs("u_add_phases", 1);
+    auto [x, xn] = sym::states("x_append_copies", 1);
+    auto u = sym::inputs("u_append_copies", 1);
     auto stage_a = make_stage("phases_a", x, xn, u);
     auto stage_b = make_stage("phases_b", x, xn, u);
 
     ns_sqp sqp;
-    auto phases = sqp.add_phases({{stage_a, 2}, {stage_b, 1}});
-    REQUIRE(phases.size() == 2);
-    REQUIRE(phases[0].size() == 2);
-    REQUIRE(phases[1].size() == 1);
+    sqp.stages().push_back(stage_a->copy());
+    sqp.stages().push_back(stage_a->copy());
+    sqp.stages().push_back(stage_b->copy());
 
     auto &initial = sqp.solver_nodes();
     REQUIRE(initial.size() == 3);
     auto *unchanged = initial.front();
     unchanged->sym_val().value_[__x].setConstant(3.0);
 
-    phases.back().back()->ed().add(*layout_cost("cost_phases_terminal", var_list{x}));
+    sqp.ed().add(*layout_cost("cost_phases_terminal", var_list{x}));
     auto &updated = sqp.solver_nodes();
     REQUIRE(updated.front() == unchanged);
     REQUIRE(updated.front()->sym_val().value_[__x](0) == 3.0);
@@ -400,7 +483,7 @@ TEST_CASE("sqp add_phases builds one linear transaction and preserves unchanged 
                                  "cost_phases_terminal"));
 }
 
-TEST_CASE("sqp add_stage lowers the next phase start endpoint onto the previous tail", "[graph][mapping]") {
+TEST_CASE("stage vector order lowers the next phase start endpoint onto the previous tail", "[graph][mapping]") {
     using namespace moto;
 
     auto [x, xn] = sym::states("x_phase_boundary", 1);
@@ -412,8 +495,9 @@ TEST_CASE("sqp add_stage lowers the next phase start endpoint onto the previous 
     stage_b->ed().add(*layout_cost("cost_ed_phase_boundary_b", var_list{x}));
 
     ns_sqp sqp;
-    sqp.add_stage(stage_a, 2);
-    sqp.add_stage(stage_b, 1);
+    sqp.stages().push_back(stage_a->copy());
+    sqp.stages().push_back(stage_a->copy());
+    sqp.stages().push_back(stage_b->copy());
 
     auto &flat = sqp.solver_nodes();
     REQUIRE(flat.size() == 3);
@@ -451,8 +535,8 @@ TEST_CASE("phase-boundary endpoint terms survive current-interval inactive argum
     stage_b->st().add(*enabled_endpoint);
 
     ns_sqp sqp;
-    sqp.add_stage(stage_a->copy(ocp::active_status_config{{u}, {}}), 1);
-    sqp.add_stage(stage_b, 1);
+    sqp.stages().push_back(stage_a->copy(ocp::active_status_config{{u}, {}}));
+    sqp.stages().push_back(stage_b->copy());
 
     auto &flat = sqp.solver_nodes();
     REQUIRE(flat.size() == 2);
@@ -462,7 +546,92 @@ TEST_CASE("phase-boundary endpoint terms survive current-interval inactive argum
     REQUIRE_FALSE(contains_name_prefix(expr_names(flat.back()->problem(), __eq_x), "start_phase_enable_boundary"));
 }
 
-TEST_CASE("sqp add_stages can append from an explicit end-node view", "[graph][path]") {
+TEST_CASE("endpoint lowering maps the source primal mask from x to y", "[graph][mapping]") {
+    using namespace moto;
+
+    auto [xa, ya] = sym::states("x_lowered_status_a", 1);
+    auto [xb, yb] = sym::states("x_lowered_status_b", 1);
+    auto stage = stage_ocp::create();
+    stage->ed().add(*layout_cost("cost_lowered_status", var_list{xa, xb}));
+
+    ns_sqp sqp;
+    sqp.stages().push_back(stage->copy(ocp::active_status_config{{xb}, {}}));
+
+    const auto &problem = sqp.solver_nodes().front()->problem();
+    REQUIRE(problem.dim(__y) == 1);
+    REQUIRE(problem.is_active(*ya));
+    REQUIRE(problem.contains(*yb));
+    REQUIRE_FALSE(problem.is_active(*yb));
+    REQUIRE(contains_name_prefix(expr_names(problem, __cost), "cost_lowered_status"));
+}
+
+TEST_CASE("composed terms keep source-resolved predicates across copies", "[graph][mapping]") {
+    using namespace moto;
+
+    auto [x, y] = sym::states("x_resolved_endpoint_status", 1);
+    auto gate = sym::inputs("u_resolved_endpoint_gate", 1);
+    auto live = sym::inputs("u_resolved_endpoint_live", 1);
+
+    auto current = stage_ocp::create();
+    current->add(*layout_cost("cost_resolved_endpoint_gate", var_list{gate}));
+    current->add(*layout_cost("cost_resolved_endpoint_live", var_list{live}));
+
+    auto next = stage_ocp::create();
+    next->add(*layout_dynamics("dyn_resolved_endpoint_status", var_list{x, y, gate, live}, expr_dim(y)));
+    auto endpoint = layout_constr("constr_resolved_endpoint_status", var_list{x}, __eq_x, expr_dim(x));
+    endpoint->enable_if_all({gate});
+    next->st().add(*endpoint);
+
+    ns_sqp sqp;
+    sqp.stages().push_back(current->copy(ocp::active_status_config{{gate}, {}}));
+    sqp.stages().push_back(next->copy());
+
+    const auto source = sqp.solver_nodes().front()->problem_ptr();
+    REQUIRE(source->dim(__u) == 1);
+    REQUIRE(contains_name_prefix(expr_names(*source, __eq_x), "constr_resolved_endpoint_status"));
+
+    const auto &live_cost = require_func_named_prefix(source, __cost, "cost_resolved_endpoint_live");
+    ocp::active_status_config deactivate_unrelated;
+    deactivate_unrelated.deactivate_list.emplace_back(live_cost.handle());
+    auto copied = source->copy(deactivate_unrelated);
+    copied->wait_until_ready();
+    REQUIRE(contains_name_prefix(expr_names(*copied, __eq_x), "constr_resolved_endpoint_status"));
+
+    ocp::active_status_config deactivate_argument;
+    deactivate_argument.deactivate_list.emplace_back(y->handle());
+    auto without_argument = source->copy(deactivate_argument);
+    without_argument->wait_until_ready();
+    REQUIRE_FALSE(contains_name_prefix(expr_names(*without_argument, __eq_x), "constr_resolved_endpoint_status"));
+}
+
+TEST_CASE("authored endpoint handles access lowered runtime data", "[graph][mapping]") {
+    using namespace moto;
+
+    auto [x, y] = sym::states("x_endpoint_access", 1);
+    auto endpoint = layout_constr("constr_endpoint_access", var_list{x}, __eq_x, 1);
+    endpoint->value = [](func_approx_data &data) { data.v_ = data[0]; };
+    endpoint->jacobian = [](func_approx_data &data) {
+        data.jac_[0](0, 0) = 1.;
+    };
+    endpoint->hessian = [](func_approx_data &) {};
+
+    auto stage = stage_ocp::create();
+    stage->ed().add(*endpoint);
+    ns_sqp sqp;
+    sqp.stages().push_back(stage->copy());
+
+    auto *node = sqp.solver_nodes().front();
+    node->sym_val()[y](0) = 3.25;
+    node->update_approximation(node_data::update_mode::eval_all);
+
+    auto &runtime = static_cast<node_data &>(*node).data(endpoint);
+    REQUIRE(std::abs(runtime.v_(0) - 3.25) < 1e-12);
+    const sym &source_x = x;
+    REQUIRE(runtime[source_x].data() == node->sym_val()[y].data());
+    REQUIRE(std::abs(runtime.jac(source_x)(0, 0) - 1.) < 1e-12);
+}
+
+TEST_CASE("appending stage copies advances the current end boundary", "[graph][path]") {
     using namespace moto;
 
     auto [x, xn] = sym::states("x_explicit_append", 1);
@@ -471,8 +640,9 @@ TEST_CASE("sqp add_stages can append from an explicit end-node view", "[graph][p
     auto stage_b = make_stage("explicit_b", x, xn, u);
     stage_b->st().add(*layout_cost("cost_st_explicit_b", var_list{x}));
     ns_sqp sqp;
-    auto first = sqp.add_stage(stage_a, 1);
-    sqp.add_stages(first.back()->ed(), stage_b, 2);
+    sqp.stages().push_back(stage_a->copy());
+    sqp.stages().push_back(stage_b->copy());
+    sqp.stages().push_back(stage_b->copy());
 
     auto &flat = sqp.solver_nodes();
     REQUIRE(flat.size() == 3);
@@ -488,70 +658,102 @@ TEST_CASE("sqp add_stages can append from an explicit end-node view", "[graph][p
     REQUIRE(repeat_boundary_cost.in_args().front()->field() == __y);
 }
 
-TEST_CASE("sqp add_stages rejects disconnected first start nodes", "[graph][path]") {
+TEST_CASE("native stage vector supports replacement and horizon shift", "[graph][mutation]") {
     using namespace moto;
 
-    auto [x, xn] = sym::states("x_disconnected_start", 1);
-    auto u = sym::inputs("u_disconnected_start", 1);
-    auto stage = make_stage("disconnected_start", x, xn, u);
+    auto [x, xn] = sym::states("x_replace_stages", 1);
+    auto u = sym::inputs("u_replace_stages", 1);
+    auto stage_a = make_stage("replace_a", x, xn, u);
+    auto stage_b = make_stage("replace_b", x, xn, u);
+    auto stage_c = make_stage("replace_c", x, xn, u);
 
     ns_sqp sqp;
+    for (size_t i = 0; i < 5; ++i)
+        sqp.stages().push_back(stage_a->copy());
+    auto &stages = sqp.stages();
+    const auto keep_0 = stages[0];
+    const auto keep_4 = stages[4];
+    auto graph_end = sqp.ed();
+    graph_end.add(*layout_cost("cost_replace_stages_terminal", var_list{x}));
+
+    stages.erase(stages.begin() + 1, stages.begin() + 3);
+    stages.insert(stages.begin() + 1, stage_b->copy());
+    REQUIRE(sqp.stages()[0] == keep_0);
+    REQUIRE(sqp.stages()[3] == keep_4);
+    REQUIRE(contains_name_prefix(expr_names(sqp.solver_nodes()[1]->problem(), __cost), "cost_x_replace_b"));
+
+    auto before_shift = sqp.solver_nodes();
+    before_shift[2]->sym_val().value_[__x].setConstant(7.0);
+    const auto shifted_0 = stages[1];
+    const auto shifted_1 = stages[2];
+    stages.erase(stages.begin());
+    stages.push_back(stage_c->copy());
+    REQUIRE(sqp.stages()[0] == shifted_0);
+    REQUIRE(sqp.stages()[1] == shifted_1);
+    auto &after_shift = sqp.solver_nodes();
+    REQUIRE(after_shift[1] == before_shift[2]);
+    REQUIRE(after_shift[1]->sym_val().value_[__x](0) == 7.0);
+    REQUIRE(contains_name_prefix(expr_names(after_shift.back()->problem(), __cost), "cost_x_replace_c"));
+    REQUIRE(contains_name_prefix(expr_names(after_shift.back()->problem(), __cost), "cost_replace_stages_terminal"));
+}
+
+TEST_CASE("set_stages rejects aliased stage entries", "[graph][validation]") {
+    using namespace moto;
+
+    auto [x, xn] = sym::states("x_aliased_stages", 1);
+    auto u = sym::inputs("u_aliased_stages", 1);
+    auto stage = make_stage("aliased_stages", x, xn, u);
+    ns_sqp sqp;
+    sqp.stages().push_back(stage->copy());
+    auto &stages = sqp.stages();
+    stages.push_back(stages[0]);
     REQUIRE_THROWS_WITH(
-        sqp.add_stages(stage->st(), stage, 1),
-        Catch::Matchers::ContainsSubstring("first path must start from sqp.start_node"));
+        sqp.solver_nodes(),
+        Catch::Matchers::ContainsSubstring("distinct stage objects"));
 }
 
-TEST_CASE("sqp add_stages supports multiple explicit successors from one boundary", "[graph][path]") {
+TEST_CASE("500-stage graph construction and shift stay within the pure graph budget",
+          "[graph][performance]") {
     using namespace moto;
 
-    auto [x, xn] = sym::states("x_multi_successor", 1);
-    auto u = sym::inputs("u_multi_successor", 1);
-    auto stage_a = make_stage("multi_successor_a", x, xn, u);
-    auto stage_b = make_stage("multi_successor_b", x, xn, u);
-    auto stage_c = make_stage("multi_successor_c", x, xn, u);
-    stage_b->st().add(*layout_cost("cost_st_multi_successor_b", var_list{x}));
-    stage_c->st().add(*layout_cost("cost_st_multi_successor_c", var_list{x}));
+    auto prototype = stage_ocp::create();
+    std::vector<stage_ocp_ptr_t> prepared;
+    prepared.reserve(500);
+    for (size_t i = 0; i < 500; ++i)
+        prepared.push_back(prototype->copy());
 
-    ns_sqp sqp;
-    auto first = sqp.add_stage(stage_a, 1);
-    sqp.add_stages(first.back()->ed(), stage_b, 1);
-    sqp.add_stages(first.back()->ed(), stage_c, 1);
+    const auto [construction_median, construction_p95] = timing_percentiles(100, [&](size_t) {
+        graph_model candidate;
+        graph_composer candidate_composer;
+        candidate.stages().insert(candidate.stages().end(), prepared.begin(), prepared.end());
+        return candidate_composer.compose(candidate).intervals->size() == 500;
+    });
+    REQUIRE(construction_median < 50.0);
+    REQUIRE(construction_p95 < 50.0);
 
-    auto &flat = sqp.solver_nodes();
-    REQUIRE(flat.size() == 3);
-    const auto first_names = expr_names(flat.front()->problem(), __cost);
-    REQUIRE(contains_name_prefix(first_names, "cost_st_multi_successor_b"));
-    REQUIRE(contains_name_prefix(first_names, "cost_st_multi_successor_c"));
-    REQUIRE_FALSE(contains_name_prefix(expr_names(flat.at(1)->problem(), __cost), "cost_st_multi_successor_b"));
-    REQUIRE_FALSE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_st_multi_successor_c"));
+    graph_model graph;
+    graph_composer composer;
+    for (size_t i = 0; i < 500; ++i)
+        graph.stages().push_back(prototype->copy());
 
-    const auto &b_start = require_func_named_prefix(flat.front()->problem_ptr(), __cost, "cost_st_multi_successor_b");
-    const auto &c_start = require_func_named_prefix(flat.front()->problem_ptr(), __cost, "cost_st_multi_successor_c");
-    REQUIRE(b_start.in_args().front()->field() == __y);
-    REQUIRE(c_start.in_args().front()->field() == __y);
-}
+    const auto initial = composer.compose(graph);
+    REQUIRE(initial.intervals->size() == 500);
+    REQUIRE(initial.intervals->front().formulation != initial.intervals->at(1).formulation);
+    REQUIRE(initial.intervals->at(1).formulation == initial.intervals->at(2).formulation);
+    REQUIRE(initial.intervals->back().formulation != initial.intervals->at(1).formulation);
 
-TEST_CASE("sqp add_stages from explicit graph start preserves start-node terms", "[graph][path]") {
-    using namespace moto;
-
-    auto [x, xn] = sym::states("x_explicit_graph_start", 1);
-    auto u = sym::inputs("u_explicit_graph_start", 1);
-    auto stage_a = make_stage("explicit_graph_start_a", x, xn, u);
-    auto stage_b = make_stage("explicit_graph_start_b", x, xn, u);
-
-    ns_sqp sqp;
-    sqp.start_node().add(*layout_cost("cost_explicit_graph_start", var_list{x}));
-    sqp.add_stage(stage_a, 1);
-    sqp.add_stages(sqp.start_node(), stage_b, 1);
-
-    auto &flat = sqp.solver_nodes();
-    REQUIRE(flat.size() == 2);
-    const auto &first_start_cost = require_func_named_prefix(
-        flat.front()->problem_ptr(), __cost, "cost_explicit_graph_start");
-    const auto &branch_start_cost = require_func_named_prefix(
-        flat.back()->problem_ptr(), __cost, "cost_explicit_graph_start");
-    REQUIRE(first_start_cost.in_args().front()->field() == __x);
-    REQUIRE(branch_start_cost.in_args().front()->field() == __x);
+    std::vector<stage_ocp_ptr_t> tails;
+    for (size_t i = 0; i < 200; ++i)
+        tails.push_back(prototype->copy());
+    const auto [median, p95] = timing_percentiles(200, [&](size_t trial) {
+        graph.stages().erase(graph.stages().begin());
+        graph.stages().push_back(std::move(tails[trial]));
+        return composer.compose(graph).intervals->size() == 500;
+    });
+#ifdef NDEBUG
+    REQUIRE(median < 50.0);
+    REQUIRE(p95 < 50.0);
+#endif
 }
 
 TEST_CASE("returned graph-owned stage handles are mutable and invalidate the runtime cache", "[graph][mutation]") {
@@ -562,7 +764,8 @@ TEST_CASE("returned graph-owned stage handles are mutable and invalidate the run
     auto stage = make_stage("mutable_stage", x, xn, u);
 
     ns_sqp sqp;
-    auto stages = sqp.add_stage(stage, 1);
+    sqp.stages().push_back(stage->copy());
+    auto &stages = sqp.stages();
     REQUIRE_FALSE(contains_name_prefix(expr_names(sqp.solver_nodes().front()->problem(), __cost), "cost_added_to_owned_stage"));
 
     stages.front()->ed().add(*layout_cost("cost_added_to_owned_stage", var_list{x}));
@@ -582,7 +785,8 @@ TEST_CASE("adding an existing expression to a new endpoint role invalidates the 
     auto boundary_cost = layout_cost("cost_mutable_role_boundary", var_list{x});
 
     ns_sqp sqp;
-    auto stages = sqp.add_stage(stage, 1);
+    sqp.stages().push_back(stage->copy());
+    auto &stages = sqp.stages();
     stages.front()->st().add(*boundary_cost);
 
     REQUIRE_FALSE(contains_name_prefix(
@@ -598,7 +802,7 @@ TEST_CASE("adding an existing expression to a new endpoint role invalidates the 
     REQUIRE(lowered.in_args().front()->field() == __y);
 }
 
-TEST_CASE("stage prototype mutation after add_stage does not affect graph-owned clones", "[graph][mutation]") {
+TEST_CASE("stage prototype mutation after insertion does not affect graph-owned clones", "[graph][mutation]") {
     using namespace moto;
 
     auto [x, xn] = sym::states("x_formulation_dirty", 1);
@@ -606,7 +810,7 @@ TEST_CASE("stage prototype mutation after add_stage does not affect graph-owned 
     auto stage = make_stage("formulation_dirty", x, xn, u);
 
     ns_sqp sqp;
-    sqp.add_stage(stage, 1);
+    sqp.stages().push_back(stage->copy());
 
     auto &flat_first = sqp.solver_nodes();
     REQUIRE_FALSE(contains_name_prefix(expr_names(flat_first.front()->problem(), __cost), "cost_added_after_realize"));
@@ -630,7 +834,7 @@ TEST_CASE("stage clone active status is honored during composition", "[graph][mu
 
     ns_sqp sqp;
     auto active_stage = stage->copy(ocp::active_status_config{{ub}, {}});
-    sqp.add_stage(active_stage, 1);
+    sqp.stages().push_back(active_stage->copy());
 
     auto &flat = sqp.solver_nodes();
     REQUIRE(flat.size() == 1);
@@ -698,8 +902,9 @@ TEST_CASE("optimized initial state uses an internal virtual stage without exposi
         auto stage = stage_ocp::create();
         stage->add(*callback_linear_dynamics("dyn_initial_state_opt", x, xn, u));
         stage->add(*callback_quadratic_cost("cost_initial_state_input", u));
-        sqp.add_stage(stage, n_stages);
-        sqp.start_node().add(*callback_quadratic_cost("cost_initial_state_target", x, target));
+        for (size_t i = 0; i < n_stages; ++i)
+            sqp.stages().push_back(stage->copy());
+        sqp.st().add(*callback_quadratic_cost("cost_initial_state_target", x, target));
         sqp.settings.restoration.enabled = false;
         sqp.settings.prim_tol = 1e-8;
         sqp.settings.dual_tol = 1e-8;

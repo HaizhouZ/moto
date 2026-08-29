@@ -158,7 +158,11 @@ constr ineq_constr::create(const std::string &name,
                            const cs::SX &out,
                            approx_order order,
                            field_t field) {
-    auto c = std::make_shared<solver::ipm_constr>(name, args, out, order, field);
+    auto c = std::make_shared<solver::ipm_constr>(
+        name, args,
+        normalize_constraint_expression(out, constraint_relation::inequality,
+                                        name),
+        order, field);
     return c;
 }
 

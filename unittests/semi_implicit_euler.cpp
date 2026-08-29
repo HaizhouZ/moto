@@ -1,17 +1,33 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
 #include <moto/ocp/dynamics/semi_implicit_euler.hpp>
 #include <moto/ocp/cost.hpp>
 #include <moto/ocp/impl/node_data.hpp>
-#include <moto/multibody/quaternion.hpp>
+#include <moto/multibody/casadi_manifold.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
 #include <moto/solver/ns_sqp.hpp>
 
 #include <chrono>
+#include <cstdint>
 
 namespace moto {
 namespace {
+
+class mock_lifted final : public generic_lifted {
+public:
+  using generic_lifted::generic_lifted;
+  void compute_project_jacobians(func_approx_data &) const override {}
+  void compute_project_residual(func_approx_data &) const override {}
+  void apply_lifted_jacobian_inverse_transpose(
+      func_approx_data &, vector_ref v, vector_ref dst) const override {
+    dst = v;
+  }
+
+protected:
+  clone_ptr clone() const override { return new mock_lifted(*this); }
+};
 
 struct fixture {
   var q, qn, v, vn, u;
@@ -71,8 +87,309 @@ struct fixture {
 
 } // namespace
 
+TEST_CASE("generic lifted groups declare arbitrary primal lifted arguments") {
+  auto lifted_input = sym::lifted("generic_lifted_l", 2);
+  auto free_input = sym::inputs("generic_lifted_u", 1);
+  const cs::SX &sl = lifted_input, &su = free_input;
+  const cs::SX residual = sl + cs::SX::vertcat({su, 2. * su});
+  auto group = std::make_shared<mock_lifted>(
+      "generic_lifted_group", residual, approx_order::first, __lift);
+  group->mark_lifted({lifted_input});
+
+  auto problem = ocp::create();
+  problem->add(*group);
+  problem->wait_until_ready();
+
+  REQUIRE(group->lifted_tdim() == 2);
+  REQUIRE(group->lifted_args().size() == 1);
+  REQUIRE(group->is_lifted(lifted_input));
+  REQUIRE_FALSE(group->is_lifted(free_input));
+
+  auto remapped_lifted = sym::lifted("generic_lifted_l_remapped", 2);
+  auto remapped_handle = group->remap_arguments(
+      {{lifted_input, remapped_lifted}});
+  const auto *remapped = dynamic_cast<const mock_lifted *>(
+      remapped_handle.get());
+  REQUIRE(remapped != nullptr);
+  REQUIRE(remapped->is_lifted(remapped_lifted));
+  REQUIRE_FALSE(remapped->is_lifted(lifted_input));
+
+  auto invalid_lifted = sym::lifted("generic_lifted_invalid", 1);
+  const cs::SX &si = invalid_lifted;
+  auto invalid = std::make_shared<mock_lifted>(
+      "generic_lifted_non_square", cs::SX::vertcat({si, si}),
+      approx_order::first, __lift);
+  invalid->mark_lifted({invalid_lifted});
+  auto invalid_problem = ocp::create();
+  REQUIRE_THROWS_WITH(
+      invalid_problem->add(*invalid),
+      Catch::Matchers::ContainsSubstring("requires a square lifted Jacobian"));
+}
+
+TEST_CASE("lifted MX elimination graph preserves zero blocks and parameters") {
+  auto [x, y] = sym::states("lifted_graph_x", 2);
+  auto u = sym::inputs("lifted_graph_u", 2);
+  auto l = sym::lifted("lifted_graph_l", 2);
+  var regularization;
+  const cs::SX &sx = x, &sy = y, &su = u, &sl = l;
+  const cs::SX dynamics_equation = sy - sx - sl;
+  const cs::SX group_equation = sy - su;
+
+  dynamics dyn = std::make_shared<semi_implicit_euler>(
+      "lifted_graph_dynamics", dynamics_equation,
+      semi_implicit_euler::state_t::pos, approx_order::first);
+  const dynamics source = dyn;
+  auto group = std::make_shared<implicit_lifted>(
+      "lifted_graph_constraint", group_equation,
+      var_inarg_list{l}, approx_order::first);
+
+  bool saw_shaped_zero = false;
+  dyn = dyn->with_elimination_graph(
+      [&](const lifted_symbolic_system &system) {
+        const auto dyn_l = system.jac(*source, *l);
+        const auto dyn_l_again = system.jac(*source, *l);
+        const auto dyn_y = system.jac(*source, *y);
+        const auto lift_y = system.jac(*group, *y);
+        const auto lift_l = system.jac(*group, *l);
+        saw_shaped_zero = system.lift_l.size1() == 2 &&
+                          system.lift_l.size2() == 2 &&
+                          system.lift_l.nnz() == 0 &&
+                          lift_l.value.nnz() == 0 &&
+                          dyn_l_again.value.sparsity() ==
+                              dyn_l.value.sparsity() &&
+                          system.residual(*group).size1() ==
+                              2;
+        regularization = lift_l.param(1e-4);
+        const cs::MX regularized_lift_l =
+            lift_l.add_diag(*regularization);
+        const cs::MX h_l = cs::MX::vertcat(std::vector<cs::MX>{
+            cs::MX::horzcat(
+                std::vector<cs::MX>{dyn_y.value, dyn_l.value}),
+            cs::MX::horzcat(
+                std::vector<cs::MX>{lift_y.value, regularized_lift_l})});
+        const auto factor = system.solve(h_l);
+        const auto solve = [&](const cs::MX &rhs) {
+          return factor.solve(rhs);
+        };
+        return system.eliminate(
+            solve, {{"regularized_lift_l", regularized_lift_l}});
+      }, {group});
+
+  REQUIRE(dyn.get() != source.get());
+  REQUIRE_FALSE(source->has_elimination_graph());
+  REQUIRE(source->subconstraints().empty());
+  REQUIRE(dyn->has_elimination_graph());
+
+  auto problem = ocp::create();
+  problem->add(*dyn);
+  problem->wait_until_ready();
+
+  REQUIRE(problem->contains(*group));
+  REQUIRE(dyn->subconstraints().size() == 1);
+  REQUIRE(dyn->owns_subconstraint(*group));
+  REQUIRE(saw_shaped_zero);
+  REQUIRE(regularization);
+  REQUIRE(regularization->name() ==
+          "lifted_graph_constraint_lifted_graph_l_regularization");
+  REQUIRE(regularization->field() == __p);
+  REQUIRE(problem->contains(*regularization));
+  REQUIRE_FALSE(dyn->has_arg(*regularization));
+  REQUIRE(dyn->elimination_parameters().size() == 1);
+  const auto &profile = problem->linear_profile();
+  const auto panel_binding = std::ranges::find_if(
+      profile.lifted_program->input_bindings,
+      [&](const lifted_graph_input_binding &binding) {
+          return binding.source ==
+                     lifted_graph_input_binding::kind::jacobian_panel &&
+                 binding.equation == __dyn && binding.variable == __l;
+      });
+  REQUIRE(panel_binding != profile.lifted_program->input_bindings.end());
+  REQUIRE(std::ranges::count_if(
+              profile.lifted_program->input_bindings,
+              [&](const lifted_graph_input_binding &binding) {
+                  return binding.source ==
+                             lifted_graph_input_binding::kind::jacobian_panel &&
+                         binding.equation == __dyn &&
+                         binding.variable == __l;
+              }) == 1);
+  const size_t panel_index = static_cast<size_t>(std::distance(
+      profile.lifted_program->input_bindings.begin(), panel_binding));
+  REQUIRE_FALSE(
+      profile.lifted_program->input_layouts[panel_index].panels.empty());
+  REQUIRE_FALSE(profile.get(linear_target::lifted_projection, __y, __u)
+                    .empty());
+  REQUIRE_FALSE(profile.get(linear_target::lifted_projection, __l, __x)
+                    .empty());
+  REQUIRE(profile.lifted_intermediates.size() == 1);
+  const auto &intermediate = profile.lifted_intermediates.front();
+  REQUIRE(intermediate.name == "regularized_lift_l");
+  REQUIRE(intermediate.rows == 2);
+  REQUIRE(intermediate.cols == 2);
+  REQUIRE(intermediate.layout.panels.size() == 1);
+  REQUIRE(intermediate.layout.panels.front().pattern == sparsity::diag);
+  node_data runtime(problem);
+  REQUIRE(runtime.sym_val().get(regularization)(0) == 1e-4);
+  REQUIRE(runtime.data(dynamics(dyn))[*regularization](0) == 1e-4);
+  REQUIRE(runtime.data(lifted(group))[*regularization](0) == 1e-4);
+  runtime.sym_val().get(x) << 0.2, -0.3;
+  runtime.sym_val().get(y) << 0.5, 0.7;
+  runtime.sym_val().get(u) << -0.4, 0.6;
+  runtime.sym_val().get(l) << 0.1, -0.2;
+  runtime.update_approximation(node_data::update_mode::eval_all);
+  auto &dyn_data = runtime.data(dynamics(dyn));
+  dyn->compute_project_derivatives(dyn_data);
+  auto &projected = dyn_data.as<generic_dynamics::approx_data>();
+  matrix pivot(4, 4), rhs(4, 5);
+  pivot << runtime.dense().approx_[__dyn].jac_[__y].dense(),
+      runtime.dense().approx_[__dyn].jac_[__l].dense(),
+      runtime.dense().approx_[__lift].jac_[__y].dense(),
+      runtime.dense().approx_[__lift].jac_[__l].dense() +
+          1e-4 * matrix::Identity(2, 2);
+  rhs << runtime.dense().approx_[__dyn].jac_[__x].dense(),
+      runtime.dense().approx_[__dyn].jac_[__u].dense(),
+      runtime.dense().approx_[__dyn].v_,
+      runtime.dense().approx_[__lift].jac_[__x].dense(),
+      runtime.dense().approx_[__lift].jac_[__u].dense(),
+      runtime.dense().approx_[__lift].v_;
+  const matrix expected = pivot.fullPivLu().solve(rhs);
+  REQUIRE(runtime.dense().proj_f_x().dense().isApprox(
+      expected.topLeftCorner(2, 2), 1e-9));
+  REQUIRE(runtime.dense().proj_f_u().dense().isApprox(
+      expected.block(0, 2, 2, 2), 1e-9));
+  REQUIRE(runtime.dense().proj_f_res().isApprox(expected.block(0, 4, 2, 1),
+                                                1e-9));
+  REQUIRE(projected.proj_l_x_.dense().isApprox(
+      expected.bottomLeftCorner(2, 2), 1e-9));
+  REQUIRE(projected.proj_l_u_.dense().isApprox(
+      expected.block(2, 2, 2, 2), 1e-9));
+  REQUIRE(projected.proj_l_res_.isApprox(expected.block(2, 4, 2, 1),
+                                         1e-10));
+  matrix action_rhs = matrix::Random(4, 2), action, transpose;
+  dyn->solve_stage_lifted_system(dyn_data, action_rhs, action, false);
+  dyn->solve_stage_lifted_system(dyn_data, action_rhs, transpose, true);
+  REQUIRE(action.isApprox(pivot.fullPivLu().solve(action_rhs), 1e-10));
+  REQUIRE(transpose.isApprox(
+      pivot.transpose().fullPivLu().solve(action_rhs), 1e-10));
+
+  runtime.sym_val().get(regularization)(0) = 2e-2;
+  runtime.update_approximation(node_data::update_mode::eval_derivatives);
+  dyn->compute_project_derivatives(dyn_data);
+  pivot.bottomRightCorner(2, 2) =
+      runtime.dense().approx_[__lift].jac_[__l].dense() +
+      2e-2 * matrix::Identity(2, 2);
+  rhs.leftCols(4) << runtime.dense().approx_[__dyn].jac_[__x].dense(),
+      runtime.dense().approx_[__dyn].jac_[__u].dense(),
+      runtime.dense().approx_[__lift].jac_[__x].dense(),
+      runtime.dense().approx_[__lift].jac_[__u].dense();
+  const matrix refreshed = pivot.fullPivLu().solve(rhs.leftCols(4));
+  REQUIRE(runtime.dense().proj_f_x().dense().isApprox(
+      refreshed.topLeftCorner(2, 2), 1e-9));
+  REQUIRE(runtime.dense().proj_f_u().dense().isApprox(
+      refreshed.block(0, 2, 2, 2), 1e-9));
+}
+
+TEST_CASE("lifted graph artifact identity includes elimination algebra") {
+  auto [x, y] = sym::states("lifted_identity_x", 2);
+  auto u = sym::inputs("lifted_identity_u", 2);
+  auto l = sym::lifted("lifted_identity_l", 2);
+  const cs::SX &sx = x, &sy = y, &su = u, &sl = l;
+  dynamics source = std::make_shared<semi_implicit_euler>(
+      "lifted_identity_dynamics", sy - sx - sl,
+      semi_implicit_euler::state_t::pos, approx_order::first);
+  auto constraint = std::make_shared<implicit_lifted>(
+      "lifted_identity_constraint", sy - su, var_inarg_list{l},
+      approx_order::first);
+  const auto make_problem = [&](scalar_t response_scale) {
+    dynamics generated = source->with_elimination_graph(
+        [response_scale](const lifted_symbolic_system &system) {
+          const auto factor = system.solve(system.h_l());
+          const auto solve = [&](const cs::MX &rhs) {
+            return response_scale * factor.solve(rhs);
+          };
+          return system.eliminate(solve);
+        }, {constraint});
+    auto problem = ocp::create();
+    problem->add(*generated);
+    problem->wait_until_ready();
+    return problem;
+  };
+
+  const auto first = make_problem(1.);
+  const auto equivalent = make_problem(1.);
+  const auto different = make_problem(2.);
+  const auto &first_identity =
+      first->linear_profile().lifted_program->artifact_identity;
+  REQUIRE_FALSE(first_identity.empty());
+  REQUIRE(equivalent->linear_profile().lifted_program->artifact_identity ==
+          first_identity);
+  REQUIRE(different->linear_profile().lifted_program->artifact_identity !=
+          first_identity);
+}
+
+TEST_CASE("integrated lifted presolve retains overlapping state Hessians") {
+  auto [x, y] = sym::states("lifted_presolve_x");
+  auto u = sym::inputs("lifted_presolve_u");
+  auto l = sym::lifted("lifted_presolve_l");
+  const cs::SX &sx = x, &sy = y, &su = u, &sl = l;
+  dynamics dyn = std::make_shared<semi_implicit_euler>(
+      "lifted_presolve_dyn", sy - sx - sl,
+      semi_implicit_euler::state_t::pos, approx_order::first);
+  auto lifting = std::make_shared<implicit_lifted>(
+      "lifted_presolve_constraint", sl - su, var_inarg_list{l},
+      approx_order::first);
+  dyn = dyn->with_elimination_graph(
+      [](const lifted_symbolic_system &system) {
+        const auto factor = system.solve(system.h_l());
+        return system.eliminate(
+            [&](const cs::MX &rhs) { return factor.solve(rhs); });
+      },
+      {lifting});
+  auto state_0 = generic_cost::from_scalar(
+      "lifted_presolve_state_0", var_inarg_list{},
+      3. * (sx - 1.) * (sx - 1.));
+  auto state_1 = generic_cost::from_scalar(
+      "lifted_presolve_state_1", var_inarg_list{},
+      5. * (sx + .25) * (sx + .25));
+  auto problem = ocp::create();
+  problem->add(*dyn);
+  problem->add(*state_0);
+  problem->add(*state_1);
+  problem->wait_until_ready();
+
+  node_data runtime(problem);
+  runtime.sym_val().get(x).setZero();
+  runtime.sym_val().get(y).setZero();
+  runtime.sym_val().get(u).setZero();
+  runtime.sym_val().get(l).setZero();
+  runtime.prepare_linear_plan();
+  runtime.update_approximation(node_data::update_mode::eval_all);
+  solver::ns_riccati::ns_riccati_data projected(&runtime);
+  projected.prepare_linear_backend();
+  solver::ns_riccati::generic_solver solver;
+  std::array<solver::ns_riccati::ns_riccati_data *, 1> stages{&projected};
+  solver.prepare_ocp_linear_graph(stages);
+  setenv("MOTO_VERIFY_NSP_GRAPH", "1", 1);
+  solver.ns_factorization(&projected);
+  unsetenv("MOTO_VERIFY_NSP_GRAPH");
+
+  matrix expected = matrix::Zero(projected.nx, projected.nx);
+  linear_backend::write_dense(projected.Q_xx, expected);
+  linear_backend::write_dense(projected.Q_xx_mod, expected);
+  REQUIRE(projected.V_xx.isApprox(expected, 1e-12));
+}
+
 TEST_CASE("semi-implicit projections match dense dynamics") {
   fixture f;
+  for (const dynamics &dyn : {f.semi, f.dense}) {
+    const auto *group = dynamic_cast<const generic_lifted *>(dyn.get());
+    REQUIRE(group != nullptr);
+    REQUIRE(group->lifted_tdim() == 12);
+    REQUIRE(group->lifted_args().size() == 2);
+    for (const sym &arg : group->lifted_args()) {
+      REQUIRE(arg.field() == __y);
+      REQUIRE(group->is_lifted(arg));
+    }
+  }
   const auto &semi_approx = f.semi_data->data(f.semi).as<
       semi_implicit_euler::approx_data>();
   INFO("inverse error = " <<
@@ -109,24 +426,37 @@ TEST_CASE("semi-implicit projections match dense dynamics") {
                                           dense_out);
   REQUIRE(semi_out.isApprox(dense_out, 1e-12));
 
-  const auto &profiles =
-      static_cast<const semi_implicit_euler &>(*f.semi).projected_profiles();
-  REQUIRE(profiles.size() == 3);
-  REQUIRE(profiles[0].rows == 12);
-  REQUIRE(profiles[0].nnz() < profiles[0].rows * profiles[0].cols);
   const auto stored_nnz = [](const sparse_matrix &value) {
     size_t count = 0;
     for (const auto &panel : value.dense_panels_)
       count += panel.rows_ * panel.cols_;
-    for (const auto &panel : value.diag_panels_)
-      count += panel.rows_;
+    if (value.diagonal_segments_.empty()) {
+      for (const auto &panel : value.diag_panels_)
+        count += panel.rows_;
+    } else {
+      for (const auto &segment : value.diagonal_segments_)
+        count += segment.rows;
+    }
     for (const auto &panel : value.eye_panels_)
       count += panel.rows_;
     return count;
   };
-  REQUIRE(stored_nnz(f.semi_data->dense().proj_f_x()) ==
-          profiles[0].nnz() + profiles[1].nnz());
-  REQUIRE(stored_nnz(f.semi_data->dense().proj_f_u()) == profiles[2].nnz());
+  REQUIRE(stored_nnz(f.semi_data->dense().proj_f_x()) < 12 * 24);
+  REQUIRE(stored_nnz(f.semi_data->dense().proj_f_u()) < 12 * 12);
+  for (const auto *projected : {&f.semi_data->dense().proj_f_x(),
+                                &f.semi_data->dense().proj_f_u()}) {
+    if (!projected->diagonal_segments_.empty()) {
+      REQUIRE(projected->diag_panels_.size() == 1);
+      for (const auto &segment : projected->diagonal_segments_) {
+        const auto *pointer =
+            projected->diag_panels_[segment.storage_panel].data_.data() +
+            segment.storage_offset;
+        REQUIRE(reinterpret_cast<std::uintptr_t>(pointer) %
+                    EIGEN_MAX_ALIGN_BYTES ==
+                0);
+      }
+    }
+  }
 
   if (std::getenv("MOTO_BENCH_SEMI_IMPLICIT")) {
     constexpr size_t warmup = 1000, runs = 20000;
@@ -149,18 +479,23 @@ TEST_CASE("semi-implicit projections match dense dynamics") {
     const double dense_ns = measure(*f.dense_data, f.dense);
     fmt::println("semi_implicit={} ns dense_fallback={} ns speedup={}x",
                  semi_ns, dense_ns, dense_ns / semi_ns);
-    for (size_t i = 0; i < profiles.size(); ++i)
-      fmt::println("PF[{}]: {}x{}, nnz={}, blocks={}", i,
-                   profiles[i].rows, profiles[i].cols, profiles[i].nnz(),
-                   profiles[i].row_blocks.empty()
-                       ? 0
-                       : profiles[i].row_blocks.size() - 1);
   }
 }
 
-TEST_CASE("position Euler is a complete kinematic dynamics") {
-  auto [q, qn] = multibody::quaternion::create("position_euler_q");
-  auto velocity = sym::inputs("position_euler_velocity", 3);
+TEST_CASE("position Euler supports generic nonlinear manifolds") {
+  const cs::SX base = cs::SX::sym("position_euler_base", 2);
+  const cs::SX step = cs::SX::sym("position_euler_step");
+  const cs::SX other = cs::SX::sym("position_euler_other", 2);
+  const cs::SX rotated = cs::SX::vertcat(std::vector<cs::SX>{
+      cs::SX::cos(step) * base(0) - cs::SX::sin(step) * base(1),
+      cs::SX::sin(step) * base(0) + cs::SX::cos(step) * base(1)});
+  const cs::SX difference = cs::SX::atan2(
+      base(0) * other(1) - base(1) * other(0),
+      base(0) * other(0) + base(1) * other(1));
+  const vector identity = (vector(2) << 1., 0.).finished();
+  auto [q, qn] = multibody::casadi_manifold::create(
+      "position_euler_q", base, step, rotated, other, difference, identity);
+  auto velocity = sym::inputs("position_euler_velocity");
   const cs::SX integrated = q->symbolic_integrate(
       *q, .1 * static_cast<const cs::SX &>(*velocity));
   const cs::SX residual = q->symbolic_difference(*qn, integrated);
@@ -176,9 +511,9 @@ TEST_CASE("position Euler is a complete kinematic dynamics") {
   dense_problem->wait_until_ready();
   node_data euler_data(euler_problem), dense_data(dense_problem);
   for (node_data *data : {&euler_data, &dense_data}) {
-    data->sym_val().get(*q) = multibody::quaternion::identity();
-    data->sym_val().get(*qn) = multibody::quaternion::identity();
-    data->sym_val().get(velocity) = vector::LinSpaced(3, -.1, .2);
+    data->sym_val().get(*q) = identity;
+    data->sym_val().get(*qn) = identity;
+    data->sym_val().get(velocity)(0) = .2;
     data->update_approximation(node_data::update_mode::eval_all);
   }
   euler->compute_project_derivatives(euler_data.data(euler));
@@ -188,7 +523,7 @@ TEST_CASE("position Euler is a complete kinematic dynamics") {
   INFO("position inverse error = " <<
        (euler_data.dense().approx_[__dyn].jac_[__y].dense() *
             euler_approx.inverse_.dense() -
-        matrix::Identity(3, 3)).norm());
+        matrix::Identity(1, 1)).norm());
   INFO("position PFx error = " <<
        (euler_data.dense().proj_f_x().dense() -
         dense_data.dense().proj_f_x().dense()).norm());
@@ -198,7 +533,8 @@ TEST_CASE("position Euler is a complete kinematic dynamics") {
       dense_data.dense().proj_f_u().dense(), 1e-12));
   REQUIRE(euler_data.dense().proj_f_res().isApprox(
       dense_data.dense().proj_f_res(), 1e-12));
-  vector rhs = vector::LinSpaced(3, -.3, .4), euler_out(3), dense_out(3);
+  vector rhs(1), euler_out(1), dense_out(1);
+  rhs(0) = -.3;
   euler->apply_jac_y_inverse_transpose(euler_data.data(euler), rhs, euler_out);
   fallback->apply_jac_y_inverse_transpose(
       dense_data.data(fallback), rhs, dense_out);
@@ -295,8 +631,9 @@ TEST_CASE("multiple dynamics support regrouped phases and optimized initial stat
   second->add(*running);
   ns_sqp sqp(1);
   sqp.settings.initial_state = ns_sqp::initial_state_mode::optimized;
-  sqp.add_stage(first, 1);
-  sqp.add_stage(second, 2);
+  sqp.stages().push_back(first->copy());
+  sqp.stages().push_back(second->copy());
+  sqp.stages().push_back(second->copy());
   auto &nodes = sqp.solver_nodes();
   for (auto *node : nodes) {
     node->sym_val().get(x1)(0) = 1.;

@@ -2,8 +2,6 @@
 #define __MOTO_PROBLEM_HPP__
 
 #include <array>
-#include <atomic>
-#include <functional>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -13,6 +11,7 @@
 
 #include <moto/core/expr.hpp>
 #include <moto/core/field_layout_store.hpp>
+#include <moto/core/linear_backend.hpp>
 #include <moto/core/sparse.hpp>
 #include <moto/ocp/sym.hpp>
 
@@ -27,27 +26,75 @@ class node_view;
 class graph_model;
 class graph_composer;
 
+struct stage_composition_identity {};
+using stage_composition_identity_ptr_t = std::shared_ptr<const stage_composition_identity>;
+
 enum class stage_expr_role : size_t {
     interval,
     start_node,
     end_node,
 };
 
-enum class linear_target : size_t { jacobian, lag_hessian, hessian_modification };
+enum class linear_target : size_t {
+    jacobian,
+    lag_hessian,
+    hessian_modification,
+    lifted_projection,
+};
+
+struct lifted_intermediate_profile {
+    std::string name;
+    size_t rows = 0, cols = 0;
+    sparse_layout_plan layout;
+};
+
+struct lifted_graph_input_binding {
+    enum class kind { jacobian_panel, residual, parameter } source;
+    field_t equation = __undefined;
+    field_t variable = __undefined;
+    size_t panel = 0;
+    std::vector<size_t> panels;
+    size_t equation_uid = 0;
+    size_t variable_uid = 0;
+    var parameter;
+};
+
+struct lifted_graph_program {
+    std::string artifact_identity;
+    std::vector<cs::MX> inputs;
+    // Exact runtime panel layout for each logical MX input.  Empty entries
+    // use the translator's ordinary one-matrix layout.  Jacobian inputs keep
+    // the OCP layout so binding them never reconstructs a matrix in the graph.
+    std::vector<linear_backend::matrix_layout> input_layouts;
+    std::vector<cs::MX> projection_outputs;
+    std::vector<lifted_graph_input_binding> input_bindings;
+    cs::MX response_x;
+    cs::MX response_u;
+    cs::MX response_residual;
+    cs::MX action_rhs;
+    cs::MX action_output;
+    cs::MX transpose_rhs;
+    cs::MX transpose_output;
+    std::vector<cs::MX> spd_factors;
+};
 
 struct ocp_linear_profile {
-    std::unordered_map<size_t, std::vector<sparse_block_spec>> blocks;
+    std::unordered_map<size_t, sparse_layout_plan> layouts;
+    std::vector<lifted_intermediate_profile> lifted_intermediates;
+    std::shared_ptr<lifted_graph_program> lifted_program;
     static constexpr size_t key(linear_target target, field_t a, field_t b) {
         return (static_cast<size_t>(target) * field::num + a) * field::num + b;
     }
-    const std::vector<sparse_block_spec> &get(linear_target target, field_t a, field_t b) const {
-        static const std::vector<sparse_block_spec> empty;
-        const auto it = blocks.find(key(target, a, b));
-        return it == blocks.end() ? empty : it->second;
+    const sparse_layout_plan &get(linear_target target, field_t a, field_t b) const {
+        static const sparse_layout_plan empty;
+        const auto it = layouts.find(key(target, a, b));
+        return it == layouts.end() ? empty : it->second;
     }
 };
 
 class ocp_base : protected field_layout_store<expr_list> {
+    friend class graph_composer;
+
   public:
     struct active_status_config {
         expr_list deactivate_list;
@@ -70,6 +117,7 @@ class ocp_base : protected field_layout_store<expr_list> {
     utils::unique_id<ocp_base> uid_;
     std::array<expr_list, field::num> disabled_expr_, pruned_expr_;
     std::unordered_set<size_t> uids_, disabled_uids_, pruned_uids_;
+    std::unordered_set<size_t> resolved_predicate_uids_;
     ocp_linear_profile linear_profile_;
 
     void finalize();
@@ -77,6 +125,8 @@ class ocp_base : protected field_layout_store<expr_list> {
     void refresh_copy(const active_status_config &config);
     void move_active_expr(const expr &ex, bool prune);
     bool restore_inactive_expr(const expr &ex, bool from_pruned);
+    void resolve_composed_status(const active_status_config &config,
+                                 const expr_list &resolved_functions);
     inline void field_read_guard() const {
         assert(finalized_ && "Cannot access before the problem is finalized. Please call finalize() before accessing expressions.");
     }
@@ -173,14 +223,13 @@ class stage_ocp : public ocp, public std::enable_shared_from_this<stage_ocp> {
 
   private:
     std::unordered_map<size_t, unsigned> endpoint_role_mask_by_uid_;
-    std::function<void()> mutation_callback_;
-    std::atomic<size_t> mutation_revision_{1};
+    stage_composition_identity_ptr_t composition_identity_ =
+        std::make_shared<stage_composition_identity>();
     bool add_with_role(expr_handle ex, stage_expr_role role);
     bool validate_stage_term(const expr_handle &ex, std::string *reason) const;
     bool validate_endpoint_term(const expr_handle &ex, std::string *reason) const;
-    void set_mutation_callback(std::function<void()> callback);
-    size_t mutation_revision() const noexcept {
-        return mutation_revision_.load(std::memory_order_acquire);
+    const stage_composition_identity_ptr_t &composition_identity() const {
+        return composition_identity_;
     }
     bool has_role(const expr &ex, stage_expr_role role) const;
     void on_modified() override;
@@ -237,10 +286,6 @@ class node_view {
             add(ex);
         }
     }
-
-    stage_ocp_ptr_t stage() const { return owner_; }
-    stage_expr_role role() const { return role_; }
-    explicit operator bool() const { return bool(owner_); }
 
   private:
     stage_ocp_ptr_t owner_;

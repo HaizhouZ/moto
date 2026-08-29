@@ -1,36 +1,27 @@
 #include <moto/solver/ns_sqp.hpp>
 #include <type_cast.hpp>
 
-#include <nanobind/stl/vector.h>
-#include <nanobind/stl/pair.h>
+#include <nanobind/stl/bind_vector.h>
 
 #include <enum_export.hpp>
 using namespace moto;
 
+NB_MAKE_OPAQUE(std::vector<stage_ocp_ptr_t>);
+
 void register_submodule_ns_sqp(nb::module_ &m) {
 
-    nb::class_<ns_sqp> sqp(m, "ns_sqp_impl");
-    sqp.def(nb::init<size_t>(), "Constructor for the SQP solver with a specified number of jobs")
-        .def("add_stage",
-             [](ns_sqp &self, const stage_ocp_ptr_t &stage, size_t n_stages) {
-                 return self.add_stage(stage, n_stages);
-             },
-             nb::arg("stage"),
-             nb::arg("n_stages") = 1)
-        .def("add_stages",
-             [](ns_sqp &self, const node_view &start_node, const stage_ocp_ptr_t &stage, size_t n_stages) {
-                 return self.add_stages(start_node, stage, n_stages);
-             },
-             nb::arg("start_node"),
-             nb::arg("stage"),
-             nb::arg("n_stages"))
-        .def("add_phases",
-             [](ns_sqp &self, const std::vector<graph_model::phase> &phases) {
-                 return self.add_phases(phases);
-             },
-             nb::arg("phases"),
-             "Append (stage, count) phases in one graph transaction")
-        .def_prop_ro("start_node", [](ns_sqp &self) { return self.start_node(); }, "Initial graph node")
+    nb::class_<ns_sqp> sqp(m, "sqp");
+    m.attr("ns_sqp_impl") = sqp;
+    nb::bind_vector<std::vector<stage_ocp_ptr_t>>(sqp, "stage_list");
+    sqp.def(nb::init<size_t>(), nb::arg("n_job") = 4,
+            "Constructor for the SQP solver with a specified number of jobs")
+        .def_prop_ro("st", [](ns_sqp &self) { return self.st(); }, "Initial graph boundary")
+        .def_prop_ro("ed", [](ns_sqp &self) { return self.ed(); }, "Graph terminal boundary")
+        .def_prop_ro(
+            "stages",
+            [](ns_sqp &self) -> auto & { return self.stages(); },
+            nb::rv_policy::reference_internal,
+            "Mutable ordered graph-owned stage vector")
         .def("update", [](ns_sqp &self, size_t n_iter, bool verbose, bool profile) {
             nb::gil_scoped_release rel;
             return self.update(n_iter, verbose, profile);
@@ -100,12 +91,12 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("s_theta", &ns_sqp::linesearch_setting::s_theta, "IPOPT switching condition exponent on constraint violation (s_theta in IPOPT paper, Section 3.3)")
         .def_rw("merit_sigma", &ns_sqp::linesearch_setting::merit_sigma, "Merit backtracking: weight on ||dual residual||^2 relative to ||constraint violation||^2 (default 1.0)")
         .def_rw("enable_flat_obj_accept", &ns_sqp::linesearch_setting::enable_flat_obj_accept, "Accept step when objective is flat, iterate is nearly feasible, and step is non-trivial")
-        .def_rw("flat_obj_dec_tol", &ns_sqp::linesearch_setting::flat_obj_dec_tol, "Threshold on |fullstep_dec| below which the objective is considered flat")
+        .def_rw("flat_obj_dec_tol", &ns_sqp::linesearch_setting::flat_obj_dec_tol, "Absolute full-step decrease below which the objective is considered flat")
         .def_rw("flat_obj_prim_tol", &ns_sqp::linesearch_setting::flat_obj_prim_tol, "Primal residual must be below this for flat-objective accept")
         .def_rw("flat_obj_step_tol", &ns_sqp::linesearch_setting::flat_obj_step_tol, "Step norm must exceed this for flat-objective accept (ensures non-trivial step)");
 
     ls_setting.def_rw("backtrack_scheme", &ns_sqp::linesearch_setting::backtrack_scheme, "Backtracking scheme: linspace (default) or geometric")
-        .def_rw("backtrack_factor", &ns_sqp::linesearch_setting::backtrack_factor, "Geometric backtracking reduction factor (alpha *= factor each step, used when backtrack_scheme == geometric)");
+        .def_rw("backtrack_factor", &ns_sqp::linesearch_setting::backtrack_factor, "Geometric reduction factor applied to alpha at each backtracking step");
 
     moto::export_enum<ns_sqp::linesearch_setting::failure_backup_strategy>(ls_setting);
     moto::export_enum<ns_sqp::linesearch_setting::on_failure_action>(ls_setting);

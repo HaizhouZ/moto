@@ -65,6 +65,17 @@ def semi_implicit_dynamics(name, q, v, qn, vn, velocity_residual, dt):
     return moto.semi_implicit_euler.create(name, residual)
 
 
+def tangent_jacobian(output, argument):
+    """Differentiate an SX expression in a moto symbol's tangent coordinates."""
+    jacobian = cs.jacobian(output, argument.sx)
+    if argument.dim == argument.tdim:
+        return jacobian
+    step = cs.SX.sym(f"{argument.name}_analytic_step", argument.tdim)
+    tangent_map = cs.jacobian(argument.symbolic_integrate(argument.sx, step), step)
+    tangent_map = cs.substitute(tangent_map, step, cs.SX.zeros(argument.tdim))
+    return jacobian @ tangent_map
+
+
 class PinocchioCasadiModel(cpin.Model):
     """CasADi Pinocchio model with common kinematics/dynamics operations."""
 
@@ -79,17 +90,25 @@ class PinocchioCasadiModel(cpin.Model):
         self.nqb = 7 if self.nq - self.nv == 1 else 6 if self.is_floating_based else 0
 
     def create_trajectory_variables(
-        self, dt, q_nom=None, *, acceleration_control=False
+        self,
+        dt,
+        q_nom=None,
+        *,
+        acceleration_control=False,
+        lifted_contact=False,
+        lifted_acceleration=False,
     ):
         """Create q/v states and either acceleration or torque input."""
         self.dt = dt
-        self.q, self.qn, self.v, self.vn = pinocchio_states(
-            self, self.name, q_nom
-        )
+        self.q, self.qn, self.v, self.vn = pinocchio_states(self, self.name, q_nom)
         self.a = (
             moto.sym.inputs(f"{self.name}_a", self.nv)
             if acceleration_control
-            else (self.vn - self.v) / dt
+            else (
+                moto.sym.lifted(f"{self.name}_a", self.nv)
+                if lifted_contact and lifted_acceleration
+                else (self.vn - self.v) / dt
+            )
         )
         self.tq = (
             None
@@ -101,7 +120,7 @@ class PinocchioCasadiModel(cpin.Model):
         self.v_stack = self.v.sx
         self.qn_stack = self.qn.sx
         self.vn_stack = self.vn.sx
-        self.a_stack = self.a
+        self.a_stack = self.a.sx if isinstance(self.a, moto.var) else self.a
         return self
 
     def update_kinematics(self, q, v=None, *, data=None, jacobians=True):
@@ -148,6 +167,60 @@ class PinocchioCasadiModel(cpin.Model):
         torque = self.generalized_torque(joint_torque) + external_impulse / dt
         return cpin.aba(self, self.data, q, v, torque) * dt
 
+    def forward_dynamics_step_analytic(
+        self,
+        q,
+        v,
+        joint_torque,
+        dt,
+        external_impulse=0,
+        *,
+        q_symbol,
+        v_symbol,
+        derivative_arguments=(),
+    ):
+        """Compute an ABA step and analytic tangent Jacobians.
+
+        Pinocchio supplies the fixed-torque ABA derivatives. Derivatives of
+        generalized torque, including ``J(q).T @ impulse``, are added through
+        the chain rule for every requested moto symbol.
+        """
+        torque = self.generalized_torque(joint_torque) + external_impulse / dt
+        dv = cpin.aba(self, self.data, q, v, torque) * dt
+        derivative_data = self.createData()
+        ddq_dq, ddq_dv, ddq_dtau = cpin.computeABADerivatives(
+            self, derivative_data, q, v, torque
+        )
+
+        # Pinocchio's analytic ABA derivatives for a composite floating-base
+        # joint are exact for all articulated-joint columns, but its first six
+        # q/v columns use the wrong composite-joint convention. Keep the
+        # compact analytic result and repair only those root columns with AD.
+        if (
+            self.is_floating_based
+            and self.joints[1].shortname() == "JointModelComposite"
+        ):
+            root_tdim = self.joints[1].nv
+            torque_q = tangent_jacobian(torque, q_symbol)
+            ddq_dq[:, :root_tdim] = (
+                tangent_jacobian(dv, q_symbol)[:, :root_tdim] / dt
+                - (ddq_dtau @ torque_q)[:, :root_tdim]
+            )
+            ddq_dv[:, :root_tdim] = cs.jacobian(dv, v_symbol.sx)[:, :root_tdim] / dt
+
+        derivatives = []
+        for argument in derivative_arguments:
+            fixed_torque = cs.SX.zeros(self.nv, argument.tdim)
+            if argument.uid == q_symbol.uid:
+                fixed_torque = ddq_dq
+            elif argument.uid == v_symbol.uid:
+                fixed_torque = ddq_dv
+            torque_jacobian = tangent_jacobian(torque, argument)
+            derivatives.append(
+                (argument, dt * (fixed_torque + ddq_dtau @ torque_jacobian))
+            )
+        return dv, derivatives
+
     def inverse_dynamics_impulse(self, q, v, a, dt, external_impulse=0):
         """Compute the RNEA generalized impulse minus an external impulse."""
         return cpin.rnea(self, self.data, q, v, a) * dt - external_impulse
@@ -192,6 +265,7 @@ class ContactModel:
         kinematic_gain=100.0,
         friction_coefficient=0.7,
         with_impulses=True,
+        lifted_impulses=False,
     ):
         self.robot = robot
         self.q = q
@@ -203,7 +277,7 @@ class ContactModel:
         self.jacobians = robot.frame_translational_jacobians(self.frame_ids)
         self.impulses = (
             [
-                moto.sym.inputs(
+                (moto.sym.lifted if lifted_impulses else moto.sym.inputs)(
                     f"{force_prefix}_{name}",
                     3,
                     default_val=np.asarray(force_default),
@@ -214,8 +288,7 @@ class ContactModel:
             else []
         )
         self.generalized_impulses = [
-            jacobian.T @ force
-            for jacobian, force in zip(self.jacobians, self.impulses)
+            jacobian.T @ force for jacobian, force in zip(self.jacobians, self.impulses)
         ]
         self.generalized_impulse = sum(self.generalized_impulses, cs.SX.zeros(robot.nv))
         self.velocities, self.heights = robot.frame_linear_kinematics(
@@ -228,16 +301,18 @@ class ContactModel:
             if self.impulses
             else None
         )
-        self.kinematic_constraints = [
-            self._make_kinematic_constraint(index)
-            for index in range(len(self.frame_names))
-        ]
+        self.kinematic_constraints = self.make_kinematic_constraints()
         self.friction_constraints = [
-            self._make_friction_constraint(index)
-            for index in range(len(self.impulses))
+            self._make_friction_constraint(index) for index in range(len(self.impulses))
         ]
 
-    def _make_kinematic_constraint(self, index):
+    def make_kinematic_constraints(self, *, name_prefix="kin"):
+        return [
+            self._make_kinematic_constraint(index, name_prefix)
+            for index in range(len(self.frame_names))
+        ]
+
+    def _make_kinematic_constraint(self, index, name_prefix):
         velocity = self.velocities[:, index]
         residual = cs.vcat(
             [
@@ -246,7 +321,7 @@ class ContactModel:
             ]
         )
         constraint = moto.constr.create(
-            f"kin_{self.frame_names[index]}",
+            f"{name_prefix}_{self.frame_names[index]}",
             residual,
         )
         if self.impulses:
@@ -269,17 +344,13 @@ class ContactModel:
         return constraint
 
     def add_to_stage(self, stage):
-        """Add interval friction and start-node contact kinematics."""
+        """Add path contact constraints to an interval stage."""
         if self.friction_constraints:
             stage.add(self.friction_constraints)
-        stage.st.add(self.kinematic_constraints)
+        stage.add(self.kinematic_constraints)
 
-    def add_to_endpoint(self, endpoint):
-        endpoint.add(self.kinematic_constraints)
-
-    def set_kinematic_gain(self, nodes, value, *, count=None):
-        set_node_value(nodes, self.kinematic_gain, value, count=count)
-
+    def add_to_endpoint(self, endpoint, constraints=None):
+        endpoint.add(self.kinematic_constraints if constraints is None else constraints)
 
 class ContactRobotModel(PinocchioCasadiModel):
     """Ready-to-use contact or acceleration-controlled robot model."""
@@ -295,12 +366,20 @@ class ContactRobotModel(PinocchioCasadiModel):
         use_forward_dynamics=True,
         configuration_velocity="next",
         acceleration_control=False,
+        lifted_contact=False,
+        lifted_acceleration=False,
     ):
         super().__init__(model, name)
         self.use_fwd_dyn = use_forward_dynamics
         self.acceleration_control = acceleration_control
+        self.lifted_contact = lifted_contact
+        self.lifted_acceleration = lifted_contact and lifted_acceleration
         self.create_trajectory_variables(
-            dt, q_nom, acceleration_control=acceleration_control
+            dt,
+            q_nom,
+            acceleration_control=acceleration_control,
+            lifted_contact=lifted_contact,
+            lifted_acceleration=self.lifted_acceleration,
         )
         self.contacts = ContactModel(
             self,
@@ -308,6 +387,7 @@ class ContactRobotModel(PinocchioCasadiModel):
             self.v,
             contact_frames,
             with_impulses=not acceleration_control,
+            lifted_impulses=lifted_contact,
         )
 
         if acceleration_control:
@@ -320,13 +400,26 @@ class ContactRobotModel(PinocchioCasadiModel):
                 self.vn - self.v - self.a * dt,
                 dt,
             )
+        elif lifted_contact:
+            # Built below at the implicit next state together with the contact
+            # position Jacobian.
+            self.rnea = None
         elif use_forward_dynamics:
-            self.aba = self.forward_dynamics_step(
+            derivative_arguments = [
+                self.q,
+                self.v,
+                self.tq,
+                *self.contacts.impulses,
+            ]
+            self.aba, self.aba_jacobians = self.forward_dynamics_step_analytic(
                 self.q_stack,
                 self.v_stack,
                 self.tq,
                 dt,
                 self.contacts.generalized_impulse,
+                q_symbol=self.q,
+                v_symbol=self.v,
+                derivative_arguments=derivative_arguments,
             )
         else:
             self.rnea = self.inverse_dynamics_impulse(
@@ -340,8 +433,118 @@ class ContactRobotModel(PinocchioCasadiModel):
         if configuration_velocity not in ("next", "predicted"):
             raise ValueError("configuration_velocity must be 'next' or 'predicted'")
         self.configuration_velocity = configuration_velocity
-        if not acceleration_control:
+        if lifted_contact:
+            if self.lifted_acceleration:
+                q_next = self.q.symbolic_integrate(self.q.sx, self.vn.sx * dt)
+                self.euler_position_residual = self.q.symbolic_difference(
+                    self.qn.sx, q_next
+                )
+                self.euler_velocity_residual = self.vn.sx - self.v.sx - self.a.sx * dt
+                self.euler_residual = cs.vcat(
+                    [self.euler_position_residual, self.euler_velocity_residual]
+                )
+                self.dyn = moto.semi_implicit_euler.create(
+                    f"{self.name}_lifted_euler", self.euler_residual
+                )
+            self.contact_activation = [
+                moto.sym.params(f"contact_active_{name}", default_val=1.0)
+                for name in self.contacts.frame_names
+            ]
+            q_reference = (
+                np.asarray(q_nom, dtype=float)
+                if q_nom is not None
+                else pin.neutral(self.fmodel)
+            )
+            reference_data = self.fmodel.createData()
+            pin.forwardKinematics(self.fmodel, reference_data, q_reference)
+            pin.updateFramePlacements(self.fmodel, reference_data)
+            self.contact_reference = [
+                moto.sym.params(
+                    f"contact_reference_{name}",
+                    3,
+                    default_val=np.asarray(
+                        reference_data.oMf[frame_id].translation, dtype=float
+                    ),
+                )
+                for name, frame_id in zip(
+                    self.contacts.frame_names, self.contacts.frame_ids
+                )
+            ]
+            contact_rows = []
+            contact_data = self.createData()
+            cpin.forwardKinematics(self, contact_data, self.qn_stack, self.vn_stack)
+            cpin.computeJointJacobians(self, contact_data, self.qn_stack)
+            cpin.updateFramePlacements(self, contact_data)
+            contact_jacobians = []
+            for active, frame_id, impulse, reference in zip(
+                self.contact_activation,
+                self.contacts.frame_ids,
+                self.contacts.impulses,
+                self.contact_reference,
+            ):
+                jacobian = cpin.getFrameJacobian(
+                    self,
+                    contact_data,
+                    frame_id,
+                    pin.LOCAL_WORLD_ALIGNED,
+                )[:3, :]
+                contact_jacobians.append(jacobian)
+                phi = contact_data.oMf[frame_id].translation - reference.sx
+                contact = phi + (jacobian @ self.vn_stack) * self.dt
+                contact_rows.append(active * contact + (1.0 - active) * impulse)
+            self.contact_rows = contact_rows
+            generalized_impulse = sum(
+                (
+                    jacobian.T @ impulse
+                    for jacobian, impulse in zip(
+                        contact_jacobians, self.contacts.impulses
+                    )
+                ),
+                cs.SX.zeros(self.nv),
+            )
+            self.rnea = self.inverse_dynamics_impulse(
+                self.qn_stack,
+                self.vn_stack,
+                self.a_stack,
+                dt,
+                generalized_impulse,
+            )
+            if self.lifted_acceleration:
+                self.rnea_residual = (
+                    self.rnea - self.generalized_torque(self.tq) * self.dt
+                )
+                self.lifting = moto.lifted.create(
+                    f"{self.name}_rnea_contact_lifting",
+                    cs.vcat(
+                        [
+                            self.rnea_residual,
+                            *contact_rows,
+                        ]
+                    ),
+                    [self.a, *self.contacts.impulses],
+                    order=moto.approx_order.approx_order_first,
+                )
+            else:
+                q_next = self.q.symbolic_integrate(self.q.sx, self.vn.sx * self.dt)
+                self.euler_residual = self.q.symbolic_difference(self.qn.sx, q_next)
+                self.rnea_residual = (
+                    self.rnea - self.generalized_torque(self.tq) * self.dt
+                )
+                dynamics_residual = cs.vcat([self.euler_residual, self.rnea_residual])
+                self.dyn = moto.semi_implicit_euler.create(
+                    f"{self.name}_lifted_rnea", dynamics_residual
+                )
+                self.lifting = moto.lifted.create(
+                    f"{self.name}_contact_lifting",
+                    cs.vcat(contact_rows),
+                    self.contacts.impulses,
+                    order=moto.approx_order.approx_order_first,
+                )
+        elif not acceleration_control:
             self.dyn = self._make_contact_dynamics()
+            self.lifting = None
+        else:
+            self.lifting = None
 
         self.q_nom = moto.sym.params(
             "q_nom",
@@ -351,21 +554,55 @@ class ContactRobotModel(PinocchioCasadiModel):
 
     def _make_contact_dynamics(self):
         if self.use_fwd_dyn:
-            velocity_residual = self.vn - (self.v + self.aba)
+            dv = cs.SX.sym(f"{self.name}_analytic_dv", self.nv)
+            velocity_residual = self.vn.sx - (self.v.sx + dv)
             name = f"{self.name}_fd"
         else:
             velocity_residual = self.rnea - self.generalized_torque(self.tq) * self.dt
             name = f"{self.name}_id"
         if self.configuration_velocity == "next":
-            return semi_implicit_dynamics(
-                name, self.q, self.v, self.qn, self.vn, velocity_residual, self.dt
+            q_next = self.q.symbolic_integrate(self.q.sx, self.vn.sx * self.dt)
+        else:
+            name += "_predicted"
+            integration_velocity = self.v.sx + dv if self.use_fwd_dyn else self.vn.sx
+            q_next = self.q.symbolic_integrate(
+                self.q.sx, integration_velocity * self.dt
             )
-        name += "_predicted"
-        integration_velocity = self.v + self.aba if self.use_fwd_dyn else self.vn
-        q_next = self.q.symbolic_integrate(self.q.sx, integration_velocity * self.dt)
-        return moto.dense_dynamics.create(
-            name, cs.vcat([self.q.symbolic_difference(self.qn.sx, q_next), velocity_residual])
+        residual_template = cs.vcat(
+            [self.q.symbolic_difference(self.qn.sx, q_next), velocity_residual]
         )
+        if not self.use_fwd_dyn:
+            return (
+                moto.semi_implicit_euler.create(name, residual_template)
+                if self.configuration_velocity == "next"
+                else moto.dense_dynamics.create(name, residual_template)
+            )
+
+        residual = cs.substitute(residual_template, dv, self.aba)
+        dynamics = (
+            moto.semi_implicit_euler.create(name, residual)
+            if self.configuration_velocity == "next"
+            else moto.dense_dynamics.create(name, residual)
+        )
+        dv_jacobian = cs.jacobian(residual_template, dv)
+        aba_jacobians = {
+            argument.uid: jacobian for argument, jacobian in self.aba_jacobians
+        }
+        derivative_arguments = [
+            self.q,
+            self.v,
+            self.qn,
+            self.vn,
+            self.tq,
+            *self.contacts.impulses,
+        ]
+        for argument in derivative_arguments:
+            jacobian = tangent_jacobian(residual_template, argument)
+            if argument.uid in aba_jacobians:
+                jacobian += dv_jacobian @ aba_jacobians[argument.uid]
+            jacobian = cs.substitute(jacobian, dv, self.aba)
+            dynamics.set_analytic_jacobian(argument, jacobian)
+        return dynamics
 
     def input_cost(
         self,
@@ -375,103 +612,25 @@ class ContactRobotModel(PinocchioCasadiModel):
         contact_weight=1e-3,
         name=None,
     ):
-        mode = "acceleration" if self.acceleration_control else "contact"
+        mode = (
+            "acceleration"
+            if self.acceleration_control
+            else ("lifted_acceleration" if self.lifted_acceleration else "contact")
+        )
         name = name or f"{self.name}_{mode}_input_cost"
         if self.acceleration_control:
-            return moto.cost.from_vector(
-                name, self.a, weight=2 * acceleration_weight
-            )
+            return moto.cost.from_vector(name, self.a, weight=2 * acceleration_weight)
         impulses = cs.vcat(self.contacts.impulses)
-        residual = cs.vcat([self.tq, impulses])
-        weight = np.r_[
+        residuals = [self.tq, impulses]
+        weights = [
             np.full(self.tq.numel(), 2 * torque_weight),
             np.full(impulses.numel(), 2 * contact_weight),
         ]
-        return moto.cost.from_vector(name, residual, weight=weight)
-
-
-def add_terms(container, *terms):
-    """Add several expressions or expression lists to an OCP container."""
-    for term in terms:
-        container.add(term)
-    return container
-
-
-def add_stage_segments(sqp, stage_prototypes, lengths):
-    """Append several linear graph segments and return all owned stages."""
-    stage_prototypes = tuple(stage_prototypes)
-    lengths = tuple(lengths)
-    if len(stage_prototypes) != len(lengths):
-        raise ValueError("stage_prototypes and lengths must have the same size")
-    phases = list(zip(stage_prototypes, lengths))
-    return [stage for phase in sqp.add_phases(phases) for stage in phase]
-
-
-def add_time_step_regularization(
-    stage,
-    dt,
-    nominal_dt,
-    *,
-    lower=1e-4,
-    upper=5e-2,
-    weight=1e8,
-):
-    """Add the shared symbolic time-step bound and quadratic regularization."""
-    if not isinstance(dt, cs.SX):
-        return
-    bounds = moto.sym.params("dt_bound", 2, default_val=np.array([lower, upper]))
-    add_terms(
-        stage,
-        moto.ineq.create("dt", dt.sx, bounds[0], bounds[1]),
-        moto.cost.from_scalar(
-            "c_t", dt - nominal_dt, weight=2 * weight
-        ),
-    )
-
-
-def visit_nodes(nodes, callback):
-    """Apply ``callback(node, index)`` to each already-materialized node."""
-    for index, node in enumerate(nodes):
-        callback(node, index)
-    return nodes
-
-
-def set_node_value(nodes, symbol, value, *, count=None):
-    """Assign one symbol across all or the first ``count`` solver nodes."""
-    selected = nodes if count is None else nodes[:count]
-    for node in selected:
-        node.value[symbol] = value
-    return nodes
-
-
-def collect_node_values(nodes, *symbols):
-    """Collect copied numeric values for one or more symbols at every node."""
-    return tuple(
-        [np.array(node.value[symbol], copy=True) for node in nodes]
-        for symbol in symbols
-    )
-
-
-def collect_state_trajectory(nodes, state, next_state, dt):
-    """Collect interval states plus the final outgoing state and time steps."""
-    states = [np.array(node.value[state], copy=True) for node in nodes]
-    states.append(np.array(nodes[-1].value[next_state], copy=True))
-    if isinstance(dt, (float, int)):
-        time_steps = [float(dt)] * len(nodes)
-    else:
-        time_steps = [float(node.value[dt]) for node in nodes]
-    return states, time_steps
-
-
-def print_graph_layout(nodes):
-    """Print the compact x/u/y layout of materialized solver nodes."""
-    for index, node in enumerate(nodes):
-        prob = node.prob
-        print(
-            f"  node[{index}] "
-            f"x={prob.dim(moto.field.field___x)} "
-            f"u={prob.dim(moto.field.field___u)} "
-            f"y={prob.dim(moto.field.field___y)}"
+        if self.lifted_acceleration:
+            residuals.append(self.a)
+            weights.append(np.full(self.a.numel(), 2 * acceleration_weight))
+        return moto.cost.from_vector(
+            name, cs.vcat(residuals), weight=np.concatenate(weights)
         )
 
 
@@ -486,9 +645,7 @@ class ViserRobot:
         self.server.scene.set_up_direction("+z")
         self.server.scene.add_grid("/ground", infinite_grid=True)
         self.root = self.server.scene.add_frame(root, show_axes=False)
-        self.robot = ViserUrdf(
-            self.server, Path(urdf), root_node_name=root
-        )
+        self.robot = ViserUrdf(self.server, Path(urdf), root_node_name=root)
         self.floating_base = floating_base
         self.joint_count = len(self.robot.get_actuated_joint_names())
 

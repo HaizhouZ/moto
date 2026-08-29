@@ -3,6 +3,19 @@
 #include <type_cast.hpp>
 #include <variant>
 
+namespace {
+
+moto::ocp_base::active_status_config active_status(
+    const moto::expr_inarg_list &disable,
+    const moto::expr_inarg_list &enable) {
+    moto::ocp_base::active_status_config result;
+    result.deactivate_list = moto::expr_list(disable);
+    result.activate_list = moto::expr_list(enable);
+    return result;
+}
+
+} // namespace
+
 void register_submodule_node_data(nb::module_ &m) {
     using namespace moto;
     nb::class_<ocp_base>(m, "ocp_base")
@@ -16,28 +29,37 @@ void register_submodule_node_data(nb::module_ &m) {
     nb::class_<ocp, ocp_base>(m, "ocp");
 
     nb::class_<node_view>(m, "endpoint")
-        .def("__bool__", [](const node_view &self) { return bool(self); })
         .def("add", [](node_view &self, expr_inarg_list &&exprs) { self.add(exprs); }, nb::arg("exprs"), "Add node-local expressions")
-        .def("add", [](node_view &self, expr_handle ex) { self.add(std::move(ex)); }, nb::arg("ex"), "Add a node-local expression")
-        .def_prop_ro("stage", &node_view::stage, "Stage retained by this endpoint handle");
+        .def("add", [](node_view &self, expr_handle ex) { self.add(std::move(ex)); }, nb::arg("ex"), "Add a node-local expression");
 
     nb::class_<stage_ocp, ocp>(m, "stage_ocp")
         .def_static("create", &stage_ocp::create, "Create a new stage OCP problem")
-        .def("copy", [](const stage_ocp &self) { return self.copy(); },
-             "Copy the stage container while sharing expression handles")
-        .def("with_status", &stage_ocp::copy, nb::arg("config"),
-             "Copy the stage with a different active-expression selection")
+        .def("copy", [](const stage_ocp &self,
+                         const expr_inarg_list &disable,
+                         const expr_inarg_list &enable) {
+            return self.copy(active_status(disable, enable));
+        }, nb::arg("disable") = nb::list{}, nb::arg("enable") = nb::list{},
+             "Copy the stage, optionally changing its active expressions")
+        .def("disable", [](stage_ocp &self, const expr_inarg_list &exprs) {
+            self.update_active_status(active_status(exprs, {}));
+        }, nb::arg("exprs"), "Disable stage expressions")
+        .def("disable", [](stage_ocp &self, expr_handle ex) {
+            ocp_base::active_status_config config;
+            config.deactivate_list.push_back(std::move(ex));
+            self.update_active_status(config);
+        }, nb::arg("ex"), "Disable a stage expression")
+        .def("enable", [](stage_ocp &self, const expr_inarg_list &exprs) {
+            self.update_active_status(active_status({}, exprs));
+        }, nb::arg("exprs"), "Enable stage expressions")
+        .def("enable", [](stage_ocp &self, expr_handle ex) {
+            ocp_base::active_status_config config;
+            config.activate_list.push_back(std::move(ex));
+            self.update_active_status(config);
+        }, nb::arg("ex"), "Enable a stage expression")
         .def("add", [](stage_ocp &self, expr_inarg_list &&exprs) { self.add(exprs); }, nb::arg("exprs"), "Add stage expressions")
         .def("add", [](stage_ocp &self, expr_handle ex) { self.add(std::move(ex)); }, nb::arg("ex"), "Add a stage expression")
-        .def_prop_ro("st", [](stage_ocp &self) { return self.st(); }, "Start-node view")
-        .def_prop_ro("ed", [](stage_ocp &self) { return self.ed(); }, "End-node view");
-
-    nb::class_<ocp_base::active_status_config>(m, "active_status_config")
-        .def(nb::init<>(), "Default constructor for active_status_config")
-        .def(nb::init<expr_inarg_list, expr_inarg_list>(),
-             nb::arg("deactivate_list") = nb::list{},
-             nb::arg("activate_list") = nb::list{},
-             "Constructor for active_status_config with deactivate and activate lists");
+        .def_prop_ro("st", [](stage_ocp &self) { return self.st(); }, "Stage start boundary")
+        .def_prop_ro("ed", [](stage_ocp &self) { return self.ed(); }, "Stage end boundary");
 
     nb::class_<sym_data>(m, "sym_data")
         .def("__getitem__", [](sym_data &self, py_var_inarg_wrapper s) -> auto { return self[s]; })
@@ -53,7 +75,9 @@ void register_submodule_node_data(nb::module_ &m) {
 
     nb::class_<node_data>(m, "node_data")
         .def_prop_ro("prob", [](node_data &self) -> auto & { return self.problem(); }, nb::rv_policy::reference_internal)
-        .def_prop_ro("value", [](node_data &self) -> auto & { return self.sym_val(); }, nb::rv_policy::reference_internal);
+        .def_prop_ro("value", [](node_data &self) -> auto & { return self.sym_val(); }, nb::rv_policy::reference_internal)
+        .def("data", [](node_data &self, const generic_func &f) -> auto & { return self.data(f); },
+             nb::arg("function"), nb::rv_policy::reference_internal);
 
     nb::class_<func_approx_data>(m, "func_approx_data")
         .def("__getitem__", [](func_approx_data &self, py_var_inarg_wrapper s) { return self[(sym &)s]; })

@@ -7,11 +7,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-import casadi as cs
 import moto
 import numpy as np
-
-from example.helpers import visit_nodes
 
 N = 3
 TARGET = 2.0
@@ -36,8 +33,8 @@ def solve(mode, *, optimize):
     stage = moto.stage()
     stage.add(dynamics)
     stage.add(control_cost)
-    sqp.add_stage(stage, N)
-    sqp.start_node.add(initial_cost)
+    sqp.stages.extend([stage.copy() for _ in range(N)])
+    sqp.st.add(initial_cost)
 
     sqp.settings.initial_state = mode
     sqp.settings.restoration.enabled = False
@@ -52,7 +49,8 @@ def solve(mode, *, optimize):
         node.value[xn] = np.zeros(1)
         node.value[u] = np.zeros(1)
 
-    visit_nodes(nodes, initialize)
+    for index, node in enumerate(nodes):
+        initialize(node, index)
     result = sqp.update(10, verbose=False) if optimize else None
     states = np.array([node.value[x][0] for node in nodes] + [nodes[-1].value[xn][0]])
     controls = np.array([node.value[u][0] for node in nodes])

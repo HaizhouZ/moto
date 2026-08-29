@@ -42,8 +42,8 @@ class dense_dynamics : public generic_dynamics {
 
     void compute_project_jacobians(func_approx_data &data) const override;
     void compute_project_residual(func_approx_data &data) const override;
-    void apply_jac_y_inverse_transpose(func_approx_data &data, vector_ref v,
-                                       vector_ref dst) const override;
+    void apply_lifted_jacobian_inverse_transpose(
+        func_approx_data &data, vector_ref v, vector_ref dst) const override;
 
     void finalize_impl() override;
 };

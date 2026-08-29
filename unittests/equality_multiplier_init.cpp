@@ -5,6 +5,7 @@
 #include <moto/ocp/constr.hpp>
 #include <moto/ocp/cost.hpp>
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
+#include <moto/solver/equality_init/eq_init_overlay.hpp>
 #include <moto/solver/ipm/ipm_constr.hpp>
 #include <moto/solver/ns_sqp.hpp>
 
@@ -128,12 +129,27 @@ void configure_solver(ns_sqp &sqp, bool enable_eq_init, size_t n_edges) {
     sqp.settings.eq_init.enabled = enable_eq_init;
     sqp.settings.eq_init.rho_eq = 10.0;
 
-    auto stages = sqp.add_stage(stage_prob, n_edges);
-    stages.back()->ed().add(*cost(new generic_cost("terminal_cost_eq_init", var_list{x}, x * x, approx_order::second)));
+    for (size_t i = 0; i < n_edges; ++i)
+        sqp.stages().push_back(stage_prob->copy());
+    sqp.ed().add(*cost(new generic_cost("terminal_cost_eq_init", var_list{x}, x * x, approx_order::second)));
 
     seed_primal_state(sqp, n_edges);
 }
 } // namespace
+
+TEST_CASE("equality multiplier initialization reuses an OCP without hard equalities") {
+    auto [x, y] = sym::states("x_eq_init_reuse", 1);
+    auto u = sym::inputs("u_eq_init_reuse", 1);
+    auto source = stage_ocp::create();
+    source->add(*make_stage_cost("stage_cost_eq_init_reuse", x, u));
+    source->wait_until_ready();
+
+    solver::equality_init::equality_init_overlay_settings settings;
+    const auto overlay =
+        solver::equality_init::build_equality_init_overlay_problem(source, settings);
+
+    REQUIRE(overlay.get() == source.get());
+}
 
 TEST_CASE("equality multiplier initialization leaves primals and inequalities fixed") {
     ns_sqp without_init;

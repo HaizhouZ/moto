@@ -1,6 +1,8 @@
 #ifndef MOTO_SOLVER_LINEAR_RUNTIME_GRAPH_HPP
 #define MOTO_SOLVER_LINEAR_RUNTIME_GRAPH_HPP
 
+#include <algorithm>
+#include <functional>
 #include <stdexcept>
 #include <tuple>
 #include <type_traits>
@@ -40,15 +42,33 @@ class linear_runtime_graph {
         return nodes_.back();
     }
 
-    template <typename DesiredRange, typename Matches, typename Factory>
-    void reconcile(const DesiredRange &desired, Matches &&matches, Factory &&factory) {
+    template <typename DesiredRange, typename ExistingKey, typename DesiredKey,
+              typename Factory>
+    void reconcile(const DesiredRange &desired, ExistingKey &&existing_key,
+                   DesiredKey &&desired_key, Factory &&factory) {
+        using key_type = std::remove_cvref_t<
+            std::invoke_result_t<DesiredKey &, const typename DesiredRange::value_type &>>;
+        std::vector<std::pair<key_type, size_t>> available;
+        available.reserve(nodes_.size());
+        for (size_t i = 0; i < nodes_.size(); ++i) {
+            available.emplace_back(existing_key(nodes_[i]), i);
+        }
+        std::sort(available.begin(), available.end(),
+                  [](const auto &lhs, const auto &rhs) { return lhs.first < rhs.first; });
+
         std::vector<node> next;
         next.reserve(desired.size());
-        for (size_t i = 0; i < desired.size(); ++i) {
-            if (i < nodes_.size() && std::invoke(matches, nodes_[i], desired[i])) {
-                next.emplace_back(std::move(nodes_[i]));
+        for (const auto &wanted : desired) {
+            const auto key = desired_key(wanted);
+            const auto found = std::lower_bound(
+                available.begin(), available.end(), key,
+                [](const auto &entry, const key_type &candidate) {
+                    return entry.first < candidate;
+                });
+            if (found != available.end() && !(key < found->first)) {
+                next.emplace_back(std::move(nodes_[found->second]));
             } else {
-                next.emplace_back(std::invoke(factory, desired[i]));
+                next.emplace_back(factory(wanted));
             }
         }
         nodes_ = std::move(next);

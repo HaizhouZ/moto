@@ -8,53 +8,14 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import moto
-import casadi as cs
 import numpy as np
-import pinocchio as pin
 
 from example.helpers import (
-    ContactRobotModel,
-    GO2_FOOT_FRAMES,
-    add_terms,
-    add_time_step_regularization,
     build_floating_base_model,
     numeric_frame_linear_kinematics,
-    visit_nodes,
 )
+from example.quadruped.model import QuadrupedModel
 from example_robot_data import load
-
-
-class QuadrupedMpcModel(ContactRobotModel):
-    def __init__(
-        self,
-        model: pin.Model,
-        name: str = "",
-        dt: cs.SX | float = 0.01,
-        q_nom: np.ndarray | None = None,
-        foot_frames=GO2_FOOT_FRAMES,
-        use_fwd_dyn: bool = False,
-    ):
-        super().__init__(
-            model,
-            name=name,
-            dt=dt,
-            q_nom=q_nom,
-            contact_frames=foot_frames,
-            use_forward_dynamics=use_fwd_dyn,
-            configuration_velocity="next",
-        )
-
-    def get_state_cost(self):
-        q_nom_res = self.q.symbolic_difference(self.q.sx, self.q_nom.sx)
-        residual = cs.vcat([q_nom_res, self.v_stack])
-        weight = np.r_[
-            np.full(6, 200.0),
-            np.full(q_nom_res.numel() - 6, 2.0),
-            np.full(6, 2.0),
-            np.full(self.v_stack.numel() - 6, 0.02),
-        ]
-        cost = moto.cost.from_vector("c_mpc", residual, weight=weight)
-        return cost
 
 
 def main():
@@ -87,16 +48,15 @@ def main():
     q_d[2] -= 0.02
     model = build_floating_base_model(go2.urdf)
     np.set_printoptions(precision=3, suppress=True, linewidth=200)
-    model = QuadrupedMpcModel(model, dt=dt, q_nom=q_d, use_fwd_dyn=True)
-    model.joint_limit_constr = model.joint_limit_constraint(model.q, model.v)
-    model.torque_limit_constr = model.torque_limit_constraint(model.tq)
-    model.state_cost = model.get_state_cost()
-
-    prob = moto.stage()
-    add_terms(prob, model.dyn, model.torque_limit_constr, model.input_cost())
-    model.contacts.add_to_stage(prob)
-    add_terms(prob.st, model.joint_limit_constr, model.state_cost)
-    add_time_step_regularization(prob, model.dt, dt_nom)
+    model = QuadrupedModel(
+        model,
+        dt=dt,
+        q_nom=q_d,
+        use_forward_dynamics=True,
+        configuration_velocity="next",
+    )
+    model.prepare_problem_terms(state_cost_name="c_mpc")
+    prob = model.create_stage(dt_nom)
 
     prob.print_summary()
     print("--" * 15)
@@ -104,9 +64,8 @@ def main():
     N_horizon = args.horizon
 
     sqp = moto.sqp(n_job=args.n_job)
-    stages = sqp.add_stage(prob, N_horizon)
-    model.contacts.add_to_endpoint(stages[-1].ed)
-    add_terms(stages[-1].ed, model.joint_limit_constr, model.state_cost)
+    sqp.stages.extend([prob.copy() for _ in range(N_horizon)])
+    model.add_terminal_terms(sqp.ed)
 
     sqp.settings.ipm.mu0 = 0.1
     sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.mehrotra_predictor_corrector
@@ -153,14 +112,16 @@ def main():
     # warm start
     current_time = 0.0
     nodes = sqp.nodes
-    visit_nodes(nodes, stance_ref)
+    for index, node in enumerate(nodes):
+        stance_ref(node, index)
     control_freq = args.control_frequency
     update_interval = max(1, round(1 / (control_freq * model.dt)))
     if len(nodes) <= update_interval:
         parser.error("horizon is too short for the requested control-frequency")
     n0 = nodes[0]
     data = go2.model.createData()
-    model.contacts.set_kinematic_gain(nodes, 0, count=10)
+    for node in nodes[:10]:
+        node.value[model.contacts.kinematic_gain] = 0
     sys.stdout.flush()
     sqp.update(args.warm_start_iter, verbose=True)
     sys.stdout.flush()
@@ -184,7 +145,8 @@ def main():
 
             # Update reference trajectory
             current_time = mj_data.time
-            visit_nodes(nodes, stance_ref)
+            for index, node in enumerate(nodes):
+                stance_ref(node, index)
             if args.verbose:
                 print(f"Updated reference trajectory for {len(nodes)} nodes")
             # Run MPC iteration

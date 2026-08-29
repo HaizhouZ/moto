@@ -1,0 +1,4 @@
+Sphinx>=8.2,<9
+furo>=2024.8
+myst-parser>=4,<6
+sphinx-autoapi>=3.8,<4

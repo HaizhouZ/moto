@@ -10,16 +10,24 @@ data_base::data_base(sym_data *s, lag_data *dense)
     : nx(dense->lag_jac_[__x].size()),
       nu(dense->lag_jac_[__u].size()),
       ny(dense->lag_jac_[__y].size()),
+      nl(dense->lag_jac_[__l].size()),
       sym_(s), dense_(dense),
       Q_x(dense->lag_jac_[__x]), Q_u(dense->lag_jac_[__u]),
-      Q_y(dense->lag_jac_[__y]), Q_xx(dense->lag_hess_[__x][__x]),
-      Q_ux(dense->lag_hess_[__u][__x]), Q_uu(dense->lag_hess_[__u][__u]),
-      Q_yx(dense->lag_hess_[__y][__x]), Q_yy(dense->lag_hess_[__y][__y]),
+      Q_y(dense->lag_jac_[__y]), Q_l(dense->lag_jac_[__l]),
+      Q_xx(dense->lag_hess_[__x][__x]),
       Q_xx_mod(dense->hessian_modification_[__x][__x]),
+      Q_ux(dense->lag_hess_[__u][__x]),
       Q_ux_mod(dense->hessian_modification_[__u][__x]),
+      Q_uu(dense->lag_hess_[__u][__u]),
       Q_uu_mod(dense->hessian_modification_[__u][__u]),
+      Q_yx(dense->lag_hess_[__y][__x]),
       Q_yx_mod(dense->hessian_modification_[__y][__x]),
-      Q_yy_mod(dense->hessian_modification_[__y][__y]) {
+      Q_yy(dense->lag_hess_[__y][__y]),
+      Q_yy_mod(dense->hessian_modification_[__y][__y]),
+      Q_lx(dense->lag_hess_[__l][__x]),
+      Q_lx_mod(dense->hessian_modification_[__l][__x]),
+      Q_ll(dense->lag_hess_[__l][__l]),
+      Q_ll_mod(dense->hessian_modification_[__l][__l]) {
     for (auto f : primal_fields) {
         base_lag_grad_backup[f].resize(dense->lag_jac_[f].size());
         base_lag_grad_backup[f].setZero();
@@ -60,7 +68,14 @@ void data_base::activate_lag_jac_corr() {
 
 void data_base::swap_active_and_lag_jac_corr() {
     for (const auto &field : primal_fields) {
-        dense_->lag_jac_[field].swap(dense_->lag_jac_corr_[field]);
+        auto &active = dense_->lag_jac_[field];
+        auto &correction = dense_->lag_jac_corr_[field];
+        assert(active.size() == correction.size());
+        // Compiled runtime entries bind these buffers as stable storage slots.
+        // Eigen's owning-object swap may exchange the underlying allocation and
+        // invalidate every prebound pointer, so exchange coefficients in place.
+        for (Eigen::Index index = 0; index < active.size(); ++index)
+            std::swap(active[index], correction[index]);
     }
 }
 

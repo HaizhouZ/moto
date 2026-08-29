@@ -63,6 +63,8 @@ generic_func::generic_func(const generic_func &rhs)
       enable_if_all_deps_(rhs.enable_if_all_deps_),
       disable_if_any_deps_(rhs.disable_if_any_deps_),
       enable_if_any_deps_(rhs.enable_if_any_deps_),
+      source_function_uid_(rhs.source_function_uid_),
+      source_argument_uids_(rhs.source_argument_uids_),
       skip_unused_arg_check_(rhs.skip_unused_arg_check_),
       jac_sp_(rhs.jac_sp_),
       hess_sp_(rhs.hess_sp_),
@@ -169,6 +171,18 @@ void generic_func::load_external_impl(const std::string &path) {
 void generic_func::substitute(const sym &arg, const sym &rhs) {
     if (gen_.task_) {
         gen_.task_->sx_output = cs::SX::substitute(gen_.task_->sx_output, arg, rhs);
+        for (auto &[jac_arg, jac] : gen_.task_->ext_jac) {
+            jac = cs::SX::substitute(jac, arg, rhs);
+            if (jac_arg->uid() == arg.uid())
+                jac_arg = rhs.handle();
+        }
+        for (auto &[hess_arg0, hess_arg1, hess] : gen_.task_->ext_hess) {
+            hess = cs::SX::substitute(hess, arg, rhs);
+            if (hess_arg0->uid() == arg.uid())
+                hess_arg0 = rhs.handle();
+            if (hess_arg1->uid() == arg.uid())
+                hess_arg1 = rhs.handle();
+        }
     }
     auto in_arg_it = std::find(in_args_.begin(), in_args_.end(), arg);
     if (in_arg_it == in_args_.end())
@@ -201,6 +215,62 @@ void generic_func::add_argument(const var &in) {
 void generic_func::add_arguments(const var_inarg_list &args) {
     for (sym &in : args) {
         add_argument(in);
+    }
+}
+
+void generic_func::set_analytic_jacobian(const sym &arg,
+                                         const cs::SX &jacobian) {
+    field_write_guard(arg.field());
+    if (!gen_.task_)
+        throw std::runtime_error(fmt::format(
+            "func {} has no CasADi codegen task", name_));
+    if (jacobian.rows() != static_cast<casadi_int>(dim_) ||
+        jacobian.columns() != static_cast<casadi_int>(arg.tdim()))
+        throw std::invalid_argument(fmt::format(
+            "analytic Jacobian for {} in func {} must have shape ({}, {}), "
+            "got ({}, {})", arg.name(), name_, dim_, arg.tdim(),
+            jacobian.rows(), jacobian.columns()));
+    add_argument(arg);
+    for (const var &dependency : global_registry::infer_args(jacobian))
+        add_argument(dependency);
+    auto &entries = gen_.task_->ext_jac;
+    if (auto it = std::ranges::find_if(entries, [&](const auto &entry) {
+            return entry.first->uid() == arg.uid();
+        }); it != entries.end()) {
+        it->second = jacobian;
+    } else {
+        entries.emplace_back(arg.handle(), jacobian);
+    }
+}
+
+void generic_func::set_analytic_hessian(const sym &arg0, const sym &arg1,
+                                        const cs::SX &hessian) {
+    field_write_guard();
+    if (!gen_.task_)
+        throw std::runtime_error(fmt::format(
+            "func {} has no CasADi codegen task", name_));
+    if (dim_ != 1)
+        throw std::invalid_argument(fmt::format(
+            "analytic Hessian blocks currently require scalar output; func {} "
+            "has dimension {}", name_, dim_));
+    if (hessian.rows() != static_cast<casadi_int>(arg0.tdim()) ||
+        hessian.columns() != static_cast<casadi_int>(arg1.tdim()))
+        throw std::invalid_argument(fmt::format(
+            "analytic Hessian for ({}, {}) in func {} must have shape ({}, "
+            "{}), got ({}, {})", arg0.name(), arg1.name(), name_, arg0.tdim(),
+            arg1.tdim(), hessian.rows(), hessian.columns()));
+    add_argument(arg0);
+    add_argument(arg1);
+    for (const var &dependency : global_registry::infer_args(hessian))
+        add_argument(dependency);
+    auto &entries = gen_.task_->ext_hess;
+    if (auto it = std::ranges::find_if(entries, [&](const auto &entry) {
+            return std::get<0>(entry)->uid() == arg0.uid() &&
+                   std::get<1>(entry)->uid() == arg1.uid();
+        }); it != entries.end()) {
+        std::get<2>(*it) = hessian;
+    } else {
+        entries.emplace_back(arg0.handle(), arg1.handle(), hessian);
     }
 }
 
@@ -293,6 +363,10 @@ expr_handle generic_func::remap_clone(const normalized_remap &remap,
             "func {} remap failed: source implementation is not ready", name_));
     expr_handle remapped_expr(clone());
     auto &remapped_func = *expr_cast<generic_func>(remapped_expr);
+    remapped_func.source_function_uid_ = uid();
+    remapped_func.source_argument_uids_.clear();
+    for (const sym &arg : in_args_)
+        remapped_func.source_argument_uids_.push_back(arg.uid());
     remapped_func.apply_argument_remap(remap, context, problem_uid);
     for (expr &dependency : remapped_func.dep_) {
         if (!dependency.finalize())
@@ -370,8 +444,19 @@ void generic_func::finalize_impl() {
         // prune unused args
         auto &out = gen_.task_->sx_output;
         std::vector<size_t> unused_args;
+        const auto derivative_uses = [&](const sym &s) {
+            for (const auto &[arg, jac] : gen_.task_->ext_jac)
+                if (arg->uid() == s.uid() || cs::SX::depends_on(jac, s))
+                    return true;
+            for (const auto &[arg0, arg1, hess] : gen_.task_->ext_hess)
+                if (arg0->uid() == s.uid() || arg1->uid() == s.uid() ||
+                    cs::SX::depends_on(hess, s))
+                    return true;
+            return false;
+        };
         for (const sym &s : in_args_) {
-            if (!cs::SX::depends_on(out, s) && !skip_unused_arg_check_.contains(s.uid())) {
+            if (!cs::SX::depends_on(out, s) && !derivative_uses(s) &&
+                !skip_unused_arg_check_.contains(s.uid())) {
                 unused_args.push_back(s.uid());
             }
         }
@@ -417,7 +502,13 @@ void generic_func::finalize_impl() {
         t.gen_hessian = order_ >= approx_order::second;
         t.append_value = field_ == __cost;
         t.append_jac = field_ == __cost;
-        t.jac_sp = in_field(field_, ineq_soft_constr_fields) ? &jac_sp_ : nullptr;
+        // Ordinary hard/lifted constraints also feed the OCP-wide sparse
+        // profile and lifted MX elimination graph. Preserve CasADi's detected
+        // zero/diagonal Jacobian structure instead of defaulting them to one
+        // dense block. Dynamics owns separate projection-specific layouts.
+        t.jac_sp = in_field(field_, constr_fields) && field_ != __dyn
+                       ? &jac_sp_
+                       : nullptr;
         t.hess_sp = &hess_sp_;
         t.hess_panels = field_ == __cost ? &hess_panel_sp_ : nullptr;
         t.verbose = false;
@@ -450,6 +541,19 @@ bool generic_func::has_arg(const sym &s) const {
 size_t generic_func::arg_idx(const sym &s) const {
     field_read_guard(s.field());
     return entry_index(s);
+}
+std::optional<size_t> generic_func::runtime_arg_idx(const sym &s) const {
+    field_read_guard(s.field());
+    if (has_entry(s))
+        return entry_index(s);
+    const auto source = std::ranges::find(source_argument_uids_, s.uid());
+    return source == source_argument_uids_.end()
+               ? std::nullopt
+               : std::optional<size_t>(source - source_argument_uids_.begin());
+}
+bool generic_func::accepts_runtime_handle(
+    const generic_func &function) const {
+    return uid() == function.uid() || source_function_uid_ == function.uid();
 }
 const bool generic_func::check_enable(ocp_base *prob) const {
     if (disable_if_any_deps_.empty() && enable_if_all_deps_.empty() && enable_if_any_deps_.empty())

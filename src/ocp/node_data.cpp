@@ -83,17 +83,6 @@ node_data::node_data(const ocp_ptr_t &prob)
       sym_(new sym_data(prob.get())),
       dense_(new lag_data(prob.get())),
       shared_(new shared_data(prob.get(), sym_.get())) {
-    const auto &profile = prob->linear_profile();
-    for (const auto cf : constr_fields)
-        for (const auto pf : primal_fields)
-            dense_->approx_[cf].jac_[pf].plan(
-                profile.get(linear_target::jacobian, cf, pf));
-    for (const auto a : primal_fields) for (const auto b : primal_fields) {
-        dense_->lag_hess_[a][b].plan(
-            profile.get(linear_target::lag_hessian, a, b));
-        dense_->hessian_modification_[a][b].plan(
-            profile.get(linear_target::hessian_modification, a, b));
-    }
     for (size_t field : func_fields) {
         for (const generic_func &f : prob->exprs(field)) {
       sparse_[f.field()].push_back(
@@ -236,11 +225,10 @@ void node_data::prepare_soft_condensation(bool hessian) {
               phase.pointers.push_back(sd.lag_hess_[i][j].data());
             }
           }
-          const linear_backend::condensation_kernel layout(spec, nullptr, {});
-          if (phase.pointers.size() - pointer_start != layout.pointer_count())
+          if (phase.pointers.size() - pointer_start != spec.pointer_count())
             throw std::runtime_error(fmt::format(
                 "condensation pointer layout mismatch for {}: expected {}, got {}",
-                sf.name(), layout.pointer_count(),
+                sf.name(), spec.pointer_count(),
                 phase.pointers.size() - pointer_start));
           batch.constraints.push_back(std::move(spec));
         });

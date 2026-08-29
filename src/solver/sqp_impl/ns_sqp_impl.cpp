@@ -176,12 +176,14 @@ ns_sqp::kkt_info ns_sqp::initialize(storage_type &graph) {
     sync_initial_state_virtual_stage(graph);
     refresh_problem_flags(graph);
     if (!settings.ipm.warm_start)
-        settings.ipm.mu = settings.ipm.mu0; // initialize mu before setting up workspace data, as it may be used in the workspace data setup
+        settings.ipm.mu = settings.ipm.mu0;
     {
         auto phase_profile = profile_scope(profile_phase::initialize_setup_eval);
         solver::for_each(solver::par, graph, [this](data *cur) {
-            // setup solver settings
-            cur->for_each_constr([this](const generic_constr &c, func_approx_data &d) { c.setup_workspace_data(d, &settings); });
+            cur->for_each_constr(
+                [this](const generic_constr &c, func_approx_data &d) {
+                    c.setup_workspace_data(d, &settings);
+                });
             solver::ineq_soft::bind_runtime(cur);
             cur->configure_scaling_profile(
                 settings.scaling.mode != scaling_settings::mode_t::none);
@@ -190,6 +192,10 @@ ns_sqp::kkt_info ns_sqp::initialize(storage_type &graph) {
             cur->prepare_linear_plan();
             cur->prepare_linear_backend();
         });
+        std::vector<ns_riccati_data *> nsp_stages;
+        nsp_stages.reserve(graph.nodes().size());
+        for (data *cur : graph.nodes()) nsp_stages.push_back(cur);
+        riccati_solver_.prepare_ocp_linear_graph(nsp_stages);
         solver::for_each(solver::par, graph, [this](data *cur) {
             cur->update_approximation(node_data::update_mode::eval_all);
         });
@@ -632,6 +638,9 @@ void ns_sqp::update_stat_info(kkt_info &kkt) {
             if (cur->dense().lag_jac_[__u].size() > 0) {
                 update_dual_inf_res(cur->dense().lag_jac_[__u]);
             }
+            if (cur->dense().lag_jac_[__l].size() > 0) {
+                update_dual_inf_res(cur->dense().lag_jac_[__l]);
+            }
             if (next != nullptr) [[likely]] {
                 projected_y_stat.resize(next->dense().lag_jac_[__x].cols());
                 projected_y_stat.noalias() = next->dense().lag_jac_[__x] *
@@ -699,6 +708,8 @@ ns_sqp::result_type ns_sqp::update(size_t n_iter, bool verbose, bool profile) {
                     break;
                 }
                 i_iter = iter_last.num_iter;
+                if (i_iter < n_iter)
+                    iter_last.result = iter_result_t::unknown;
                 continue;
             }
 

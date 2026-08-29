@@ -7,7 +7,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-import casadi as cs
 import moto
 import numpy as np
 
@@ -27,8 +26,8 @@ def main():
     stage = moto.stage()
     stage.add(dynamics)
     stage.add(tracking)
-    stages = sqp.add_stage(stage, 2)
-    stages[-1].ed.add(target)
+    sqp.stages.extend([stage.copy() for _ in range(2)])
+    sqp.ed.add(target)
 
     nodes = sqp.nodes
     for index, node in enumerate(nodes):

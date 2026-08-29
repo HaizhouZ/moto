@@ -79,7 +79,10 @@ void eq_init_pmm_constr::hessian_impl(func_approx_data &data) const {
 
 ocp_ptr_t build_equality_init_overlay_problem(
     const ocp_ptr_t &source_prob,
-                                              const equality_init_overlay_settings &settings) {
+    const equality_init_overlay_settings &settings) {
+    if (source_prob->num(__eq_x) == 0 && source_prob->num(__eq_xu) == 0)
+        return source_prob;
+
     ocp::active_status_config config;
     for (auto field : std::array{__eq_x, __eq_xu}) {
         for (const expr_handle &expr : source_prob->exprs(field)) {
@@ -88,13 +91,14 @@ ocp_ptr_t build_equality_init_overlay_problem(
     }
 
     auto overlay_prob = source_prob->copy(config);
-  solver::overlay::add_constr_overlay_group(
-      source_prob, overlay_prob, std::array{__eq_x, __eq_xu}, [&](const constr &source) {
-        return constr(new eq_init_pmm_constr(
-            solver::overlay::overlay_name(*source, "eq_init_pmm"),
-                                             source,
-                                             settings.rho_eq));
-    });
+    solver::overlay::add_constr_overlay_group(
+        source_prob, overlay_prob, std::array{__eq_x, __eq_xu},
+        [&](const constr &source) {
+            return constr(new eq_init_pmm_constr(
+                solver::overlay::overlay_name(*source, "eq_init_pmm"),
+                source,
+                settings.rho_eq));
+        });
 
     overlay_prob->wait_until_ready();
     return overlay_prob;
@@ -106,6 +110,7 @@ void sync_equality_init_overlay_primal(node_data &outer, node_data &overlay) {
 
 void sync_equality_init_overlay_duals(node_data &outer, node_data &overlay) {
     solver::overlay::copy_dense_dual_if_present(outer, overlay, __dyn);
+    solver::overlay::copy_dense_dual_if_present(outer, overlay, __lift);
   solver::overlay::copy_source_multipliers<eq_init_pmm_constr>(
       outer, overlay, std::array{__eq_x, __eq_xu});
     sync_soft_overlay_dual_field(outer, overlay, __eq_x_soft);
@@ -116,6 +121,7 @@ void sync_equality_init_overlay_duals(node_data &outer, node_data &overlay) {
 
 void commit_equality_init_overlay_duals(node_data &outer, node_data &overlay) {
     solver::overlay::copy_dense_dual_if_present(overlay, outer, __dyn);
+    solver::overlay::copy_dense_dual_if_present(overlay, outer, __lift);
   solver::overlay::commit_source_multipliers<eq_init_pmm_constr>(
       outer, overlay, std::array{__eq_x, __eq_xu});
     commit_soft_overlay_dual_field(outer, overlay, __eq_x_soft);

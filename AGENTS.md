@@ -54,6 +54,8 @@ Modeling and expressions:
 Dynamics and linear backend:
 
 - [`include/moto/ocp/dynamics.hpp`](/home/harper/Documents/moto/include/moto/ocp/dynamics.hpp)
+- [`include/moto/ocp/lifted.hpp`](/home/harper/Documents/moto/include/moto/ocp/lifted.hpp)
+- [`src/ocp/lifted.cpp`](/home/harper/Documents/moto/src/ocp/lifted.cpp)
 - [`include/moto/ocp/dynamics/semi_implicit_euler.hpp`](/home/harper/Documents/moto/include/moto/ocp/dynamics/semi_implicit_euler.hpp)
 - [`include/moto/ocp/dynamics/dense_dynamics.hpp`](/home/harper/Documents/moto/include/moto/ocp/dynamics/dense_dynamics.hpp)
 - [`include/moto/core/sparse_matrix.hpp`](/home/harper/Documents/moto/include/moto/core/sparse_matrix.hpp)
@@ -108,7 +110,6 @@ MOTO_SYNC_CODEGEN=1 ./build/unittests/semi_implicit_euler_test
 ./build/unittests/graph_model_compose_test
 python example/toy/initial_state_optimization.py
 python example/toy/restoration.py
-python example/quadruped/quaternion_test.py
 python example/quadruped/run.py --no-display --acceleration-control \
   --horizon 4 --steps 1 --nodes-per-step 2 --max-iter 1
 ```
@@ -139,6 +140,7 @@ Primary primal fields:
 - `__x`: current state
 - `__u`: interval input
 - `__y`: predicted next-state copy used by solver algebra
+- `__l`: explicit user-authored lifted primal variables
 
 Other symbol storage:
 
@@ -149,12 +151,15 @@ Other symbol storage:
 Main function fields:
 
 - `__dyn`: dynamics residual
+- `__lift`: grouped lifted-variable equality residual
 - `__cost`: costs
 - `__eq_x`, `__eq_xu`: hard equalities
 - `__ineq_x`, `__ineq_xu`: inequalities
 - `__eq_x_soft`, `__eq_xu_soft`: soft equalities
 
-Do not treat `__s` as a public primal block. `primal_fields` is `x/u/y`.
+Do not treat `__s` as a public primal block. `x/u` are unlifted, while `y/l`
+are eliminated relative to them in the local QP. All four remain explicit
+nonlinear primal fields.
 
 ## Public Modeling Surface
 
@@ -165,8 +170,8 @@ sqp = moto.sqp(n_job=6)
 stage = moto.stage()
 stage.add(dynamics)
 stage.add(interval_cost)
-stages = sqp.add_stage(stage, horizon)
-stages[-1].ed.add(terminal_cost)
+sqp.stages.extend([stage.copy() for _ in range(horizon)])
+sqp.ed.add(terminal_cost)
 nodes = sqp.nodes
 ```
 
@@ -176,16 +181,19 @@ Placement rules:
   path-state terms evaluated on the interval's current `x`
 - `stage.st.add(...)`: state-only term on the phase start boundary
 - `stage.ed.add(...)`: state-only term on the phase end boundary
-- `sqp.start_node.add(...)`: state-only term on the graph's initial state
+- `sqp.st.add(...)`: state-only term on the graph's initial state
+- `sqp.ed.add(...)`: state-only term on the stable graph terminal boundary
 
 Endpoint views reject terms involving `u`, authored `y`, or dynamics. Users
 write endpoint expressions on `x`; graph composition performs the necessary
 solver-storage lowering.
 
-`sqp.add_stage(stage, N)` appends `N` graph-owned stage copies from the current
-tail. `sqp.add_stages(node, stage, N)` appends from an explicit graph boundary.
-Returned stages are mutable graph-owned copies; editing them invalidates cached
-realization. Editing the original prototype later does not mutate those copies.
+`sqp.stages` is the mutable graph-owned stage vector. Insert independent
+`stage.copy()` objects directly; there is no separate stage/phase insertion
+API. Editing graph-owned stages invalidates cached realization, while editing a
+prototype later does not mutate existing copies. Use ordinary
+index/delete/insert/append operations for range replacement and horizon shift.
+`sqp.st` and `sqp.ed` expose graph boundaries separately.
 
 `sqp.nodes` realizes and returns the ordered solver-stage list for initialization
 and debugging. It is not the modeling API and should not absorb graph semantic
@@ -274,7 +282,25 @@ remaps intentionally reuse those artifacts.
 Do not put graph topology decisions into `generic_func::finalize_impl()` or
 `ocp_base::finalize()`; neither has enough context to place endpoint terms.
 
-## Structured Euler And Dense Dynamics
+## Lifted Groups, Structured Euler, And Dense Dynamics
+
+`generic_dynamics` is the common dynamics/lifting group. Its active `__y`
+arguments and any explicitly marked `__l` arguments remain authored nonlinear
+primals, while their local QP directions are eliminated relative to `x/u`.
+Remap/substitution must preserve that lifted identity.
+
+A stage with explicit `__l` owns grouped `__lift` subconstraints and must
+provide one MX elimination graph for the coupled rows `[__dyn; __lift]` and
+columns `[__y; __l]`. The graph supplies projected `x/u/residual` responses and
+a forward linear action; the transpose action is derived from the same graph.
+CasADi supplies symbolic DAG and sparsity metadata only. The linear backend
+owns panel storage, factor reuse, lowering, and runtime execution. Do not add a
+second dense assembled-pivot fallback.
+
+The nullspace solver consumes those projected responses, contracts all
+`x/u/y/l` gradient and Hessian contributions, and recovers explicit `l` steps
+and both multiplier blocks after rollout. Lifting never performs symbolic
+nonlinear substitution or removes the authored primal/dual variables.
 
 All dynamics implement the `generic_dynamics` projection interface consumed by
 the solver:
@@ -452,7 +478,7 @@ Bindings use nanobind. The public package surface is defined by:
 
 - [`bindings/definition/public_api.py`](/home/harper/Documents/moto/bindings/definition/public_api.py)
 - [`bindings/package_init.py`](/home/harper/Documents/moto/bindings/package_init.py)
-- [`bindings/definition/sqp.py`](/home/harper/Documents/moto/bindings/definition/sqp.py)
+- [`bindings/definition/ns_sqp.cpp`](/home/harper/Documents/moto/bindings/definition/ns_sqp.cpp)
 - [`bindings/definition/var.py`](/home/harper/Documents/moto/bindings/definition/var.py)
 
 Low-level `node_data`, `lag_data`, and runtime-graph machinery are debugging

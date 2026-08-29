@@ -1,0 +1,11 @@
+@INCLUDE = Doxyfile
+
+PROJECT_NAME = Moto
+PROJECT_BRIEF = "C++ API reference; tutorials are available from the Moto documentation home."
+OUTPUT_DIRECTORY = docs/_build/html/cpp
+HTML_OUTPUT = .
+GENERATE_HTML = YES
+GENERATE_LATEX = NO
+GENERATE_XML = NO
+QUIET = YES
+WARN_LOGFILE = docs/_build/doxygen-warnings.log

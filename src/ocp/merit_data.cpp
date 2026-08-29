@@ -1,11 +1,12 @@
 #include <moto/ocp/impl/lag_data.hpp>
+#include <moto/ocp/dynamics.hpp>
 #include <moto/ocp/problem.hpp>
 
 namespace moto {
 
 lag_data::lag_data(ocp *prob) : prob_(prob) {
     prob->wait_until_ready();
-    size_t n_dyn = prob_->exprs(__dyn).size();
+    const auto &profile = prob_->linear_profile();
     for (auto i : constr_fields) {
         if (prob_->exprs(i).empty()) {
             continue;
@@ -16,8 +17,8 @@ lag_data::lag_data(ocp *prob) : prob_(prob) {
             approx_[i].v_.setZero();
             for (auto f : primal_fields) {
                 approx_[i].jac_[f].resize(dim, prob_->tdim(f));
-                // fmt::println("prob {} lag_data: approx jacobian for constr field {} w.r.t. primal field {} has dim {}x{}",
-                //              prob_->uid(), field::name(i), field::name(f), dim, prob_->tdim(f));
+                approx_[i].jac_[f].plan(
+                    profile.get(linear_target::jacobian, i, f));
             }
         }
         // dual variables
@@ -29,6 +30,42 @@ lag_data::lag_data(ocp *prob) : prob_(prob) {
     dynamics_data_.proj_f_res_.setZero();
     dynamics_data_.proj_f_x_.resize(prob_->dim(__dyn), prob_->tdim(__x));
     dynamics_data_.proj_f_u_.resize(prob_->dim(__dyn), prob_->tdim(__u));
+    std::vector<sparse_block_spec> projected_x, projected_u;
+    if (prob_->tdim(__l)) {
+        auto projected_x_layout = profile.get(
+            linear_target::lifted_projection, __y, __x);
+        auto projected_u_layout = profile.get(
+            linear_target::lifted_projection, __y, __u);
+        projected_x_layout.pack_diagonal_storage = true;
+        projected_u_layout.pack_diagonal_storage = true;
+        dynamics_data_.proj_f_x_.plan(projected_x_layout);
+        dynamics_data_.proj_f_u_.plan(projected_u_layout);
+    }
+    if (!prob_->tdim(__l)) for (const auto &entry : prob_->exprs(__dyn)) {
+        const auto *group = dynamic_cast<const generic_lifted *>(entry.get());
+        if (!group) continue;
+        const size_t f_st = prob_->get_expr_start(*group);
+        for (const auto &[argument, block] : group->projected_panel_sparsity()) {
+            const sym &arg = group->in_args(argument);
+            if (!prob_->is_active(arg)) continue;
+            auto &target = arg.field() == __x ? projected_x : projected_u;
+            target.push_back({f_st + block.row_offset,
+                              prob_->get_expr_start_tangent(arg) +
+                                  block.col_offset,
+                              block.rows, block.cols, block.pattern});
+        }
+    }
+    const auto plan_projected = [](sparse_matrix &target,
+                                   const std::vector<sparse_block_spec> &blocks) {
+        if (blocks.empty()) return;
+        auto layout = make_sparse_layout_plan(blocks);
+        layout.pack_diagonal_storage = true;
+        target.plan(layout);
+    };
+    if (!prob_->tdim(__l)) {
+        plan_projected(dynamics_data_.proj_f_x_, projected_x);
+        plan_projected(dynamics_data_.proj_f_u_, projected_u);
+    }
     // complementarity
     for (auto f : ineq_constr_fields) {
         comp_[f].resize(prob_->dim(f));
@@ -39,10 +76,19 @@ lag_data::lag_data(ocp *prob) : prob_(prob) {
     // cost hessian(store only half)
     for (auto i : range(field::num_prim)) {
         for (auto j : range(i, field::num_prim)) {
+            const auto fi = static_cast<field_t>(i);
+            const auto fj = static_cast<field_t>(j);
             lag_hess_[j][i].resize(prob_->tdim(j), prob_->tdim(i));
-            // lag_hess_[j][i].setZero();
+            lag_hess_[j][i].plan(
+                profile.get(linear_target::lag_hessian, fj, fi));
+            hessian_modification_[j][i].resize(prob_->tdim(j), prob_->tdim(i));
+            hessian_modification_[j][i].plan(
+                profile.get(linear_target::hessian_modification, fj, fi));
         }
-        lag_hess_[i][i].insert<sparsity::diag>(0, 0, prob_->tdim(i));
+        lag_hess_[i][i].bind(0, 0, prob_->tdim(i), prob_->tdim(i),
+                             sparsity::diag);
+        hessian_modification_[i][i].bind(
+            0, 0, prob_->tdim(i), prob_->tdim(i), sparsity::diag);
         cost_jac_[i].resize(prob_->tdim(i));
         cost_jac_[i].setZero();
         lag_jac_[i].resize(prob_->tdim(i));
@@ -50,6 +96,5 @@ lag_data::lag_data(ocp *prob) : prob_(prob) {
         lag_jac_corr_[i].resize(prob_->tdim(i));
         lag_jac_corr_[i].setZero();
     }
-    hessian_modification_ = lag_hess_; // same size
 }
 } // namespace moto

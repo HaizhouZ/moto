@@ -5,10 +5,16 @@
 
 #include <filesystem>
 #include <span>
+#include <string_view>
 
-namespace casadi { class Sparsity; }
+namespace casadi { class MX; class Sparsity; }
 
 namespace moto::linear_backend {
+
+namespace detail {
+struct casadi_mx_graph_plan;
+struct casadi_mx_graph_instance;
+}
 
 enum class product_op {
   times,
@@ -23,13 +29,25 @@ struct panel_layout {
   size_t col_offset;
   size_t rows;
   size_t cols;
+  /// Logical panel may be a zero-copy transpose of its physical storage.
+  /// storage_offset is measured in scalars from the bound panel pointer.
+  bool transposed = false;
+  size_t storage_offset = 0;
+  /// Physical column stride for a view. Zero selects its natural stride.
+  size_t storage_rows = 0;
+
+  bool operator==(const panel_layout &) const = default;
 };
 
 struct matrix_layout {
   size_t rows = 0;
   size_t cols = 0;
   std::vector<panel_layout> panels;
+
+  bool operator==(const matrix_layout &) const = default;
 };
+
+matrix_layout describe(const casadi::Sparsity &sparsity);
 
 struct product_spec {
   matrix_layout sparse;
@@ -81,7 +99,6 @@ private:
   function_type function_ = nullptr;
 };
 
-std::string emit_product_source(const product_spec &spec);
 product_kernel
 compile_product(product_spec spec,
                 const std::filesystem::path &cache_dir = "gen/linear_backend");
@@ -89,38 +106,81 @@ batch_product_kernel compile_batch_product(
     batch_product_spec spec,
     const std::filesystem::path &cache_dir = "gen/linear_backend");
 
-struct ccs_layout {
-  size_t rows = 0, cols = 0;
-  std::vector<size_t> colind, row;
-  std::vector<size_t> row_permutation, col_permutation;
-  std::vector<size_t> row_blocks, col_blocks;
-  size_t nnz() const { return row.size(); }
-};
-
-class spgemm_kernel {
+/// Lowered MX elimination schedule using the backend's panel kernels.  MX is
+/// compile-time DAG/sparsity metadata only.  Existing Jacobian panels are
+/// caller-owned inputs; the schedule must not regenerate or repack them.
+class graph_kernel {
 public:
-  using function_type = void (*)(scalar_t *const *);
-  spgemm_kernel() = default;
-  spgemm_kernel(size_t lhs_nnz, size_t rhs_nnz, ccs_layout output,
-                function_type function)
-      : lhs_nnz_(lhs_nnz), rhs_nnz_(rhs_nnz), output_(std::move(output)),
-        function_(function) {}
-  void operator()(const scalar_t *lhs, const scalar_t *rhs,
-                  scalar_t *output) const;
-  const ccs_layout &output_layout() const { return output_; }
+  graph_kernel();
+  graph_kernel(graph_kernel &&) noexcept;
+  graph_kernel &operator=(graph_kernel &&) noexcept;
+  graph_kernel(const graph_kernel &) = delete;
+  graph_kernel &operator=(const graph_kernel &) = delete;
+  ~graph_kernel();
+  void operator()(std::span<scalar_t *> pointers) const;
+  void operator()(size_t entry, std::span<scalar_t *> pointers) const;
+  size_t input_count() const;
+  size_t entry_count() const;
+  size_t pointer_count() const { return inputs_ + outputs_; }
+  graph_kernel instantiate(
+      std::vector<::moto::sparse_matrix> *workspace = nullptr) const;
+  explicit operator bool() const { return instance_ != nullptr; }
 
 private:
-  size_t lhs_nnz_ = 0, rhs_nnz_ = 0;
-  ccs_layout output_;
-  function_type function_ = nullptr;
+  friend graph_kernel compile_graph(
+      const std::vector<casadi::MX> &, const std::vector<casadi::MX> &,
+      std::vector<::moto::sparse_matrix> *, const std::filesystem::path &);
+  friend graph_kernel compile_graph(
+      const std::vector<casadi::MX> &,
+      const std::vector<std::vector<casadi::MX>> &,
+      std::vector<::moto::sparse_matrix> *, const std::filesystem::path &);
+  friend graph_kernel compile_graph(
+      const std::vector<casadi::MX> &,
+      const std::vector<std::vector<casadi::MX>> &,
+      std::span<const matrix_layout>,
+      std::vector<::moto::sparse_matrix> *, const std::filesystem::path &);
+  friend graph_kernel compile_graph(
+      std::string_view, const std::vector<casadi::MX> &,
+      const std::vector<std::vector<casadi::MX>> &,
+      std::span<const matrix_layout>,
+      std::vector<::moto::sparse_matrix> *, const std::filesystem::path &,
+      std::span<const casadi::MX>);
+  explicit graph_kernel(
+      std::unique_ptr<detail::casadi_mx_graph_instance> instance);
+  size_t inputs_ = 0, outputs_ = 0, entries_ = 0;
+  std::unique_ptr<detail::casadi_mx_graph_instance> instance_;
 };
 
-ccs_layout analyze_spgemm(const casadi::Sparsity &lhs,
-                          const casadi::Sparsity &rhs);
-ccs_layout analyze_sparsity(const casadi::Sparsity &sparsity);
-spgemm_kernel compile_spgemm(
-    const casadi::Sparsity &lhs, const casadi::Sparsity &rhs,
+graph_kernel compile_graph(
+    const std::vector<casadi::MX> &inputs,
+    const std::vector<casadi::MX> &outputs,
+    std::vector<::moto::sparse_matrix> *workspace,
     const std::filesystem::path &cache_dir = "gen/linear_backend");
+graph_kernel compile_graph(
+    const std::vector<casadi::MX> &inputs,
+    const std::vector<std::vector<casadi::MX>> &output_entries,
+    std::vector<::moto::sparse_matrix> *workspace,
+    const std::filesystem::path &cache_dir = "gen/linear_backend");
+graph_kernel compile_graph(
+    const std::vector<casadi::MX> &inputs,
+    const std::vector<std::vector<casadi::MX>> &output_entries,
+    std::span<const matrix_layout> input_layouts,
+    std::vector<::moto::sparse_matrix> *workspace,
+    const std::filesystem::path &cache_dir = "gen/linear_backend");
+graph_kernel compile_graph(
+    std::string_view artifact_identity,
+    const std::vector<casadi::MX> &inputs,
+    const std::vector<std::vector<casadi::MX>> &output_entries,
+    std::span<const matrix_layout> input_layouts,
+    std::vector<::moto::sparse_matrix> *workspace,
+    const std::filesystem::path &cache_dir = "gen/linear_backend",
+    std::span<const casadi::MX> spd_factors = {});
+inline graph_kernel compile_graph(
+    const std::vector<casadi::MX> &inputs,
+    const std::vector<casadi::MX> &outputs,
+    const std::filesystem::path &cache_dir = "gen/linear_backend") {
+  return compile_graph(inputs, outputs, nullptr, cache_dir);
+}
 
 matrix_layout describe(const ::moto::sparse_matrix &sparse);
 std::vector<scalar_t *> panel_pointers(const ::moto::sparse_matrix &sparse);
@@ -128,9 +188,6 @@ void run_product(const ::moto::sparse_matrix &sparse, product_op op,
                  scalar_t sign, const scalar_t *other, size_t other_rows,
                  size_t other_cols, scalar_t *out, size_t out_rows,
                  size_t out_cols);
-void prepare_product(const ::moto::sparse_matrix &sparse, product_op op,
-                     scalar_t sign, size_t other_rows, size_t other_cols,
-                     size_t out_rows, size_t out_cols);
 struct product_request {
   const ::moto::sparse_matrix *sparse;
   product_op op;
@@ -152,9 +209,6 @@ void run_dense_write(const ::moto::sparse_matrix &sparse, scalar_t *out,
                      size_t out_rows, scalar_t alpha, bool overwrite);
 void prepare_dense_write(const ::moto::sparse_matrix &sparse, size_t out_rows,
                          scalar_t alpha, bool overwrite);
-void run_weighted_gram(const ::moto::sparse_matrix &sparse,
-                       const scalar_t *middle, scalar_t *out);
-void prepare_weighted_gram(const ::moto::sparse_matrix &sparse);
 
 enum class rowwise_op { scale, inf_norm, scaled_inf_norm };
 
@@ -236,12 +290,6 @@ void write_dense(const sparse_matrix &sparse, Out &&out,
                   config.overwrite);
 }
 
-template <typename Middle, typename Out>
-void weighted_gram(const sparse_matrix &sparse, const Middle &middle,
-                   Out &out) {
-  run_weighted_gram(sparse, middle.data(), out.data());
-}
-
 struct condensation_spec {
   size_t rows = 0;
   std::vector<size_t> jac_cols;
@@ -251,41 +299,12 @@ struct condensation_spec {
 
   void validate() const;
   size_t argument_count() const;
+  size_t pointer_count() const;
 };
-
-panel_layout condensation_hessian_layout(const panel_layout &lhs,
-                                         const panel_layout &rhs);
 
 batch_product_kernel compile_batch_jacobian_product(
     std::vector<std::pair<size_t, std::vector<panel_layout>>> products,
     const std::filesystem::path &cache_dir = "gen/linear_backend");
-
-class condensation_kernel {
-public:
-  using function_type = void (*)(scalar_t *const *);
-
-  condensation_kernel() = default;
-  condensation_kernel(condensation_spec spec, function_type function,
-                      std::string cache_key)
-      : spec_(std::move(spec)), function_(function),
-        cache_key_(std::move(cache_key)) {}
-
-  explicit operator bool() const { return function_ != nullptr; }
-  void operator()(std::span<scalar_t *> pointers) const;
-
-  size_t pointer_count() const;
-  size_t jacobian_slot(size_t arg) const;
-  size_t residual_slot(size_t side) const;
-  size_t weight_slot(size_t side) const;
-  size_t gradient_slot(size_t arg) const;
-  size_t hessian_slot(size_t lhs, size_t rhs) const;
-  const std::string &cache_key() const { return cache_key_; }
-
-private:
-  condensation_spec spec_;
-  function_type function_ = nullptr;
-  std::string cache_key_;
-};
 
 struct batch_condensation_spec {
   std::vector<condensation_spec> constraints;
@@ -293,10 +312,6 @@ struct batch_condensation_spec {
 
 using batch_condensation_kernel = batch_product_kernel;
 
-std::string emit_condensation_source(const condensation_spec &spec);
-condensation_kernel compile_condensation(
-    condensation_spec spec,
-    const std::filesystem::path &cache_dir = "gen/linear_backend");
 batch_condensation_kernel compile_batch_condensation(
     batch_condensation_spec spec,
     const std::filesystem::path &cache_dir = "gen/linear_backend");

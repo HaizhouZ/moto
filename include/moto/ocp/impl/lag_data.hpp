@@ -30,6 +30,10 @@ struct lag_data {
     auto &proj_f_u() { return dynamics_data_.proj_f_u_; }
     auto &proj_f_res() { return dynamics_data_.proj_f_res_; }
     dynamics_data dynamics_data_;
+    /// Stage-local sparse storage for elimination-graph intermediates. Leaves
+    /// and destinations bind the ordinary approximation/projection matrices;
+    /// only true intermediate values allocate entries here.
+    std::vector<sparse_matrix> lifted_graph_workspace_;
     /// dual variables of constratins, indexed by field
     array_type<vector, constr_fields> dual_;
     /// complementarity of each inequality fields
