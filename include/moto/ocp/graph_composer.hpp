@@ -1,8 +1,10 @@
 #ifndef MOTO_OCP_GRAPH_COMPOSER_HPP
 #define MOTO_OCP_GRAPH_COMPOSER_HPP
 
+#include <array>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
 #include <vector>
 
 #include <moto/ocp/graph_model.hpp>
@@ -11,9 +13,14 @@ namespace moto {
 
 class graph_composer {
   public:
+    struct composed_interval {
+        stage_ocp_ptr_t occurrence;
+        ocp_ptr_t formulation;
+    };
+
     struct interval_snapshot {
         size_t revision = 0;
-        std::shared_ptr<const std::vector<ocp_ptr_t>> intervals;
+        std::shared_ptr<const std::vector<composed_interval>> intervals;
     };
 
     interval_snapshot compose(const graph_model &model) const;
@@ -24,26 +31,32 @@ class graph_composer {
         lower_x_to_y,
     };
 
-    struct dependency {
-        const stage_ocp *stage = nullptr;
-        size_t revision = 0;
-        stage_expr_role role = stage_expr_role::interval;
-        bool operator==(const dependency &) const = default;
+    struct status_request {
+        expr_handle expression;
+        bool active = false;
     };
 
-    struct cache_entry {
-        std::vector<dependency> dependencies;
-        ocp_ptr_t composed;
+    using status_request_list = std::vector<status_request>;
+
+    struct composition_key {
+        std::array<stage_composition_identity_ptr_t, 4> identity;
+        bool operator==(const composition_key &) const = default;
     };
 
-    std::vector<dependency> dependencies(const graph_model::interval_record &record) const;
-    ocp_ptr_t compose_stage(const graph_model::interval_record &record) const;
-    void append_role_terms(const stage_ocp_ptr_t &source, stage_expr_role role, const ocp_ptr_t &target,
-                           term_placement placement) const;
-    void append_node_terms(const node_view &node, const ocp_ptr_t &target, term_placement placement) const;
+    struct composition_key_hash {
+        size_t operator()(const composition_key &key) const noexcept;
+    };
 
-    mutable std::vector<cache_entry> entries_;
-    mutable std::shared_ptr<const std::vector<ocp_ptr_t>> interval_cache_;
+    ocp_ptr_t compose_stage(const graph_model::topology_snapshot &topology,
+                            size_t index) const;
+    void append_placement(const stage_ocp_ptr_t &source, stage_expr_role role,
+                          term_placement placement, const ocp_ptr_t &target,
+                          status_request_list &status) const;
+    void resolve_status(const status_request_list &status,
+                        const ocp_ptr_t &target) const;
+
+    mutable std::unordered_map<composition_key, ocp_ptr_t, composition_key_hash> entries_;
+    mutable std::shared_ptr<const std::vector<composed_interval>> interval_cache_;
     mutable size_t cache_revision_ = 0;
     mutable std::mutex mutex_;
 };

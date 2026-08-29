@@ -2,10 +2,15 @@
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
 #include <moto/solver/ns_riccati/generic_solver.hpp>
 #include <moto/solver/ns_sqp.hpp>
+#include <cstdint>
 #include <unordered_map>
 #include <utility>
 namespace moto {
 namespace {
+using runtime_node_key = std::tuple<uintptr_t, uintptr_t, bool>;
+
+uintptr_t address(const auto *ptr) { return reinterpret_cast<uintptr_t>(ptr); }
+
 bool same_restoration_cfg(const solver::restoration::restoration_overlay_settings &lhs,
                           const solver::restoration::restoration_overlay_settings &rhs) {
     return lhs.rho_u == rhs.rho_u &&
@@ -39,14 +44,15 @@ void ns_sqp::realize_runtime(storage_type &runtime,
     }
     runtime.reserve(snapshot.intervals->size() + (add_virtual_initial_state ? 1 : 0));
     if (add_virtual_initial_state) {
-        auto virtual_stage = stage_builder(build_initial_state_virtual_stage(snapshot.intervals->front()));
+        auto virtual_stage = stage_builder(
+            build_initial_state_virtual_stage(snapshot.intervals->front().formulation));
         if (!virtual_stage) {
             throw std::runtime_error("ns_sqp::realize_runtime stage_builder returned null virtual initial stage");
         }
         runtime.add(node_type(virtual_stage, true));
     }
-    for (const auto &stage_ocp : *snapshot.intervals) {
-        auto built = stage_builder(stage_ocp);
+    for (const auto &interval : *snapshot.intervals) {
+        auto built = stage_builder(interval.formulation);
         if (!built) {
             throw std::runtime_error("ns_sqp::realize_runtime stage_builder returned null stage_ocp");
         }
@@ -117,9 +123,10 @@ size_t ns_sqp::rebuild_runtime_from_model(storage_type &runtime,
     return snapshot.revision;
 }
 
-size_t ns_sqp::reconcile_solver_runtime_from_model() {
-    const auto snapshot = graph_composer_.compose(model_graph_);
+void ns_sqp::reconcile_solver_runtime_from_model(
+    const graph_composer::interval_snapshot &snapshot) {
     struct desired_node {
+        stage_ocp_ptr_t occurrence;
         ocp_ptr_t formulation;
         bool internal_initial_state = false;
     };
@@ -130,28 +137,35 @@ size_t ns_sqp::reconcile_solver_runtime_from_model() {
         if (snapshot.intervals->empty()) {
             throw std::runtime_error("initial state optimization requires at least one solver stage");
         }
-        desired.push_back({snapshot.intervals->front(), true});
+        const auto &first = snapshot.intervals->front();
+        desired.push_back({first.occurrence, first.formulation, true});
     }
-    for (const ocp_ptr_t &stage : *snapshot.intervals) {
-        desired.push_back({stage, false});
+    for (const auto &interval : *snapshot.intervals) {
+        desired.push_back({interval.occurrence, interval.formulation, false});
     }
 
     solver_runtime_.reconcile(
         desired,
-        [](const node_type &existing, const desired_node &wanted) {
-            return existing.source_formulation_.get() == wanted.formulation.get() &&
-                   existing.payload().internal_initial_state == wanted.internal_initial_state;
+        [](const node_type &existing) {
+            return runtime_node_key{address(existing.source_occurrence_.get()),
+                                    address(existing.source_formulation_.get()),
+                                    existing.payload().internal_initial_state};
+        },
+        [](const desired_node &wanted) {
+            return runtime_node_key{address(wanted.occurrence.get()),
+                                    address(wanted.formulation.get()),
+                                    wanted.internal_initial_state};
         },
         [this](const desired_node &wanted) {
             if (wanted.internal_initial_state) {
                 return node_type(build_initial_state_virtual_stage(wanted.formulation),
                                  true,
-                                 wanted.formulation);
+                                 wanted.formulation,
+                                 wanted.occurrence);
             }
-            return node_type(wanted.formulation);
+            return node_type(wanted.formulation, false, {}, wanted.occurrence);
         });
     solver_runtime_.nodes();
-    return snapshot.revision;
 }
 
 ns_sqp::storage_type &ns_sqp::active_data() {
@@ -159,31 +173,30 @@ ns_sqp::storage_type &ns_sqp::active_data() {
         return *phase_graph_override_;
     }
 
-    for (;;) {
-        const size_t model_revision = model_graph_.revision();
-        const auto initial_state = settings.initial_state;
-        if (solver_runtime_revision_.load(std::memory_order_acquire) == model_revision &&
-            solver_runtime_initial_state_mode_ == initial_state) {
-            return solver_runtime_;
-        }
-
-        std::lock_guard<std::mutex> lock(solver_runtime_mutex_);
-        if (solver_runtime_revision_.load(std::memory_order_relaxed) == model_graph_.revision() &&
-            solver_runtime_initial_state_mode_ == settings.initial_state) {
-            return solver_runtime_;
-        }
-
-        const size_t built_revision = reconcile_solver_runtime_from_model();
-        if (built_revision == model_graph_.revision()) {
-            solver_runtime_initial_state_mode_ = settings.initial_state;
-            solver_runtime_revision_.store(built_revision, std::memory_order_release);
-            return solver_runtime_;
-        }
+    const auto snapshot = graph_composer_.compose(model_graph_);
+    const auto initial_state = settings.initial_state;
+    if (solver_runtime_revision_.load(std::memory_order_acquire) == snapshot.revision &&
+        solver_runtime_initial_state_mode_ == initial_state) {
+        return solver_runtime_;
     }
+
+    std::lock_guard<std::mutex> lock(solver_runtime_mutex_);
+    if (solver_runtime_revision_.load(std::memory_order_relaxed) == snapshot.revision &&
+        solver_runtime_initial_state_mode_ == initial_state) {
+        return solver_runtime_;
+    }
+
+    reconcile_solver_runtime_from_model(snapshot);
+    solver_runtime_initial_state_mode_ = initial_state;
+    solver_runtime_revision_.store(snapshot.revision, std::memory_order_release);
+    return solver_runtime_;
 }
 
 std::vector<ns_sqp::data *> &ns_sqp::solver_nodes() {
     auto &nodes = active_data().nodes();
+    if (nodes.empty() || !nodes.front()->internal_initial_state) {
+        return nodes;
+    }
     thread_local std::unordered_map<const ns_sqp *, std::vector<data *>> public_nodes_by_solver;
     auto &public_solver_nodes_ = public_nodes_by_solver[this];
     public_solver_nodes_.clear();

@@ -2,8 +2,6 @@
 #define __MOTO_PROBLEM_HPP__
 
 #include <array>
-#include <atomic>
-#include <functional>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -27,6 +25,9 @@ def_ptr(stage_ocp);
 class node_view;
 class graph_model;
 class graph_composer;
+
+struct stage_composition_identity {};
+using stage_composition_identity_ptr_t = std::shared_ptr<const stage_composition_identity>;
 
 enum class stage_expr_role : size_t {
     interval,
@@ -92,6 +93,8 @@ struct ocp_linear_profile {
 };
 
 class ocp_base : protected field_layout_store<expr_list> {
+    friend class graph_composer;
+
   public:
     struct active_status_config {
         expr_list deactivate_list;
@@ -114,6 +117,7 @@ class ocp_base : protected field_layout_store<expr_list> {
     utils::unique_id<ocp_base> uid_;
     std::array<expr_list, field::num> disabled_expr_, pruned_expr_;
     std::unordered_set<size_t> uids_, disabled_uids_, pruned_uids_;
+    std::unordered_set<size_t> resolved_predicate_uids_;
     ocp_linear_profile linear_profile_;
 
     void finalize();
@@ -121,6 +125,8 @@ class ocp_base : protected field_layout_store<expr_list> {
     void refresh_copy(const active_status_config &config);
     void move_active_expr(const expr &ex, bool prune);
     bool restore_inactive_expr(const expr &ex, bool from_pruned);
+    void resolve_composed_status(const active_status_config &config,
+                                 const expr_list &resolved_functions);
     inline void field_read_guard() const {
         assert(finalized_ && "Cannot access before the problem is finalized. Please call finalize() before accessing expressions.");
     }
@@ -217,14 +223,13 @@ class stage_ocp : public ocp, public std::enable_shared_from_this<stage_ocp> {
 
   private:
     std::unordered_map<size_t, unsigned> endpoint_role_mask_by_uid_;
-    std::function<void()> mutation_callback_;
-    std::atomic<size_t> mutation_revision_{1};
+    stage_composition_identity_ptr_t composition_identity_ =
+        std::make_shared<stage_composition_identity>();
     bool add_with_role(expr_handle ex, stage_expr_role role);
     bool validate_stage_term(const expr_handle &ex, std::string *reason) const;
     bool validate_endpoint_term(const expr_handle &ex, std::string *reason) const;
-    void set_mutation_callback(std::function<void()> callback);
-    size_t mutation_revision() const noexcept {
-        return mutation_revision_.load(std::memory_order_acquire);
+    const stage_composition_identity_ptr_t &composition_identity() const {
+        return composition_identity_;
     }
     bool has_role(const expr &ex, stage_expr_role role) const;
     void on_modified() override;

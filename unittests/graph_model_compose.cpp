@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <string>
@@ -14,6 +15,7 @@
 #include <moto/ocp/cost.hpp>
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
 #include <moto/ocp/graph_model.hpp>
+#include <moto/ocp/graph_composer.hpp>
 #include <moto/ocp/ineq_constr.hpp>
 #include <moto/solver/ns_sqp.hpp>
 
@@ -124,6 +126,23 @@ const moto::generic_func &require_func_named_prefix(const moto::ocp_base_ptr_t &
     const auto *func = dynamic_cast<const moto::generic_func *>((*it).get());
     REQUIRE(func != nullptr);
     return *func;
+}
+
+template <typename Work>
+std::pair<double, double> timing_percentiles(size_t trials, Work work) {
+    using clock = std::chrono::steady_clock;
+    std::vector<double> elapsed;
+    elapsed.reserve(trials);
+    bool valid = true;
+    for (size_t trial = 0; trial < trials; ++trial) {
+        const auto start = clock::now();
+        valid &= work(trial);
+        elapsed.push_back(std::chrono::duration<double, std::micro>(
+                              clock::now() - start).count());
+    }
+    REQUIRE(valid);
+    std::sort(elapsed.begin(), elapsed.end());
+    return {elapsed[trials / 2], elapsed[trials * 95 / 100]};
 }
 
 moto::stage_ocp_ptr_t make_stage(const std::string &tag,
@@ -468,6 +487,91 @@ TEST_CASE("phase-boundary endpoint terms survive current-interval inactive argum
     REQUIRE_FALSE(contains_name_prefix(expr_names(flat.back()->problem(), __eq_x), "start_phase_enable_boundary"));
 }
 
+TEST_CASE("endpoint lowering maps the source primal mask from x to y", "[graph][mapping]") {
+    using namespace moto;
+
+    auto [xa, ya] = sym::states("x_lowered_status_a", 1);
+    auto [xb, yb] = sym::states("x_lowered_status_b", 1);
+    auto stage = stage_ocp::create();
+    stage->ed().add(*layout_cost("cost_lowered_status", var_list{xa, xb}));
+
+    ns_sqp sqp;
+    sqp.stages().push_back(stage->copy(ocp::active_status_config{{xb}, {}}));
+
+    const auto &problem = sqp.solver_nodes().front()->problem();
+    REQUIRE(problem.dim(__y) == 1);
+    REQUIRE(problem.is_active(*ya));
+    REQUIRE(problem.contains(*yb));
+    REQUIRE_FALSE(problem.is_active(*yb));
+    REQUIRE(contains_name_prefix(expr_names(problem, __cost), "cost_lowered_status"));
+}
+
+TEST_CASE("composed terms keep source-resolved predicates across copies", "[graph][mapping]") {
+    using namespace moto;
+
+    auto [x, y] = sym::states("x_resolved_endpoint_status", 1);
+    auto gate = sym::inputs("u_resolved_endpoint_gate", 1);
+    auto live = sym::inputs("u_resolved_endpoint_live", 1);
+
+    auto current = stage_ocp::create();
+    current->add(*layout_cost("cost_resolved_endpoint_gate", var_list{gate}));
+    current->add(*layout_cost("cost_resolved_endpoint_live", var_list{live}));
+
+    auto next = stage_ocp::create();
+    next->add(*layout_dynamics("dyn_resolved_endpoint_status", var_list{x, y, gate, live}, expr_dim(y)));
+    auto endpoint = layout_constr("constr_resolved_endpoint_status", var_list{x}, __eq_x, expr_dim(x));
+    endpoint->enable_if_all({gate});
+    next->st().add(*endpoint);
+
+    ns_sqp sqp;
+    sqp.stages().push_back(current->copy(ocp::active_status_config{{gate}, {}}));
+    sqp.stages().push_back(next->copy());
+
+    const auto source = sqp.solver_nodes().front()->problem_ptr();
+    REQUIRE(source->dim(__u) == 1);
+    REQUIRE(contains_name_prefix(expr_names(*source, __eq_x), "constr_resolved_endpoint_status"));
+
+    const auto &live_cost = require_func_named_prefix(source, __cost, "cost_resolved_endpoint_live");
+    ocp::active_status_config deactivate_unrelated;
+    deactivate_unrelated.deactivate_list.emplace_back(live_cost.handle());
+    auto copied = source->copy(deactivate_unrelated);
+    copied->wait_until_ready();
+    REQUIRE(contains_name_prefix(expr_names(*copied, __eq_x), "constr_resolved_endpoint_status"));
+
+    ocp::active_status_config deactivate_argument;
+    deactivate_argument.deactivate_list.emplace_back(y->handle());
+    auto without_argument = source->copy(deactivate_argument);
+    without_argument->wait_until_ready();
+    REQUIRE_FALSE(contains_name_prefix(expr_names(*without_argument, __eq_x), "constr_resolved_endpoint_status"));
+}
+
+TEST_CASE("authored endpoint handles access lowered runtime data", "[graph][mapping]") {
+    using namespace moto;
+
+    auto [x, y] = sym::states("x_endpoint_access", 1);
+    auto endpoint = layout_constr("constr_endpoint_access", var_list{x}, __eq_x, 1);
+    endpoint->value = [](func_approx_data &data) { data.v_ = data[0]; };
+    endpoint->jacobian = [](func_approx_data &data) {
+        data.jac_[0](0, 0) = 1.;
+    };
+    endpoint->hessian = [](func_approx_data &) {};
+
+    auto stage = stage_ocp::create();
+    stage->ed().add(*endpoint);
+    ns_sqp sqp;
+    sqp.stages().push_back(stage->copy());
+
+    auto *node = sqp.solver_nodes().front();
+    node->sym_val()[y](0) = 3.25;
+    node->update_approximation(node_data::update_mode::eval_all);
+
+    auto &runtime = static_cast<node_data &>(*node).data(endpoint);
+    REQUIRE(std::abs(runtime.v_(0) - 3.25) < 1e-12);
+    const sym &source_x = x;
+    REQUIRE(runtime[source_x].data() == node->sym_val()[y].data());
+    REQUIRE(std::abs(runtime.jac(source_x)(0, 0) - 1.) < 1e-12);
+}
+
 TEST_CASE("appending stage copies advances the current end boundary", "[graph][path]") {
     using namespace moto;
 
@@ -548,6 +652,50 @@ TEST_CASE("set_stages rejects aliased stage entries", "[graph][validation]") {
     REQUIRE_THROWS_WITH(
         sqp.solver_nodes(),
         Catch::Matchers::ContainsSubstring("distinct stage objects"));
+}
+
+TEST_CASE("500-stage graph construction and shift stay within the pure graph budget",
+          "[graph][performance]") {
+    using namespace moto;
+
+    auto prototype = stage_ocp::create();
+    std::vector<stage_ocp_ptr_t> prepared;
+    prepared.reserve(500);
+    for (size_t i = 0; i < 500; ++i)
+        prepared.push_back(prototype->copy());
+
+    const auto [construction_median, construction_p95] = timing_percentiles(100, [&](size_t) {
+        graph_model candidate;
+        graph_composer candidate_composer;
+        candidate.stages().insert(candidate.stages().end(), prepared.begin(), prepared.end());
+        return candidate_composer.compose(candidate).intervals->size() == 500;
+    });
+    REQUIRE(construction_median < 50.0);
+    REQUIRE(construction_p95 < 50.0);
+
+    graph_model graph;
+    graph_composer composer;
+    for (size_t i = 0; i < 500; ++i)
+        graph.stages().push_back(prototype->copy());
+
+    const auto initial = composer.compose(graph);
+    REQUIRE(initial.intervals->size() == 500);
+    REQUIRE(initial.intervals->front().formulation != initial.intervals->at(1).formulation);
+    REQUIRE(initial.intervals->at(1).formulation == initial.intervals->at(2).formulation);
+    REQUIRE(initial.intervals->back().formulation != initial.intervals->at(1).formulation);
+
+    std::vector<stage_ocp_ptr_t> tails;
+    for (size_t i = 0; i < 200; ++i)
+        tails.push_back(prototype->copy());
+    const auto [median, p95] = timing_percentiles(200, [&](size_t trial) {
+        graph.stages().erase(graph.stages().begin());
+        graph.stages().push_back(std::move(tails[trial]));
+        return composer.compose(graph).intervals->size() == 500;
+    });
+#ifdef NDEBUG
+    REQUIRE(median < 50.0);
+    REQUIRE(p95 < 50.0);
+#endif
 }
 
 TEST_CASE("returned graph-owned stage handles are mutable and invalidate the runtime cache", "[graph][mutation]") {

@@ -6,6 +6,7 @@
 #include <moto/utils/movable_ptr.hpp>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string_view>
 #include <utility>
 
@@ -47,6 +48,8 @@ class generic_func : public expr, protected field_layout_store<var_list> {
     expr_list enable_if_all_deps_;
     expr_list disable_if_any_deps_;
     expr_list enable_if_any_deps_;
+    size_t source_function_uid_ = static_cast<size_t>(-1);
+    std::vector<size_t> source_argument_uids_;
 
     struct remap_cache;
     std::unique_ptr<remap_cache> remap_cache_;
@@ -62,6 +65,7 @@ class generic_func : public expr, protected field_layout_store<var_list> {
     friend class func_arg_map;
     friend class func_approx_data;
     friend class graph_composer;
+    friend struct node_data;
 
     virtual void substitute(const sym &arg, const sym &rhs);
     void substitute_argument(const sym &arg, const sym &rhs);
@@ -92,6 +96,8 @@ class generic_func : public expr, protected field_layout_store<var_list> {
                             size_t problem_uid);
     expr_handle lower_expr_x_to_y_reuse(std::string_view context = {},
                                         size_t problem_uid = static_cast<size_t>(-1));
+    std::optional<size_t> runtime_arg_idx(const sym &s) const;
+    bool accepts_runtime_handle(const generic_func &function) const;
     DEF_DEFAULT_CLONE(generic_func)
 
     generic_func();

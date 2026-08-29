@@ -327,11 +327,14 @@ struct ns_sqp {
         using data_type = data;
         std::unique_ptr<data_type> data_;
         ocp_ptr_t source_formulation_;
+        stage_ocp_ptr_t source_occurrence_;
         explicit node_type(const ocp_ptr_t &formulation,
                            bool internal_initial_state = false,
-                           ocp_ptr_t source_formulation = {})
+                           ocp_ptr_t source_formulation = {},
+                           stage_ocp_ptr_t source_occurrence = {})
             : data_(std::make_unique<data_type>(formulation)),
-              source_formulation_(source_formulation ? std::move(source_formulation) : formulation) {
+              source_formulation_(source_formulation ? std::move(source_formulation) : formulation),
+              source_occurrence_(std::move(source_occurrence)) {
             data_->internal_initial_state = internal_initial_state;
         }
         data_type &payload() { return *data_; }
@@ -370,7 +373,8 @@ struct ns_sqp {
     template <typename StageBuilder>
     size_t rebuild_runtime_from_model(storage_type &runtime,
                                       StageBuilder &&stage_builder);
-    size_t reconcile_solver_runtime_from_model();
+    void reconcile_solver_runtime_from_model(
+        const graph_composer::interval_snapshot &snapshot);
     struct scoped_phase_graph_override {
         ns_sqp &owner;
         bool in_restoration_backup;

@@ -55,7 +55,9 @@ void register_submodule_node_data(nb::module_ &m) {
 
     nb::class_<node_data>(m, "node_data")
         .def_prop_ro("prob", [](node_data &self) -> auto & { return self.problem(); }, nb::rv_policy::reference_internal)
-        .def_prop_ro("value", [](node_data &self) -> auto & { return self.sym_val(); }, nb::rv_policy::reference_internal);
+        .def_prop_ro("value", [](node_data &self) -> auto & { return self.sym_val(); }, nb::rv_policy::reference_internal)
+        .def("data", [](node_data &self, const generic_func &f) -> auto & { return self.data(f); },
+             nb::arg("function"), nb::rv_policy::reference_internal);
 
     nb::class_<func_approx_data>(m, "func_approx_data")
         .def("__getitem__", [](func_approx_data &self, py_var_inarg_wrapper s) { return self[(sym &)s]; })

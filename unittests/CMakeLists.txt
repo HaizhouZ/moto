@@ -73,7 +73,7 @@ set_target_properties(graph_model_compose_test PROPERTIES
     BUILD_RPATH "\$ORIGIN/.."
 )
 
-foreach(graph_shard IN ITEMS mapping remap path mutation validation concurrency)
+foreach(graph_shard IN ITEMS mapping remap path mutation validation concurrency performance)
     add_test(
         NAME graph_model_compose_${graph_shard}_test
         COMMAND graph_model_compose_test "[graph][${graph_shard}]"

@@ -8,11 +8,15 @@ the graph-owned stages consumed by composition.
 ## Workflow
 
 1. A user authors an interval prototype with `stage.add(...)`.
-2. The user copies prototypes directly into `sqp.stages`, the graph-owned
-   `std::vector` exposed in Python by nanobind's standard vector binding.
+2. The user inserts independent stage copies directly into `sqp.stages`, the
+   graph-owned `std::vector` exposed in Python by nanobind's standard vector
+   binding.
 3. `sqp.st`, `sqp.ed`, and `sqp.stages` expose the graph boundaries and the
    ordinary ordered stage container independently.
-4. The graph composer lowers boundary terms and realizes solver runtime nodes.
+4. The graph derives each interval's incoming and outgoing boundaries directly
+   from neighboring entries in `sqp.stages`; it does not maintain a second
+   interval-topology representation.
+5. The graph composer lowers boundary terms and realizes solver runtime nodes.
 
 ## Term Placement
 
@@ -37,19 +41,48 @@ create a terminal expression.
 
 ## Ownership And Access
 
-- The authored prototype remains independent from every graph-owned copy.
 - The graph owns every stage pointer inserted into `sqp.stages`.
 - `sqp.stages` is the graph's ordinary mutable `std::vector` of stage pointers,
   exposed with nanobind's standard vector binding. Its stage objects remain
   mutable modeling objects.
 - Index assignment, deletion, insertion, and append edit the linear stage order
-  directly. Existing graph-owned pointers retain identity; newly supplied
-  stages must be independent copies, and duplicate pointers are rejected when
-  the graph is next realized.
+  directly. Each occurrence has a distinct stage pointer; duplicate pointers
+  are rejected because they cannot preserve occurrence identity across a
+  homogeneous horizon shift.
 - Mutating a graph-owned stage invalidates cached composition and runtime
   realization.
+- Unmodified copies of one stage share a composition identity. The composer may
+  therefore share one immutable composed OCP for equal interior placements;
+  editing one copy first gives that copy a new identity.
 - `sqp.nodes` exposes composed runtime data and is not a modeling-stage
   accessor.
+
+## Composition, Lowering, And Active Status
+
+Each interval is composed in this order:
+
+1. current-stage interval terms
+2. graph-start terms on the first interval
+3. current stage-end terms lowered from `x` to `y`
+4. next stage-start terms, or graph-end terms, lowered from `x` to `y`
+5. one combined active-layout resolution and finalization
+
+Enable/disable predicates are resolved in the authored stage; only active terms
+are placed, and later OCP copies do not re-evaluate those predicates in another
+stage's symbol context.
+
+The composed primal layout is the union of placed terms' computational
+arguments. Direct placement preserves identity; lowering maps source `x` status
+to paired `y`; active wins when placements share a target symbol.
+
+Composition applies this resolved status in one pass without running generic
+dependency pruning. Later explicit status changes may prune a function with no
+active computational primal argument, but do not re-run its authored predicate.
+
+Lowered functions retain lineage to the user-defined function and parameter
+handles. Runtime function-data lookup accepts either function handle, and its
+argument lookup maps source `x` to lowered `y`. This is contextual:
+`node.value[x]` always remains the interval's current state.
 
 ## Sequential Construction
 
@@ -62,9 +95,17 @@ create a terminal expression.
 ## Invariants
 
 - Endpoint lowering is performed only by graph composition.
-- Copying a prototype into the graph does not mutate the prototype.
+- Authored endpoint function handles remain valid for composed runtime data
+  lookup after lowering.
 - Runtime realization never replaces or exposes a different object as the
   authored graph-owned stage.
 - Structural editing directly uses native container operations on
   `sqp.stages`. Shift therefore retains the pointer identity of the surviving
   stages and only introduces the explicitly copied tail stages.
+- Modeling mutation and solver realization are not concurrent operations.
+  Concurrent readers may share an already realized graph.
+- Runtime reconciliation preserves one runtime node for each surviving stage
+  occurrence even when equivalent occurrences share one immutable composed OCP.
+- Building or shifting 500-occurrence topology targets 50 microseconds,
+  including graph/composition allocations but excluding stage authoring,
+  codegen, runtime-node allocation, and solver work.

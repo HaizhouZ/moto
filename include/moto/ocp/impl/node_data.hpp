@@ -57,11 +57,24 @@ struct MOTO_ALIGN_NO_SHARING node_data {
      * @param f
      * @return auto&
      */
-    auto &data(const func &f) const {
-        if (in_field(f->field(), custom_func_fields))
+    auto &data(const generic_func &f) const {
+        if (in_field(f.field(), custom_func_fields))
             throw std::runtime_error("custom_func does not have sparse data");
-        return *sparse_[f->field()][prob_->pos(f)];
+        const generic_func *runtime = prob_->is_active(f) ? &f : nullptr;
+        if (!runtime)
+            for (const generic_func &candidate : prob_->exprs(f.field()))
+                if (candidate.accepts_runtime_handle(f)) {
+                    runtime = &candidate;
+                    break;
+                }
+        if (!runtime)
+            throw std::out_of_range("function is not active in this node");
+        return *sparse_[runtime->field()][prob_->pos(*runtime)];
     }
+
+    template <typename Function>
+        requires std::is_base_of_v<generic_func, Function>
+    auto &data(const utils::shared<Function> &f) const { return data(*f); }
 
     // auto &data(const custom_func &f) const { return shared_->get(f->uid()); }
 

@@ -20,8 +20,10 @@ bool has_active_primal_arg(const generic_func &func, const ocp_base *prob) {
     return false;
 }
 
-bool can_be_active_by_status(const generic_func &func, ocp_base *prob) {
-    return has_active_primal_arg(func, prob) && func.check_enable(prob);
+bool can_be_active_by_status(const generic_func &func, ocp_base *prob,
+                             bool predicate_resolved = false) {
+    return has_active_primal_arg(func, prob) &&
+           (predicate_resolved || func.check_enable(prob));
 }
 
 const generic_func *as_generic_func(const expr_handle &ex) {
@@ -214,10 +216,11 @@ ocp_base::ocp_base(const ocp_base &rhs)
       uid_(rhs.uid_),
       disabled_expr_(rhs.disabled_expr_),
       pruned_expr_(rhs.pruned_expr_),
-      linear_profile_(rhs.linear_profile_),
       uids_(rhs.uids_),
       disabled_uids_(rhs.disabled_uids_),
       pruned_uids_(rhs.pruned_uids_),
+      resolved_predicate_uids_(rhs.resolved_predicate_uids_),
+      linear_profile_(rhs.linear_profile_),
       allow_inconsistent_dynamics_(rhs.allow_inconsistent_dynamics_),
       automatic_reorder_primal_(rhs.automatic_reorder_primal_) {}
 
@@ -935,7 +938,7 @@ ocp_ptr_t ocp::copy(const active_status_config &config) const {
 stage_ocp::stage_ocp(const stage_ocp &rhs)
     : ocp(rhs),
       endpoint_role_mask_by_uid_(rhs.endpoint_role_mask_by_uid_),
-      mutation_revision_(rhs.mutation_revision()) {}
+      composition_identity_(rhs.composition_identity_) {}
 
 stage_ocp_ptr_t stage_ocp::copy(const active_status_config &config) const {
     auto prob = stage_ocp_ptr_t(new stage_ocp(*this));
@@ -1032,14 +1035,8 @@ bool stage_ocp::has_role(const expr &ex, stage_expr_role role) const {
     }
     return role == stage_expr_role::interval;
 }
-void stage_ocp::set_mutation_callback(std::function<void()> callback) {
-    mutation_callback_ = std::move(callback);
-}
 void stage_ocp::on_modified() {
-    mutation_revision_.fetch_add(1, std::memory_order_release);
-    if (mutation_callback_) {
-        mutation_callback_();
-    }
+    composition_identity_ = std::make_shared<stage_composition_identity>();
 }
 node_view stage_ocp::st() {
     return node_view(shared_from_this(), stage_expr_role::start_node);
@@ -1072,6 +1069,33 @@ bool ocp_base::restore_inactive_expr(const expr &ex, bool from_pruned) {
     source_uids.erase(ex.uid());
     return true;
 }
+void ocp_base::resolve_composed_status(
+    const active_status_config &config,
+    const expr_list &resolved_functions) {
+    for (const expr &ex : config.activate_list) {
+        if (!is_active(ex) &&
+            !restore_inactive_expr(ex, true) &&
+            !restore_inactive_expr(ex, false)) {
+            throw std::runtime_error(fmt::format(
+                "Cannot activate composed expression {} uid {}, it does not exist",
+                ex.name(), ex.uid()));
+        }
+    }
+    for (const expr &ex : config.deactivate_list) {
+        if (!contains(ex)) {
+            throw std::runtime_error(fmt::format(
+                "Cannot deactivate composed expression {} uid {}, it does not exist",
+                ex.name(), ex.uid()));
+        }
+        if (is_active(ex)) {
+            move_active_expr(ex, false);
+        }
+    }
+    for (const expr &function : resolved_functions) {
+        resolved_predicate_uids_.insert(function.uid());
+    }
+    finalized_ = false;
+}
 void ocp_base::update_active_status(const active_status_config &config) {
     for (expr &ex : config.activate_list) {
         if (!restore_inactive_expr(ex, true) && !restore_inactive_expr(ex, false)) {
@@ -1093,7 +1117,8 @@ void ocp_base::update_active_status(const active_status_config &config) {
                 continue;
             to_re_enable[f].reserve(pruned_expr_[f].size());
             for (const generic_func &e : pruned_expr_[f]) {
-                if (can_be_active_by_status(e, this)) {
+                if (can_be_active_by_status(
+                        e, this, resolved_predicate_uids_.contains(e.uid()))) {
                     to_re_enable[f].emplace_back(e);
                 }
             }
@@ -1103,7 +1128,8 @@ void ocp_base::update_active_status(const active_status_config &config) {
                 continue;
             to_delete[f].reserve(field_entry_count(f));
             for (const generic_func &e : field_entries(f)) {
-                if (!can_be_active_by_status(e, this)) {
+                if (!can_be_active_by_status(
+                        e, this, resolved_predicate_uids_.contains(e.uid()))) {
                     to_delete[f].emplace_back(e);
                 }
             }

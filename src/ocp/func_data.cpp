@@ -29,7 +29,7 @@ func_arg_map::func_arg_map(sym_data &primal, shared_data &shared, const generic_
 }
 
 vector_ref func_arg_map::operator[](const sym &in) const {
-    if (func_.has_arg(in)) return in_args_[func_.arg_idx(in)];
+    if (const auto index = func_.runtime_arg_idx(in)) return in_args_[*index];
     if (in.field() == __p && problem()->is_active(in))
         return primal_->get(in);
     throw std::out_of_range(fmt::format(
@@ -152,6 +152,8 @@ void func_approx_data::setup_hessian() {
 }
 
 bool func_approx_data::has_jacobian_block(size_t arg_idx) const { return arg_idx < jac_.size() && jac_[arg_idx].size() != 0; }
-matrix_ref func_approx_data::jac(const sym &in) const { return jac_[func_.arg_idx(in)]; }
+matrix_ref func_approx_data::jac(const sym &in) const {
+    return jac_[func_.runtime_arg_idx(in).value()];
+}
 matrix_ref func_approx_data::jac(size_t i) const { return jac_.at(i); }
 } // namespace moto

@@ -63,6 +63,8 @@ generic_func::generic_func(const generic_func &rhs)
       enable_if_all_deps_(rhs.enable_if_all_deps_),
       disable_if_any_deps_(rhs.disable_if_any_deps_),
       enable_if_any_deps_(rhs.enable_if_any_deps_),
+      source_function_uid_(rhs.source_function_uid_),
+      source_argument_uids_(rhs.source_argument_uids_),
       skip_unused_arg_check_(rhs.skip_unused_arg_check_),
       jac_sp_(rhs.jac_sp_),
       hess_sp_(rhs.hess_sp_),
@@ -361,6 +363,10 @@ expr_handle generic_func::remap_clone(const normalized_remap &remap,
             "func {} remap failed: source implementation is not ready", name_));
     expr_handle remapped_expr(clone());
     auto &remapped_func = *expr_cast<generic_func>(remapped_expr);
+    remapped_func.source_function_uid_ = uid();
+    remapped_func.source_argument_uids_.clear();
+    for (const sym &arg : in_args_)
+        remapped_func.source_argument_uids_.push_back(arg.uid());
     remapped_func.apply_argument_remap(remap, context, problem_uid);
     for (expr &dependency : remapped_func.dep_) {
         if (!dependency.finalize())
@@ -535,6 +541,19 @@ bool generic_func::has_arg(const sym &s) const {
 size_t generic_func::arg_idx(const sym &s) const {
     field_read_guard(s.field());
     return entry_index(s);
+}
+std::optional<size_t> generic_func::runtime_arg_idx(const sym &s) const {
+    field_read_guard(s.field());
+    if (has_entry(s))
+        return entry_index(s);
+    const auto source = std::ranges::find(source_argument_uids_, s.uid());
+    return source == source_argument_uids_.end()
+               ? std::nullopt
+               : std::optional<size_t>(source - source_argument_uids_.begin());
+}
+bool generic_func::accepts_runtime_handle(
+    const generic_func &function) const {
+    return uid() == function.uid() || source_function_uid_ == function.uid();
 }
 const bool generic_func::check_enable(ocp_base *prob) const {
     if (disable_if_any_deps_.empty() && enable_if_all_deps_.empty() && enable_if_any_deps_.empty())
