@@ -14,90 +14,6 @@
 #include <iostream>
 
 namespace moto::linear_backend {
-namespace {
-
-struct fixture {
-  condensation_spec spec;
-  std::vector<matrix> jac;
-  std::vector<vector> residual;
-  std::vector<vector> weight;
-  std::vector<row_vector> gradient;
-  std::vector<matrix> hessian;
-
-  explicit fixture(condensation_spec input) : spec(std::move(input)) {
-    for (const size_t cols : spec.jac_cols) {
-      jac.push_back(matrix::Random(spec.rows, cols));
-      gradient.push_back(row_vector::Random(cols));
-    }
-    for (size_t side = 0; side < spec.residual_signs.size(); ++side) {
-      residual.push_back(vector::Random(spec.rows));
-      weight.push_back(vector::Random(spec.rows).cwiseAbs());
-    }
-    for (size_t i = 0; i < spec.jac_cols.size(); ++i)
-      for (size_t j = i; j < spec.jac_cols.size(); ++j)
-        hessian.push_back(matrix::Random(spec.jac_cols[i], spec.jac_cols[j]));
-  }
-};
-
-void check_condensation(condensation_spec spec) {
-  fixture f(std::move(spec));
-  auto expected_gradient = f.gradient;
-  auto expected_hessian = f.hessian;
-  vector combined_residual = vector::Zero(f.spec.rows);
-  vector combined_weight = vector::Zero(f.spec.rows);
-  for (size_t side = 0; side < f.spec.residual_signs.size(); ++side) {
-    combined_residual.noalias() +=
-        f.spec.residual_signs[side] * f.residual[side];
-    combined_weight.noalias() += f.weight[side];
-  }
-  for (size_t i = 0; i < f.jac.size(); ++i)
-    expected_gradient[i].noalias() += combined_residual.transpose() * f.jac[i];
-  size_t pair = 0;
-  for (size_t i = 0; i < f.jac.size(); ++i)
-    for (size_t j = i; j < f.jac.size(); ++j)
-      expected_hessian[pair++].noalias() +=
-          f.jac[i].transpose() * combined_weight.asDiagonal() * f.jac[j];
-
-  auto kernel = compile_condensation(f.spec);
-  std::vector<scalar_t *> pointers(kernel.pointer_count());
-  for (size_t i = 0; i < f.jac.size(); ++i) {
-    pointers[kernel.jacobian_slot(i)] = f.jac[i].data();
-    pointers[kernel.gradient_slot(i)] = f.gradient[i].data();
-  }
-  for (size_t side = 0; side < f.residual.size(); ++side) {
-    pointers[kernel.residual_slot(side)] = f.residual[side].data();
-    pointers[kernel.weight_slot(side)] = f.weight[side].data();
-  }
-  pair = 0;
-  for (size_t i = 0; i < f.jac.size(); ++i)
-    for (size_t j = i; j < f.jac.size(); ++j)
-      pointers[kernel.hessian_slot(i, j)] = f.hessian[pair++].data();
-  kernel(pointers);
-
-  for (size_t i = 0; i < f.gradient.size(); ++i)
-    REQUIRE(f.gradient[i].isApprox(expected_gradient[i], 1e-12));
-  for (size_t i = 0; i < f.hessian.size(); ++i)
-    REQUIRE(f.hessian[i].isApprox(expected_hessian[i], 1e-12));
-}
-
-} // namespace
-
-TEST_CASE("JIT condensation fuses sides and matches Eigen") {
-  check_condensation(
-      {.rows = 7, .jac_cols = {4, 3}, .residual_signs = {1., -1., .5}});
-  check_condensation(
-      {.rows = 24, .jac_cols = {18, 12}, .residual_signs = {1., -1.}});
-}
-
-TEST_CASE("JIT condensation source has no structural dispatch") {
-  condensation_spec spec{
-      .rows = 4, .jac_cols = {3, 2}, .residual_signs = {1., -1.}};
-  const auto source = emit_condensation_source(spec);
-  REQUIRE(source.find("switch") == std::string::npos);
-  REQUIRE(source.find("if (") == std::string::npos);
-  REQUIRE(source.find("moto_linear_axpy") != std::string::npos);
-  REQUIRE(source.find("#include <Eigen") == std::string::npos);
-}
 
 TEST_CASE("JIT panel products match dense algebra") {
   matrix dense = matrix::Zero(8, 7);
@@ -140,58 +56,6 @@ TEST_CASE("JIT panel products match dense algebra") {
         1.);
 }
 
-TEST_CASE("CasADi-profiled SpGEMM matches a quadruped-sized product") {
-  constexpr casadi_int n = 36, m = 30;
-  std::vector<casadi_int> pr, pc, fr, fc;
-  const auto add = [](auto &rows, auto &cols, casadi_int r0, casadi_int c0,
-                      casadi_int nr, casadi_int nc) {
-    for (casadi_int c = 0; c < nc; ++c)
-      for (casadi_int r = 0; r < nr; ++r) {
-        rows.push_back(r0 + r);
-        cols.push_back(c0 + c);
-      }
-  };
-  for (casadi_int i = 0; i < n; ++i) {
-    pr.push_back(i);
-    pc.push_back(i);
-  }
-  for (casadi_int i = 0; i < 18; ++i) {
-    pr.push_back(i);
-    pc.push_back(18 + i);
-  }
-  add(pr, pc, 3, 3, 3, 3);
-  add(pr, pc, 3, 21, 3, 3);
-  for (casadi_int i = 0; i < 18; ++i) {
-    fr.push_back(i);
-    fc.push_back(i);
-  }
-  add(fr, fc, 18, 0, 18, m);
-  const auto psp = casadi::Sparsity::triplet(n, n, pr, pc);
-  const auto fsp = casadi::Sparsity::triplet(n, m, fr, fc);
-  auto kernel = compile_spgemm(psp, fsp);
-  REQUIRE(kernel.output_layout().nnz() ==
-          static_cast<size_t>(casadi::Sparsity::mtimes(psp, fsp).nnz()));
-  REQUIRE_FALSE(kernel.output_layout().row_blocks.empty());
-  REQUIRE_FALSE(kernel.output_layout().col_blocks.empty());
-
-  vector pv = vector::Random(psp.nnz()), fv = vector::Random(fsp.nnz());
-  vector out(kernel.output_layout().nnz());
-  kernel(pv.data(), fv.data(), out.data());
-  const auto dense = [](const auto &sp, const vector &values) {
-    matrix result = matrix::Zero(sp.size1(), sp.size2());
-    for (casadi_int c = 0; c < sp.size2(); ++c)
-      for (casadi_int k = sp.colind(c); k < sp.colind(c + 1); ++k)
-        result(sp.row(k), c) = values[k];
-    return result;
-  };
-  matrix actual = matrix::Zero(n, m);
-  const auto &layout = kernel.output_layout();
-  for (size_t c = 0; c < layout.cols; ++c)
-    for (size_t k = layout.colind[c]; k < layout.colind[c + 1]; ++k)
-      actual(layout.row[k], c) = out[k];
-  REQUIRE(actual.isApprox(dense(psp, pv) * dense(fsp, fv), 1e-12));
-}
-
 TEST_CASE("sparse_matrix dispatches dense operands through JIT") {
   sparse_matrix sparse;
   sparse.resize(6, 5);
@@ -215,11 +79,6 @@ TEST_CASE("sparse_matrix dispatches dense operands through JIT") {
   matrix ltout = matrix::Zero(3, 5);
   linear_backend::right_transpose_multiply(lhs_t, sparse, ltout);
   REQUIRE(ltout.isApprox(lhs_t.transpose() * dense, 1e-12));
-
-  matrix middle = matrix::Random(6, 6);
-  matrix gram = matrix::Zero(5, 5);
-  weighted_gram(sparse, middle, gram);
-  REQUIRE(gram.isApprox(dense.transpose() * middle * dense, 1e-12));
 
   matrix sub = matrix::Random(6, 5), expected = sub - dense;
   write_dense(sparse, sub, {.alpha = -1.});
@@ -273,134 +132,6 @@ TEST_CASE("precompiled direct-map sparse products match dense algebra") {
                                        1e-12));
 }
 
-TEST_CASE("SpMM analysis is canonical across panel layouts and association") {
-  const matrix_layout whole{
-      4, 4, {{sparsity::dense, 0, 0, 4, 4}}};
-  const matrix_layout split{
-      4,
-      4,
-      {{sparsity::dense, 0, 0, 4, 2},
-       {sparsity::dense, 0, 2, 4, 2}}};
-  const auto whole_pattern = analyze_pattern(whole);
-  const auto split_pattern = analyze_pattern(split);
-  REQUIRE(whole_pattern == split_pattern);
-  REQUIRE(sparse_pattern_hash{}(whole_pattern) ==
-          sparse_pattern_hash{}(split_pattern));
-
-  const matrix_layout a{
-      6,
-      5,
-      {{sparsity::dense, 0, 0, 3, 3},
-       {sparsity::diag, 3, 2, 3, 3}}};
-  const matrix_layout b{
-      5,
-      4,
-      {{sparsity::dense, 0, 0, 3, 2},
-       {sparsity::diag, 2, 1, 3, 3}}};
-  const matrix_layout c{
-      4,
-      3,
-      {{sparsity::diag, 0, 0, 3, 3},
-       {sparsity::dense, 3, 2, 1, 1}}};
-  const auto ab = analyze_spmm({a}, {b});
-  const auto ab_c =
-      analyze_spmm({ab.output_layout, false, ab.output_pattern}, {c});
-  const auto bc = analyze_spmm({b}, {c});
-  const auto a_bc =
-      analyze_spmm({a}, {bc.output_layout, false, bc.output_pattern});
-  REQUIRE(ab_c.output_pattern == a_bc.output_pattern);
-  REQUIRE(ab.scalar_products() > 0);
-  REQUIRE(ab.products.size() == 4);
-}
-
-TEST_CASE("analyzed SpMM compiles inferred panels including two transposes") {
-  const auto allocate = [](const matrix_layout &layout) {
-    sparse_matrix value;
-    value.resize(layout.rows, layout.cols);
-    for (const auto &panel : layout.panels)
-      value.insert(panel.row_offset, panel.col_offset, panel.rows, panel.cols,
-                   panel.pattern);
-    return value;
-  };
-  const auto run = [&](const sparse_matrix &lhs, bool lhs_transpose,
-                       const sparse_matrix &rhs, bool rhs_transpose) {
-    const auto analysis = analyze_spmm(
-        {describe(lhs), lhs_transpose}, {describe(rhs), rhs_transpose});
-    auto output = allocate(analysis.output_layout);
-    auto pointers = panel_pointers(lhs);
-    const auto rhs_pointers = panel_pointers(rhs);
-    const auto output_pointers = panel_pointers(output);
-    pointers.insert(pointers.end(), rhs_pointers.begin(), rhs_pointers.end());
-    pointers.insert(pointers.end(), output_pointers.begin(),
-                    output_pointers.end());
-    compile_sparse_product(analysis)(pointers);
-    matrix left = lhs.dense();
-    matrix right = rhs.dense();
-    if (lhs_transpose) left.transposeInPlace();
-    if (rhs_transpose) right.transposeInPlace();
-    REQUIRE(output.dense().isApprox(left * right, 1e-12));
-
-    output.setZero();
-    std::vector<scalar_t *> indexed(pointers.size() + 3);
-    std::vector<size_t> lhs_slots, rhs_slots, output_slots;
-    size_t slot = 1;
-    for (auto *pointer : panel_pointers(lhs)) {
-      lhs_slots.push_back(slot);
-      indexed[slot++] = pointer;
-    }
-    ++slot;
-    for (auto *pointer : panel_pointers(rhs)) {
-      rhs_slots.push_back(slot);
-      indexed[slot++] = pointer;
-    }
-    for (auto *pointer : panel_pointers(output)) {
-      output_slots.push_back(slot);
-      indexed[slot++] = pointer;
-    }
-    compile_indexed_sparse_product(analysis, 1., indexed.size(), lhs_slots,
-                                   rhs_slots, output_slots)(indexed);
-    REQUIRE(output.dense().isApprox(left * right, 1e-12));
-  };
-
-  sparse_matrix lhs, rhs;
-  lhs.resize(5, 4);
-  lhs.insert(0, 0, 3, 2, sparsity::dense).setRandom();
-  lhs.insert(2, 1, 3, 3, sparsity::diag).setRandom();
-  rhs.resize(3, 5);
-  rhs.insert(0, 0, 2, 3, sparsity::dense).setRandom();
-  rhs.insert(0, 2, 3, 3, sparsity::diag).setRandom();
-  run(lhs, true, rhs, true);
-
-  sparse_matrix ordinary_rhs;
-  ordinary_rhs.resize(4, 3);
-  ordinary_rhs.insert(0, 0, 2, 2, sparsity::dense).setRandom();
-  ordinary_rhs.insert(1, 0, 3, 3, sparsity::diag).setRandom();
-  run(lhs, false, ordinary_rhs, false);
-}
-
-TEST_CASE("sparse products bind directly to sparse output panels") {
-  sparse_matrix lhs, rhs, output;
-  lhs.resize(4, 5);
-  rhs.resize(5, 4);
-  output.resize(4, 4);
-
-  lhs.insert(0, 0, 2, 3, sparsity::dense).setRandom();
-  lhs.insert(2, 3, 2, 2, sparsity::diag).setRandom();
-  rhs.insert(0, 0, 3, 2, sparsity::dense).setRandom();
-  rhs.insert(3, 2, 2, 2, sparsity::diag).setRandom();
-  output.insert(0, 0, 2, 2, sparsity::dense);
-  output.insert(2, 2, 2, 2, sparsity::diag);
-
-  const matrix expected = lhs.dense() * rhs.dense();
-  run_sparse_product(lhs, rhs, product_op::times, 1., output);
-  REQUIRE(output.dense().isApprox(expected, 1e-12));
-
-  // Exercise the cached plan and verify that it owns output zeroing.
-  for (auto *panel : panel_pointers(output)) panel[0] = 42.;
-  run_sparse_product(lhs, rhs, product_op::times, 1., output);
-  REQUIRE(output.dense().isApprox(expected, 1e-12));
-}
-
 TEST_CASE("scaled eye panels use their dynamic diagonal values") {
   sparse_matrix sparse;
   sparse.resize(6, 6);
@@ -419,9 +150,6 @@ TEST_CASE("scaled eye panels use their dynamic diagonal values") {
   transpose_multiply(sparse, trhs, transpose);
   REQUIRE(transpose.isApprox(expected.transpose() * trhs, 1e-12));
 
-  matrix weight = matrix::Random(6, 6), gram = matrix::Zero(6, 6);
-  weighted_gram(sparse, weight, gram);
-  REQUIRE(gram.isApprox(expected.transpose() * weight * expected, 1e-12));
   REQUIRE(sparse.dense().isApprox(expected, 1e-12));
 }
 
@@ -493,16 +221,6 @@ TEST_CASE("JIT fuses overlapping diagonal contributions") {
   matrix lhs_t = matrix::Random(18, 5), right_t = matrix::Zero(5, 18);
   right_transpose_multiply(lhs_t, sparse, right_t);
   REQUIRE(right_t.isApprox(lhs_t.transpose() * (d0 + d1).asDiagonal(), 1e-12));
-  const product_spec spec{.sparse = describe(sparse),
-                          .op = product_op::times,
-                          .other_rows = 18,
-                          .other_cols = 1,
-                          .out_rows = 18,
-                          .out_cols = 1};
-  const auto source = emit_product_source(spec);
-  REQUIRE(source.find("moto_linear_fused_diag_times") != std::string::npos);
-  REQUIRE(source.find("#include <Eigen/Core>") == std::string::npos);
-  REQUIRE(source.find("  moto_linear_diag_times(") == std::string::npos);
   REQUIRE(sparse.dense().diagonal().isApprox(d0 + d1, 1e-12));
 }
 
@@ -700,13 +418,6 @@ TEST_CASE("JIT fuses overlapping dense contributions") {
   matrix rhs = matrix::Random(6, 5), out = matrix::Zero(8, 5);
   multiply(sparse, rhs, out);
   REQUIRE(out.isApprox((a + b) * rhs, 1e-12));
-  REQUIRE(emit_product_source({.sparse = describe(sparse),
-                               .op = product_op::times,
-                               .other_rows = 6,
-                               .other_cols = 5,
-                               .out_rows = 8,
-                               .out_cols = 5})
-              .find("moto_linear_fused_dense_times") != std::string::npos);
 }
 
 TEST_CASE("OCP batch fuses quadruped limits and friction") {
@@ -819,7 +530,7 @@ TEST_CASE("MX graph lowers matrix products to the linear backend") {
   REQUIRE(second_value.isApprox(expected_first * dv, 1e-12));
 }
 
-TEST_CASE("MX graph e-graph optimizes a dense matrix chain") {
+TEST_CASE("MX graph lowers a dense matrix chain") {
   constexpr casadi_int outer = 20, thin = 2;
   const casadi::MX a = casadi::MX::sym("chain_a", outer, thin);
   const casadi::MX b = casadi::MX::sym("chain_b", thin, outer);
@@ -837,40 +548,6 @@ TEST_CASE("MX graph e-graph optimizes a dense matrix chain") {
       const_cast<scalar_t *>(cv.data()), output.data()};
   kernel(pointers);
   REQUIRE(output.isApprox(av * (bv * cv), 1e-12));
-}
-
-TEST_CASE("sparse product consumes strided and transposed panel views") {
-  matrix storage = matrix::Random(6, 5);
-  constexpr size_t offset = 1 + 6;
-
-  matrix rhs = matrix::Random(4, 2), output(3, 2);
-  matrix_layout view{3, 4,
-                     {{sparsity::dense, 0, 0, 3, 4, false, offset, 6}}};
-  matrix_layout rhs_layout{4, 2,
-                           {{sparsity::dense, 0, 0, 4, 2}}};
-  matrix_layout output_layout{3, 2,
-                              {{sparsity::dense, 0, 0, 3, 2}}};
-  auto kernel = compile_sparse_product(view, rhs_layout, product_op::times,
-                                       1., output_layout);
-  std::vector<scalar_t *> pointers{storage.data(), rhs.data(), output.data()};
-  kernel(pointers);
-  REQUIRE(output.isApprox(storage.block(1, 1, 3, 4) * rhs, 1e-12));
-
-  matrix transpose_rhs = matrix::Random(3, 2), transpose_output(4, 2);
-  matrix_layout transpose_view{
-      4, 3,
-      {{sparsity::dense, 0, 0, 4, 3, true, offset, 6}}};
-  matrix_layout transpose_rhs_layout{
-      3, 2, {{sparsity::dense, 0, 0, 3, 2}}};
-  matrix_layout transpose_output_layout{
-      4, 2, {{sparsity::dense, 0, 0, 4, 2}}};
-  auto transpose_kernel = compile_sparse_product(
-      transpose_view, transpose_rhs_layout, product_op::times, 1.,
-      transpose_output_layout);
-  pointers = {storage.data(), transpose_rhs.data(), transpose_output.data()};
-  transpose_kernel(pointers);
-  REQUIRE(transpose_output.isApprox(
-      storage.block(1, 1, 3, 4).transpose() * transpose_rhs, 1e-12));
 }
 
 TEST_CASE("MX graph lowers submatrix products to backend panel views") {

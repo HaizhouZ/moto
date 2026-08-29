@@ -8,6 +8,7 @@
 #include <casadi/casadi.hpp>
 
 #include <deque>
+#include <set>
 #include <unordered_map>
 
 namespace moto {
@@ -16,19 +17,26 @@ namespace ns_riccati {
 namespace {
 
 casadi::Sparsity casadi_sparsity(const linear_backend::matrix_layout &layout) {
-    const auto pattern = linear_backend::analyze_pattern(layout);
-    std::vector<casadi_int> rows;
-    std::vector<casadi_int> cols;
-    rows.reserve(pattern.nnz());
-    cols.reserve(pattern.nnz());
-    for (size_t col = 0; col < pattern.cols; ++col)
-        for (size_t nz = pattern.colind[col]; nz < pattern.colind[col + 1]; ++nz) {
-            rows.push_back(static_cast<casadi_int>(pattern.row[nz]));
-            cols.push_back(static_cast<casadi_int>(col));
-        }
+    std::set<std::pair<size_t, size_t>> entries;
+    for (const auto &panel : layout.panels)
+        if (panel.pattern == sparsity::dense)
+            for (size_t col = 0; col < panel.cols; ++col)
+                for (size_t row = 0; row < panel.rows; ++row)
+                    entries.emplace(panel.row_offset + row,
+                                    panel.col_offset + col);
+        else
+            for (size_t i = 0; i < panel.rows; ++i)
+                entries.emplace(panel.row_offset + i, panel.col_offset + i);
+    std::vector<casadi_int> rows, cols;
+    rows.reserve(entries.size());
+    cols.reserve(entries.size());
+    for (const auto &[row, col] : entries) {
+        rows.push_back(static_cast<casadi_int>(row));
+        cols.push_back(static_cast<casadi_int>(col));
+    }
     return casadi::Sparsity::triplet(
-        static_cast<casadi_int>(pattern.rows),
-        static_cast<casadi_int>(pattern.cols), rows, cols);
+        static_cast<casadi_int>(layout.rows),
+        static_cast<casadi_int>(layout.cols), rows, cols);
 }
 
 } // namespace

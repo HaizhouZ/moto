@@ -1,7 +1,6 @@
 #include <moto/core/linear_backend.hpp>
 
 #include "casadi_mx_graph_translator.hpp"
-#include "casadi_mx_egraph.hpp"
 
 #include <moto/core/external_function.hpp>
 #include <moto/core/sparse_matrix.hpp>
@@ -42,53 +41,6 @@ std::unordered_map<std::string,
                    std::weak_ptr<const detail::casadi_mx_graph_plan>>
     graph_plans;
 std::unordered_map<std::string, std::shared_ptr<std::mutex>> graph_compile_locks;
-std::unordered_map<std::string, std::shared_ptr<const std::string>>
-    graph_spd_signatures;
-std::unordered_map<std::string, bool> graph_legacy_cache_presence;
-
-std::shared_ptr<const std::string> graph_spd_signature(
-    std::string_view artifact_identity, const std::vector<casadi::MX> &inputs,
-    std::span<const casadi::MX> factors) {
-  if (!artifact_identity.empty()) {
-    std::lock_guard lock(graph_mutex);
-    if (const auto found = graph_spd_signatures.find(
-            std::string(artifact_identity));
-        found != graph_spd_signatures.end())
-      return found->second;
-  }
-  auto signature = std::make_shared<const std::string>(
-      casadi::Function("moto_spd_properties", inputs,
-                       std::vector<casadi::MX>(factors.begin(), factors.end()))
-          .serialize());
-  if (artifact_identity.empty()) return signature;
-  std::lock_guard lock(graph_mutex);
-  return graph_spd_signatures
-      .try_emplace(std::string(artifact_identity), std::move(signature))
-      .first->second;
-}
-
-bool has_legacy_graph_cache(const std::filesystem::path &cache_dir) {
-  const auto cache = cache_dir.lexically_normal().string();
-  {
-    std::lock_guard lock(graph_mutex);
-    if (const auto found = graph_legacy_cache_presence.find(cache);
-        found != graph_legacy_cache_presence.end())
-      return found->second;
-  }
-  bool present = false;
-  std::error_code ec;
-  for (std::filesystem::directory_iterator it(cache_dir, ec), end;
-       !ec && it != end; it.increment(ec)) {
-    const auto name = it->path().filename().string();
-    if (name.starts_with("plan_v12_") && name.ends_with(".cbor")) {
-      present = true;
-      break;
-    }
-  }
-  std::lock_guard lock(graph_mutex);
-  return graph_legacy_cache_presence.try_emplace(cache, present).first->second;
-}
-
 void collect_mx_solves(
     const casadi::MX &expression,
     std::unordered_set<const casadi::MXNode *> &visited,
@@ -555,86 +507,6 @@ void *detail::compile_casadi_mx_graph_source(
 }
 
 namespace {
-
-template <bool LT, bool RT, int LA, int RA>
-void graph_pair_dd(const double *a, size_t ar, size_t ac, size_t ald,
-                   size_t ak, const double *b, size_t br, size_t bc,
-                   size_t bld, size_t bk, double *out, size_t orows,
-                   size_t oi, size_t oj, size_t n, double alpha) {
-  using CA = Eigen::Map<const matrix, LA, Eigen::OuterStride<>>;
-  using CB = Eigen::Map<const matrix, RA, Eigen::OuterStride<>>;
-  auto A = LT ? CA(a + ak, n, ac, Eigen::OuterStride<>(ald))
-              : CA(a + ak * ald, ar, n, Eigen::OuterStride<>(ald));
-  auto B = RT ? CB(b + bk * bld, br, n, Eigen::OuterStride<>(bld))
-              : CB(b + bk, n, bc, Eigen::OuterStride<>(bld));
-  Eigen::Map<matrix, Eigen::Unaligned, Eigen::OuterStride<>> O(
-      out + oi + oj * orows, LT ? ac : ar, RT ? br : bc,
-      Eigen::OuterStride<>(orows));
-  if constexpr (LT && RT) O.noalias() += alpha * A.transpose() * B.transpose();
-  else if constexpr (LT) O.noalias() += alpha * A.transpose() * B;
-  else if constexpr (RT) O.noalias() += alpha * A * B.transpose();
-  else O.noalias() += alpha * A * B;
-}
-
-template <bool Eye, bool RT, int RA>
-void graph_pair_sd(const double *a, size_t ak, const double *b, size_t br,
-                   size_t bc, size_t bld, size_t bk, double *out,
-                   size_t orows, size_t oi, size_t oj, size_t n,
-                   double alpha) {
-  using CB = Eigen::Map<const matrix, RA, Eigen::OuterStride<>>;
-  auto B = RT ? CB(b + bk * bld, br, n, Eigen::OuterStride<>(bld))
-              : CB(b + bk, n, bc, Eigen::OuterStride<>(bld));
-  Eigen::Map<matrix, Eigen::Unaligned, Eigen::OuterStride<>> O(
-      out + oi + oj * orows, n, RT ? br : bc,
-      Eigen::OuterStride<>(orows));
-  if constexpr (Eye && RT) O += alpha * B.transpose();
-  else if constexpr (Eye) O += alpha * B;
-  else if constexpr (RT)
-    O.noalias() += alpha * Eigen::Map<const Eigen::VectorXd>(a + ak, n)
-                               .asDiagonal() * B.transpose();
-  else
-    O.noalias() += alpha * Eigen::Map<const Eigen::VectorXd>(a + ak, n)
-                               .asDiagonal() * B;
-}
-
-template <bool LT, bool Eye, int LA>
-void graph_pair_ds(const double *a, size_t ar, size_t ac, size_t ald,
-                   size_t ak, const double *b, size_t bk, double *out,
-                   size_t orows, size_t oi, size_t oj, size_t n,
-                   double alpha) {
-  using CA = Eigen::Map<const matrix, LA, Eigen::OuterStride<>>;
-  auto A = LT ? CA(a + ak, n, ac, Eigen::OuterStride<>(ald))
-              : CA(a + ak * ald, ar, n, Eigen::OuterStride<>(ald));
-  Eigen::Map<matrix, Eigen::Unaligned, Eigen::OuterStride<>> O(
-      out + oi + oj * orows, LT ? ac : ar, n,
-      Eigen::OuterStride<>(orows));
-  if constexpr (LT && Eye) O += alpha * A.transpose();
-  else if constexpr (Eye) O += alpha * A;
-  else if constexpr (LT)
-    O.noalias() += alpha * A.transpose() *
-                   Eigen::Map<const Eigen::VectorXd>(b + bk, n).asDiagonal();
-  else
-    O.noalias() += alpha * A *
-                   Eigen::Map<const Eigen::VectorXd>(b + bk, n).asDiagonal();
-}
-
-template <bool LE, bool RE, int LA, int RA>
-void graph_pair_ss(const double *a, size_t ak, const double *b, size_t bk,
-                   double *out, size_t orows, size_t oi, size_t oj, size_t n,
-                   double alpha) {
-  Eigen::Map<Eigen::VectorXd, Eigen::Unaligned, Eigen::InnerStride<>> O(
-      out + oi + oj * orows, n,
-      Eigen::InnerStride<>(orows ? orows + 1 : 1));
-  if constexpr (LE && RE) O.array() += alpha;
-  else if constexpr (LE)
-    O.array() += alpha * Eigen::Map<const Eigen::VectorXd, RA>(b + bk, n).array();
-  else if constexpr (RE)
-    O.array() += alpha * Eigen::Map<const Eigen::VectorXd, LA>(a + ak, n).array();
-  else
-    O.array() += alpha * Eigen::Map<const Eigen::VectorXd, LA>(a + ak, n).array() *
-                 Eigen::Map<const Eigen::VectorXd, RA>(b + bk, n).array();
-}
-
 struct graph_factor_state {
   struct factor {
     Eigen::PartialPivLU<matrix> lu;
@@ -723,57 +595,6 @@ moto_graph_small_solve(const double *a, bool transpose, const double *rhs,
   }
 }
 
-#define MOTO_GRAPH_PAIR_SIGNATURE(name)                                      \
-  extern "C" __attribute__((visibility("default"))) void name(             \
-      const double *a, size_t ar, size_t ac, size_t ald, size_t ak,          \
-      const double *b, size_t br, size_t bc, size_t bld, size_t bk,          \
-      double *out, size_t orows, size_t oi, size_t oj, size_t n,             \
-      double alpha)
-#define MOTO_GRAPH_PAIR_DD(id, lt, rt, la, ra)                               \
-  MOTO_GRAPH_PAIR_SIGNATURE(moto_graph_pair_dd_##id) {                       \
-    graph_pair_dd<lt, rt, la, ra>(a, ar, ac, ald, ak, b, br, bc, bld, bk,   \
-                                   out, orows, oi, oj, n, alpha);             \
-  }
-#define MOTO_GRAPH_PAIR_SD(id, eye, rt, ra)                                  \
-  MOTO_GRAPH_PAIR_SIGNATURE(moto_graph_pair_sd_##id) {                       \
-    graph_pair_sd<eye, rt, ra>(a, ak, b, br, bc, bld, bk, out, orows, oi,   \
-                                oj, n, alpha);                                \
-  }
-#define MOTO_GRAPH_PAIR_DS(id, lt, eye, la)                                  \
-  MOTO_GRAPH_PAIR_SIGNATURE(moto_graph_pair_ds_##id) {                       \
-    graph_pair_ds<lt, eye, la>(a, ar, ac, ald, ak, b, bk, out, orows, oi,   \
-                                oj, n, alpha);                                \
-  }
-#define MOTO_GRAPH_PAIR_SS(id, le, re, la, ra)                               \
-  MOTO_GRAPH_PAIR_SIGNATURE(moto_graph_pair_ss_##id) {                       \
-    graph_pair_ss<le, re, la, ra>(a, ak, b, bk, out, orows, oi, oj, n,      \
-                                   alpha);                                    \
-  }
-
-#define MOTO_GRAPH_PAIR_FLAGS4(kind, i0, i1, i2, i3, la, ra)                \
-  MOTO_GRAPH_PAIR_##kind(i0, false, false, la, ra)                           \
-  MOTO_GRAPH_PAIR_##kind(i1, true, false, la, ra)                            \
-  MOTO_GRAPH_PAIR_##kind(i2, false, true, la, ra)                            \
-  MOTO_GRAPH_PAIR_##kind(i3, true, true, la, ra)
-#define MOTO_GRAPH_PAIR_FLAGS3(kind, i0, i1, i2, i3, alignment)             \
-  MOTO_GRAPH_PAIR_##kind(i0, false, false, alignment)                        \
-  MOTO_GRAPH_PAIR_##kind(i1, true, false, alignment)                         \
-  MOTO_GRAPH_PAIR_##kind(i2, false, true, alignment)                         \
-  MOTO_GRAPH_PAIR_##kind(i3, true, true, alignment)
-
-MOTO_GRAPH_PAIR_FLAGS4(DD, 0, 1, 2, 3, Eigen::Unaligned, Eigen::Unaligned)
-MOTO_GRAPH_PAIR_FLAGS4(DD, 4, 5, 6, 7, Eigen::Aligned, Eigen::Unaligned)
-MOTO_GRAPH_PAIR_FLAGS4(DD, 8, 9, 10, 11, Eigen::Unaligned, Eigen::Aligned)
-MOTO_GRAPH_PAIR_FLAGS4(DD, 12, 13, 14, 15, Eigen::Aligned, Eigen::Aligned)
-MOTO_GRAPH_PAIR_FLAGS3(SD, 0, 1, 2, 3, Eigen::Unaligned)
-MOTO_GRAPH_PAIR_FLAGS3(SD, 4, 5, 6, 7, Eigen::Aligned)
-MOTO_GRAPH_PAIR_FLAGS3(DS, 0, 1, 2, 3, Eigen::Unaligned)
-MOTO_GRAPH_PAIR_FLAGS3(DS, 4, 5, 6, 7, Eigen::Aligned)
-MOTO_GRAPH_PAIR_FLAGS4(SS, 0, 1, 2, 3, Eigen::Unaligned, Eigen::Unaligned)
-MOTO_GRAPH_PAIR_FLAGS4(SS, 4, 5, 6, 7, Eigen::Aligned, Eigen::Unaligned)
-MOTO_GRAPH_PAIR_FLAGS4(SS, 8, 9, 10, 11, Eigen::Unaligned, Eigen::Aligned)
-MOTO_GRAPH_PAIR_FLAGS4(SS, 12, 13, 14, 15, Eigen::Aligned, Eigen::Aligned)
-
 struct moto_graph_copy_run {
   size_t pointer, panel_offset, count;
   ptrdiff_t panel_stride, local_offset, local_stride;
@@ -813,14 +634,6 @@ extern "C" __attribute__((visibility("default"))) void moto_graph_unpack(
     }
   }
 }
-
-#undef MOTO_GRAPH_PAIR_SS
-#undef MOTO_GRAPH_PAIR_DS
-#undef MOTO_GRAPH_PAIR_SD
-#undef MOTO_GRAPH_PAIR_DD
-#undef MOTO_GRAPH_PAIR_FLAGS3
-#undef MOTO_GRAPH_PAIR_FLAGS4
-#undef MOTO_GRAPH_PAIR_SIGNATURE
 
 extern "C" __attribute__((visibility("default"))) void *
 moto_graph_factor_state_create(size_t factors) {
@@ -1682,14 +1495,10 @@ std::string emit_product_function(const product_spec &spec,
   return s.str();
 }
 
-std::string emit_product_source(const product_spec &spec) {
-  return emit_product_function(spec, symbol_name, true);
-}
-
 product_kernel compile_product(product_spec spec,
                                const std::filesystem::path &cache_dir) {
   auto function = reinterpret_cast<product_kernel::function_type>(
-      compile_source(emit_product_source(spec), cache_dir));
+      compile_source(emit_product_function(spec, symbol_name, true), cache_dir));
   return product_kernel(std::move(spec), function);
 }
 
@@ -1764,7 +1573,6 @@ graph_kernel::graph_kernel(graph_kernel &&) noexcept = default;
 graph_kernel &graph_kernel::operator=(graph_kernel &&) noexcept = default;
 graph_kernel::~graph_kernel() = default;
 size_t graph_kernel::input_count() const { return inputs_; }
-size_t graph_kernel::output_count() const { return outputs_; }
 
 graph_kernel graph_kernel::instantiate(
     std::vector<sparse_matrix> *workspace) const {
@@ -1829,8 +1637,8 @@ graph_kernel compile_graph(
   raw_outputs.insert(raw_outputs.end(), spd_factors.begin(),
                      spd_factors.end());
   const bool named_artifact = !artifact_identity.empty();
-  std::string serialized = named_artifact ? "casadi_mx_translator_named_v3:"
-                                          : "casadi_mx_translator_v5:";
+  std::string serialized = named_artifact ? "casadi_mx_translator_named_v4:"
+                                          : "casadi_mx_translator_v6:";
   if (artifact_identity.empty()) {
     const casadi::Function raw_function(
         "moto_casadi_linear_graph_input", inputs, raw_outputs);
@@ -1850,9 +1658,10 @@ graph_kernel compile_graph(
     serialized += ':' + std::to_string(count);
   serialized += ":spd:" + std::to_string(spd_factors.size());
   if (!named_artifact && !spd_factors.empty())
-    serialized +=
-        *graph_spd_signature(artifact_identity, inputs, spd_factors);
-  const size_t layout_offset = serialized.size();
+    serialized += casadi::Function(
+        "moto_spd_properties", inputs,
+        std::vector<casadi::MX>(spd_factors.begin(), spd_factors.end()))
+                      .serialize();
   for (const auto &layout : input_layouts) {
     serialized += ":layout:" + std::to_string(layout.rows) + ':' +
                   std::to_string(layout.cols);
@@ -1889,7 +1698,7 @@ graph_kernel compile_graph(
   }
   if (!plan) {
     std::filesystem::create_directories(cache_dir);
-    const auto plan_cache = cache_dir / ("plan_v12_" + key + ".cbor");
+    const auto plan_cache = cache_dir / ("plan_v13_" + key + ".cbor");
     const auto mx_cache = cache_dir / ("graph_" + key + ".casadi");
     if (std::filesystem::exists(plan_cache)) {
       try {
@@ -1897,34 +1706,6 @@ graph_kernel compile_graph(
       } catch (const std::exception &) {
         std::error_code ec;
         std::filesystem::remove(plan_cache, ec);
-      }
-    }
-    if (!plan && named_artifact && has_legacy_graph_cache(cache_dir)) {
-      auto legacy_serialized = serialized;
-      constexpr std::string_view current_prefix =
-          "casadi_mx_translator_named_v3:";
-      constexpr std::string_view legacy_prefix =
-          "casadi_mx_translator_named_v2:";
-      legacy_serialized.replace(0, current_prefix.size(), legacy_prefix);
-      if (!spd_factors.empty())
-        legacy_serialized.insert(
-            layout_offset, *graph_spd_signature(artifact_identity, inputs,
-                                                spd_factors));
-      const auto legacy_key =
-          utils::compute_md5_from_bytes(legacy_serialized);
-      const auto legacy_cache =
-          cache_dir / ("plan_v12_" + legacy_key + ".cbor");
-      if (std::filesystem::exists(legacy_cache)) {
-        try {
-          plan = detail::load_casadi_mx_graph_plan(legacy_cache, cache_dir);
-          std::error_code ec;
-          std::filesystem::copy_file(
-              legacy_cache, plan_cache,
-              std::filesystem::copy_options::skip_existing, ec);
-        } catch (const std::exception &) {
-          std::error_code ec;
-          std::filesystem::remove(legacy_cache, ec);
-        }
       }
     }
     if (!plan) {
@@ -1944,10 +1725,8 @@ graph_kernel compile_graph(
           graph_entries.emplace_back(spd_factors.begin(), spd_factors.end());
         const auto batched_entries = batch_independent_mx_products(
             batch_independent_mx_solves(graph_entries));
-        const auto optimized_entries = detail::optimize_casadi_mx_graph(
-            inputs, batched_entries, input_layouts);
         std::vector<casadi::MX> outputs;
-        for (const auto &entry : optimized_entries)
+        for (const auto &entry : batched_entries)
           outputs.insert(outputs.end(), entry.begin(), entry.end());
         outputs = casadi::MX::cse(outputs);
         function = casadi::Function("moto_casadi_linear_graph", inputs,
@@ -1978,70 +1757,6 @@ graph_kernel compile_graph(
   return graph_kernel(std::make_unique<detail::casadi_mx_graph_instance>(
       std::move(plan), workspace));
 }
-ccs_layout analyze_sparsity(const casadi::Sparsity &sp) {
-  ccs_layout output{static_cast<size_t>(sp.size1()),
-                    static_cast<size_t>(sp.size2())};
-  for (const auto value : sp.get_colind())
-    output.colind.push_back(static_cast<size_t>(value));
-  for (const auto value : sp.get_row())
-    output.row.push_back(static_cast<size_t>(value));
-  std::vector<casadi_int> row_permutation, col_permutation, row_blocks,
-      col_blocks, coarse_rows, coarse_cols;
-  sp.btf(row_permutation, col_permutation, row_blocks, col_blocks,
-         coarse_rows, coarse_cols);
-  const auto copy_index = [](const auto &source, auto &destination) {
-    for (const auto value : source)
-      destination.push_back(static_cast<size_t>(value));
-  };
-  copy_index(row_permutation, output.row_permutation);
-  copy_index(col_permutation, output.col_permutation);
-  copy_index(row_blocks, output.row_blocks);
-  copy_index(col_blocks, output.col_blocks);
-  return output;
-}
-
-ccs_layout analyze_spgemm(const casadi::Sparsity &lhs,
-                          const casadi::Sparsity &rhs) {
-  if (lhs.size2() != rhs.size1() || !lhs.nnz() || !rhs.nnz())
-    throw std::invalid_argument("invalid CasADi SpGEMM sparsity");
-  return analyze_sparsity(casadi::Sparsity::mtimes(lhs, rhs));
-}
-
-spgemm_kernel compile_spgemm(const casadi::Sparsity &lhs,
-                             const casadi::Sparsity &rhs,
-                             const std::filesystem::path &cache_dir) {
-  ccs_layout output = analyze_spgemm(lhs, rhs);
-  const casadi::SX a = casadi::SX::sym("a", lhs);
-  const casadi::SX b = casadi::SX::sym("b", rhs);
-  const casadi::SX product = casadi::SX::mtimes(a, b);
-  const casadi::Function function("moto_casadi_spgemm", {a, b}, {product});
-  casadi::Dict options;
-  options["casadi_real"] = "double";
-  casadi::CodeGenerator generator("moto_casadi_spgemm.c", options);
-  generator.add(function);
-  std::string source = generator.dump();
-  source += fmt::format(
-      "\nextern \"C\" __attribute__((visibility(\"default\"))) void {}"
-      "(double *const *p){{const casadi_real* a[2]={{p[0],p[1]}};"
-      "casadi_real* r[1]={{p[2]}};casadi_int iw[{}];casadi_real w[{}];"
-      "moto_casadi_spgemm(a,r,iw,w,0);}}\n",
-      symbol_name, std::max<size_t>(1, function.sz_iw()),
-      std::max<size_t>(1, function.sz_w()));
-  auto compiled = reinterpret_cast<spgemm_kernel::function_type>(
-      compile_source(source, cache_dir));
-  return {static_cast<size_t>(lhs.nnz()), static_cast<size_t>(rhs.nnz()),
-          std::move(output), compiled};
-}
-
-void spgemm_kernel::operator()(const scalar_t *lhs, const scalar_t *rhs,
-                               scalar_t *output) const {
-  if (!function_ || !lhs || !rhs || !output)
-    throw std::invalid_argument("invalid CasADi SpGEMM invocation");
-  scalar_t *p[]{const_cast<scalar_t *>(lhs), const_cast<scalar_t *>(rhs),
-                output};
-  function_(p);
-}
-
 struct cached_product {
   product_op op;
   scalar_t sign;
@@ -2055,7 +1770,6 @@ struct cached_product {
 
 struct cached_sparse_product {
   const sparse_matrix *other;
-  const sparse_matrix *output = nullptr;
   product_op op;
   scalar_t sign;
   size_t out_rows;
@@ -2064,16 +1778,10 @@ struct cached_sparse_product {
   std::vector<scalar_t *> pointers;
 };
 
-struct simple_key {
-  enum class kind { weighted_gram, dense_write } op;
+struct cached_dense_write {
   size_t out_rows = 0;
   scalar_t alpha = 0.;
   bool overwrite = false;
-  bool operator==(const simple_key &) const = default;
-};
-
-struct cached_simple_kernel {
-  simple_key key;
   batch_product_kernel kernel;
   std::vector<scalar_t *> pointers;
 };
@@ -2082,8 +1790,84 @@ struct matrix_cache {
   std::mutex mutex;
   std::vector<cached_product> products;
   std::vector<cached_sparse_product> sparse_products;
-  std::vector<cached_simple_kernel> simple;
+  std::vector<cached_dense_write> dense_writes;
 };
+
+matrix_layout describe(const casadi::Sparsity &sp) {
+  const size_t rows = sp.size1(), cols = sp.size2();
+  matrix_layout result{rows, cols, {}};
+  if (!sp.nnz()) return result;
+  if (static_cast<size_t>(sp.nnz()) == rows * cols) {
+    result.panels.push_back({sparsity::dense, 0, 0, rows, cols});
+    return result;
+  }
+  std::vector<std::vector<size_t>> by_row(rows);
+  const auto &colind = sp.get_colind();
+  const auto &row = sp.get_row();
+  for (size_t col = 0; col < cols; ++col)
+    for (casadi_int nz = colind[col]; nz < colind[col + 1]; ++nz)
+      by_row[row[nz]].push_back(col);
+
+  struct active_rectangle { size_t block, last_row; };
+  std::vector<sparse_block_spec> blocks;
+  std::map<std::pair<size_t, size_t>, active_rectangle> active;
+  for (size_t r = 0; r < rows; ++r) {
+    std::map<std::pair<size_t, size_t>, active_rectangle> next;
+    for (size_t i = 0; i < by_row[r].size();) {
+      const size_t begin = by_row[r][i];
+      size_t end = begin + 1;
+      while (++i < by_row[r].size() && by_row[r][i] == end) ++end;
+      const auto key = std::pair{begin, end};
+      if (const auto found = active.find(key);
+          found != active.end() && found->second.last_row + 1 == r) {
+        ++blocks[found->second.block].rows;
+        next.emplace(key, active_rectangle{found->second.block, r});
+      } else {
+        blocks.push_back({r, begin, 1, end - begin, sparsity::dense});
+        next.emplace(key, active_rectangle{blocks.size() - 1, r});
+      }
+    }
+    active = std::move(next);
+  }
+  std::map<ptrdiff_t, std::vector<size_t>> diagonals;
+  for (size_t i = 0; i < blocks.size(); ++i)
+    if (blocks[i].rows == 1 && blocks[i].cols == 1)
+      diagonals[static_cast<ptrdiff_t>(blocks[i].col) - blocks[i].row]
+          .push_back(i);
+  std::vector<bool> replaced(blocks.size());
+  for (const auto &[offset, candidates] : diagonals) {
+    (void)offset;
+    for (size_t begin = 0; begin < candidates.size();) {
+      size_t end = begin + 1;
+      while (end < candidates.size() &&
+             blocks[candidates[end]].row ==
+                 blocks[candidates[end - 1]].row + 1 &&
+             blocks[candidates[end]].col ==
+                 blocks[candidates[end - 1]].col + 1)
+        ++end;
+      if (end - begin > 1) {
+        auto diagonal = blocks[candidates[begin]];
+        diagonal.rows = diagonal.cols = end - begin;
+        diagonal.pattern = sparsity::diag;
+        blocks.push_back(diagonal);
+        for (size_t i = begin; i < end; ++i) replaced[candidates[i]] = true;
+      }
+      begin = end;
+    }
+  }
+  std::vector<sparse_block_spec> canonical;
+  for (size_t i = 0; i < blocks.size(); ++i)
+    if (i >= replaced.size() || !replaced[i]) canonical.push_back(blocks[i]);
+  const auto plan = make_sparse_layout_plan(canonical);
+  for (const auto &panel : plan.panels)
+    result.panels.push_back({panel.pattern, panel.row, panel.col,
+                             panel.rows, panel.cols});
+  std::ranges::stable_sort(result.panels, {}, [](const panel_layout &panel) {
+    return panel.pattern == sparsity::dense ? 0
+           : panel.pattern == sparsity::diag ? 1 : 2;
+  });
+  return result;
+}
 
 matrix_layout describe(const ::moto::sparse_matrix &sparse) {
   matrix_layout layout{.rows = sparse.rows_, .cols = sparse.cols_};
@@ -2258,15 +2042,6 @@ void run_product(const ::moto::sparse_matrix &sparse, product_op op,
                             out_cols, std::move(kernel), std::move(pointers)});
 }
 
-void prepare_product(const sparse_matrix &sparse, product_op op, scalar_t sign,
-                     size_t other_rows, size_t other_cols, size_t out_rows,
-                     size_t out_cols) {
-  if (sparse.is_empty() || !other_rows || !other_cols || !out_rows || !out_cols)
-    return;
-  run_product(sparse, op, sign, nullptr, other_rows, other_cols, nullptr,
-              out_rows, out_cols);
-}
-
 void prepare_products(std::span<const product_request> requests) {
   struct pending {
     matrix_cache *cache;
@@ -2366,115 +2141,10 @@ struct effective_panel {
   bool structured() const { return panel.pattern != sparsity::dense; }
 };
 
-size_t panel_program_operands(panel_program_op op) {
-  return op == panel_program_op::fill ? size_t{0}
-         : op == panel_program_op::copy ? size_t{1}
-                                        : size_t{2};
-}
-
-panel_program_spec coalesce_panel_program(panel_program_spec spec) {
-  spec.validate();
-  std::vector<panel_program_instruction> regions;
-  regions.reserve(spec.instructions.size());
-  const auto contiguous = [](const panel_program_operand &tail,
-                             const panel_program_operand &next,
-                             size_t count) {
-    return tail.pointer == next.pointer &&
-           next.offset == tail.offset + count;
-  };
-  for (const auto &instruction : spec.instructions) {
-    if (regions.empty() || instruction.count != 1) {
-      regions.push_back(instruction);
-      continue;
-    }
-    auto &tail = regions.back();
-    const size_t sources = panel_program_operands(instruction.op);
-    const bool merge = tail.op == instruction.op &&
-                       tail.scalar == instruction.scalar &&
-                       (tail.count == 1 || tail.destination.stride == 1) &&
-                       contiguous(tail.destination, instruction.destination,
-                                  tail.count) &&
-                       (!sources ||
-                        ((tail.count == 1 || tail.lhs.stride == 1) &&
-                         contiguous(tail.lhs, instruction.lhs,
-                                    tail.count))) &&
-                       (sources < 2 ||
-                        ((tail.count == 1 || tail.rhs.stride == 1) &&
-                         contiguous(tail.rhs, instruction.rhs,
-                                    tail.count)));
-    if (!merge) {
-      regions.push_back(instruction);
-      continue;
-    }
-    tail.destination.stride = 1;
-    if (sources) tail.lhs.stride = 1;
-    if (sources > 1) tail.rhs.stride = 1;
-    ++tail.count;
-  }
-  spec.instructions = std::move(regions);
-  return spec;
-}
-
-void emit_panel_program_body(std::ostringstream &source,
-                             const panel_program_spec &spec) {
-  const auto address = [&](const panel_program_operand &operand,
-                           std::string_view index) {
-    std::ostringstream expression;
-    expression << "p[" << operand.pointer << "][" << operand.offset;
-    if (operand.stride)
-      expression << "+(" << index << ")*(" << operand.stride << ')';
-    expression << ']';
-    return expression.str();
-  };
-  source << std::setprecision(17);
-  for (const auto &instruction : spec.instructions) {
-    if (!instruction.count) continue;
-    const bool loop = instruction.count > 1;
-    if (loop) {
-      source << "  #pragma omp simd\n";
-      source << "  for (std::ptrdiff_t i=0; i<" << instruction.count
-             << "; ++i) {\n";
-    }
-    const std::string index = loop ? "i" : "0";
-    source << (loop ? "    " : "  ")
-           << address(instruction.destination, index) << " = ";
-    switch (instruction.op) {
-    case panel_program_op::fill:
-      source << instruction.scalar;
-      break;
-    case panel_program_op::copy:
-      if (instruction.scalar != 1.) source << instruction.scalar << '*';
-      source << address(instruction.lhs, index);
-      break;
-    case panel_program_op::add:
-    case panel_program_op::sub:
-    case panel_program_op::mul:
-    case panel_program_op::div:
-      source << address(instruction.lhs, index)
-             << (instruction.op == panel_program_op::add ? "+"
-                 : instruction.op == panel_program_op::sub ? "-"
-                 : instruction.op == panel_program_op::mul ? "*"
-                                                            : "/")
-             << address(instruction.rhs, index);
-      break;
-    }
-    source << ";\n";
-    if (loop) source << "  }\n";
-  }
-}
-
 std::string emit_sparse_product_source(const matrix_layout &lhs,
                                        const matrix_layout &rhs,
-                                       bool lhs_transpose, bool rhs_transpose,
-                                       scalar_t sign, size_t out_rows,
-                                       const matrix_layout *sparse_output =
-                                           nullptr,
-                                       std::span<const size_t> lhs_slots = {},
-                                       std::span<const size_t> rhs_slots = {},
-                                       std::span<const size_t> output_slots =
-                                           {},
-                                       const panel_program_spec *initialization =
-                                           nullptr) {
+                                       bool lhs_transpose, scalar_t sign,
+                                       size_t out_rows) {
   std::ostringstream s;
   const auto pattern_name = [](sparsity p) {
     return p == sparsity::dense  ? "dense"
@@ -2518,10 +2188,8 @@ std::string emit_sparse_product_source(const matrix_layout &lhs,
     return name;
   };
   s << "#include <cstddef>\n";
-  if (sparse_output)
-    s << "extern \"C\" void moto_linear_zero(double*,std::size_t);\n";
   for (const auto &lp : lhs.panels) for (const auto &rp : rhs.panels) {
-      const effective_panel l{lp, lhs_transpose}, r{rp, rhs_transpose};
+      const effective_panel l{lp, lhs_transpose}, r{rp, false};
       const size_t begin = std::max(l.col(), r.row());
       const size_t end = std::min(l.col() + l.cols(), r.row() + r.rows());
       if (end <= begin)
@@ -2535,300 +2203,34 @@ std::string emit_sparse_product_source(const matrix_layout &lhs,
     }
   s << "extern \"C\" __attribute__((visibility(\"default\"))) void "
     << symbol_name << "(double *const *p) {\n";
-  const auto lhs_slot = [&](size_t panel) {
-    return lhs_slots.empty() ? panel : lhs_slots[panel];
-  };
-  const auto rhs_slot = [&](size_t panel) {
-    return rhs_slots.empty() ? lhs.panels.size() + panel : rhs_slots[panel];
-  };
-  const auto output_slot = [&](size_t panel) {
-    return output_slots.empty()
-               ? lhs.panels.size() + rhs.panels.size() + panel
-               : output_slots[panel];
-  };
-  if (initialization) {
-    emit_panel_program_body(s, *initialization);
-  } else if (sparse_output) {
-    for (size_t oi = 0; oi < sparse_output->panels.size(); ++oi) {
-      const auto &panel = sparse_output->panels[oi];
-      if (panel.pattern == sparsity::eye)
-        throw std::invalid_argument(
-            "sparse product cannot write a constant eye panel");
-      const size_t storage = panel.pattern == sparsity::dense
-                                 ? panel.rows * panel.cols
-                                 : panel.rows;
-      s << "  moto_linear_zero(p[" << output_slot(oi) << "]," << storage
-        << ");\n";
-    }
-  }
+  const size_t output_slot = lhs.panels.size() + rhs.panels.size();
   for (size_t li = 0; li < lhs.panels.size(); ++li) {
     const effective_panel l{lhs.panels[li], lhs_transpose};
     for (size_t ri = 0; ri < rhs.panels.size(); ++ri) {
-      const effective_panel r{rhs.panels[ri], rhs_transpose};
+      const effective_panel r{rhs.panels[ri], false};
       const size_t begin = std::max(l.col(), r.row());
       const size_t end = std::min(l.col() + l.cols(), r.row() + r.rows());
       if (end <= begin)
         continue;
       const size_t n = end - begin;
       const size_t lk = begin - l.col(), rk = begin - r.row();
-      const size_t rslot = rhs_slot(ri);
+      const size_t rslot = lhs.panels.size() + ri;
       const size_t out_row = l.row() + (l.structured() ? lk : 0);
       const size_t out_col = r.col() + (r.structured() ? rk : 0);
-      size_t oslot = output_slot(0);
-      size_t destination_rows = out_rows;
-      size_t destination_row = out_row;
-      size_t destination_col = out_col;
-      size_t destination_offset = 0;
-      if (sparse_output) {
-        const size_t result_rows = l.structured() ? n : l.rows();
-        const size_t result_cols = r.structured() ? n : r.cols();
-        const bool diagonal_result = l.structured() && r.structured();
-        bool found = false;
-        for (size_t oi = 0; oi < sparse_output->panels.size(); ++oi) {
-          const auto &panel = sparse_output->panels[oi];
-          if (panel.pattern == sparsity::dense &&
-              panel.row_offset <= out_row && panel.col_offset <= out_col &&
-              out_row + result_rows <= panel.row_offset + panel.rows &&
-              out_col + result_cols <= panel.col_offset + panel.cols) {
-            oslot = output_slot(oi);
-            destination_rows = panel.rows;
-            destination_row = out_row - panel.row_offset;
-            destination_col = out_col - panel.col_offset;
-            found = true;
-            break;
-          }
-          if (panel.pattern == sparsity::diag && diagonal_result &&
-              panel.row_offset <= out_row && panel.col_offset <= out_col &&
-              out_row - panel.row_offset == out_col - panel.col_offset &&
-              out_row + n <= panel.row_offset + panel.rows &&
-              out_col + n <= panel.col_offset + panel.cols) {
-            oslot = output_slot(oi);
-            destination_offset = out_row - panel.row_offset;
-            destination_rows = 0;
-            destination_row = destination_col = 0;
-            found = true;
-            break;
-          }
-        }
-        if (!found)
-          throw std::invalid_argument(
-              "sparse product contribution is not covered by one output panel");
-      }
-      s << "  " << helper_name(l, r, lk, rk) << "(p[" << lhs_slot(li)
+      s << "  " << helper_name(l, r, lk, rk) << "(p[" << li
         << "]+"
         << l.panel.storage_offset << ',' << l.physical_rows()
         << ',' << l.physical_cols() << ',' << l.leading_rows() << ',' << lk
         << ",p[" << rslot << "]+"
         << r.panel.storage_offset << ',' << r.physical_rows() << ','
         << r.physical_cols() << ',' << r.leading_rows() << ',' << rk << ",p["
-        << oslot
-        << "]+" << destination_offset << ',' << destination_rows << ','
-        << destination_row << ',' << destination_col << ',' << n
+        << output_slot << "]," << out_rows << ',' << out_row << ',' << out_col << ',' << n
         << ',' << sign << ");\n";
     }
   }
   return s.str() + "}\n";
 }
 } // namespace
-
-panel_program_spec coalesce_panel_program_spec(panel_program_spec spec) {
-  return coalesce_panel_program(std::move(spec));
-}
-
-batch_product_kernel compile_sparse_product(
-    matrix_layout lhs, matrix_layout rhs, product_op op, scalar_t sign,
-    matrix_layout output, const std::filesystem::path &cache_dir) {
-  const bool transpose = op == product_op::transpose_times ||
-                         op == product_op::right_transpose_times;
-  const bool swap = op == product_op::right_times ||
-                    op == product_op::right_transpose_times;
-  if (swap)
-    std::swap(lhs, rhs);
-  const size_t rows = transpose ? lhs.cols : lhs.rows;
-  const size_t cols = rhs.cols;
-  if (rows != output.rows || cols != output.cols)
-    throw std::invalid_argument("sparse product output shape mismatch");
-  const std::string source = emit_sparse_product_source(
-      lhs, rhs, transpose, false, sign, rows, &output);
-  auto function = reinterpret_cast<batch_product_kernel::function_type>(
-      compile_source(source, cache_dir));
-  return batch_product_kernel(lhs.panels.size() + rhs.panels.size() +
-                                  output.panels.size(),
-                              function);
-}
-
-batch_product_kernel compile_sparse_product(
-    const spmm_analysis &analysis, scalar_t sign,
-    const std::filesystem::path &cache_dir) {
-  const auto expected = analyze_spmm(analysis.lhs, analysis.rhs);
-  if (analysis.output_pattern != expected.output_pattern ||
-      analysis.output_layout != expected.output_layout ||
-      analysis.products != expected.products)
-    throw std::invalid_argument("inconsistent SpMM analysis");
-  const std::string source = emit_sparse_product_source(
-      analysis.lhs.layout, analysis.rhs.layout, analysis.lhs.transpose,
-      analysis.rhs.transpose, sign, analysis.output_layout.rows,
-      &analysis.output_layout);
-  auto function = reinterpret_cast<batch_product_kernel::function_type>(
-      compile_source(source, cache_dir));
-  return batch_product_kernel(analysis.lhs.layout.panels.size() +
-                                  analysis.rhs.layout.panels.size() +
-                                  analysis.output_layout.panels.size(),
-                              function);
-}
-
-batch_product_kernel compile_indexed_sparse_product(
-    matrix_layout lhs, matrix_layout rhs, product_op op, scalar_t sign,
-    matrix_layout output, size_t pointer_count,
-    std::span<const size_t> lhs_slots, std::span<const size_t> rhs_slots,
-    std::span<const size_t> output_slots,
-    const std::filesystem::path &cache_dir) {
-  if (lhs_slots.size() != lhs.panels.size() ||
-      rhs_slots.size() != rhs.panels.size() ||
-      output_slots.size() != output.panels.size())
-    throw std::invalid_argument("indexed sparse product slot mismatch");
-  const auto valid = [&](std::span<const size_t> slots) {
-    return std::ranges::all_of(slots,
-                               [&](size_t slot) { return slot < pointer_count; });
-  };
-  if (!valid(lhs_slots) || !valid(rhs_slots) || !valid(output_slots))
-    throw std::invalid_argument("indexed sparse product slot out of range");
-  const bool transpose = op == product_op::transpose_times ||
-                         op == product_op::right_transpose_times;
-  const bool swap = op == product_op::right_times ||
-                    op == product_op::right_transpose_times;
-  std::vector<size_t> left_slots(lhs_slots.begin(), lhs_slots.end());
-  std::vector<size_t> right_slots(rhs_slots.begin(), rhs_slots.end());
-  if (swap) {
-    std::swap(lhs, rhs);
-    std::swap(left_slots, right_slots);
-  }
-  const size_t rows = transpose ? lhs.cols : lhs.rows;
-  const size_t cols = rhs.cols;
-  if (rows != output.rows || cols != output.cols)
-    throw std::invalid_argument("indexed sparse product output shape mismatch");
-  const std::string source = emit_sparse_product_source(
-      lhs, rhs, transpose, false, sign, rows, &output, left_slots,
-      right_slots, output_slots);
-  auto function = reinterpret_cast<batch_product_kernel::function_type>(
-      compile_source(source, cache_dir));
-  return batch_product_kernel(pointer_count, function);
-}
-
-batch_product_kernel compile_indexed_sparse_product(
-    const spmm_analysis &analysis, scalar_t sign, size_t pointer_count,
-    std::span<const size_t> lhs_slots, std::span<const size_t> rhs_slots,
-    std::span<const size_t> output_slots,
-    const std::filesystem::path &cache_dir) {
-  const auto expected = analyze_spmm(analysis.lhs, analysis.rhs);
-  if (analysis.output_pattern != expected.output_pattern ||
-      analysis.output_layout != expected.output_layout ||
-      analysis.products != expected.products)
-    throw std::invalid_argument("inconsistent indexed SpMM analysis");
-  if (lhs_slots.size() != analysis.lhs.layout.panels.size() ||
-      rhs_slots.size() != analysis.rhs.layout.panels.size() ||
-      output_slots.size() != analysis.output_layout.panels.size())
-    throw std::invalid_argument("indexed analyzed SpMM slot mismatch");
-  const auto valid = [&](std::span<const size_t> slots) {
-    return std::ranges::all_of(slots,
-                               [&](size_t slot) { return slot < pointer_count; });
-  };
-  if (!valid(lhs_slots) || !valid(rhs_slots) || !valid(output_slots))
-    throw std::invalid_argument("indexed analyzed SpMM slot out of range");
-  const std::string source = emit_sparse_product_source(
-      analysis.lhs.layout, analysis.rhs.layout, analysis.lhs.transpose,
-      analysis.rhs.transpose, sign, analysis.output_layout.rows,
-      &analysis.output_layout, lhs_slots, rhs_slots, output_slots);
-  auto function = reinterpret_cast<batch_product_kernel::function_type>(
-      compile_source(source, cache_dir));
-  return batch_product_kernel(pointer_count, function);
-}
-
-batch_product_kernel compile_indexed_sparse_product_lazy(
-    matrix_layout lhs, matrix_layout rhs, product_op op, scalar_t sign,
-    matrix_layout output, size_t pointer_count,
-    std::span<const size_t> lhs_slots, std::span<const size_t> rhs_slots,
-    std::span<const size_t> output_slots,
-    panel_program_spec initialization,
-    const std::filesystem::path &cache_dir) {
-  if (lhs_slots.size() != lhs.panels.size() ||
-      rhs_slots.size() != rhs.panels.size() ||
-      output_slots.size() != output.panels.size())
-    throw std::invalid_argument("indexed lazy product slot mismatch");
-  const auto valid = [&](std::span<const size_t> slots) {
-    return std::ranges::all_of(slots,
-                               [&](size_t slot) { return slot < pointer_count; });
-  };
-  if (!valid(lhs_slots) || !valid(rhs_slots) || !valid(output_slots) ||
-      initialization.pointers != pointer_count)
-    throw std::invalid_argument("indexed lazy product slot out of range");
-  initialization = coalesce_panel_program(std::move(initialization));
-  const bool transpose = op == product_op::transpose_times ||
-                         op == product_op::right_transpose_times;
-  const bool swap = op == product_op::right_times ||
-                    op == product_op::right_transpose_times;
-  std::vector<size_t> left_slots(lhs_slots.begin(), lhs_slots.end());
-  std::vector<size_t> right_slots(rhs_slots.begin(), rhs_slots.end());
-  if (swap) {
-    std::swap(lhs, rhs);
-    std::swap(left_slots, right_slots);
-  }
-  const size_t rows = transpose ? lhs.cols : lhs.rows;
-  const size_t cols = rhs.cols;
-  if (rows != output.rows || cols != output.cols)
-    throw std::invalid_argument("indexed lazy product output shape mismatch");
-  const std::string source = emit_sparse_product_source(
-      lhs, rhs, transpose, false, sign, rows, &output, left_slots,
-      right_slots, output_slots, &initialization);
-  auto function = reinterpret_cast<batch_product_kernel::function_type>(
-      compile_source(source, cache_dir));
-  return batch_product_kernel(pointer_count, function);
-}
-
-void panel_program_spec::validate() const {
-  const auto validate_operand = [&](const panel_program_operand &operand,
-                                    bool optional) {
-    if (operand.pointer == panel_program_operand::invalid) {
-      if (!optional)
-        throw std::invalid_argument("missing panel-program operand");
-      return;
-    }
-    if (operand.pointer >= pointers)
-      throw std::invalid_argument("panel-program pointer is out of range");
-  };
-  for (const auto &instruction : instructions) {
-    if (!instruction.count) continue;
-    validate_operand(instruction.destination, false);
-    const bool fill = instruction.op == panel_program_op::fill;
-    validate_operand(instruction.lhs, fill);
-    const bool binary = instruction.op == panel_program_op::add ||
-                        instruction.op == panel_program_op::sub ||
-                        instruction.op == panel_program_op::mul ||
-                        instruction.op == panel_program_op::div;
-    validate_operand(instruction.rhs, !binary);
-  }
-}
-
-void panel_program_kernel::operator()(
-    std::span<scalar_t *> pointers) const {
-  if (!function_ || pointers.size() < pointers_)
-    throw std::invalid_argument("invalid panel-program invocation");
-  function_(pointers.data());
-}
-
-panel_program_kernel compile_panel_program(
-    panel_program_spec spec, const std::filesystem::path &cache_dir) {
-  spec = coalesce_panel_program(std::move(spec));
-  std::ostringstream source;
-  source << "#include <cstddef>\n"
-         << "extern \"C\" void " << symbol_name
-         << "(double* const* p) {\n";
-  emit_panel_program_body(source, spec);
-  source << "}\n";
-  auto function = reinterpret_cast<panel_program_kernel::function_type>(
-      compile_source(source.str(), cache_dir));
-  return panel_program_kernel(spec.pointers, function);
-}
 
 void run_sparse_product(const sparse_matrix &sparse, const sparse_matrix &other,
                         product_op op, scalar_t sign, scalar_t *out,
@@ -2837,8 +2239,7 @@ void run_sparse_product(const sparse_matrix &sparse, const sparse_matrix &other,
     sparse.jit_cache_ = std::make_shared<matrix_cache>();
   auto &cache = *sparse.jit_cache_;
   const auto matches = [&](const auto &entry) {
-    return entry.other == &other && entry.output == nullptr &&
-           entry.op == op && entry.sign == sign &&
+    return entry.other == &other && entry.op == op && entry.sign == sign &&
            entry.out_rows == out_rows && entry.out_cols == out_cols;
   };
   if (auto found = std::ranges::find_if(cache.sparse_products, matches);
@@ -2860,74 +2261,14 @@ void run_sparse_product(const sparse_matrix &sparse, const sparse_matrix &other,
   auto rhs_pointers = panel_pointers(swap ? sparse : other);
   pointers.insert(pointers.end(), rhs_pointers.begin(), rhs_pointers.end());
   pointers.push_back(out);
-  const bool at = swap ? lhs_t : lhs_t;
-  const bool bt = false;
-  const auto source = emit_sparse_product_source(a, b, at, bt, sign, out_rows);
+  const auto source = emit_sparse_product_source(a, b, lhs_t, sign, out_rows);
   auto function = reinterpret_cast<batch_product_kernel::function_type>(
       compile_source(source, "gen/linear_backend"));
   batch_product_kernel kernel(pointers.size(), function);
   if (out)
     kernel(pointers);
-  cache.sparse_products.push_back({&other, nullptr, op, sign, out_rows, out_cols,
+  cache.sparse_products.push_back({&other, op, sign, out_rows, out_cols,
                                    std::move(kernel), std::move(pointers)});
-}
-
-void run_sparse_product(const sparse_matrix &sparse,
-                        const sparse_matrix &other, product_op op,
-                        scalar_t sign, sparse_matrix &out) {
-  if (sparse.is_empty() || other.is_empty() || out.is_empty()) {
-    out.setZero();
-    return;
-  }
-  if (!sparse.jit_cache_)
-    sparse.jit_cache_ = std::make_shared<matrix_cache>();
-  auto &cache = *sparse.jit_cache_;
-  const auto matches = [&](const auto &entry) {
-    return entry.other == &other && entry.output == &out && entry.op == op &&
-           entry.sign == sign && entry.out_rows == out.rows() &&
-           entry.out_cols == out.cols();
-  };
-  if (auto found = std::ranges::find_if(cache.sparse_products, matches);
-      found != cache.sparse_products.end()) {
-    found->kernel(found->pointers);
-    return;
-  }
-  std::lock_guard lock(cache.mutex);
-  if (auto found = std::ranges::find_if(cache.sparse_products, matches);
-      found != cache.sparse_products.end()) {
-    found->kernel(found->pointers);
-    return;
-  }
-
-  const bool transpose = op == product_op::transpose_times ||
-                         op == product_op::right_transpose_times;
-  const bool swap = op == product_op::right_times ||
-                    op == product_op::right_transpose_times;
-  const sparse_matrix &lhs_matrix = swap ? other : sparse;
-  const sparse_matrix &rhs_matrix = swap ? sparse : other;
-  const auto lhs = describe(lhs_matrix);
-  const auto rhs = describe(rhs_matrix);
-  const auto output = describe(out);
-  const size_t product_rows = transpose ? lhs.cols : lhs.rows;
-  const size_t product_cols = rhs.cols;
-  if (product_rows != out.rows() || product_cols != out.cols())
-    throw std::invalid_argument("sparse product output shape mismatch");
-
-  auto pointers = panel_pointers(lhs_matrix);
-  auto rhs_pointers = panel_pointers(rhs_matrix);
-  auto output_pointers = panel_pointers(out);
-  pointers.insert(pointers.end(), rhs_pointers.begin(), rhs_pointers.end());
-  pointers.insert(pointers.end(), output_pointers.begin(),
-                  output_pointers.end());
-  const auto source = emit_sparse_product_source(
-      lhs, rhs, transpose, false, sign, out.rows(), &output);
-  auto function = reinterpret_cast<batch_product_kernel::function_type>(
-      compile_source(source, "gen/linear_backend"));
-  batch_product_kernel kernel(pointers.size(), function);
-  kernel(pointers);
-  cache.sparse_products.push_back({&other, &out, op, sign, out.rows(),
-                                   out.cols(), std::move(kernel),
-                                   std::move(pointers)});
 }
 
 void prepare_sparse_product(const sparse_matrix &sparse,
@@ -2938,27 +2279,17 @@ void prepare_sparse_product(const sparse_matrix &sparse,
   run_sparse_product(sparse, other, op, sign, nullptr, out_rows, out_cols);
 }
 
-void prepare_sparse_product(const sparse_matrix &sparse,
-                            const sparse_matrix &other, product_op op,
-                            scalar_t sign, sparse_matrix &out) {
-  if (sparse.is_empty() || other.is_empty() || out.is_empty())
-    return;
-  // Compiling executes once because the sparse-output kernel also performs
-  // deterministic zeroing. Graph construction calls this only after all
-  // source panels have valid storage.
-  run_sparse_product(sparse, other, op, sign, out);
-}
-
 void run_dense_write(const sparse_matrix &sparse, scalar_t *out,
                      size_t out_rows, scalar_t alpha, bool overwrite) {
   if (!sparse.jit_cache_)
     sparse.jit_cache_ = std::make_shared<matrix_cache>();
   auto &cache = *sparse.jit_cache_;
-  const simple_key key{simple_key::kind::dense_write, out_rows, alpha,
-                       overwrite};
-  if (auto found =
-          std::ranges::find(cache.simple, key, &cached_simple_kernel::key);
-      found != cache.simple.end()) {
+  const auto matches = [&](const cached_dense_write &entry) {
+    return entry.out_rows == out_rows && entry.alpha == alpha &&
+           entry.overwrite == overwrite;
+  };
+  if (auto found = std::ranges::find_if(cache.dense_writes, matches);
+      found != cache.dense_writes.end()) {
     if (out) {
       found->pointers.back() = out;
       found->kernel(found->pointers);
@@ -3041,7 +2372,8 @@ void run_dense_write(const sparse_matrix &sparse, scalar_t *out,
   batch_product_kernel kernel(pointers.size(), function);
   if (out)
     kernel(pointers);
-  cache.simple.push_back({key, std::move(kernel), std::move(pointers)});
+  cache.dense_writes.push_back(
+      {out_rows, alpha, overwrite, std::move(kernel), std::move(pointers)});
 }
 
 void prepare_dense_write(const sparse_matrix &sparse, size_t out_rows,
@@ -3049,62 +2381,6 @@ void prepare_dense_write(const sparse_matrix &sparse, size_t out_rows,
   if (sparse.is_empty() || !out_rows)
     return;
   run_dense_write(sparse, nullptr, out_rows, alpha, overwrite);
-}
-
-void run_weighted_gram(const sparse_matrix &sparse, const scalar_t *middle,
-                       scalar_t *out) {
-  if (!sparse.jit_cache_)
-    sparse.jit_cache_ = std::make_shared<matrix_cache>();
-  auto &cache = *sparse.jit_cache_;
-  const simple_key key{simple_key::kind::weighted_gram};
-  if (auto found =
-          std::ranges::find(cache.simple, key, &cached_simple_kernel::key);
-      found != cache.simple.end()) {
-    if (out) {
-      found->pointers[found->pointers.size() - 2] =
-          const_cast<scalar_t *>(middle);
-      found->pointers.back() = out;
-      found->kernel(found->pointers);
-    }
-    return;
-  }
-  std::lock_guard lock(cache.mutex);
-  const auto layout = describe(sparse);
-  auto pointers = panel_pointers(sparse);
-  pointers.push_back(const_cast<scalar_t *>(middle));
-  pointers.push_back(out);
-  product_spec left{.sparse = layout,
-                    .op = product_op::right_times,
-                    .other_rows = sparse.rows_,
-                    .other_cols = sparse.rows_,
-                    .out_rows = sparse.rows_,
-                    .out_cols = sparse.cols_};
-  product_spec right{.sparse = layout,
-                     .op = product_op::transpose_times,
-                     .other_rows = sparse.rows_,
-                     .other_cols = sparse.cols_,
-                     .out_rows = sparse.cols_,
-                     .out_cols = sparse.cols_};
-  std::ostringstream source;
-  source << emit_product_function(left, "moto_linear_jit_left", false)
-         << emit_product_function(right, "moto_linear_jit_right", false)
-         << "extern \"C\" __attribute__((visibility(\"default\"))) void "
-         << symbol_name << "(double *const *p) { alignas(64) double tmp["
-         << sparse.rows_ * sparse.cols_ << "]={}; moto_linear_jit_left(p,p["
-         << layout.panels.size() << "],tmp); moto_linear_jit_right(p,tmp,p["
-         << layout.panels.size() + 1 << "]); }\n";
-  auto function = reinterpret_cast<batch_product_kernel::function_type>(
-      compile_source(source.str(), "gen/linear_backend"));
-  batch_product_kernel kernel(pointers.size(), function);
-  if (out)
-    kernel(pointers);
-  cache.simple.push_back({key, std::move(kernel), std::move(pointers)});
-}
-
-void prepare_weighted_gram(const sparse_matrix &sparse) {
-  if (sparse.is_empty())
-    return;
-  run_weighted_gram(sparse, nullptr, nullptr);
 }
 
 void condensation_spec::validate() const {
@@ -3125,23 +2401,6 @@ void condensation_spec::validate() const {
 
 size_t condensation_spec::argument_count() const {
   return jacobians.empty() ? jac_cols.size() : jacobians.size();
-}
-
-panel_layout condensation_hessian_layout(const panel_layout &lhs,
-                                         const panel_layout &rhs) {
-  const bool ls = lhs.pattern != sparsity::dense;
-  const bool rs = rhs.pattern != sparsity::dense;
-  const size_t row = std::max(lhs.row_offset, rhs.row_offset);
-  const size_t end =
-      std::min(lhs.row_offset + lhs.rows, rhs.row_offset + rhs.rows);
-  if (lhs.pattern == sparsity::unknown || rhs.pattern == sparsity::unknown ||
-      end <= row)
-    return {sparsity::unknown, 0, 0, 0, 0};
-  const size_t n = end - row;
-  return {ls && rs ? sparsity::diag : sparsity::dense,
-          lhs.col_offset + (ls ? row - lhs.row_offset : 0),
-          rhs.col_offset + (rs ? row - rhs.row_offset : 0), ls ? n : lhs.cols,
-          rs ? n : rhs.cols};
 }
 
 std::string
@@ -3228,54 +2487,9 @@ batch_product_kernel compile_batch_jacobian_product(
   return jacobian_product_kernels.emplace(key, kernel).first->second;
 }
 
-size_t condensation_kernel::jacobian_slot(size_t arg) const {
-  if (arg >= spec_.argument_count())
-    throw std::out_of_range("JIT condensation Jacobian argument index");
-  return arg;
-}
-
-size_t condensation_kernel::residual_slot(size_t side) const {
-  if (side >= spec_.residual_signs.size())
-    throw std::out_of_range("JIT condensation residual side index");
-  return spec_.argument_count() + side;
-}
-
-size_t condensation_kernel::weight_slot(size_t side) const {
-  if (side >= spec_.residual_signs.size())
-    throw std::out_of_range("JIT condensation weight side index");
-  return spec_.argument_count() + spec_.residual_signs.size() + side;
-}
-
-size_t condensation_kernel::gradient_slot(size_t arg) const {
-  if (arg >= spec_.argument_count())
-    throw std::out_of_range("JIT condensation gradient argument index");
-  return spec_.argument_count() + 2 * spec_.residual_signs.size() + arg;
-}
-
-size_t condensation_kernel::hessian_slot(size_t lhs, size_t rhs) const {
-  const size_t n = spec_.argument_count();
-  if (lhs >= n || rhs >= n)
-    throw std::out_of_range("JIT condensation Hessian argument index");
-  const auto pairs = condensation_pairs(spec_);
-  const auto found = std::ranges::find(pairs, std::pair(lhs, rhs));
-  if (found == pairs.end())
-    throw std::out_of_range("inactive JIT condensation Hessian block");
-  return 2 * n + 2 * spec_.residual_signs.size() +
-         std::distance(pairs.begin(), found);
-}
-
-size_t condensation_kernel::pointer_count() const {
-  const size_t n = spec_.argument_count();
-  return 2 * n + 2 * spec_.residual_signs.size() +
-         condensation_pairs(spec_).size();
-}
-
-void condensation_kernel::operator()(std::span<scalar_t *> pointers) const {
-  if (!function_)
-    throw std::runtime_error("empty JIT condensation kernel");
-  if (pointers.size() != pointer_count())
-    throw std::invalid_argument("JIT condensation pointer table size mismatch");
-  function_(pointers.data());
+size_t condensation_spec::pointer_count() const {
+  return 2 * argument_count() + 2 * residual_signs.size() +
+         condensation_pairs(*this).size();
 }
 
 std::string emit_condensation_function(const condensation_spec &spec,
@@ -3395,20 +2609,6 @@ std::string emit_condensation_function(const condensation_spec &spec,
   return s.str();
 }
 
-std::string emit_condensation_source(const condensation_spec &spec) {
-  return emit_condensation_function(spec, symbol_name, true);
-}
-
-condensation_kernel
-compile_condensation(condensation_spec spec,
-                     const std::filesystem::path &cache_dir) {
-  const std::string source = emit_condensation_source(spec);
-  const std::string key = utils::compute_md5_from_bytes(source);
-  auto function = reinterpret_cast<condensation_kernel::function_type>(
-      compile_source(source, cache_dir));
-  return condensation_kernel(std::move(spec), function, key);
-}
-
 batch_condensation_kernel
 compile_batch_condensation(batch_condensation_spec spec,
                            const std::filesystem::path &cache_dir) {
@@ -3441,8 +2641,7 @@ compile_batch_condensation(batch_condensation_spec spec,
   for (size_t i = 0; i < spec.constraints.size(); ++i) {
     spec.constraints[i].validate();
     offsets.push_back(offset);
-    condensation_kernel layout(spec.constraints[i], nullptr, {});
-    offset += layout.pointer_count();
+    offset += spec.constraints[i].pointer_count();
     source << emit_condensation_function(
         spec.constraints[i], "moto_linear_jit_cond_" + std::to_string(i),
         false);

@@ -13,9 +13,8 @@ void register_submodule_ns_sqp(nb::module_ &m) {
     nb::class_<ns_sqp> sqp(m, "ns_sqp_impl");
     nb::bind_vector<std::vector<stage_ocp_ptr_t>>(sqp, "stage_list");
     sqp.def(nb::init<size_t>(), "Constructor for the SQP solver with a specified number of jobs")
-        .def_prop_ro("start_node", [](ns_sqp &self) { return self.start_node(); }, "Initial graph node")
         .def_prop_ro("st", [](ns_sqp &self) { return self.st(); }, "Initial graph boundary")
-        .def_prop_ro("ed", [](ns_sqp &self) { return self.ed(); }, "Current graph end boundary")
+        .def_prop_ro("ed", [](ns_sqp &self) { return self.ed(); }, "Graph terminal boundary")
         .def_prop_ro(
             "stages",
             [](ns_sqp &self) -> auto & { return self.stages(); },

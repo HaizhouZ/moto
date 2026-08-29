@@ -190,7 +190,6 @@ void semi_implicit_euler::prepare_dynamics_codegen() {
   jac_panels_.clear();
   projected_panels_.clear();
   inverse_panels_.clear();
-  projected_profiles_.clear();
   task->jac_outputs.clear();
   const auto jacobian_for = [&](const sym &arg) {
     if (auto it = std::ranges::find_if(task->ext_jac, [&](const auto &entry) {
@@ -226,15 +225,11 @@ void semi_implicit_euler::prepare_dynamics_codegen() {
       continue;
     cs::SX jac = cs::SX::sparsify(jacobian_for(arg));
     cs::SX projected = cs::SX::mtimes(inverse, jac);
-    projected_profiles_.push_back(
-        linear_backend::analyze_sparsity(projected.sparsity()));
     if (std::getenv("MOTO_DEBUG_DYNAMICS_PROFILE")) {
-      const auto &profile = projected_profiles_.back();
-      fmt::println("{} P*F_{}: {}x{}, nnz={}/{}, blocks={}", name(),
-                   arg.name(), profile.rows, profile.cols, profile.nnz(),
-                   profile.rows * profile.cols,
-                   profile.row_blocks.empty() ? 0
-                                              : profile.row_blocks.size() - 1);
+      const auto profile = projected.sparsity();
+      fmt::println("{} P*F_{}: {}x{}, nnz={}/{}", name(),
+                   arg.name(), profile.size1(), profile.size2(), profile.nnz(),
+                   profile.numel());
     }
     for (auto &[block, value] : split_panels(projected)) {
       projected_panels_.push_back({i, block});

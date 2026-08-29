@@ -287,10 +287,6 @@ class node_view {
         }
     }
 
-    stage_ocp_ptr_t stage() const { return owner_; }
-    stage_expr_role role() const { return role_; }
-    explicit operator bool() const { return bool(owner_); }
-
   private:
     stage_ocp_ptr_t owner_;
     stage_expr_role role_ = stage_expr_role::start_node;

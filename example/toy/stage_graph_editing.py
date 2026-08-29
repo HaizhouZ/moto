@@ -23,11 +23,27 @@ def make_stage(cost):
 
 
 def main():
+    assert not hasattr(moto, "stage_ocp")
+    assert not hasattr(moto, "endpoint")
+    assert not hasattr(moto, "active_status_config")
+    assert moto.stage.__name__ == "stage"
+
     sqp = moto.sqp(n_job=1)
+    assert not hasattr(sqp, "start_node")
     stage = make_stage(base_cost)
+
+    variant = stage.copy(disable=[base_cost])
+    assert not variant.is_active(base_cost)
+    variant.enable(base_cost)
+    assert variant.is_active(base_cost)
+    variant.disable([base_cost])
+    assert not variant.is_active(base_cost)
+    variant.enable([base_cost])
+    assert variant.is_active(base_cost)
+
     sqp.stages.extend([stage.copy() for _ in range(5)])
     stages = sqp.stages
-    graph_end = sqp.ed
+    sqp.ed.add(moto.cost.from_scalar("stage_edit_terminal_cost", x))
 
     # 1. Edit a graph-owned stage directly through its retained pointer.
     stages[1].add(changed_cost)
@@ -46,7 +62,6 @@ def main():
     del sqp.stages[0]
     sqp.stages.append(make_stage(tail_cost).copy())
     assert all(actual is expected for actual, expected in zip(sqp.stages[:-1], retained))
-    assert sqp.ed.stage is graph_end.stage
     assert len(sqp.nodes) == 4
 
     print("native stage-list editing passed")

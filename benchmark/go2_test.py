@@ -201,7 +201,7 @@ class pinCasadiModel(cpin.Model):
         c = moto.constr.create(f"fric_{self.foot_frames[i]}", cone).cast_ineq()
         return c
 
-    def add_dt_constr_and_cost(self, prob: moto.stage_ocp, dt_nom: moto.var):
+    def add_dt_constr_and_cost(self, prob, dt_nom: moto.var):
         if isinstance(self.dt, cs.SX):
             dt_bound = moto.sym.params(
                 "dt_bound", 2, default_val=np.array([1e-4, 5e-2])
@@ -284,7 +284,7 @@ model = pinCasadiModel(
 model.joint_limit_constr = model.make_joint_limit_constr()
 model.state_cost = model.get_state_cost()
 
-prob = moto.stage_ocp.create()
+prob = moto.stage()
 prob.add(model.dyn)
 if benchmark.args.full:
     prob.add(model.fric)
@@ -335,9 +335,7 @@ for gait, (idx_cfg, cfg) in tqdm(
             else:
                 if gait_setting[gait][idx]:
                     constr_to_disable += [model.f_f[f]]
-        phase_prob = prob.clone(
-            moto.active_status_config(deactivate_list=constr_to_disable)
-        )
+        phase_prob = prob.copy(disable=constr_to_disable)
         return phase_prob
 
     phase_lengths = [stance_length]
@@ -346,7 +344,7 @@ for gait, (idx_cfg, cfg) in tqdm(
 
     phase_prototypes = [prob]
     phase_prototypes.extend(create_phase_problem(step) for step in range(1, steps + 1))
-    phase_prototypes.append(prob.clone())
+    phase_prototypes.append(prob.copy())
     graph_stages = []
     for prototype, n_edges in zip(phase_prototypes, phase_lengths):
         phase = [prototype.copy() for _ in range(n_edges)]

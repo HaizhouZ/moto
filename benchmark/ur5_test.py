@@ -192,7 +192,7 @@ model = pinCasadiModel(model, dt=dt, q_nom=q_d, dense=True, use_fwd_dyn=True)
 joint_limit_constr = model.make_joint_limit_constr()
 state_cost = model.get_state_cost()
 
-prob = moto.stage_ocp.create()
+prob = moto.stage()
 prob.add(model.dyn)
 prob.add(model.make_tq_limit_constr())
 prob.st.add(joint_limit_constr)

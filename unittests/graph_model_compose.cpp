@@ -196,7 +196,7 @@ TEST_CASE("graph start terms are explicit while stage starts lower through incom
     stage->st().add(*layout_cost("cost_stage_start_graph_start_rule", var_list{x}));
 
     ns_sqp sqp;
-    sqp.start_node().add(*layout_cost("cost_graph_start_rule", var_list{x}));
+    sqp.st().add(*layout_cost("cost_graph_start_rule", var_list{x}));
     for (size_t i = 0; i < 2; ++i)
         sqp.stages().push_back(stage->copy());
 
@@ -427,8 +427,6 @@ TEST_CASE("expression and endpoint handles have explicit identity semantics",
         auto stage = stage_ocp::create();
         endpoint = stage->ed();
     }
-    REQUIRE(bool(endpoint));
-    REQUIRE(endpoint.stage() != nullptr);
     REQUIRE_NOTHROW(endpoint.add(*layout_cost(
         "endpoint_owned_handle_cost", var_list{x})));
 }
@@ -449,9 +447,6 @@ TEST_CASE("sqp stages is the graph-owned stage vector", "[graph][path]") {
     sqp.stages().push_back(stage_b->copy());
     sqp.stages().push_back(stage_b->copy());
     REQUIRE(sqp.stages().size() == 3);
-    REQUIRE(sqp.st().stage() == sqp.start_node().stage());
-    REQUIRE(sqp.ed().stage() != sqp.stages().back());
-
     auto &flat = sqp.solver_nodes();
     REQUIRE(flat.size() == 3);
     REQUIRE(contains_name_prefix(expr_names(flat.front()->problem(), __cost), "cost_u_append_a"));
@@ -700,7 +695,6 @@ TEST_CASE("native stage vector supports replacement and horizon shift", "[graph]
     REQUIRE(after_shift[1]->sym_val().value_[__x](0) == 7.0);
     REQUIRE(contains_name_prefix(expr_names(after_shift.back()->problem(), __cost), "cost_x_replace_c"));
     REQUIRE(contains_name_prefix(expr_names(after_shift.back()->problem(), __cost), "cost_replace_stages_terminal"));
-    REQUIRE(sqp.ed().stage() == graph_end.stage());
 }
 
 TEST_CASE("set_stages rejects aliased stage entries", "[graph][validation]") {
@@ -910,7 +904,7 @@ TEST_CASE("optimized initial state uses an internal virtual stage without exposi
         stage->add(*callback_quadratic_cost("cost_initial_state_input", u));
         for (size_t i = 0; i < n_stages; ++i)
             sqp.stages().push_back(stage->copy());
-        sqp.start_node().add(*callback_quadratic_cost("cost_initial_state_target", x, target));
+        sqp.st().add(*callback_quadratic_cost("cost_initial_state_target", x, target));
         sqp.settings.restoration.enabled = false;
         sqp.settings.prim_tol = 1e-8;
         sqp.settings.dual_tol = 1e-8;

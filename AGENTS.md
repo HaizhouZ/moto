@@ -182,7 +182,7 @@ Placement rules:
   path-state terms evaluated on the interval's current `x`
 - `stage.st.add(...)`: state-only term on the phase start boundary
 - `stage.ed.add(...)`: state-only term on the phase end boundary
-- `sqp.start_node.add(...)`: state-only term on the graph's initial state
+- `sqp.st.add(...)`: state-only term on the graph's initial state
 - `sqp.ed.add(...)`: state-only term on the stable graph terminal boundary
 
 Endpoint views reject terms involving `u`, authored `y`, or dynamics. Users

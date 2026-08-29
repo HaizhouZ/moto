@@ -12,7 +12,8 @@ the graph-owned stages consumed by composition.
    graph-owned `std::vector` exposed in Python by nanobind's standard vector
    binding.
 3. `sqp.st`, `sqp.ed`, and `sqp.stages` expose the graph boundaries and the
-   ordinary ordered stage container independently.
+   ordinary ordered stage container independently. There is no second name for
+   either graph boundary.
 4. The graph derives each interval's incoming and outgoing boundaries directly
    from neighboring entries in `sqp.stages`; it does not maintain a second
    interval-topology representation.
@@ -23,8 +24,7 @@ the graph-owned stages consumed by composition.
 - Ordinary path dynamics, input terms, mixed terms, and path-state terms belong
   to the interval through `stage.add(...)` and are evaluated on its current
   state.
-- Terms that exist only at the initial graph boundary belong to
-  `sqp.start_node`.
+- Terms that exist only at the initial graph boundary belong to `sqp.st`.
 - Terms that exist only at a stage or phase start boundary belong to
   `stage.st`.
 - Terms that exist only at a stage or phase end boundary belong to `stage.ed`.
@@ -71,6 +71,13 @@ create a terminal expression.
   editing one copy first gives that copy a new identity.
 - `sqp.nodes` exposes composed runtime data and is not a modeling-stage
   accessor.
+- `moto.stage()` is the public stage factory. The implementation types backing
+  stages and endpoints are not top-level package APIs, and endpoint handles do
+  not expose their retained owner.
+- `stage.copy(disable=..., enable=...)` creates a phase variant in one step.
+  `stage.disable(...)` and `stage.enable(...)` update an existing authored or
+  graph-owned stage. The internal active-status configuration object is not a
+  user API.
 
 ## Composition, Lowering, And Active Status
 

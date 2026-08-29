@@ -62,6 +62,7 @@ target_link_libraries(semi_implicit_euler_test PRIVATE moto_multibody)
 add_moto_python_test(restoration_demo example/toy/restoration.py)
 add_moto_python_test(modeling_shortcuts_demo example/toy/box_api_demo.py)
 add_moto_python_test(initial_state_optimization_demo example/toy/initial_state_optimization.py)
+add_moto_python_test(stage_graph_editing_demo example/toy/stage_graph_editing.py)
 add_moto_python_test(lifted_input_demo example/toy/lifted_input.py)
 add_moto_python_test(lifted_sparse_elimination_graph
                      example/toy/lifted_sparse_elimination.py)

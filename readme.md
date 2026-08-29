@@ -132,10 +132,12 @@ u_trajectory = [np.asarray(node.value[u]).reshape(-1) for node in nodes]
 print(result.num_iter, result.inf_prim_res, result.inf_dual_res)
 ```
 
-Use `sqp.start_node.add(...)` for initial-state terms, `stage.st.add(...)` for
+Use `sqp.st.add(...)` for initial-state terms, `stage.st.add(...)` for
 phase-start state terms, and `stage.ed.add(...)` for phase-end or terminal
 state terms. Interval dynamics, controls, and mixed terms belong on
-`stage.add(...)`.
+`stage.add(...)`. Build a phase variant with
+`stage.copy(disable=[...], enable=[...])`; edit an existing authored or
+graph-owned stage with `stage.disable(...)` and `stage.enable(...)`.
 
 Costs support explicit scalar- and vector-valued construction through
 `cost.from_scalar(...)` and `cost.from_vector(...)`. Inequality boxes use

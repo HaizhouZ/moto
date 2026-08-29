@@ -34,7 +34,7 @@ def solve(mode, *, optimize):
     stage.add(dynamics)
     stage.add(control_cost)
     sqp.stages.extend([stage.copy() for _ in range(N)])
-    sqp.start_node.add(initial_cost)
+    sqp.st.add(initial_cost)
 
     sqp.settings.initial_state = mode
     sqp.settings.restoration.enabled = False

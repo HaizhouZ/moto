@@ -426,11 +426,6 @@ TEST_CASE("semi-implicit projections match dense dynamics") {
                                           dense_out);
   REQUIRE(semi_out.isApprox(dense_out, 1e-12));
 
-  const auto &profiles =
-      static_cast<const semi_implicit_euler &>(*f.semi).projected_profiles();
-  REQUIRE(profiles.size() == 3);
-  REQUIRE(profiles[0].rows == 12);
-  REQUIRE(profiles[0].nnz() < profiles[0].rows * profiles[0].cols);
   const auto stored_nnz = [](const sparse_matrix &value) {
     size_t count = 0;
     for (const auto &panel : value.dense_panels_)
@@ -446,9 +441,8 @@ TEST_CASE("semi-implicit projections match dense dynamics") {
       count += panel.rows_;
     return count;
   };
-  REQUIRE(stored_nnz(f.semi_data->dense().proj_f_x()) ==
-          profiles[0].nnz() + profiles[1].nnz());
-  REQUIRE(stored_nnz(f.semi_data->dense().proj_f_u()) == profiles[2].nnz());
+  REQUIRE(stored_nnz(f.semi_data->dense().proj_f_x()) < 12 * 24);
+  REQUIRE(stored_nnz(f.semi_data->dense().proj_f_u()) < 12 * 12);
   for (const auto *projected : {&f.semi_data->dense().proj_f_x(),
                                 &f.semi_data->dense().proj_f_u()}) {
     if (!projected->diagonal_segments_.empty()) {
@@ -485,12 +479,6 @@ TEST_CASE("semi-implicit projections match dense dynamics") {
     const double dense_ns = measure(*f.dense_data, f.dense);
     fmt::println("semi_implicit={} ns dense_fallback={} ns speedup={}x",
                  semi_ns, dense_ns, dense_ns / semi_ns);
-    for (size_t i = 0; i < profiles.size(); ++i)
-      fmt::println("PF[{}]: {}x{}, nnz={}, blocks={}", i,
-                   profiles[i].rows, profiles[i].cols, profiles[i].nnz(),
-                   profiles[i].row_blocks.empty()
-                       ? 0
-                       : profiles[i].row_blocks.size() - 1);
   }
 }
 

@@ -8,10 +8,11 @@ program without retaining a second runtime evaluator.
 ## Workflow
 
 1. `compile_graph` batches independent solve and product consumers.
-2. The internal linear-algebra optimizer may replace multiplication and
-   transpose subgraphs only with algebraically equivalent expressions selected
-   from the same exact sparsity and panel-layout analysis.
-3. The translator imports the optimized MX graph into its internal operation
+2. CasADi CSE preserves shared algebraic branches. The translator may combine
+   adjacent products, solves, copies, and materializations while lowering, but
+   there is no separate e-graph or symbolic cost-model layer in the production
+   path.
+3. The translator imports the MX graph into its internal operation
    representation, establishes aliases, materializations, persistent factor
    slots, entry schedules, and workspace ownership.
 4. Before source emission, alias-compatible views remain views and contiguous
@@ -29,9 +30,8 @@ program without retaining a second runtime evaluator.
 1. One finalized artifact identity produces one immutable lowered plan and one
    generated dispatcher artifact. A supplied identity covers the complete MX
    graph, including factorization metadata, so repeated cache lookup does not
-   reserialize that graph. A legacy named cache may serialize once to recover
-   its old key; successful recovery publishes the same plan under the stable
-   key used by later processes.
+   reserialize that graph. Generated-helper ABI changes bump the plan identity;
+   incompatible legacy plans are never loaded.
 2. Equivalent stage instances share that plan and dispatcher. They allocate
    only their mutable workspace and factor state.
 3. Generated dispatchers call precompiled numerical helpers. Their compilation
@@ -49,8 +49,8 @@ program without retaining a second runtime evaluator.
 ## Ownership
 
 - CasADi owns symbolic DAG identity and symbolic sparsity metadata.
-- The linear backend owns panel layout analysis, algebraic extraction,
-  generated source, factor state, and runtime execution.
+- The linear backend owns panel layout analysis, lowering, generated source,
+  factor state, and runtime execution.
 - The caller owns input and output panel storage.
 - A graph instance owns or borrows its persistent sparse workspace.
 

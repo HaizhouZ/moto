@@ -114,79 +114,13 @@ cs::MX symbolic_block(std::string name, size_t rows, size_t cols,
     return input;
 }
 
-std::vector<sparse_block_spec> blocks_from_sparsity(
-    const casadi::Sparsity &sp) {
-    const size_t rows = static_cast<size_t>(sp.size1());
-    const size_t cols = static_cast<size_t>(sp.size2());
-    const size_t nnz = static_cast<size_t>(sp.nnz());
-    if (!nnz) return {};
-    if (nnz == rows * cols)
-        return {{0, 0, rows, cols, sparsity::dense}};
-
-    std::vector<casadi_int> triplet_rows, triplet_cols;
-    sp.get_triplet(triplet_rows, triplet_cols);
-    std::vector<std::vector<size_t>> by_row(rows);
-    for (size_t i = 0; i < triplet_rows.size(); ++i)
-        by_row.at(static_cast<size_t>(triplet_rows[i])).push_back(
-            static_cast<size_t>(triplet_cols[i]));
-    for (auto &entries : by_row)
-        std::ranges::sort(entries);
-
-    const bool singleton_rows = std::ranges::all_of(
-        by_row, [](const auto &entries) { return entries.size() <= 1; });
-    std::vector<sparse_block_spec> result;
-    if (singleton_rows) {
-        size_t r = 0;
-        while (r < rows) {
-            if (by_row[r].empty()) {
-                ++r;
-                continue;
-            }
-            const size_t start_row = r;
-            const size_t start_col = by_row[r][0];
-            while (r + 1 < rows && by_row[r + 1].size() == 1 &&
-                   by_row[r + 1][0] == start_col + (r + 1 - start_row))
-                ++r;
-            const size_t length = r - start_row + 1;
-            result.push_back({start_row, start_col, length, length,
-                              sparsity::diag});
-            ++r;
-        }
-        return result;
-    }
-
-    struct active_rectangle {
-        size_t index;
-        size_t last_row;
-    };
-    std::map<std::pair<size_t, size_t>, active_rectangle> active;
-    for (size_t r = 0; r < rows; ++r) {
-        std::map<std::pair<size_t, size_t>, active_rectangle> next;
-        const auto &entries = by_row[r];
-        for (size_t i = 0; i < entries.size();) {
-            const size_t begin = entries[i];
-            size_t end = begin + 1;
-            while (++i < entries.size() && entries[i] == end) ++end;
-            const auto key = std::pair{begin, end};
-            if (auto it = active.find(key);
-                it != active.end() && it->second.last_row + 1 == r) {
-                auto &block = result[it->second.index];
-                ++block.rows;
-                next.emplace(key, active_rectangle{it->second.index, r});
-            } else {
-                result.push_back(
-                    {r, begin, 1, end - begin, sparsity::dense});
-                next.emplace(key,
-                             active_rectangle{result.size() - 1, r});
-            }
-        }
-        active = std::move(next);
-    }
-    return result;
-}
-
 sparse_layout_plan layout_from_sparsity(const casadi::Sparsity &sp) {
-    auto blocks = blocks_from_sparsity(sp);
+    const auto layout = linear_backend::describe(sp);
+    std::vector<sparse_block_spec> blocks;
+    blocks.reserve(layout.panels.size());
+    for (const auto &panel : layout.panels)
+        blocks.push_back({panel.row_offset, panel.col_offset, panel.rows,
+                          panel.cols, panel.pattern});
     return make_sparse_layout_plan(blocks);
 }
 

@@ -16,8 +16,7 @@ class graph_model {
   public:
     graph_model();
 
-    node_view start_node() const;
-    node_view st() const { return start_node(); }
+    node_view st() const;
     node_view ed() const;
     std::vector<stage_ocp_ptr_t> &stages() { return stages_; }
     const std::vector<stage_ocp_ptr_t> &stages() const { return stages_; }

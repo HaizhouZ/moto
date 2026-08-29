@@ -98,7 +98,7 @@ def _phase_stage(stage, model, step):
         for foot in feet:
             disabled.append(model.contacts.kinematic_constraints[foot])
             disabled.append(model.contacts.friction_constraints[foot])
-    phase = stage.with_status(moto.active_status_config(deactivate_list=disabled))
+    phase = stage.copy(disable=disabled)
     if not model.acceleration_control and not model.lifted_contact:
         phase.add([model.swing_force_constraints[foot] for foot in feet])
     return phase

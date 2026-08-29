@@ -9,7 +9,7 @@ graph_model::graph_model()
       start_cache_{start_stage_, start_stage_->composition_identity()},
       end_cache_{end_stage_, end_stage_->composition_identity()} {}
 
-node_view graph_model::start_node() const {
+node_view graph_model::st() const {
     return start_stage_->st();
 }
 

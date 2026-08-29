@@ -351,7 +351,6 @@ struct ns_sqp {
     size_t n_jobs() const noexcept { return graph_n_jobs_; }
     using storage_type = linear_runtime_graph<node_type>;
 
-    node_view start_node() const { return model_graph_.start_node(); }
     node_view st() const { return model_graph_.st(); }
     node_view ed() const { return model_graph_.ed(); }
     std::vector<stage_ocp_ptr_t> &stages() { return model_graph_.stages(); }
