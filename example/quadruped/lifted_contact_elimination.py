@@ -54,17 +54,20 @@ def configure_lifted_contact_elimination(robot, regularization=1e-9):
     nv = robot.nv
 
     def elimination(system):
-        def jac(equation, variable):
-            return system.jac(equation, variable)
-
         forces = robot.contacts.impulses
 
+        def dyn_jac(variable):
+            return system.jac(robot.dyn, variable).mx
+
+        def lift_jac(variable):
+            return system.jac(robot.lifting, variable).mx
+
         if robot.lifted_acceleration:
-            euler_q = jac(robot.euler_residual, robot.qn).mx[:nv, :]
-            euler_v = jac(robot.euler_residual, robot.vn).mx
+            euler_q = dyn_jac(robot.qn)[:nv, :]
+            euler_v = dyn_jac(robot.vn)
             position_v = euler_v[:nv, :]
             velocity_v = euler_v[nv:, :]
-            velocity_a = jac(robot.euler_residual, robot.a).mx[nv:, :]
+            velocity_a = dyn_jac(robot.a)[nv:, :]
 
             acceleration_diagonal = cs.diag(velocity_a)
 
@@ -74,27 +77,26 @@ def configure_lifted_contact_elimination(robot, regularization=1e-9):
                 )
 
             a_v = eliminate_acceleration(velocity_v)
-            rnea_a = jac(robot.rnea_residual, robot.a).mx
-            rnea_q = jac(robot.rnea_residual, robot.qn).mx
-            rnea_v = (
-                jac(robot.rnea_residual, robot.vn).mx - rnea_a @ a_v
-            )
+            rnea_a = lift_jac(robot.a)[:nv, :]
+            rnea_q = lift_jac(robot.qn)[:nv, :]
+            rnea_v = lift_jac(robot.vn)[:nv, :] - rnea_a @ a_v
             rnea_f = cs.horzcat(
-                *[jac(robot.rnea_residual, force).mx for force in forces]
+                *[lift_jac(force)[:nv, :] for force in forces]
             )
 
-            contact_q = cs.vertcat(
-                *[jac(contact, robot.qn).mx for contact in robot.contact_rows]
-            )
-            contact_v = cs.vertcat(
-                *[jac(contact, robot.vn).mx for contact in robot.contact_rows]
-            )
+            contact_q = lift_jac(robot.qn)[nv:, :]
+            contact_v = lift_jac(robot.vn)[nv:, :]
             regularizer = None
             contact_blocks = []
-            for row, contact in enumerate(robot.contact_rows):
+            force_blocks = [
+                system.jac(robot.lifting, force) for force in forces
+            ]
+            for row in range(len(forces)):
                 blocks = []
-                for col, force in enumerate(forces):
-                    block = jac(contact, force)
+                for col, force_block in enumerate(force_blocks):
+                    block = force_block.rows(
+                        nv + 3 * row, nv + 3 * (row + 1)
+                    )
                     if row == col:
                         if regularizer is None:
                             regularizer = block.param(
@@ -140,41 +142,27 @@ def configure_lifted_contact_elimination(robot, regularization=1e-9):
                     configuration_step, velocity, acceleration, force_step
                 )
 
-            x_columns = system.h_x().size2()
-            u_columns = system.h_u().size2()
-            projection = solve(
-                cs.horzcat(system.h_x(), system.h_u(), system.h())
-            )
-            return moto.lifted.elimination(
-                projection[:, :x_columns],
-                projection[:, x_columns:x_columns + u_columns],
-                projection[:, x_columns + u_columns:],
-                [],
-                solve(system.action_rhs),
-            )
+            return system.eliminate(solve)
 
-        aqq = jac(robot.euler_residual, robot.qn).mx
-        aqv = jac(robot.euler_residual, robot.vn).mx
-        avq = jac(robot.rnea_residual, robot.qn).mx
-        avv = jac(robot.rnea_residual, robot.vn).mx
+        aqq = dyn_jac(robot.qn)[:nv, :]
+        aqv = dyn_jac(robot.vn)[:nv, :]
+        avq = dyn_jac(robot.qn)[nv:, :]
+        avv = dyn_jac(robot.vn)[nv:, :]
         bq = cs.horzcat(
-            *[jac(robot.euler_residual, force).mx for force in forces]
+            *[dyn_jac(force)[:nv, :] for force in forces]
         )
         bv = cs.horzcat(
-            *[jac(robot.rnea_residual, force).mx for force in forces]
+            *[dyn_jac(force)[nv:, :] for force in forces]
         )
-        cq = cs.vertcat(
-            *[jac(contact, robot.qn).mx for contact in robot.contact_rows]
-        )
-        cv = cs.vertcat(
-            *[jac(contact, robot.vn).mx for contact in robot.contact_rows]
-        )
+        cq = lift_jac(robot.qn)
+        cv = lift_jac(robot.vn)
         regularizer = None
         contact_blocks = []
-        for row, contact in enumerate(robot.contact_rows):
+        force_blocks = [system.jac(robot.lifting, force) for force in forces]
+        for row in range(len(forces)):
             blocks = []
-            for col, force in enumerate(forces):
-                block = jac(contact, force)
+            for col, force_block in enumerate(force_blocks):
+                block = force_block.rows(3 * row, 3 * (row + 1))
                 if row == col:
                     if regularizer is None:
                         regularizer = block.param(
@@ -210,18 +198,9 @@ def configure_lifted_contact_elimination(robot, regularization=1e-9):
             configuration = q_base - qv @ velocity - qf @ force_step
             return cs.vertcat(configuration, velocity, force_step)
 
-        response_x = solve(system.h_x())
-        response_u = solve(system.h_u())
-        response_residual = solve(system.h())
-        response_action = solve(system.action_rhs)
-        return moto.lifted.elimination(
-            response_x,
-            response_u,
-            response_residual,
-            [],
-            response_action,
-        )
+        return system.eliminate(solve)
 
-    robot.dyn.add_subconstraint(robot.lifting)
-    robot.dyn = robot.dyn.set_elimination_graph(elimination)
+    robot.dyn = robot.dyn.with_elimination_graph(
+        elimination, [robot.lifting]
+    )
     return robot.dyn

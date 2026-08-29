@@ -34,6 +34,21 @@ the graph-owned stages consumed by composition.
 Boundary placement must not be used as a substitute for ordinary path
 placement.
 
+For one fixed connected knot, the solver representation is invariant: a
+state-only term on the next interval's current `x` and the same term lowered
+from that interval's `stage.st` onto the predecessor's `y` must produce the
+same value, first- and second-order contribution, and SQP direction after the
+`y -> x` transfer. This equivalence assumes the same numerical values for all
+non-primal arguments. It does not make the two authoring forms select the same
+set of knots across a horizon: interval placement includes every authored
+interval occurrence, while start-boundary placement applies only where that
+boundary is connected by composition.
+
+Non-primal arguments of a lowered boundary term are read from the runtime
+interval that owns the lowered `y`. A time-varying parameter schedule must
+therefore be indexed by the physical knot represented by that runtime
+interval, not merely by the source stage object's vector index.
+
 An expression handle has one placement identity within a stage. A
 mathematically identical running and terminal term must therefore be authored
 as two expressions with stable, distinct names; copying a handle does not

@@ -210,6 +210,70 @@ TEST_CASE("graph start terms are explicit while stage starts lower through incom
     REQUIRE_FALSE(contains_name_prefix(expr_names(flat.back()->problem(), __cost), "cost_stage_start_graph_start_rule"));
 }
 
+TEST_CASE("connected stage start and current state placements give the same SQP step", "[graph][mapping][solver]") {
+    using namespace moto;
+
+    struct solution {
+        vector x, y, u;
+        scalar_t primal = 0.;
+        scalar_t dual = 0.;
+    };
+    const auto solve = [](const std::string &tag, bool boundary) {
+        auto [x, y] = sym::states("x_placement_equivalence_" + tag, 1);
+        auto u = sym::inputs("u_placement_equivalence_" + tag, 1);
+        auto prototype = stage_ocp::create();
+        prototype->add(*callback_linear_dynamics(
+            "dyn_placement_equivalence_" + tag, x, y, u));
+        prototype->add(*callback_quadratic_cost(
+            "input_placement_equivalence_" + tag, u));
+        auto first = prototype->copy();
+        auto second = prototype->copy();
+        auto state_cost = callback_quadratic_cost(
+            "state_placement_equivalence_" + tag, x, 2.);
+        if (boundary)
+            second->st().add(*state_cost);
+        else
+            second->add(*state_cost);
+
+        ns_sqp sqp;
+        sqp.stages().push_back(first);
+        sqp.stages().push_back(second);
+        auto &nodes = sqp.solver_nodes();
+        for (auto *node : nodes) {
+            node->sym_val()[x].setZero();
+            node->sym_val()[y].setZero();
+            node->sym_val()[u].setZero();
+        }
+        sqp.settings.restoration.enabled = false;
+        sqp.settings.prim_tol = 1e-10;
+        sqp.settings.dual_tol = 1e-10;
+        sqp.settings.comp_tol = 1e-10;
+        const auto result = sqp.update(5, false);
+        REQUIRE(result.iter.result == ns_sqp::iter_result_t::success);
+
+        solution out;
+        out.x.resize(2);
+        out.y.resize(2);
+        out.u.resize(2);
+        for (Eigen::Index i = 0; i < 2; ++i) {
+            out.x(i) = nodes[i]->sym_val()[x](0);
+            out.y(i) = nodes[i]->sym_val()[y](0);
+            out.u(i) = nodes[i]->sym_val()[u](0);
+        }
+        out.primal = result.primal.inf_res;
+        out.dual = result.dual.inf_res;
+        return out;
+    };
+
+    const auto direct = solve("direct", false);
+    const auto boundary = solve("boundary", true);
+    REQUIRE(direct.x.isApprox(boundary.x, 1e-12));
+    REQUIRE(direct.y.isApprox(boundary.y, 1e-12));
+    REQUIRE(direct.u.isApprox(boundary.u, 1e-12));
+    REQUIRE(std::abs(direct.primal - boundary.primal) < 1e-12);
+    REQUIRE(std::abs(direct.dual - boundary.dual) < 1e-12);
+}
+
 TEST_CASE("graph_model reuses cached lowered function entities across stages", "[graph][remap]") {
     using namespace moto;
 

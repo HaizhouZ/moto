@@ -176,12 +176,14 @@ ns_sqp::kkt_info ns_sqp::initialize(storage_type &graph) {
     sync_initial_state_virtual_stage(graph);
     refresh_problem_flags(graph);
     if (!settings.ipm.warm_start)
-        settings.ipm.mu = settings.ipm.mu0; // initialize mu before setting up workspace data, as it may be used in the workspace data setup
+        settings.ipm.mu = settings.ipm.mu0;
     {
         auto phase_profile = profile_scope(profile_phase::initialize_setup_eval);
         solver::for_each(solver::par, graph, [this](data *cur) {
-            // setup solver settings
-            cur->for_each_constr([this](const generic_constr &c, func_approx_data &d) { c.setup_workspace_data(d, &settings); });
+            cur->for_each_constr(
+                [this](const generic_constr &c, func_approx_data &d) {
+                    c.setup_workspace_data(d, &settings);
+                });
             solver::ineq_soft::bind_runtime(cur);
             cur->configure_scaling_profile(
                 settings.scaling.mode != scaling_settings::mode_t::none);
@@ -706,6 +708,8 @@ ns_sqp::result_type ns_sqp::update(size_t n_iter, bool verbose, bool profile) {
                     break;
                 }
                 i_iter = iter_last.num_iter;
+                if (i_iter < n_iter)
+                    iter_last.result = iter_result_t::unknown;
                 continue;
             }
 

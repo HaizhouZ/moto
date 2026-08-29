@@ -68,7 +68,7 @@ class QuadrupedModel(ContactRobotModel):
                     ),
                 ]
             )
-        stage.add([self.joint_limit_constr, self.state_cost])
+        stage.st.add([self.joint_limit_constr, self.state_cost])
         return stage
 
     def add_terminal_terms(self, endpoint):

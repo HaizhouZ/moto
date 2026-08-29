@@ -33,21 +33,13 @@ def main():
     lifting = moto.lifted.create(
         "lifted_demo_constraint", lifted.sx - u.sx, [lifted]
     )
-    dynamics.add_subconstraint(lifting)
-
     def elimination(system):
         def solve(rhs):
             return cs.vertcat(rhs[:1, :] + rhs[1:, :], rhs[1:, :])
 
-        return moto.lifted.elimination(
-            solve(system.h_x()),
-            solve(system.h_u()),
-            solve(system.h()),
-            [],
-            solve(system.action_rhs),
-        )
+        return system.eliminate(solve)
 
-    dynamics = dynamics.set_elimination_graph(elimination)
+    dynamics = dynamics.with_elimination_graph(elimination, [lifting])
 
     stage = moto.stage()
     stage.add(dynamics)

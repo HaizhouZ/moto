@@ -24,6 +24,7 @@
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
+#include <unistd.h>
 
 namespace moto::linear_backend {
 namespace {
@@ -41,6 +42,52 @@ std::unordered_map<std::string,
                    std::weak_ptr<const detail::casadi_mx_graph_plan>>
     graph_plans;
 std::unordered_map<std::string, std::shared_ptr<std::mutex>> graph_compile_locks;
+std::unordered_map<std::string, std::shared_ptr<const std::string>>
+    graph_spd_signatures;
+std::unordered_map<std::string, bool> graph_legacy_cache_presence;
+
+std::shared_ptr<const std::string> graph_spd_signature(
+    std::string_view artifact_identity, const std::vector<casadi::MX> &inputs,
+    std::span<const casadi::MX> factors) {
+  if (!artifact_identity.empty()) {
+    std::lock_guard lock(graph_mutex);
+    if (const auto found = graph_spd_signatures.find(
+            std::string(artifact_identity));
+        found != graph_spd_signatures.end())
+      return found->second;
+  }
+  auto signature = std::make_shared<const std::string>(
+      casadi::Function("moto_spd_properties", inputs,
+                       std::vector<casadi::MX>(factors.begin(), factors.end()))
+          .serialize());
+  if (artifact_identity.empty()) return signature;
+  std::lock_guard lock(graph_mutex);
+  return graph_spd_signatures
+      .try_emplace(std::string(artifact_identity), std::move(signature))
+      .first->second;
+}
+
+bool has_legacy_graph_cache(const std::filesystem::path &cache_dir) {
+  const auto cache = cache_dir.lexically_normal().string();
+  {
+    std::lock_guard lock(graph_mutex);
+    if (const auto found = graph_legacy_cache_presence.find(cache);
+        found != graph_legacy_cache_presence.end())
+      return found->second;
+  }
+  bool present = false;
+  std::error_code ec;
+  for (std::filesystem::directory_iterator it(cache_dir, ec), end;
+       !ec && it != end; it.increment(ec)) {
+    const auto name = it->path().filename().string();
+    if (name.starts_with("plan_v12_") && name.ends_with(".cbor")) {
+      present = true;
+      break;
+    }
+  }
+  std::lock_guard lock(graph_mutex);
+  return graph_legacy_cache_presence.try_emplace(cache, present).first->second;
+}
 
 void collect_mx_solves(
     const casadi::MX &expression,
@@ -436,8 +483,13 @@ condensation_pairs(const condensation_spec &spec) {
 }
 
 void *compile_source(const std::string &source,
-                     const std::filesystem::path &cache_dir) {
-  const std::string key = utils::compute_md5_from_bytes(source);
+                     const std::filesystem::path &cache_dir,
+                     std::string_view optimization = "-O3") {
+  const std::string key = utils::compute_md5_from_bytes(
+      optimization == "-O3"
+          ? source
+          : source + "\n:moto-jit-optimization:" +
+                std::string(optimization));
   const auto cpp = cache_dir / (key + ".cpp");
   const auto lib = cache_dir / ("lib" + key + ".so");
   const auto tmp = cache_dir / ("lib" + key + ".so.tmp");
@@ -466,7 +518,8 @@ void *compile_source(const std::string &source,
       out << source;
       out.close();
       const std::string command =
-          "g++ -shared -fPIC -std=c++20 -O3 -DNDEBUG -march=native "
+          "g++ -shared -fPIC -std=c++20 " + std::string(optimization) +
+          " -DNDEBUG -march=native "
           "-fopenmp-simd -ffp-contract=fast -I/usr/include/eigen3 -o " +
           shell_quote(tmp) + " " + shell_quote(cpp) + [&] {
             Dl_info info{};
@@ -495,39 +548,13 @@ void *compile_source(const std::string &source,
 
 void *detail::compile_casadi_mx_graph_source(
     const std::string &source, const std::filesystem::path &cache_dir) {
-  return compile_source(source, cache_dir);
+  return compile_source(
+      source, cache_dir,
+      "-O1 -ftree-loop-vectorize -fvect-cost-model=unlimited "
+      "-fstrict-aliasing");
 }
 
 namespace {
-
-template <class Callback>
-void dispatch_graph_flags4(unsigned flags, Callback &&callback) {
-  switch (flags & 15U) {
-  case 0: callback(std::false_type{}, std::false_type{}, std::false_type{}, std::false_type{}); break;
-  case 1: callback(std::true_type{},  std::false_type{}, std::false_type{}, std::false_type{}); break;
-  case 2: callback(std::false_type{}, std::true_type{},  std::false_type{}, std::false_type{}); break;
-  case 3: callback(std::true_type{},  std::true_type{},  std::false_type{}, std::false_type{}); break;
-  case 4: callback(std::false_type{}, std::false_type{}, std::true_type{},  std::false_type{}); break;
-  case 5: callback(std::true_type{},  std::false_type{}, std::true_type{},  std::false_type{}); break;
-  case 6: callback(std::false_type{}, std::true_type{},  std::true_type{},  std::false_type{}); break;
-  case 7: callback(std::true_type{},  std::true_type{},  std::true_type{},  std::false_type{}); break;
-  case 8: callback(std::false_type{}, std::false_type{}, std::false_type{}, std::true_type{}); break;
-  case 9: callback(std::true_type{},  std::false_type{}, std::false_type{}, std::true_type{}); break;
-  case 10: callback(std::false_type{}, std::true_type{},  std::false_type{}, std::true_type{}); break;
-  case 11: callback(std::true_type{},  std::true_type{},  std::false_type{}, std::true_type{}); break;
-  case 12: callback(std::false_type{}, std::false_type{}, std::true_type{},  std::true_type{}); break;
-  case 13: callback(std::true_type{},  std::false_type{}, std::true_type{},  std::true_type{}); break;
-  case 14: callback(std::false_type{}, std::true_type{},  std::true_type{},  std::true_type{}); break;
-  case 15: callback(std::true_type{},  std::true_type{},  std::true_type{},  std::true_type{}); break;
-  }
-}
-
-template <class Callback>
-void dispatch_graph_flags3(unsigned flags, Callback &&callback) {
-  dispatch_graph_flags4(flags, [&](auto a, auto b, auto c, auto) {
-    callback(a, b, c);
-  });
-}
 
 template <bool LT, bool RT, int LA, int RA>
 void graph_pair_dd(const double *a, size_t ar, size_t ac, size_t ald,
@@ -696,54 +723,104 @@ moto_graph_small_solve(const double *a, bool transpose, const double *rhs,
   }
 }
 
-extern "C" __attribute__((visibility("default"))) void moto_graph_pair_dd(
-    unsigned flags, const double *a, size_t ar, size_t ac, size_t ald,
-    size_t ak, const double *b, size_t br, size_t bc, size_t bld, size_t bk,
-    double *out, size_t orows, size_t oi, size_t oj, size_t n, double alpha) {
-  dispatch_graph_flags4(flags, [&](auto lt, auto rt, auto la, auto ra) {
-    graph_pair_dd<decltype(lt)::value, decltype(rt)::value,
-                  decltype(la)::value ? Eigen::Aligned : Eigen::Unaligned,
-                  decltype(ra)::value ? Eigen::Aligned : Eigen::Unaligned>(
-        a, ar, ac, ald, ak, b, br, bc, bld, bk, out, orows, oi, oj, n,
-        alpha);
-  });
+#define MOTO_GRAPH_PAIR_SIGNATURE(name)                                      \
+  extern "C" __attribute__((visibility("default"))) void name(             \
+      const double *a, size_t ar, size_t ac, size_t ald, size_t ak,          \
+      const double *b, size_t br, size_t bc, size_t bld, size_t bk,          \
+      double *out, size_t orows, size_t oi, size_t oj, size_t n,             \
+      double alpha)
+#define MOTO_GRAPH_PAIR_DD(id, lt, rt, la, ra)                               \
+  MOTO_GRAPH_PAIR_SIGNATURE(moto_graph_pair_dd_##id) {                       \
+    graph_pair_dd<lt, rt, la, ra>(a, ar, ac, ald, ak, b, br, bc, bld, bk,   \
+                                   out, orows, oi, oj, n, alpha);             \
+  }
+#define MOTO_GRAPH_PAIR_SD(id, eye, rt, ra)                                  \
+  MOTO_GRAPH_PAIR_SIGNATURE(moto_graph_pair_sd_##id) {                       \
+    graph_pair_sd<eye, rt, ra>(a, ak, b, br, bc, bld, bk, out, orows, oi,   \
+                                oj, n, alpha);                                \
+  }
+#define MOTO_GRAPH_PAIR_DS(id, lt, eye, la)                                  \
+  MOTO_GRAPH_PAIR_SIGNATURE(moto_graph_pair_ds_##id) {                       \
+    graph_pair_ds<lt, eye, la>(a, ar, ac, ald, ak, b, bk, out, orows, oi,   \
+                                oj, n, alpha);                                \
+  }
+#define MOTO_GRAPH_PAIR_SS(id, le, re, la, ra)                               \
+  MOTO_GRAPH_PAIR_SIGNATURE(moto_graph_pair_ss_##id) {                       \
+    graph_pair_ss<le, re, la, ra>(a, ak, b, bk, out, orows, oi, oj, n,      \
+                                   alpha);                                    \
+  }
+
+#define MOTO_GRAPH_PAIR_FLAGS4(kind, i0, i1, i2, i3, la, ra)                \
+  MOTO_GRAPH_PAIR_##kind(i0, false, false, la, ra)                           \
+  MOTO_GRAPH_PAIR_##kind(i1, true, false, la, ra)                            \
+  MOTO_GRAPH_PAIR_##kind(i2, false, true, la, ra)                            \
+  MOTO_GRAPH_PAIR_##kind(i3, true, true, la, ra)
+#define MOTO_GRAPH_PAIR_FLAGS3(kind, i0, i1, i2, i3, alignment)             \
+  MOTO_GRAPH_PAIR_##kind(i0, false, false, alignment)                        \
+  MOTO_GRAPH_PAIR_##kind(i1, true, false, alignment)                         \
+  MOTO_GRAPH_PAIR_##kind(i2, false, true, alignment)                         \
+  MOTO_GRAPH_PAIR_##kind(i3, true, true, alignment)
+
+MOTO_GRAPH_PAIR_FLAGS4(DD, 0, 1, 2, 3, Eigen::Unaligned, Eigen::Unaligned)
+MOTO_GRAPH_PAIR_FLAGS4(DD, 4, 5, 6, 7, Eigen::Aligned, Eigen::Unaligned)
+MOTO_GRAPH_PAIR_FLAGS4(DD, 8, 9, 10, 11, Eigen::Unaligned, Eigen::Aligned)
+MOTO_GRAPH_PAIR_FLAGS4(DD, 12, 13, 14, 15, Eigen::Aligned, Eigen::Aligned)
+MOTO_GRAPH_PAIR_FLAGS3(SD, 0, 1, 2, 3, Eigen::Unaligned)
+MOTO_GRAPH_PAIR_FLAGS3(SD, 4, 5, 6, 7, Eigen::Aligned)
+MOTO_GRAPH_PAIR_FLAGS3(DS, 0, 1, 2, 3, Eigen::Unaligned)
+MOTO_GRAPH_PAIR_FLAGS3(DS, 4, 5, 6, 7, Eigen::Aligned)
+MOTO_GRAPH_PAIR_FLAGS4(SS, 0, 1, 2, 3, Eigen::Unaligned, Eigen::Unaligned)
+MOTO_GRAPH_PAIR_FLAGS4(SS, 4, 5, 6, 7, Eigen::Aligned, Eigen::Unaligned)
+MOTO_GRAPH_PAIR_FLAGS4(SS, 8, 9, 10, 11, Eigen::Unaligned, Eigen::Aligned)
+MOTO_GRAPH_PAIR_FLAGS4(SS, 12, 13, 14, 15, Eigen::Aligned, Eigen::Aligned)
+
+struct moto_graph_copy_run {
+  size_t pointer, panel_offset, count;
+  ptrdiff_t panel_stride, local_offset, local_stride;
+};
+
+extern "C" __attribute__((visibility("default"))) void moto_graph_pack(
+    double *local, double **p, const moto_graph_copy_run *runs,
+    size_t run_count) {
+  for (size_t run_index = 0; run_index < run_count; ++run_index) {
+    const auto &run = runs[run_index];
+    for (size_t i = 0; i < run.count; ++i) {
+      const auto ordinal = static_cast<ptrdiff_t>(i);
+      local[run.local_offset + run.local_stride * ordinal] =
+          p[run.pointer][static_cast<ptrdiff_t>(run.panel_offset) +
+                         run.panel_stride * ordinal];
+    }
+  }
 }
 
-extern "C" __attribute__((visibility("default"))) void moto_graph_pair_sd(
-    unsigned flags, const double *a, size_t, size_t, size_t, size_t ak,
-    const double *b, size_t br, size_t bc, size_t bld, size_t bk,
-    double *out, size_t orows, size_t oi, size_t oj, size_t n,
-    double alpha) {
-  dispatch_graph_flags3(flags, [&](auto eye, auto rt, auto ra) {
-    graph_pair_sd<decltype(eye)::value, decltype(rt)::value,
-                  decltype(ra)::value ? Eigen::Aligned : Eigen::Unaligned>(
-        a, ak, b, br, bc, bld, bk, out, orows, oi, oj, n, alpha);
-  });
+extern "C" __attribute__((visibility("default"))) void moto_graph_unpack(
+    double **p, const moto_graph_copy_run *runs, size_t run_count,
+    const double *local) {
+  for (size_t run_index = 0; run_index < run_count; ++run_index) {
+    const auto &run = runs[run_index];
+    double *destination = p[run.pointer] + run.panel_offset;
+    if (run.local_offset < 0) {
+      for (size_t i = 0; i < run.count; ++i) {
+        const auto ordinal = static_cast<ptrdiff_t>(i);
+        destination[run.panel_stride * ordinal] = 0.;
+      }
+    } else {
+      for (size_t i = 0; i < run.count; ++i) {
+        const auto ordinal = static_cast<ptrdiff_t>(i);
+        destination[run.panel_stride * ordinal] =
+            local[run.local_offset + run.local_stride * ordinal];
+      }
+    }
+  }
 }
 
-extern "C" __attribute__((visibility("default"))) void moto_graph_pair_ds(
-    unsigned flags, const double *a, size_t ar, size_t ac, size_t ald,
-    size_t ak, const double *b, size_t, size_t, size_t, size_t bk,
-    double *out, size_t orows, size_t oi, size_t oj, size_t n,
-    double alpha) {
-  dispatch_graph_flags3(flags, [&](auto lt, auto eye, auto la) {
-    graph_pair_ds<decltype(lt)::value, decltype(eye)::value,
-                  decltype(la)::value ? Eigen::Aligned : Eigen::Unaligned>(
-        a, ar, ac, ald, ak, b, bk, out, orows, oi, oj, n, alpha);
-  });
-}
-
-extern "C" __attribute__((visibility("default"))) void moto_graph_pair_ss(
-    unsigned flags, const double *a, size_t, size_t, size_t, size_t ak,
-    const double *b, size_t, size_t, size_t, size_t bk, double *out,
-    size_t orows, size_t oi, size_t oj, size_t n, double alpha) {
-  dispatch_graph_flags4(flags, [&](auto le, auto re, auto la, auto ra) {
-    graph_pair_ss<decltype(le)::value, decltype(re)::value,
-                  decltype(la)::value ? Eigen::Aligned : Eigen::Unaligned,
-                  decltype(ra)::value ? Eigen::Aligned : Eigen::Unaligned>(
-        a, ak, b, bk, out, orows, oi, oj, n, alpha);
-  });
-}
+#undef MOTO_GRAPH_PAIR_SS
+#undef MOTO_GRAPH_PAIR_DS
+#undef MOTO_GRAPH_PAIR_SD
+#undef MOTO_GRAPH_PAIR_DD
+#undef MOTO_GRAPH_PAIR_FLAGS3
+#undef MOTO_GRAPH_PAIR_FLAGS4
+#undef MOTO_GRAPH_PAIR_SIGNATURE
 
 extern "C" __attribute__((visibility("default"))) void *
 moto_graph_factor_state_create(size_t factors) {
@@ -1751,9 +1828,9 @@ graph_kernel compile_graph(
   if (raw_outputs.empty()) return {};
   raw_outputs.insert(raw_outputs.end(), spd_factors.begin(),
                      spd_factors.end());
-  std::string serialized = artifact_identity.empty()
-                               ? "casadi_mx_translator_v5:"
-                               : "casadi_mx_translator_named_v2:";
+  const bool named_artifact = !artifact_identity.empty();
+  std::string serialized = named_artifact ? "casadi_mx_translator_named_v3:"
+                                          : "casadi_mx_translator_v5:";
   if (artifact_identity.empty()) {
     const casadi::Function raw_function(
         "moto_casadi_linear_graph_input", inputs, raw_outputs);
@@ -1772,11 +1849,10 @@ graph_kernel compile_graph(
   for (const size_t count : entry_outputs)
     serialized += ':' + std::to_string(count);
   serialized += ":spd:" + std::to_string(spd_factors.size());
-  if (!spd_factors.empty())
-    serialized += casadi::Function("moto_spd_properties", inputs,
-                                   std::vector<casadi::MX>(
-                                       spd_factors.begin(),
-                                       spd_factors.end())).serialize();
+  if (!named_artifact && !spd_factors.empty())
+    serialized +=
+        *graph_spd_signature(artifact_identity, inputs, spd_factors);
+  const size_t layout_offset = serialized.size();
   for (const auto &layout : input_layouts) {
     serialized += ":layout:" + std::to_string(layout.rows) + ':' +
                   std::to_string(layout.cols);
@@ -1812,25 +1888,90 @@ graph_kernel compile_graph(
       plan = found->second.lock();
   }
   if (!plan) {
-    const casadi::Function raw_function(
-        "moto_casadi_linear_graph_input", inputs, raw_outputs);
-    auto graph_entries = output_entries;
-    if (!spd_factors.empty())
-      graph_entries.emplace_back(spd_factors.begin(), spd_factors.end());
-    const auto batched_entries = batch_independent_mx_products(
-        batch_independent_mx_solves(graph_entries));
-    const auto optimized_entries = detail::optimize_casadi_mx_graph(
-        inputs, batched_entries, input_layouts);
-    std::vector<casadi::MX> outputs;
-    for (const auto &entry : optimized_entries)
-      outputs.insert(outputs.end(), entry.begin(), entry.end());
-    outputs = casadi::MX::cse(outputs);
-    const casadi::Function function("moto_casadi_linear_graph", inputs,
+    std::filesystem::create_directories(cache_dir);
+    const auto plan_cache = cache_dir / ("plan_v12_" + key + ".cbor");
+    const auto mx_cache = cache_dir / ("graph_" + key + ".casadi");
+    if (std::filesystem::exists(plan_cache)) {
+      try {
+        plan = detail::load_casadi_mx_graph_plan(plan_cache, cache_dir);
+      } catch (const std::exception &) {
+        std::error_code ec;
+        std::filesystem::remove(plan_cache, ec);
+      }
+    }
+    if (!plan && named_artifact && has_legacy_graph_cache(cache_dir)) {
+      auto legacy_serialized = serialized;
+      constexpr std::string_view current_prefix =
+          "casadi_mx_translator_named_v3:";
+      constexpr std::string_view legacy_prefix =
+          "casadi_mx_translator_named_v2:";
+      legacy_serialized.replace(0, current_prefix.size(), legacy_prefix);
+      if (!spd_factors.empty())
+        legacy_serialized.insert(
+            layout_offset, *graph_spd_signature(artifact_identity, inputs,
+                                                spd_factors));
+      const auto legacy_key =
+          utils::compute_md5_from_bytes(legacy_serialized);
+      const auto legacy_cache =
+          cache_dir / ("plan_v12_" + legacy_key + ".cbor");
+      if (std::filesystem::exists(legacy_cache)) {
+        try {
+          plan = detail::load_casadi_mx_graph_plan(legacy_cache, cache_dir);
+          std::error_code ec;
+          std::filesystem::copy_file(
+              legacy_cache, plan_cache,
+              std::filesystem::copy_options::skip_existing, ec);
+        } catch (const std::exception &) {
+          std::error_code ec;
+          std::filesystem::remove(legacy_cache, ec);
+        }
+      }
+    }
+    if (!plan) {
+      casadi::Function function;
+      if (std::filesystem::exists(mx_cache)) {
+        try {
+          std::ifstream input(mx_cache, std::ios::binary);
+          function = casadi::Function::deserialize(input);
+        } catch (const std::exception &) {
+          std::error_code ec;
+          std::filesystem::remove(mx_cache, ec);
+        }
+      }
+      if (function.is_null()) {
+        auto graph_entries = output_entries;
+        if (!spd_factors.empty())
+          graph_entries.emplace_back(spd_factors.begin(), spd_factors.end());
+        const auto batched_entries = batch_independent_mx_products(
+            batch_independent_mx_solves(graph_entries));
+        const auto optimized_entries = detail::optimize_casadi_mx_graph(
+            inputs, batched_entries, input_layouts);
+        std::vector<casadi::MX> outputs;
+        for (const auto &entry : optimized_entries)
+          outputs.insert(outputs.end(), entry.begin(), entry.end());
+        outputs = casadi::MX::cse(outputs);
+        function = casadi::Function("moto_casadi_linear_graph", inputs,
                                     outputs);
-    plan = detail::translate_casadi_mx_graph(
-        function, entry_outputs, input_layouts, cache_dir,
-        spd_factors.size());
-    (void)cache_dir;
+        const auto tmp =
+            mx_cache.string() + ".tmp." + std::to_string(::getpid());
+        try {
+          {
+            std::ofstream output(tmp, std::ios::binary);
+            if (!output)
+              throw std::runtime_error("failed to create MX graph cache");
+            function.serialize(output);
+          }
+          std::filesystem::rename(tmp, mx_cache);
+        } catch (...) {
+          std::error_code ec;
+          std::filesystem::remove(tmp, ec);
+          throw;
+        }
+      }
+      plan = detail::translate_casadi_mx_graph(
+          function, entry_outputs, input_layouts, cache_dir,
+          spd_factors.size(), plan_cache);
+    }
     std::lock_guard lock(graph_mutex);
     graph_plans[key] = plan;
   }

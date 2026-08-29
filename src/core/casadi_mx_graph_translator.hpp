@@ -39,7 +39,12 @@ std::shared_ptr<const casadi_mx_graph_plan> translate_casadi_mx_graph(
     const casadi::Function &function, std::vector<size_t> entry_outputs,
     std::span<const matrix_layout> input_layouts = {},
     const std::filesystem::path &cache_dir = "gen/linear_backend",
-    size_t spd_outputs = 0);
+    size_t spd_outputs = 0,
+    const std::filesystem::path &plan_cache = {});
+
+std::shared_ptr<const casadi_mx_graph_plan> load_casadi_mx_graph_plan(
+    const std::filesystem::path &plan_cache,
+    const std::filesystem::path &cache_dir = "gen/linear_backend");
 
 size_t casadi_mx_graph_inputs(const casadi_mx_graph_plan &plan);
 size_t casadi_mx_graph_outputs(const casadi_mx_graph_plan &plan);

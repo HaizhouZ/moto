@@ -33,14 +33,14 @@ def main():
     )
 
     def elimination(system):
-        missing = system.jac(dynamics_residual, lifted)
+        missing = system.jac(dynamics, lifted)
         assert missing.mx.shape == (DIM, DIM)
         assert missing.mx.nnz() == 0
 
         regularization = missing.param(1e-6)
         regularized = missing.add_diag(regularization)
-        lift_l = system.jac(constraint_residual, lifted).mx
-        lift_y = system.jac(constraint_residual, y).mx
+        lift_l = system.jac(constraint, lifted).mx
+        lift_y = system.jac(constraint, y).mx
         schur_diagonal = cs.diag(lift_l - lift_y @ regularized)
 
         def solve(rhs):
@@ -53,13 +53,9 @@ def main():
                 y_base - regularized @ lifted_step, lifted_step
             )
 
-        return moto.lifted.elimination(
-            solve(system.h_x()), solve(system.h_u()), solve(system.h()), [],
-            solve(system.action_rhs)
-        )
+        return system.eliminate(solve)
 
-    dynamics.add_subconstraint(constraint)
-    dynamics = dynamics.set_elimination_graph(elimination)
+    dynamics = dynamics.with_elimination_graph(elimination, [constraint])
 
     stage = moto.stage()
     stage.add(dynamics)

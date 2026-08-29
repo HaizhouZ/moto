@@ -79,7 +79,10 @@ void eq_init_pmm_constr::hessian_impl(func_approx_data &data) const {
 
 ocp_ptr_t build_equality_init_overlay_problem(
     const ocp_ptr_t &source_prob,
-                                              const equality_init_overlay_settings &settings) {
+    const equality_init_overlay_settings &settings) {
+    if (source_prob->num(__eq_x) == 0 && source_prob->num(__eq_xu) == 0)
+        return source_prob;
+
     ocp::active_status_config config;
     for (auto field : std::array{__eq_x, __eq_xu}) {
         for (const expr_handle &expr : source_prob->exprs(field)) {
@@ -88,13 +91,14 @@ ocp_ptr_t build_equality_init_overlay_problem(
     }
 
     auto overlay_prob = source_prob->copy(config);
-  solver::overlay::add_constr_overlay_group(
-      source_prob, overlay_prob, std::array{__eq_x, __eq_xu}, [&](const constr &source) {
-        return constr(new eq_init_pmm_constr(
-            solver::overlay::overlay_name(*source, "eq_init_pmm"),
-                                             source,
-                                             settings.rho_eq));
-    });
+    solver::overlay::add_constr_overlay_group(
+        source_prob, overlay_prob, std::array{__eq_x, __eq_xu},
+        [&](const constr &source) {
+            return constr(new eq_init_pmm_constr(
+                solver::overlay::overlay_name(*source, "eq_init_pmm"),
+                source,
+                settings.rho_eq));
+        });
 
     overlay_prob->wait_until_ready();
     return overlay_prob;

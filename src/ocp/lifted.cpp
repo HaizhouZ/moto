@@ -142,8 +142,12 @@ class generated_lifted final : public generic_dynamics {
 
     generated_lifted(const generic_dynamics &source,
                      lifted_elimination_builder builder)
-        : generic_dynamics(source) {
+        : generic_dynamics(source), source_uid_(source.uid()) {
         install_elimination_graph(std::move(builder));
+    }
+
+    size_t elimination_source_uid() const override {
+        return source_uid_;
     }
 
     func_approx_data_ptr_t create_approx_data(
@@ -167,6 +171,7 @@ class generated_lifted final : public generic_dynamics {
     void jacobian_impl(func_approx_data &data) const override;
 
   private:
+    size_t source_uid_ = 0;
     std::vector<projection_panel> jacobian_panels_;
     void prepare_graph(data &) const;
     void update_projection(func_approx_data &) const;
@@ -345,6 +350,20 @@ var lifted_symbolic_block::param(sym::default_val_t default_value,
                                   std::move(default_value));
 }
 
+lifted_symbolic_block lifted_symbolic_block::rows(
+    size_t begin, size_t end) const {
+    if (begin > end || end > static_cast<size_t>(value.size1()))
+        throw std::out_of_range(fmt::format(
+            "lifted block row slice [{}, {}) exceeds {} rows",
+            begin, end, value.size1()));
+    return {value(cs::Slice(static_cast<casadi_int>(begin),
+                            static_cast<casadi_int>(end)),
+                  cs::Slice()),
+            parameter_name + "_rows_" + std::to_string(begin) + "_" +
+                std::to_string(end),
+            system};
+}
+
 cs::MX lifted_symbolic_block::add_diag(const sym &parameter) const {
     if (!system)
         throw std::logic_error("detached lifted symbolic block");
@@ -424,6 +443,19 @@ const lifted_symbolic_partition &find_partition(
             "unknown lifted {} partition '{}'", kind, name));
     return *result;
 }
+
+const lifted_symbolic_partition &find_partition(
+    const std::vector<lifted_symbolic_partition> &partitions,
+    size_t uid, std::string_view kind) {
+    const auto found = std::ranges::find_if(
+        partitions, [uid](const auto &partition) {
+            return partition.uid == uid || partition.source_uid == uid;
+        });
+    if (found == partitions.end())
+        throw std::out_of_range(fmt::format(
+            "unknown lifted {} handle uid {}", kind, uid));
+    return *found;
+}
 } // namespace
 
 lifted_symbolic_block lifted_symbolic_system::block(
@@ -432,6 +464,18 @@ lifted_symbolic_block lifted_symbolic_system::block(
             block_parameter_name(field::name(equation),
                                  field::name(variable)),
             this};
+}
+
+lifted_symbolic_block lifted_symbolic_system::jac(
+    const generic_func &equation, const sym &variable) const {
+    const auto &row = find_partition(equations, equation.uid(), "equation");
+    const auto &col = find_partition(variables, variable.uid(), "variable");
+    return {block_value(row.field, col.field)(
+        cs::Slice(static_cast<casadi_int>(row.offset),
+                  static_cast<casadi_int>(row.offset + row.size)),
+        cs::Slice(static_cast<casadi_int>(col.offset),
+                  static_cast<casadi_int>(col.offset + col.size))),
+            block_parameter_name(row.name, col.name), this};
 }
 
 lifted_symbolic_block lifted_symbolic_system::block(
@@ -456,6 +500,14 @@ lifted_symbolic_block lifted_symbolic_system::jac(
 
 cs::MX lifted_symbolic_system::residual(std::string_view equation) const {
     const auto &row = find_partition(equations, equation, "equation");
+    const cs::MX &source = row.field == __dyn ? dyn_residual : lift_residual;
+    return source(cs::Slice(static_cast<casadi_int>(row.offset),
+                            static_cast<casadi_int>(row.offset + row.size)));
+}
+
+cs::MX lifted_symbolic_system::residual(
+    const generic_func &equation) const {
+    const auto &row = find_partition(equations, equation.uid(), "equation");
     const cs::MX &source = row.field == __dyn ? dyn_residual : lift_residual;
     return source(cs::Slice(static_cast<casadi_int>(row.offset),
                             static_cast<casadi_int>(row.offset + row.size)));
@@ -493,6 +545,39 @@ lifted_symbolic_factor lifted_symbolic_system::solve(
     const cs::MX inverse = cs::MX::inv(matrix);
     if (spd) spd_factors_->push_back(inverse);
     return {matrix, inverse};
+}
+
+lifted_symbolic_projection lifted_symbolic_system::eliminate(
+    const std::function<cs::MX(const cs::MX &)> &solve,
+    std::vector<lifted_symbolic_intermediate> intermediates) const {
+    if (!solve)
+        throw std::invalid_argument(
+            "lifted elimination solve callback is empty");
+    const auto apply = [&](const cs::MX &rhs, std::string_view what) {
+        cs::MX response = solve(rhs);
+        if (response.size1() != rhs.size1() ||
+            response.size2() != rhs.size2())
+            throw std::invalid_argument(fmt::format(
+                "lifted elimination solve returned {} shape ({}, {}), "
+                "expected ({}, {})", what, response.size1(), response.size2(),
+                rhs.size1(), rhs.size2()));
+        return response;
+    };
+    const cs::MX hx = h_x(), hu = h_u(), residual = h();
+    const cs::MX packed_rhs = cs::MX::horzcat(
+        std::vector<cs::MX>{hx, hu, residual});
+    const cs::MX packed_response = apply(packed_rhs, "projection");
+    const casadi_int nx = hx.size2();
+    const casadi_int nu = hu.size2();
+    return {
+        .response_x = packed_response(cs::Slice(), cs::Slice(0, nx)),
+        .response_u = packed_response(
+            cs::Slice(), cs::Slice(nx, nx + nu)),
+        .response_residual = packed_response(
+            cs::Slice(), cs::Slice(nx + nu, nx + nu + 1)),
+        .intermediates = std::move(intermediates),
+        .response_action = apply(action_rhs, "action"),
+    };
 }
 
 implicit_lifted::implicit_lifted(const std::string &name, const cs::SX &out,
@@ -612,9 +697,19 @@ void generic_dynamics::install_elimination_graph(
 
 lifted generic_dynamics::set_elimination_graph(
     lifted_elimination_builder builder) const {
+    return with_elimination_graph(std::move(builder));
+}
+
+lifted generic_dynamics::with_elimination_graph(
+    lifted_elimination_builder builder,
+    const std::vector<constr> &subconstraints) const {
     if (!builder)
         throw std::invalid_argument("lifted elimination graph builder is empty");
-    return std::make_shared<generated_lifted>(*this, std::move(builder));
+    auto result =
+        std::make_shared<generated_lifted>(*this, std::move(builder));
+    for (const constr &constraint : subconstraints)
+        result->add_subconstraint(constraint);
+    return result;
 }
 
 var generic_dynamics::get_or_create_elimination_parameter(

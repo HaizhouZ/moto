@@ -23,12 +23,16 @@ using lifted = dynamics;
 /// regularization term to it without special casing.
 struct lifted_symbolic_partition {
   std::string name;
+  size_t uid = 0;
+  size_t source_uid = 0;
   field_t field = __undefined;
   size_t offset = 0;
   size_t size = 0;
 };
 
 struct lifted_symbolic_system;
+struct lifted_symbolic_intermediate;
+struct lifted_symbolic_projection;
 
 /// Reusable symbolic solve handle. The matrix remains an ordinary MX value;
 /// the MX translator recognizes repeated solves and emits one shared runtime
@@ -50,6 +54,7 @@ struct lifted_symbolic_block {
 
   var param(sym::default_val_t default_value = sym::default_val_none_t(),
             std::string name = {}, size_t dim = 1) const;
+  lifted_symbolic_block rows(size_t begin, size_t end) const;
   cs::MX add_diag(const sym &parameter) const;
 };
 
@@ -64,14 +69,20 @@ struct lifted_symbolic_system {
   lifted_symbolic_block block(field_t equation, field_t variable) const;
   lifted_symbolic_block block(std::string_view equation,
                               std::string_view variable) const;
+  lifted_symbolic_block jac(const generic_func &equation,
+                            const sym &variable) const;
   lifted_symbolic_block jac(const cs::SX &equation,
                             const sym &variable) const;
+  cs::MX residual(const generic_func &equation) const;
   cs::MX residual(std::string_view equation) const;
   cs::MX h_l() const;
   cs::MX h_x() const;
   cs::MX h_u() const;
   cs::MX h() const;
   lifted_symbolic_factor solve(const cs::MX &matrix, bool spd = false) const;
+  lifted_symbolic_projection eliminate(
+      const std::function<cs::MX(const cs::MX &)> &solve,
+      std::vector<lifted_symbolic_intermediate> intermediates = {}) const;
 
   // Internal hooks installed by generic_dynamics while the builder runs.
   mutable std::function<var(std::string, size_t, sym::default_val_t)>
@@ -163,6 +174,9 @@ class generic_dynamics : public generic_constr {
     /// expression is not mutated. Parameters declared by symbolic blocks are
     /// ordinary __p dependencies of the returned expression.
     lifted set_elimination_graph(lifted_elimination_builder builder) const;
+    lifted with_elimination_graph(
+        lifted_elimination_builder builder,
+        const std::vector<constr> &subconstraints = {}) const;
     bool has_elimination_graph() const {
       return static_cast<bool>(elimination_builder_);
     }
@@ -171,6 +185,7 @@ class generic_dynamics : public generic_constr {
     }
     lifted_symbolic_projection derive_elimination_graph(
         const lifted_symbolic_system &system) const;
+    virtual size_t elimination_source_uid() const { return uid(); }
 
     virtual void compute_project_jacobians(func_approx_data &data) const;
     virtual void compute_project_residual(func_approx_data &data) const;

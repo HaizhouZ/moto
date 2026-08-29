@@ -55,28 +55,42 @@ bool ns_sqp::initialize_equality_multipliers(storage_type &outer_graph, bool ref
     solver::for_each(solver::par, solver::zip(outer_graph, overlay_graph),
                      [&](data *outer, data *overlay) {
                          solver::equality_init::sync_equality_init_overlay_primal(*outer, *overlay);
-                         overlay->for_each_constr([this](const generic_constr &c, func_approx_data &fd) { c.setup_workspace_data(fd, &settings); });
+                         overlay->for_each_constr(
+                             [this](const generic_constr &c,
+                                    func_approx_data &fd) {
+                                 c.setup_workspace_data(fd, &settings);
+                             });
                          solver::ineq_soft::bind_and_invalidate(overlay);
                          solver::equality_init::sync_equality_init_overlay_duals(*outer, *overlay);
                          solver::ineq_soft::mark_initialized(overlay);
                          overlay->prepare_linear_plan();
                          overlay->prepare_linear_backend();
-                         overlay->update_approximation(node_data::update_mode::eval_all, true);
+                         overlay->update_approximation(
+                             node_data::update_mode::eval_all, true);
                      });
+    std::vector<ns_riccati_data *> nsp_stages;
+    nsp_stages.reserve(overlay_graph.nodes().size());
+    for (data *stage : overlay_graph.nodes()) nsp_stages.push_back(stage);
+    riccati_solver_.prepare_ocp_linear_graph(nsp_stages);
 
     kkt_info kkt_overlay;
     update_primal_info(kkt_overlay, point_value_mask::primal);
     filter_linesearch_data ls;
-    ls.constr_vio_min = std::max(kkt_overlay.primal.res_l1 * settings.ls.constr_vio_min_frac, settings.prim_tol);
-    sqp_iter(ls, kkt_overlay, /*do_scaling=*/false, /*do_refinement=*/settings.rf.enabled);
+    ls.constr_vio_min = std::max(
+        kkt_overlay.primal.res_l1 * settings.ls.constr_vio_min_frac,
+        settings.prim_tol);
+    sqp_iter(ls, kkt_overlay, /*do_scaling=*/false,
+             /*do_refinement=*/settings.rf.enabled);
 
-    solver::for_each(solver::par, solver::zip(outer_graph, overlay_graph),
-                     [refresh_outer_derivatives](data *outer, data *overlay) {
-                         solver::equality_init::commit_equality_init_overlay_duals(*outer, *overlay);
-                         if (refresh_outer_derivatives) {
-                             outer->update_approximation(node_data::update_mode::eval_derivatives, true);
-                         }
-                     });
+    solver::for_each(
+        solver::par, solver::zip(outer_graph, overlay_graph),
+        [refresh_outer_derivatives](data *outer, data *overlay) {
+            solver::equality_init::commit_equality_init_overlay_duals(
+                *outer, *overlay);
+            if (refresh_outer_derivatives)
+                outer->update_approximation(
+                    node_data::update_mode::eval_derivatives, true);
+        });
     return true;
 }
 

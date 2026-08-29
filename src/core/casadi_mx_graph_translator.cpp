@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdlib>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -15,6 +16,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
+#include <unistd.h>
 
 namespace moto::linear_backend::detail {
 namespace {
@@ -749,6 +752,23 @@ panel_program_operand panel_operand(const casadi_mx_graph_plan_impl &plan,
           address.offset, stride};
 }
 
+panel_program_operand panel_source_operand(
+    const casadi_mx_graph_plan_impl &plan, size_t value,
+    const nz_address &address, ptrdiff_t stride = 0) {
+  if (address.panel == no_value) return {};
+  const auto source =
+      canonical_panel_source(plan, value, address.panel, address.offset);
+  return {plan.panel_pointer_offsets.at(source.input_value) +
+              source.input_panel,
+          source.input_offset, stride};
+}
+
+panel_program_operand panel_source_operand(
+    const casadi_mx_graph_plan_impl &plan, size_t value, index_t nz) {
+  if (nz < 0) return {};
+  return panel_source_operand(plan, value, plan.values[value].csc.at(nz));
+}
+
 panel_program_operand external_operand(
     const casadi_mx_graph_plan_impl &plan, size_t pointer,
     size_t offset = 0, ptrdiff_t stride = 0) {
@@ -789,7 +809,7 @@ bool lower_to_panel_program(const casadi_mx_graph_plan_impl &plan,
           program,
           external_operand(plan, plan.external_inputs + output->output,
                            output->offset + nz),
-          panel_operand(plan, output->input, nz));
+          panel_source_operand(plan, output->input, nz));
     return true;
   }
   if (const auto *copy = dynamic_cast<const copy_operation *>(&operation)) {
@@ -807,8 +827,8 @@ bool lower_to_panel_program(const casadi_mx_graph_plan_impl &plan,
         program.instructions.push_back(
             {.op = panel_program_op::copy,
              .destination = destination,
-             .lhs = panel_operand(plan, copy->input, segment.source,
-                                  segment.source_stride),
+             .lhs = panel_source_operand(plan, copy->input, segment.source,
+                                         segment.source_stride),
              .count = segment.count,
              .scalar = copy->scale});
       }
@@ -819,8 +839,10 @@ bool lower_to_panel_program(const casadi_mx_graph_plan_impl &plan,
           dynamic_cast<const binary_operation *>(&operation)) {
     for (size_t nz = 0; nz < binary->lhs_map.size(); ++nz) {
       const auto destination = panel_operand(plan, binary->output, nz);
-      const auto lhs = panel_operand(plan, binary->lhs, binary->lhs_map[nz]);
-      const auto rhs = panel_operand(plan, binary->rhs, binary->rhs_map[nz]);
+      const auto lhs =
+          panel_source_operand(plan, binary->lhs, binary->lhs_map[nz]);
+      const auto rhs =
+          panel_source_operand(plan, binary->rhs, binary->rhs_map[nz]);
       const bool has_lhs = lhs.pointer != panel_program_operand::invalid;
       const bool has_rhs = rhs.pointer != panel_program_operand::invalid;
       if (!has_lhs || !has_rhs) {
@@ -848,13 +870,13 @@ bool lower_to_panel_program(const casadi_mx_graph_plan_impl &plan,
           dynamic_cast<const scatter_operation *>(&operation)) {
     for (size_t nz = 0; nz < scatter->base_map.size(); ++nz)
       append_assignment(program, panel_operand(plan, scatter->output, nz),
-                        panel_operand(plan, scatter->base,
-                                      scatter->base_map[nz]));
+                        panel_source_operand(plan, scatter->base,
+                                             scatter->base_map[nz]));
     for (size_t nz = 0; nz < scatter->destination.size(); ++nz) {
       if (scatter->destination[nz] < 0) continue;
       const auto destination = panel_operand(
           plan, scatter->output, scatter->destination[nz]);
-      const auto source = panel_operand(
+      const auto source = panel_source_operand(
           plan, scatter->source, scatter->scalar ? 0 : nz);
       if (scatter->add)
         program.instructions.push_back(
@@ -876,7 +898,7 @@ bool lower_to_panel_program(const casadi_mx_graph_plan_impl &plan,
             program,
             panel_operand(plan, concat->output,
                           concat->destinations[dependency][nz]),
-            panel_operand(plan, concat->inputs[dependency], nz));
+            panel_source_operand(plan, concat->inputs[dependency], nz));
     return true;
   }
   return false;
@@ -1494,71 +1516,114 @@ void emit_generated_panel_program(generated_source &source,
     return static_cast<ptrdiff_t>(next.offset) -
            static_cast<ptrdiff_t>(first.offset);
   };
+  struct repeated_group {
+    size_t period = 1, cycles = 1;
+    std::vector<ptrdiff_t> destination, lhs, rhs;
+    size_t saved() const { return period * (cycles - 1); }
+  };
   for (size_t begin = 0; begin < spec.instructions.size();) {
-    const auto &instruction = spec.instructions[begin];
-    size_t repeat = 1;
-    ptrdiff_t destination_outer = 0, lhs_outer = 0, rhs_outer = 0;
-    if (begin + 1 < spec.instructions.size() &&
-        same_shape(instruction, spec.instructions[begin + 1])) {
-      destination_outer = delta(spec.instructions[begin + 1].destination,
-                                instruction.destination);
-      lhs_outer = delta(spec.instructions[begin + 1].lhs, instruction.lhs);
-      rhs_outer = delta(spec.instructions[begin + 1].rhs, instruction.rhs);
-      for (size_t next = begin + 1; next < spec.instructions.size(); ++next) {
-        const auto &candidate = spec.instructions[next];
-        if (!same_shape(instruction, candidate) ||
-            delta(candidate.destination, instruction.destination) !=
-                destination_outer * static_cast<ptrdiff_t>(next - begin) ||
-            delta(candidate.lhs, instruction.lhs) !=
-                lhs_outer * static_cast<ptrdiff_t>(next - begin) ||
-            delta(candidate.rhs, instruction.rhs) !=
-                rhs_outer * static_cast<ptrdiff_t>(next - begin))
+    repeated_group best;
+    const size_t remaining = spec.instructions.size() - begin;
+    for (size_t period = 1; period <= std::min<size_t>(32, remaining / 2);
+         ++period) {
+      repeated_group candidate;
+      candidate.period = period;
+      candidate.destination.resize(period);
+      candidate.lhs.resize(period);
+      candidate.rhs.resize(period);
+      bool matches = true;
+      for (size_t i = 0; i < period; ++i) {
+        const auto &first = spec.instructions[begin + i];
+        const auto &second = spec.instructions[begin + period + i];
+        if (!same_shape(first, second)) {
+          matches = false;
           break;
-        repeat = next - begin + 1;
+        }
+        candidate.destination[i] =
+            delta(second.destination, first.destination);
+        candidate.lhs[i] = delta(second.lhs, first.lhs);
+        candidate.rhs[i] = delta(second.rhs, first.rhs);
       }
+      if (!matches) continue;
+      candidate.cycles = 2;
+      while ((candidate.cycles + 1) * period <= remaining) {
+        const size_t cycle = candidate.cycles;
+        for (size_t i = 0; i < period; ++i) {
+          const auto &first = spec.instructions[begin + i];
+          const auto &next =
+              spec.instructions[begin + cycle * period + i];
+          if (!same_shape(first, next) ||
+              delta(next.destination, first.destination) !=
+                  candidate.destination[i] *
+                      static_cast<ptrdiff_t>(cycle) ||
+              delta(next.lhs, first.lhs) !=
+                  candidate.lhs[i] * static_cast<ptrdiff_t>(cycle) ||
+              delta(next.rhs, first.rhs) !=
+                  candidate.rhs[i] * static_cast<ptrdiff_t>(cycle)) {
+            matches = false;
+            break;
+          }
+        }
+        if (!matches) break;
+        ++candidate.cycles;
+      }
+      if (candidate.saved() > best.saved() ||
+          (candidate.saved() == best.saved() &&
+           candidate.period < best.period))
+        best = std::move(candidate);
     }
-    if (repeat > 1)
-      source.open("for (std::size_t j=0;j<" + std::to_string(repeat) +
-                  ";++j)");
-    const bool loop = instruction.count > 1;
-    if (loop) {
-      source.open("for (std::size_t i=0;i<" +
-                  std::to_string(instruction.count) + ";++i)");
+    if (best.cycles > 1)
+      source.open("for (std::size_t j=0;j<" +
+                  std::to_string(best.cycles) + ";++j)");
+    for (size_t ordinal = 0; ordinal < best.period; ++ordinal) {
+      const auto &instruction = spec.instructions[begin + ordinal];
+      const bool loop = instruction.count > 1;
+      if (loop) {
+        source.line("#pragma omp simd");
+        source.open("for (std::size_t i=0;i<" +
+                    std::to_string(instruction.count) + ";++i)");
+      }
+      const std::string index = loop ? "i" : "0";
+      const std::string outer_index = best.cycles > 1 ? "j" : "0";
+      const ptrdiff_t destination_outer =
+          best.cycles > 1 ? best.destination[ordinal] : 0;
+      const ptrdiff_t lhs_outer =
+          best.cycles > 1 ? best.lhs[ordinal] : 0;
+      const ptrdiff_t rhs_outer =
+          best.cycles > 1 ? best.rhs[ordinal] : 0;
+      std::string expression;
+      switch (instruction.op) {
+      case panel_program_op::fill:
+        expression = generated_number(instruction.scalar);
+        break;
+      case panel_program_op::copy:
+        expression = generated_panel_address(instruction.lhs, index, lhs_outer,
+                                             outer_index);
+        if (instruction.scalar != 1.)
+          expression = generated_number(instruction.scalar) + "*(" +
+                       expression + ')';
+        break;
+      case panel_program_op::add:
+      case panel_program_op::sub:
+      case panel_program_op::mul:
+      case panel_program_op::div:
+        expression = generated_panel_address(instruction.lhs, index, lhs_outer,
+                                             outer_index) +
+                     (instruction.op == panel_program_op::add ? "+"
+                      : instruction.op == panel_program_op::sub ? "-"
+                      : instruction.op == panel_program_op::mul ? "*"
+                                                                 : "/") +
+                     generated_panel_address(instruction.rhs, index, rhs_outer,
+                                             outer_index);
+        break;
+      }
+      source.line(generated_panel_address(instruction.destination, index,
+                                          destination_outer, outer_index) +
+                  "=" + expression + ";");
+      if (loop) source.close();
     }
-    const std::string index = loop ? "i" : "0";
-    const std::string outer_index = repeat > 1 ? "j" : "0";
-    std::string expression;
-    switch (instruction.op) {
-    case panel_program_op::fill:
-      expression = generated_number(instruction.scalar);
-      break;
-    case panel_program_op::copy:
-      expression = generated_panel_address(instruction.lhs, index, lhs_outer,
-                                           outer_index);
-      if (instruction.scalar != 1.)
-        expression = generated_number(instruction.scalar) + "*(" +
-                     expression + ')';
-      break;
-    case panel_program_op::add:
-    case panel_program_op::sub:
-    case panel_program_op::mul:
-    case panel_program_op::div:
-      expression = generated_panel_address(instruction.lhs, index, lhs_outer,
-                                           outer_index) +
-                   (instruction.op == panel_program_op::add ? "+"
-                    : instruction.op == panel_program_op::sub ? "-"
-                    : instruction.op == panel_program_op::mul ? "*"
-                                                               : "/") +
-                   generated_panel_address(instruction.rhs, index, rhs_outer,
-                                           outer_index);
-      break;
-    }
-    source.line(generated_panel_address(instruction.destination, index,
-                                        destination_outer, outer_index) +
-                "=" + expression + ";");
-    if (loop) source.close();
-    if (repeat > 1) source.close();
-    begin += repeat;
+    if (best.cycles > 1) source.close();
+    begin += best.period * best.cycles;
   }
 }
 
@@ -1575,8 +1640,8 @@ void emit_generated_product(generated_source &source,
     for (size_t nz = 0; nz < operation.addend_map.size(); ++nz)
       append_assignment(initialization,
                         panel_operand(plan, operation.output, nz),
-                        panel_operand(plan, operation.addend,
-                                      operation.addend_map[nz]),
+                        panel_source_operand(plan, operation.addend,
+                                             operation.addend_map[nz]),
                         operation.addend_scale);
   emit_generated_panel_program(
       source, coalesce_panel_program_spec(std::move(initialization)));
@@ -1633,24 +1698,24 @@ void emit_generated_product(generated_source &source,
       if (!l.structured() && !r.structured()) {
         flags = unsigned(l.transpose()) | (unsigned(r.transpose()) << 1) |
                 (unsigned(la == 'a') << 2) | (unsigned(ra == 'a') << 3);
-        call << "moto_graph_pair_dd";
+        call << "moto_graph_pair_dd_" << flags;
       } else if (l.structured() && !r.structured()) {
         flags = unsigned(l.panel.pattern == sparsity::eye) |
                 (unsigned(r.transpose()) << 1) |
                 (unsigned(ra == 'a') << 2);
-        call << "moto_graph_pair_sd";
+        call << "moto_graph_pair_sd_" << flags;
       } else if (!l.structured() && r.structured()) {
         flags = unsigned(l.transpose()) |
                 (unsigned(r.panel.pattern == sparsity::eye) << 1) |
                 (unsigned(la == 'a') << 2);
-        call << "moto_graph_pair_ds";
+        call << "moto_graph_pair_ds_" << flags;
       } else {
         flags = unsigned(l.panel.pattern == sparsity::eye) |
                 (unsigned(r.panel.pattern == sparsity::eye) << 1) |
                 (unsigned(la == 'a') << 2) | (unsigned(ra == 'a') << 3);
-        call << "moto_graph_pair_ss";
+        call << "moto_graph_pair_ss_" << flags;
       }
-      call << '(' << flags << ",p[" << lhs_slot << "]+"
+      call << "(p[" << lhs_slot << "]+"
            << l.panel.storage_offset << ','
            << l.physical_rows() << ',' << l.physical_cols() << ','
            << l.leading_rows() << ',' << lk << ",p[" << rhs_slot << "]+"
@@ -1666,6 +1731,89 @@ void emit_generated_product(generated_source &source,
   }
 }
 
+struct solve_copy_assignment {
+  size_t pointer = 0, panel_offset = 0;
+  ptrdiff_t local_offset = 0, grouping_stride = 0;
+};
+
+struct solve_copy_run {
+  size_t pointer = 0, panel_offset = 0, count = 1;
+  ptrdiff_t panel_stride = 0, local_offset = 0, local_stride = 0;
+};
+
+std::vector<solve_copy_run> coalesce_solve_copies(
+    std::span<const solve_copy_assignment> assignments) {
+  std::vector<solve_copy_run> runs;
+  for (size_t begin = 0; begin < assignments.size();) {
+    const auto &first = assignments[begin];
+    solve_copy_run run{first.pointer, first.panel_offset, 1, 0,
+                       first.local_offset, 0};
+    if (begin + 1 < assignments.size()) {
+      const auto &second = assignments[begin + 1];
+      run.panel_stride = static_cast<ptrdiff_t>(second.panel_offset) -
+                         static_cast<ptrdiff_t>(first.panel_offset);
+      if (first.local_offset >= 0)
+        run.local_stride = second.local_offset - first.local_offset;
+      for (size_t next = begin + 1; next < assignments.size(); ++next) {
+        const auto &candidate = assignments[next];
+        const auto ordinal = static_cast<ptrdiff_t>(next - begin);
+        if (candidate.pointer != first.pointer ||
+            candidate.grouping_stride != first.grouping_stride ||
+            (candidate.local_offset < 0) != (first.local_offset < 0) ||
+            static_cast<ptrdiff_t>(candidate.panel_offset) !=
+                static_cast<ptrdiff_t>(first.panel_offset) +
+                    run.panel_stride * ordinal ||
+            (first.local_offset >= 0 &&
+             candidate.local_offset !=
+                 first.local_offset + run.local_stride * ordinal))
+          break;
+        run.count = next - begin + 1;
+      }
+    }
+    runs.push_back(run);
+    begin += run.count;
+  }
+  return runs;
+}
+
+size_t emit_solve_copy_runs(
+    generated_source &source, std::string_view name,
+    std::span<const solve_copy_assignment> assignments) {
+  const auto runs = coalesce_solve_copies(assignments);
+  if (runs.empty()) return 0;
+  source.open("static constexpr moto_graph_copy_run " + std::string(name) +
+              "[]=");
+  for (const auto &run : runs)
+    source.line("{" + std::to_string(run.pointer) + "," +
+                std::to_string(run.panel_offset) + "," +
+                std::to_string(run.count) + "," +
+                std::to_string(run.panel_stride) + "," +
+                std::to_string(run.local_offset) + "," +
+                std::to_string(run.local_stride) + "},");
+  source.close(";");
+  return runs.size();
+}
+
+void emit_solve_pack(generated_source &source, std::string_view destination,
+                     std::span<const solve_copy_assignment> assignments) {
+  const std::string name = "pack_runs_" + std::string(destination);
+  const size_t runs = emit_solve_copy_runs(source, name, assignments);
+  if (runs)
+    source.line("moto_graph_pack(" + std::string(destination) + ",p," + name +
+                "," + std::to_string(runs) + ");");
+}
+
+void emit_solve_unpack(generated_source &source, std::string_view input,
+                       std::span<const solve_copy_assignment> assignments,
+                       std::string_view tag) {
+  const std::string name = "unpack_runs_" + std::string(tag);
+  const size_t runs = emit_solve_copy_runs(source, name, assignments);
+  if (runs)
+    source.line("moto_graph_unpack(p," + name + "," +
+                std::to_string(runs) + "," +
+                (input.empty() ? "nullptr" : std::string(input)) + ");");
+}
+
 bool emit_generated_solve(generated_source &source,
                           const casadi_mx_graph_plan_impl &plan,
                           const solve_operation &operation) {
@@ -1678,11 +1826,15 @@ bool emit_generated_solve(generated_source &source,
   const auto &output = plan.values[operation.output];
   const sparse_index rhs_index(rhs.sparsity);
   const auto zero_output = [&] {
+    std::vector<solve_copy_assignment> assignments;
     for (size_t nz = 0; nz < output.csc.size(); ++nz) {
       const auto destination = panel_operand(plan, operation.output, nz);
       if (destination.pointer != panel_program_operand::invalid)
-        source.line(generated_panel_address(destination) + "=0.0;");
+        assignments.push_back({destination.pointer, destination.offset, -1,
+                               destination.stride});
     }
+    emit_solve_unpack(source, {}, assignments,
+                      "zero_" + std::to_string(operation.output));
   };
   if (operation.active_columns.empty()) {
     zero_output();
@@ -1748,17 +1900,21 @@ bool emit_generated_solve(generated_source &source,
                 std::to_string(n * cols) + "]{};");
     source.line("alignas(64) double " + packed_output + "[" +
                 std::to_string(n * cols) + "];");
+    std::vector<solve_copy_assignment> pack_assignments;
     for (size_t packed = 0; packed < cols; ++packed) {
       const index_t col = operation.active_columns[packed];
       for (index_t nz = rhs_index.colind[col];
            nz < rhs_index.colind[col + 1]; ++nz) {
-        const auto source_operand = panel_operand(plan, operation.rhs, nz);
+        const auto source_operand =
+            panel_source_operand(plan, operation.rhs, nz);
         if (source_operand.pointer == panel_program_operand::invalid) continue;
-        source.line(packed_rhs + "[" +
-                    std::to_string(rhs_index.row[nz] + packed * n) + "]=" +
-                    generated_panel_address(source_operand) + ";");
+        pack_assignments.push_back(
+            {source_operand.pointer, source_operand.offset,
+             static_cast<ptrdiff_t>(rhs_index.row[nz] + packed * n),
+             source_operand.stride});
       }
     }
+    emit_solve_pack(source, packed_rhs, pack_assignments);
     if (n <= 3) {
       source.line("moto_graph_small_solve(p[" +
                   std::to_string(factor_pointer) + "]," +
@@ -1784,6 +1940,7 @@ bool emit_generated_solve(generated_source &source,
       packed_column[operation.active_columns[packed]] =
           static_cast<index_t>(packed);
     const sparse_index output_index(output.sparsity);
+    std::vector<solve_copy_assignment> unpack_assignments;
     for (index_t col = 0; col < output_index.cols; ++col) {
       for (index_t nz = output_index.colind[col];
            nz < output_index.colind[col + 1]; ++nz) {
@@ -1791,14 +1948,18 @@ bool emit_generated_solve(generated_source &source,
         if (destination.pointer == panel_program_operand::invalid) continue;
         const index_t packed = packed_column[col];
         if (packed < 0)
-          source.line(generated_panel_address(destination) + "=0.0;");
+          unpack_assignments.push_back({destination.pointer,
+                                        destination.offset, -1,
+                                        destination.stride});
         else
-          source.line(generated_panel_address(destination) + "=" +
-                      packed_output + "[" +
-                      std::to_string(output_index.row[nz] + packed * n) +
-                      "];");
+          unpack_assignments.push_back({
+              destination.pointer, destination.offset,
+              output_index.row[nz] + packed * static_cast<index_t>(n),
+              destination.stride});
       }
     }
+    emit_solve_unpack(source, packed_output, unpack_assignments,
+                      packed_output);
     return true;
   }
   source.line("moto_graph_factor(s," +
@@ -1825,32 +1986,35 @@ bool emit_generated_solve(generated_source &source,
   return true;
 }
 
-std::string generated_graph_preamble(size_t factors) {
-  {
-    std::ostringstream source;
-    source << R"cpp(#include <cstddef>
-extern "C" void moto_graph_pair_dd(unsigned,const double*,std::size_t,std::size_t,std::size_t,std::size_t,const double*,std::size_t,std::size_t,std::size_t,std::size_t,double*,std::size_t,std::size_t,std::size_t,std::size_t,double);
-extern "C" void moto_graph_pair_sd(unsigned,const double*,std::size_t,std::size_t,std::size_t,std::size_t,const double*,std::size_t,std::size_t,std::size_t,std::size_t,double*,std::size_t,std::size_t,std::size_t,std::size_t,double);
-extern "C" void moto_graph_pair_ds(unsigned,const double*,std::size_t,std::size_t,std::size_t,std::size_t,const double*,std::size_t,std::size_t,std::size_t,std::size_t,double*,std::size_t,std::size_t,std::size_t,std::size_t,double);
-extern "C" void moto_graph_pair_ss(unsigned,const double*,std::size_t,std::size_t,std::size_t,std::size_t,const double*,std::size_t,std::size_t,std::size_t,std::size_t,double*,std::size_t,std::size_t,std::size_t,std::size_t,double);
+std::string generated_graph_preamble() {
+  return R"cpp(#include <cstddef>
+#define MOTO_DECLARE_PAIR(kind,id) extern "C" void moto_graph_pair_##kind##_##id(const double*,std::size_t,std::size_t,std::size_t,std::size_t,const double*,std::size_t,std::size_t,std::size_t,std::size_t,double*,std::size_t,std::size_t,std::size_t,std::size_t,double)
+#define MOTO_DECLARE_PAIR_8(kind) MOTO_DECLARE_PAIR(kind,0); MOTO_DECLARE_PAIR(kind,1); MOTO_DECLARE_PAIR(kind,2); MOTO_DECLARE_PAIR(kind,3); MOTO_DECLARE_PAIR(kind,4); MOTO_DECLARE_PAIR(kind,5); MOTO_DECLARE_PAIR(kind,6); MOTO_DECLARE_PAIR(kind,7)
+#define MOTO_DECLARE_PAIR_16(kind) MOTO_DECLARE_PAIR_8(kind); MOTO_DECLARE_PAIR(kind,8); MOTO_DECLARE_PAIR(kind,9); MOTO_DECLARE_PAIR(kind,10); MOTO_DECLARE_PAIR(kind,11); MOTO_DECLARE_PAIR(kind,12); MOTO_DECLARE_PAIR(kind,13); MOTO_DECLARE_PAIR(kind,14); MOTO_DECLARE_PAIR(kind,15)
+MOTO_DECLARE_PAIR_16(dd);
+MOTO_DECLARE_PAIR_8(sd);
+MOTO_DECLARE_PAIR_8(ds);
+MOTO_DECLARE_PAIR_16(ss);
+#undef MOTO_DECLARE_PAIR_16
+#undef MOTO_DECLARE_PAIR_8
+#undef MOTO_DECLARE_PAIR
 extern "C" void* moto_graph_factor_state_create(std::size_t);
 extern "C" void moto_graph_factor_state_destroy(void*);
 extern "C" void moto_graph_factor_next_epoch(void*);
+struct moto_graph_copy_run { std::size_t pointer,panel_offset,count; std::ptrdiff_t panel_stride,local_offset,local_stride; };
+extern "C" void moto_graph_pack(double*,double**,const moto_graph_copy_run*,std::size_t);
+extern "C" void moto_graph_unpack(double**,const moto_graph_copy_run*,std::size_t,const double*);
 extern "C" void moto_graph_small_inverse(const double*,double*,std::size_t);
 extern "C" void moto_graph_small_solve(const double*,bool,const double*,std::size_t,std::size_t,std::size_t,double*,std::size_t);
 extern "C" void moto_graph_factor(void*,std::size_t,bool,const double*,std::size_t);
 extern "C" void moto_graph_inverse(void*,std::size_t,double*,std::size_t);
 extern "C" void moto_graph_solve(void*,std::size_t,bool,const double*,std::size_t,std::size_t,std::size_t,double*,std::size_t);
 )cpp";
-    return source.str();
-  }
 }
 
-casadi_mx_graph_plan_impl::whole_kernel_registry compile_generated_graph(
-    const casadi_mx_graph_plan_impl &plan,
-    const std::filesystem::path &cache_dir) {
+std::string generate_graph_source(const casadi_mx_graph_plan_impl &plan) {
   generated_source source;
-  source.text << generated_graph_preamble(plan.factor_values.size());
+  source.text << generated_graph_preamble();
   source.open("static void run(void*s,std::size_t entry,double**p)");
   source.line("if(entry==0)moto_graph_factor_next_epoch(s);");
   source.open("switch(entry)");
@@ -1904,8 +2068,14 @@ casadi_mx_graph_plan_impl::whole_kernel_registry compile_generated_graph(
   source.line("if(action==1){moto_graph_factor_state_destroy(opaque);return nullptr;}");
   source.line("run(opaque,entry,p);return nullptr;");
   source.close();
+  return source.text.str();
+}
+
+casadi_mx_graph_plan_impl::whole_kernel_registry compile_generated_graph(
+    const std::string &source,
+    const std::filesystem::path &cache_dir) {
   return reinterpret_cast<casadi_mx_graph_plan_impl::whole_kernel_registry>(
-      compile_casadi_mx_graph_source(source.text.str(), cache_dir));
+      compile_casadi_mx_graph_source(source, cache_dir));
 }
 
 std::vector<index_t> transpose_map(const casadi::Sparsity &output,
@@ -1928,12 +2098,220 @@ void require_map(const std::vector<index_t> &map, std::string_view what) {
 
 struct casadi_mx_graph_plan : casadi_mx_graph_plan_impl {};
 
+namespace {
+
+using json = nlohmann::json;
+
+json serialize_matrix_layout(const matrix_layout &layout) {
+  json panels = json::array();
+  for (const auto &panel : layout.panels) {
+    panels.push_back({
+        {"pattern", static_cast<int>(panel.pattern)},
+        {"row", panel.row_offset},
+        {"col", panel.col_offset},
+        {"rows", panel.rows},
+        {"cols", panel.cols},
+        {"transposed", panel.transposed},
+        {"storage_offset", panel.storage_offset},
+        {"storage_rows", panel.storage_rows},
+    });
+  }
+  return {{"rows", layout.rows}, {"cols", layout.cols}, {"panels", panels}};
+}
+
+matrix_layout deserialize_matrix_layout(const json &value) {
+  matrix_layout layout;
+  layout.rows = value.at("rows").get<size_t>();
+  layout.cols = value.at("cols").get<size_t>();
+  for (const auto &item : value.at("panels")) {
+    panel_layout panel;
+    panel.pattern = static_cast<sparsity>(item.at("pattern").get<int>());
+    panel.row_offset = item.at("row").get<size_t>();
+    panel.col_offset = item.at("col").get<size_t>();
+    panel.rows = item.at("rows").get<size_t>();
+    panel.cols = item.at("cols").get<size_t>();
+    panel.transposed = item.at("transposed").get<bool>();
+    panel.storage_offset = item.at("storage_offset").get<size_t>();
+    panel.storage_rows = item.at("storage_rows").get<size_t>();
+    layout.panels.push_back(panel);
+  }
+  return layout;
+}
+
+json serialize_runtime_plan(const casadi_mx_graph_plan &plan,
+                            const std::string &source) {
+  std::unordered_set<size_t> constant_values;
+  for (const auto &operation : plan.operations)
+    if (const auto *constant =
+            dynamic_cast<const constant_operation *>(operation.get()))
+      constant_values.insert(constant->output);
+
+  json values = json::array();
+  for (size_t index = 0; index < plan.values.size(); ++index) {
+    const auto &value = plan.values[index];
+    json addresses = json::array();
+    if (constant_values.contains(index))
+      for (const auto &address : value.csc)
+        addresses.push_back({address.panel, address.offset});
+    values.push_back({
+        {"matrix", serialize_matrix_layout(value.matrix)},
+        {"csc", std::move(addresses)},
+        {"allocate", value.allocate},
+        {"local_entries", value.local_entries},
+    });
+  }
+
+  json bindings = json::array();
+  for (const auto &base : plan.operations) {
+    if (const auto *input = dynamic_cast<const input_operation *>(base.get());
+        input && input->direct) {
+      bindings.push_back({{"kind", "input"},
+                          {"output", input->output},
+                          {"input", input->input}});
+    } else if (const auto *constant =
+                   dynamic_cast<const constant_operation *>(base.get())) {
+      bindings.push_back({{"kind", "constant"},
+                          {"output", constant->output},
+                          {"values", constant->values}});
+    } else if (const auto *alias =
+                   dynamic_cast<const alias_operation *>(base.get())) {
+      json aliases = json::array();
+      for (const auto &item : alias->aliases)
+        aliases.push_back({item.output_panel, item.input_value,
+                           item.input_panel, item.input_offset});
+      bindings.push_back({{"kind", "alias"},
+                          {"output", alias->output},
+                          {"aliases", std::move(aliases)}});
+    } else if (base->binding_only() &&
+               !dynamic_cast<const output_operation *>(base.get())) {
+      throw std::logic_error("unsupported cached graph binding operation");
+    }
+  }
+
+  json direct_outputs = json::array();
+  for (const auto &output : plan.direct_outputs)
+    direct_outputs.push_back(
+        {output.value, output.panel, output.output, output.offset});
+
+  return {
+      {"version", 12},
+      {"inputs", plan.inputs},
+      {"external_inputs", plan.external_inputs},
+      {"outputs", plan.outputs},
+      {"input_pointer_offsets", plan.input_pointer_offsets},
+      {"entry_outputs", plan.entry_outputs},
+      {"values", std::move(values)},
+      {"panel_pointer_offsets", plan.panel_pointer_offsets},
+      {"value_panel_pointers", plan.value_panel_pointers},
+      {"bindings", std::move(bindings)},
+      {"direct_outputs", std::move(direct_outputs)},
+      {"source", source},
+  };
+}
+
+std::shared_ptr<casadi_mx_graph_plan>
+deserialize_runtime_plan(const json &value,
+                         const std::filesystem::path &cache_dir) {
+  if (value.at("version").get<int>() != 12)
+    throw std::runtime_error("unsupported cached MX graph plan version");
+  auto plan = std::make_shared<casadi_mx_graph_plan>();
+  plan->inputs = value.at("inputs").get<size_t>();
+  plan->external_inputs = value.at("external_inputs").get<size_t>();
+  plan->outputs = value.at("outputs").get<size_t>();
+  plan->input_pointer_offsets =
+      value.at("input_pointer_offsets").get<std::vector<size_t>>();
+  plan->entry_outputs =
+      value.at("entry_outputs").get<std::vector<size_t>>();
+  plan->panel_pointer_offsets =
+      value.at("panel_pointer_offsets").get<std::vector<size_t>>();
+  plan->value_panel_pointers =
+      value.at("value_panel_pointers").get<size_t>();
+
+  for (const auto &item : value.at("values")) {
+    value_layout layout;
+    layout.matrix = deserialize_matrix_layout(item.at("matrix"));
+    layout.allocate = item.at("allocate").get<bool>();
+    layout.local_entries = item.at("local_entries").get<uint64_t>();
+    for (const auto &address : item.at("csc"))
+      layout.csc.push_back(
+          {address.at(0).get<size_t>(), address.at(1).get<size_t>()});
+    plan->values.push_back(std::move(layout));
+  }
+
+  for (const auto &binding : value.at("bindings")) {
+    const auto kind = binding.at("kind").get<std::string>();
+    const size_t output = binding.at("output").get<size_t>();
+    if (kind == "input") {
+      plan->operations.push_back(std::make_unique<input_operation>(
+          output, binding.at("input").get<size_t>(), true));
+    } else if (kind == "constant") {
+      plan->operations.push_back(std::make_unique<constant_operation>(
+          output, binding.at("values").get<std::vector<double>>()));
+    } else if (kind == "alias") {
+      std::vector<panel_alias> aliases;
+      for (const auto &item : binding.at("aliases"))
+        aliases.push_back({item.at(0).get<size_t>(),
+                           item.at(1).get<size_t>(),
+                           item.at(2).get<size_t>(),
+                           item.at(3).get<size_t>()});
+      plan->operations.push_back(
+          std::make_unique<alias_operation>(output, std::move(aliases)));
+    } else {
+      throw std::runtime_error("unknown cached MX graph binding operation");
+    }
+  }
+
+  for (const auto &output : value.at("direct_outputs"))
+    plan->direct_outputs.push_back({output.at(0).get<size_t>(),
+                                    output.at(1).get<size_t>(),
+                                    output.at(2).get<size_t>(),
+                                    output.at(3).get<size_t>()});
+  plan->whole_kernel = compile_generated_graph(
+      value.at("source").get<std::string>(), cache_dir);
+  if (!plan->whole_kernel)
+    throw std::runtime_error("cached MX graph kernel could not be loaded");
+  return plan;
+}
+
+void store_runtime_plan(const std::filesystem::path &path,
+                        const casadi_mx_graph_plan &plan,
+                        const std::string &source) {
+  const auto tmp = path.string() + ".tmp." + std::to_string(::getpid());
+  try {
+    {
+      std::ofstream output(tmp, std::ios::binary);
+      if (!output)
+        throw std::runtime_error("failed to create MX graph plan cache");
+      const auto encoded = json::to_cbor(serialize_runtime_plan(plan, source));
+      output.write(reinterpret_cast<const char *>(encoded.data()),
+                   static_cast<std::streamsize>(encoded.size()));
+    }
+    std::filesystem::rename(tmp, path);
+  } catch (...) {
+    std::error_code ec;
+    std::filesystem::remove(tmp, ec);
+    throw;
+  }
+}
+
+} // namespace
+
+std::shared_ptr<const casadi_mx_graph_plan> load_casadi_mx_graph_plan(
+    const std::filesystem::path &plan_cache,
+    const std::filesystem::path &cache_dir) {
+  std::ifstream input(plan_cache, std::ios::binary);
+  if (!input) return {};
+  const json value = json::from_cbor(input);
+  return deserialize_runtime_plan(value, cache_dir);
+}
+
 std::shared_ptr<const casadi_mx_graph_plan>
 translate_casadi_mx_graph(const casadi::Function &function,
                           std::vector<size_t> entry_outputs,
                           std::span<const matrix_layout> input_layouts,
                           const std::filesystem::path &cache_dir,
-                          size_t spd_outputs) {
+                          size_t spd_outputs,
+                          const std::filesystem::path &plan_cache) {
   auto plan = std::make_shared<casadi_mx_graph_plan>();
   plan->inputs = function.n_in();
   if (spd_outputs > static_cast<size_t>(function.n_out()))
@@ -2525,9 +2903,11 @@ translate_casadi_mx_graph(const casadi::Function &function,
     output->direct = true;
   }
   build_entry_schedules(*plan);
-  plan->whole_kernel = compile_generated_graph(*plan, cache_dir);
+  const std::string source = generate_graph_source(*plan);
+  plan->whole_kernel = compile_generated_graph(source, cache_dir);
   if (!plan->whole_kernel)
     throw std::runtime_error("MX graph did not lower to a generated kernel");
+  if (!plan_cache.empty()) store_runtime_plan(plan_cache, *plan, source);
   return plan;
 }
 

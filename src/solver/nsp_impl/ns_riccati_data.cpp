@@ -49,8 +49,6 @@ namespace {
 std::vector<const sparse_matrix *> presolve_sparse_inputs(
     ns_riccati_data &d) {
     return {
-        &d.Q_xx,
-        &d.Q_xx_mod,
         &d.Q_uu,
         &d.Q_uu_mod,
         &d.Q_ux,
@@ -195,8 +193,6 @@ linear_backend::graph_kernel build_unconstrained_presolve_graph(
         layouts.push_back(layout);
         return inputs.back();
     };
-    const auto q_xx = sparse_input("q_xx");
-    const auto q_xx_mod = sparse_input("q_xx_mod");
     const auto q_uu = sparse_input("q_uu");
     const auto q_uu_mod = sparse_input("q_uu_mod");
     const auto q_ux = sparse_input("q_ux");
@@ -266,8 +262,7 @@ linear_backend::graph_kernel build_unconstrained_presolve_graph(
                          product(q_ll_total, l_y);
     const auto z_0_K = state_u + product(z_y.T(), state_y) +
                        product(z_l.T(), state_l);
-    const auto v_xx = q_xx + q_xx_mod -
-                      product((q_yx + q_yx_mod).T(), y_y) -
+    const auto v_xx = -product((q_yx + q_yx_mod).T(), y_y) -
                       product((q_lx + q_lx_mod).T(), l_y) -
                       product(y_y.T(), state_y) -
                       product(l_y.T(), state_l);
@@ -291,9 +286,9 @@ linear_backend::graph_kernel build_unconstrained_presolve_graph(
     }
     const std::string artifact_identity =
         lifted_program
-            ? "nsp_integrated_presolve_v3_" +
+            ? "nsp_integrated_presolve_v4_" +
                   lifted_program->artifact_identity
-            : "nsp_unconstrained_presolve_v2";
+            : "nsp_unconstrained_presolve_v3";
     return compile_graph(artifact_identity,
                          inputs, entries, layouts, nullptr,
                          "gen/linear_backend",
@@ -704,6 +699,8 @@ void ns_riccati_data::run_unconstrained_presolve_graph() {
         plan.pointers[offset] = V_xx.data();
     }
     plan.presolve(0, plan.pointers);
+    linear_backend::write_dense(Q_xx, V_xx);
+    linear_backend::write_dense(Q_xx_mod, V_xx);
     plan.projection_active = plan.integrated;
 }
 

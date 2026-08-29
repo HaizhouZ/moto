@@ -144,21 +144,20 @@ TEST_CASE("lifted MX elimination graph preserves zero blocks and parameters") {
       var_inarg_list{l}, approx_order::first);
 
   bool saw_shaped_zero = false;
-  dyn->add_subconstraint(group);
-  dyn = dyn->set_elimination_graph(
+  dyn = dyn->with_elimination_graph(
       [&](const lifted_symbolic_system &system) {
-        const auto dyn_l = system.jac(dynamics_equation, *l);
-        const auto dyn_l_again = system.jac(dynamics_equation, *l);
-        const auto dyn_y = system.jac(dynamics_equation, *y);
-        const auto lift_y = system.jac(group_equation, *y);
-        const auto lift_l = system.jac(group_equation, *l);
+        const auto dyn_l = system.jac(*source, *l);
+        const auto dyn_l_again = system.jac(*source, *l);
+        const auto dyn_y = system.jac(*source, *y);
+        const auto lift_y = system.jac(*group, *y);
+        const auto lift_l = system.jac(*group, *l);
         saw_shaped_zero = system.lift_l.size1() == 2 &&
                           system.lift_l.size2() == 2 &&
                           system.lift_l.nnz() == 0 &&
                           lift_l.value.nnz() == 0 &&
                           dyn_l_again.value.sparsity() ==
                               dyn_l.value.sparsity() &&
-                          system.residual("lifted_graph_constraint").size1() ==
+                          system.residual(*group).size1() ==
                               2;
         regularization = lift_l.param(1e-4);
         const cs::MX regularized_lift_l =
@@ -172,17 +171,13 @@ TEST_CASE("lifted MX elimination graph preserves zero blocks and parameters") {
         const auto solve = [&](const cs::MX &rhs) {
           return factor.solve(rhs);
         };
-        return lifted_symbolic_projection{
-            .response_x = solve(system.h_x()),
-            .response_u = solve(system.h_u()),
-            .response_residual = solve(system.h()),
-            .intermediates = {{"regularized_lift_l", regularized_lift_l}},
-            .response_action = solve(system.action_rhs),
-        };
-      });
+        return system.eliminate(
+            solve, {{"regularized_lift_l", regularized_lift_l}});
+      }, {group});
 
   REQUIRE(dyn.get() != source.get());
   REQUIRE_FALSE(source->has_elimination_graph());
+  REQUIRE(source->subconstraints().empty());
   REQUIRE(dyn->has_elimination_graph());
 
   auto problem = ocp::create();
@@ -201,20 +196,26 @@ TEST_CASE("lifted MX elimination graph preserves zero blocks and parameters") {
   REQUIRE_FALSE(dyn->has_arg(*regularization));
   REQUIRE(dyn->elimination_parameters().size() == 1);
   const auto &profile = problem->linear_profile();
-  const auto fine_binding = std::ranges::find_if(
+  const auto panel_binding = std::ranges::find_if(
       profile.lifted_program->input_bindings,
       [&](const lifted_graph_input_binding &binding) {
-          return binding.equation_uid == dyn->uid() &&
-                 binding.variable_uid == l->uid();
+          return binding.source ==
+                     lifted_graph_input_binding::kind::jacobian_panel &&
+                 binding.equation == __dyn && binding.variable == __l;
       });
-  REQUIRE(fine_binding != profile.lifted_program->input_bindings.end());
+  REQUIRE(panel_binding != profile.lifted_program->input_bindings.end());
   REQUIRE(std::ranges::count_if(
               profile.lifted_program->input_bindings,
               [&](const lifted_graph_input_binding &binding) {
-                  return binding.equation_uid == dyn->uid() &&
-                         binding.variable_uid == l->uid();
+                  return binding.source ==
+                             lifted_graph_input_binding::kind::jacobian_panel &&
+                         binding.equation == __dyn &&
+                         binding.variable == __l;
               }) == 1);
-  REQUIRE_FALSE(fine_binding->panels.empty());
+  const size_t panel_index = static_cast<size_t>(std::distance(
+      profile.lifted_program->input_bindings.begin(), panel_binding));
+  REQUIRE_FALSE(
+      profile.lifted_program->input_layouts[panel_index].panels.empty());
   REQUIRE_FALSE(profile.get(linear_target::lifted_projection, __y, __u)
                     .empty());
   REQUIRE_FALSE(profile.get(linear_target::lifted_projection, __l, __x)
@@ -298,19 +299,15 @@ TEST_CASE("lifted graph artifact identity includes elimination algebra") {
   auto constraint = std::make_shared<implicit_lifted>(
       "lifted_identity_constraint", sy - su, var_inarg_list{l},
       approx_order::first);
-  source->add_subconstraint(constraint);
-
   const auto make_problem = [&](scalar_t response_scale) {
-    dynamics generated = source->set_elimination_graph(
+    dynamics generated = source->with_elimination_graph(
         [response_scale](const lifted_symbolic_system &system) {
           const auto factor = system.solve(system.h_l());
-          return lifted_symbolic_projection{
-              .response_x = response_scale * factor.solve(system.h_x()),
-              .response_u = factor.solve(system.h_u()),
-              .response_residual = factor.solve(system.h()),
-              .response_action = factor.solve(system.action_rhs),
+          const auto solve = [&](const cs::MX &rhs) {
+            return response_scale * factor.solve(rhs);
           };
-        });
+          return system.eliminate(solve);
+        }, {constraint});
     auto problem = ocp::create();
     problem->add(*generated);
     problem->wait_until_ready();
@@ -327,6 +324,58 @@ TEST_CASE("lifted graph artifact identity includes elimination algebra") {
           first_identity);
   REQUIRE(different->linear_profile().lifted_program->artifact_identity !=
           first_identity);
+}
+
+TEST_CASE("integrated lifted presolve retains overlapping state Hessians") {
+  auto [x, y] = sym::states("lifted_presolve_x");
+  auto u = sym::inputs("lifted_presolve_u");
+  auto l = sym::lifted("lifted_presolve_l");
+  const cs::SX &sx = x, &sy = y, &su = u, &sl = l;
+  dynamics dyn = std::make_shared<semi_implicit_euler>(
+      "lifted_presolve_dyn", sy - sx - sl,
+      semi_implicit_euler::state_t::pos, approx_order::first);
+  auto lifting = std::make_shared<implicit_lifted>(
+      "lifted_presolve_constraint", sl - su, var_inarg_list{l},
+      approx_order::first);
+  dyn = dyn->with_elimination_graph(
+      [](const lifted_symbolic_system &system) {
+        const auto factor = system.solve(system.h_l());
+        return system.eliminate(
+            [&](const cs::MX &rhs) { return factor.solve(rhs); });
+      },
+      {lifting});
+  auto state_0 = generic_cost::from_scalar(
+      "lifted_presolve_state_0", var_inarg_list{},
+      3. * (sx - 1.) * (sx - 1.));
+  auto state_1 = generic_cost::from_scalar(
+      "lifted_presolve_state_1", var_inarg_list{},
+      5. * (sx + .25) * (sx + .25));
+  auto problem = ocp::create();
+  problem->add(*dyn);
+  problem->add(*state_0);
+  problem->add(*state_1);
+  problem->wait_until_ready();
+
+  node_data runtime(problem);
+  runtime.sym_val().get(x).setZero();
+  runtime.sym_val().get(y).setZero();
+  runtime.sym_val().get(u).setZero();
+  runtime.sym_val().get(l).setZero();
+  runtime.prepare_linear_plan();
+  runtime.update_approximation(node_data::update_mode::eval_all);
+  solver::ns_riccati::ns_riccati_data projected(&runtime);
+  projected.prepare_linear_backend();
+  solver::ns_riccati::generic_solver solver;
+  std::array<solver::ns_riccati::ns_riccati_data *, 1> stages{&projected};
+  solver.prepare_ocp_linear_graph(stages);
+  setenv("MOTO_VERIFY_NSP_GRAPH", "1", 1);
+  solver.ns_factorization(&projected);
+  unsetenv("MOTO_VERIFY_NSP_GRAPH");
+
+  matrix expected = matrix::Zero(projected.nx, projected.nx);
+  linear_backend::write_dense(projected.Q_xx, expected);
+  linear_backend::write_dense(projected.Q_xx_mod, expected);
+  REQUIRE(projected.V_xx.isApprox(expected, 1e-12));
 }
 
 TEST_CASE("semi-implicit projections match dense dynamics") {

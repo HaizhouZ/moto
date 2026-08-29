@@ -238,6 +238,8 @@ void register_submodule_functional(nb::module_ &m) {
             },
             nb::arg("default_val") = nb::none(), nb::arg("name") = "",
             nb::arg("dim") = 1)
+        .def("rows", &lifted_symbolic_block::rows,
+             nb::arg("begin"), nb::arg("end"))
         .def(
             "add_diag",
             [](const lifted_symbolic_block &block, const nb::handle &value,
@@ -267,10 +269,23 @@ void register_submodule_functional(nb::module_ &m) {
                      [](const lifted_symbolic_system &s) { return s.action_rhs; })
         .def("jac",
              [](const lifted_symbolic_system &system,
+                const generic_constr &equation,
+                py_var_inarg_wrapper variable) {
+                 return system.jac(equation, (sym &)variable);
+             },
+             nb::arg("equation"), nb::arg("variable"))
+        .def("jac",
+             [](const lifted_symbolic_system &system,
                 const cs::SX &equation, py_var_inarg_wrapper variable) {
                  return system.jac(equation, (sym &)variable);
              },
              nb::arg("equation"), nb::arg("variable"))
+        .def("residual",
+             [](const lifted_symbolic_system &system,
+                const generic_constr &equation) {
+                 return system.residual(equation);
+             },
+             nb::arg("equation"))
         .def("residual",
              [](const lifted_symbolic_system &system,
                 const std::string &equation) {
@@ -284,7 +299,10 @@ void register_submodule_functional(nb::module_ &m) {
         .def("h_u", &lifted_symbolic_system::h_u)
         .def("h", &lifted_symbolic_system::h)
         .def("solve", &lifted_symbolic_system::solve,
-             nb::arg("matrix"), nb::arg("spd") = false);
+             nb::arg("matrix"), nb::arg("spd") = false)
+        .def("eliminate", &lifted_symbolic_system::eliminate,
+             nb::arg("solve"), nb::arg("intermediates") =
+                 std::vector<lifted_symbolic_intermediate>{});
     nb::class_<lifted_symbolic_intermediate>(lifted_class, "intermediate")
         .def(nb::init<std::string, cs::MX>(), nb::arg("name"),
              nb::arg("value"))
@@ -316,6 +334,22 @@ void register_submodule_functional(nb::module_ &m) {
             nb::arg("name"), nb::arg("out"), nb::arg("lifted_args"),
             nb::arg("order") = approx_order::second)
         .def(
+            "with_elimination_graph",
+            [](generic_lifted &self, lifted_elimination_builder builder,
+               const std::vector<std::shared_ptr<generic_constr>>
+                   &subconstraints) {
+                std::vector<constr> owned;
+                owned.reserve(subconstraints.size());
+                for (const auto &constraint : subconstraints)
+                    owned.emplace_back(constraint);
+                lifted result = self.with_elimination_graph(
+                    std::move(builder), owned);
+                return std::shared_ptr<generic_dynamics>(result);
+            },
+            nb::arg("builder"),
+            nb::arg("subconstraints") =
+                std::vector<std::shared_ptr<generic_constr>>{})
+        .def(
             "set_elimination_graph",
             [](generic_lifted &self, lifted_elimination_builder builder) {
                 lifted result =
@@ -333,7 +367,11 @@ void register_submodule_functional(nb::module_ &m) {
         .def_prop_ro(
             "subconstraints",
             [](generic_dynamics &self) {
-                return self.subconstraints();
+                std::vector<std::shared_ptr<generic_constr>> result;
+                result.reserve(self.subconstraints().size());
+                for (const constr &constraint : self.subconstraints())
+                    result.emplace_back(constraint);
+                return result;
             })
         .def_prop_ro(
             "lifted_args",

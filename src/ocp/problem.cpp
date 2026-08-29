@@ -677,12 +677,17 @@ void ocp_base::build_linear_profile() {
         for (const auto equation : std::array{__dyn, __lift})
             for (const generic_func &function : exprs(equation))
                 system.equations.push_back({
-                    function.name(), equation, get_expr_start(function),
+                    function.name(), function.uid(),
+                    function.uid() == owner->uid()
+                        ? owner->elimination_source_uid()
+                        : function.uid(),
+                    equation,
+                    get_expr_start(function),
                     function.dim()});
         for (const auto field : primal_fields)
             for (const sym &variable : exprs(field))
                 system.variables.push_back({
-                    variable.name(), field,
+                    variable.name(), variable.uid(), variable.uid(), field,
                     get_expr_start_tangent(variable), variable.tdim()});
 
         const auto graph = owner->derive_elimination_graph(system);
