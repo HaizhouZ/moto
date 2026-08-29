@@ -50,7 +50,6 @@ if(BUILD_MULTIBODY)
 endif()
 set(PYTHON_BINDING_FILES
   definition/public_api.py
-  definition/sqp.py
   definition/var.py
 )
 
@@ -87,5 +86,46 @@ add_custom_command(
   VERBATIM
 )
 add_custom_target(${PYTHON_MODULE_NAME}_stub ALL DEPENDS ${PYTHON_STUB_FILE})
+set(PYTHON_DOC_STUB_DIR ${CMAKE_SOURCE_DIR}/docs/stubs/moto)
+set(PYTHON_DOC_STUB_DEFINITION_DIR ${PYTHON_DOC_STUB_DIR}/definition)
+set(PYTHON_DOC_STAGE_ROOT ${CMAKE_CURRENT_BINARY_DIR}/python_doc_package)
+set(PYTHON_DOC_STAGE_DIR ${PYTHON_DOC_STAGE_ROOT}/moto)
+set(PYTHON_DOC_STAGE_DEFINITION_DIR ${PYTHON_DOC_STAGE_DIR}/definition)
+add_custom_target(update_python_doc_stub
+  COMMAND ${CMAKE_COMMAND} -E make_directory
+          ${PYTHON_DOC_STUB_DEFINITION_DIR}
+          ${PYTHON_DOC_STAGE_DEFINITION_DIR}
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          ${CMAKE_CURRENT_SOURCE_DIR}/package_init.py
+          ${PYTHON_DOC_STAGE_DIR}/__init__.py
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          ${CMAKE_CURRENT_SOURCE_DIR}/definition/public_api.py
+          ${CMAKE_CURRENT_SOURCE_DIR}/definition/var.py
+          ${PYTHON_DOC_STAGE_DEFINITION_DIR}
+  COMMAND ${CMAKE_COMMAND} -E touch
+          ${PYTHON_DOC_STAGE_DEFINITION_DIR}/__init__.py
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          $<TARGET_FILE:${PYTHON_MODULE_NAME}>
+          ${PYTHON_DOC_STAGE_DIR}/$<TARGET_FILE_NAME:${PYTHON_MODULE_NAME}>
+  COMMAND ${CMAKE_COMMAND} -E env
+          "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}:$ENV{LD_LIBRARY_PATH}"
+          "PYTHONPATH=${PYTHON_DOC_STAGE_ROOT}:$ENV{PYTHONPATH}"
+          ${Python_EXECUTABLE} -m nanobind.stubgen -q
+          -m moto -o ${PYTHON_DOC_STUB_DIR}/__init__.pyi
+  COMMAND ${CMAKE_COMMAND} -E env
+          "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}:$ENV{LD_LIBRARY_PATH}"
+          "PYTHONPATH=${PYTHON_DOC_STAGE_ROOT}:$ENV{PYTHONPATH}"
+          ${Python_EXECUTABLE} -m nanobind.stubgen -q
+          -m moto.moto_pywrap -o ${PYTHON_DOC_STUB_DIR}/moto_pywrap.pyi
+  COMMAND ${CMAKE_COMMAND} -E env
+          "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}:$ENV{LD_LIBRARY_PATH}"
+          "PYTHONPATH=${PYTHON_DOC_STAGE_ROOT}:$ENV{PYTHONPATH}"
+          ${Python_EXECUTABLE} -m nanobind.stubgen -q
+          -m moto.definition.var
+          -o ${PYTHON_DOC_STUB_DEFINITION_DIR}/var.pyi
+  DEPENDS ${PYTHON_MODULE_NAME}_stub
+  COMMENT "Updating the tracked Python package stubs for documentation"
+  VERBATIM
+)
 install(FILES ${PYTHON_STUB_FILE}
         DESTINATION ${PYTHON_SITE_INSTALL}/${PROJECT_NAME})

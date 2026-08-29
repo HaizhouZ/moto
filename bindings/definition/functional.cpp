@@ -174,7 +174,7 @@ void register_submodule_functional(nb::module_ &m) {
         .def("enable_if_all", [](generic_func &self, const expr_inarg_list &args) { self.enable_if_all(args); }, nb::arg("args"))
         .def("disable_if_any", [](generic_func &self, const expr_inarg_list &args) { self.disable_if_any(args); }, nb::arg("args"))
         .def("enable_if_any", [](generic_func &self, const expr_inarg_list &args) { self.enable_if_any(args); }, nb::arg("args"))
-        .def("add_argument", [](generic_func &self, py_var_inarg_wrapper v) { self.add_argument((sym &)v); }, nb::arg("in"))
+        .def("add_argument", [](generic_func &self, py_var_inarg_wrapper v) { self.add_argument((sym &)v); }, nb::arg("arg"))
         .def("add_arguments", [](generic_func &self, const var_inarg_list &args) { self.add_arguments(args); })
         .def("set_analytic_jacobian",
              [](generic_func &self, py_var_inarg_wrapper arg,

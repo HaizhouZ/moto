@@ -23,8 +23,10 @@ def make_stage(cost):
 
 
 def main():
-    assert not hasattr(moto, "stage_ocp")
-    assert not hasattr(moto, "endpoint")
+    authored_stage = moto.stage()
+    assert isinstance(authored_stage, moto.stage_ocp)
+    assert isinstance(authored_stage.st, moto.endpoint)
+    assert isinstance(authored_stage.ed, moto.endpoint)
     assert not hasattr(moto, "active_status_config")
     assert moto.stage.__name__ == "stage"
 

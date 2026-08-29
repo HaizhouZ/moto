@@ -38,7 +38,7 @@ std::vector<piece> split_panels(const cs::SX &input) {
       for (size_t i = r; i < r + rows; ++i) used[i + j * nr] = 1;
   };
   std::vector<piece> out;
-  // Extract non-trivial dense rectangles first (quaternion and ordinary dense blocks).
+  // Extract non-trivial dense rectangles first (manifold and ordinary dense blocks).
   for (size_t r = 0; r < nr; ++r)
     for (size_t c = 0; c < nc; ++c) {
       if (!live(r, c)) continue;

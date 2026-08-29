@@ -110,7 +110,6 @@ MOTO_SYNC_CODEGEN=1 ./build/unittests/semi_implicit_euler_test
 ./build/unittests/graph_model_compose_test
 python example/toy/initial_state_optimization.py
 python example/toy/restoration.py
-python example/quadruped/quaternion_test.py
 python example/quadruped/run.py --no-display --acceleration-control \
   --horizon 4 --steps 1 --nodes-per-step 2 --max-iter 1
 ```
@@ -479,7 +478,7 @@ Bindings use nanobind. The public package surface is defined by:
 
 - [`bindings/definition/public_api.py`](/home/harper/Documents/moto/bindings/definition/public_api.py)
 - [`bindings/package_init.py`](/home/harper/Documents/moto/bindings/package_init.py)
-- [`bindings/definition/sqp.py`](/home/harper/Documents/moto/bindings/definition/sqp.py)
+- [`bindings/definition/ns_sqp.cpp`](/home/harper/Documents/moto/bindings/definition/ns_sqp.cpp)
 - [`bindings/definition/var.py`](/home/harper/Documents/moto/bindings/definition/var.py)
 
 Low-level `node_data`, `lag_data`, and runtime-graph machinery are debugging

@@ -10,9 +10,11 @@ NB_MAKE_OPAQUE(std::vector<stage_ocp_ptr_t>);
 
 void register_submodule_ns_sqp(nb::module_ &m) {
 
-    nb::class_<ns_sqp> sqp(m, "ns_sqp_impl");
+    nb::class_<ns_sqp> sqp(m, "sqp");
+    m.attr("ns_sqp_impl") = sqp;
     nb::bind_vector<std::vector<stage_ocp_ptr_t>>(sqp, "stage_list");
-    sqp.def(nb::init<size_t>(), "Constructor for the SQP solver with a specified number of jobs")
+    sqp.def(nb::init<size_t>(), nb::arg("n_job") = 4,
+            "Constructor for the SQP solver with a specified number of jobs")
         .def_prop_ro("st", [](ns_sqp &self) { return self.st(); }, "Initial graph boundary")
         .def_prop_ro("ed", [](ns_sqp &self) { return self.ed(); }, "Graph terminal boundary")
         .def_prop_ro(
@@ -89,12 +91,12 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("s_theta", &ns_sqp::linesearch_setting::s_theta, "IPOPT switching condition exponent on constraint violation (s_theta in IPOPT paper, Section 3.3)")
         .def_rw("merit_sigma", &ns_sqp::linesearch_setting::merit_sigma, "Merit backtracking: weight on ||dual residual||^2 relative to ||constraint violation||^2 (default 1.0)")
         .def_rw("enable_flat_obj_accept", &ns_sqp::linesearch_setting::enable_flat_obj_accept, "Accept step when objective is flat, iterate is nearly feasible, and step is non-trivial")
-        .def_rw("flat_obj_dec_tol", &ns_sqp::linesearch_setting::flat_obj_dec_tol, "Threshold on |fullstep_dec| below which the objective is considered flat")
+        .def_rw("flat_obj_dec_tol", &ns_sqp::linesearch_setting::flat_obj_dec_tol, "Absolute full-step decrease below which the objective is considered flat")
         .def_rw("flat_obj_prim_tol", &ns_sqp::linesearch_setting::flat_obj_prim_tol, "Primal residual must be below this for flat-objective accept")
         .def_rw("flat_obj_step_tol", &ns_sqp::linesearch_setting::flat_obj_step_tol, "Step norm must exceed this for flat-objective accept (ensures non-trivial step)");
 
     ls_setting.def_rw("backtrack_scheme", &ns_sqp::linesearch_setting::backtrack_scheme, "Backtracking scheme: linspace (default) or geometric")
-        .def_rw("backtrack_factor", &ns_sqp::linesearch_setting::backtrack_factor, "Geometric backtracking reduction factor (alpha *= factor each step, used when backtrack_scheme == geometric)");
+        .def_rw("backtrack_factor", &ns_sqp::linesearch_setting::backtrack_factor, "Geometric reduction factor applied to alpha at each backtracking step");
 
     moto::export_enum<ns_sqp::linesearch_setting::failure_backup_strategy>(ls_setting);
     moto::export_enum<ns_sqp::linesearch_setting::on_failure_action>(ls_setting);

@@ -5,7 +5,7 @@
 #include <moto/ocp/dynamics/semi_implicit_euler.hpp>
 #include <moto/ocp/cost.hpp>
 #include <moto/ocp/impl/node_data.hpp>
-#include <moto/multibody/quaternion.hpp>
+#include <moto/multibody/casadi_manifold.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
 #include <moto/solver/ns_sqp.hpp>
 
@@ -482,9 +482,20 @@ TEST_CASE("semi-implicit projections match dense dynamics") {
   }
 }
 
-TEST_CASE("position Euler is a complete kinematic dynamics") {
-  auto [q, qn] = multibody::quaternion::create("position_euler_q");
-  auto velocity = sym::inputs("position_euler_velocity", 3);
+TEST_CASE("position Euler supports generic nonlinear manifolds") {
+  const cs::SX base = cs::SX::sym("position_euler_base", 2);
+  const cs::SX step = cs::SX::sym("position_euler_step");
+  const cs::SX other = cs::SX::sym("position_euler_other", 2);
+  const cs::SX rotated = cs::SX::vertcat(std::vector<cs::SX>{
+      cs::SX::cos(step) * base(0) - cs::SX::sin(step) * base(1),
+      cs::SX::sin(step) * base(0) + cs::SX::cos(step) * base(1)});
+  const cs::SX difference = cs::SX::atan2(
+      base(0) * other(1) - base(1) * other(0),
+      base(0) * other(0) + base(1) * other(1));
+  const vector identity = (vector(2) << 1., 0.).finished();
+  auto [q, qn] = multibody::casadi_manifold::create(
+      "position_euler_q", base, step, rotated, other, difference, identity);
+  auto velocity = sym::inputs("position_euler_velocity");
   const cs::SX integrated = q->symbolic_integrate(
       *q, .1 * static_cast<const cs::SX &>(*velocity));
   const cs::SX residual = q->symbolic_difference(*qn, integrated);
@@ -500,9 +511,9 @@ TEST_CASE("position Euler is a complete kinematic dynamics") {
   dense_problem->wait_until_ready();
   node_data euler_data(euler_problem), dense_data(dense_problem);
   for (node_data *data : {&euler_data, &dense_data}) {
-    data->sym_val().get(*q) = multibody::quaternion::identity();
-    data->sym_val().get(*qn) = multibody::quaternion::identity();
-    data->sym_val().get(velocity) = vector::LinSpaced(3, -.1, .2);
+    data->sym_val().get(*q) = identity;
+    data->sym_val().get(*qn) = identity;
+    data->sym_val().get(velocity)(0) = .2;
     data->update_approximation(node_data::update_mode::eval_all);
   }
   euler->compute_project_derivatives(euler_data.data(euler));
@@ -512,7 +523,7 @@ TEST_CASE("position Euler is a complete kinematic dynamics") {
   INFO("position inverse error = " <<
        (euler_data.dense().approx_[__dyn].jac_[__y].dense() *
             euler_approx.inverse_.dense() -
-        matrix::Identity(3, 3)).norm());
+        matrix::Identity(1, 1)).norm());
   INFO("position PFx error = " <<
        (euler_data.dense().proj_f_x().dense() -
         dense_data.dense().proj_f_x().dense()).norm());
@@ -522,7 +533,8 @@ TEST_CASE("position Euler is a complete kinematic dynamics") {
       dense_data.dense().proj_f_u().dense(), 1e-12));
   REQUIRE(euler_data.dense().proj_f_res().isApprox(
       dense_data.dense().proj_f_res(), 1e-12));
-  vector rhs = vector::LinSpaced(3, -.3, .4), euler_out(3), dense_out(3);
+  vector rhs(1), euler_out(1), dense_out(1);
+  rhs(0) = -.3;
   euler->apply_jac_y_inverse_transpose(euler_data.data(euler), rhs, euler_out);
   fallback->apply_jac_y_inverse_transpose(
       dense_data.data(fallback), rhs, dense_out);
