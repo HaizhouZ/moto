@@ -93,6 +93,59 @@ TEST_CASE("sparse_matrix dispatches dense operands through JIT") {
   REQUIRE(sub.isApprox(expected, 1e-12));
 }
 
+TEST_CASE("sparse backend writes directly to strided row-block outputs") {
+  sparse_matrix sparse;
+  sparse.resize(4, 3);
+  sparse.insert(0, 0, 2, 2, sparsity::dense).setRandom();
+  sparse.insert(2, 1, 2, 2, sparsity::diag).setRandom();
+  const matrix dense = sparse.dense();
+
+  matrix multiply_parent = matrix::Constant(9, 2, -17.);
+  auto multiply_out = multiply_parent.middleRows(3, 4);
+  multiply_out.setZero();
+  const matrix rhs = matrix::Random(3, 2);
+  run_product(sparse, product_op::times, 1., rhs.data(), rhs.rows(),
+              rhs.cols(), multiply_out.data(), multiply_out.outerStride(),
+              multiply_out.cols());
+  REQUIRE(multiply_out.isApprox(dense * rhs, 1e-12));
+  REQUIRE(multiply_parent.topRows(3).isConstant(-17.));
+  REQUIRE(multiply_parent.bottomRows(2).isConstant(-17.));
+
+  matrix transpose_parent = matrix::Constant(8, 2, -17.);
+  auto transpose_out = transpose_parent.middleRows(2, 3);
+  transpose_out.setZero();
+  const matrix transpose_rhs = matrix::Random(4, 2);
+  run_product(sparse, product_op::transpose_times, 1., transpose_rhs.data(),
+              transpose_rhs.rows(), transpose_rhs.cols(),
+              transpose_out.data(), transpose_out.outerStride(),
+              transpose_out.cols());
+  REQUIRE(transpose_out.isApprox(dense.transpose() * transpose_rhs, 1e-12));
+  REQUIRE(transpose_parent.topRows(2).isConstant(-17.));
+  REQUIRE(transpose_parent.bottomRows(3).isConstant(-17.));
+
+  sparse_matrix sparse_lhs;
+  sparse_lhs.resize(2, 4);
+  sparse_lhs.insert(0, 0, 2, 4, sparsity::dense).setRandom();
+  matrix right_parent = matrix::Constant(7, 3, -17.);
+  auto right_out = right_parent.middleRows(4, 2);
+  right_out.setZero();
+  run_sparse_product(sparse, sparse_lhs, product_op::right_times, 1.,
+                     right_out.data(), right_out.outerStride(),
+                     right_out.cols());
+  REQUIRE(right_out.isApprox(sparse_lhs.dense() * dense, 1e-12));
+  REQUIRE(right_parent.topRows(4).isConstant(-17.));
+  REQUIRE(right_parent.bottomRows(1).isConstant(-17.));
+
+  matrix write_parent = matrix::Constant(9, 3, -17.);
+  auto write_out = write_parent.middleRows(2, 4);
+  write_out.setZero();
+  run_dense_write(sparse, write_out.data(), write_out.outerStride(), 1.,
+                  false);
+  REQUIRE(write_out.isApprox(dense, 1e-12));
+  REQUIRE(write_parent.topRows(2).isConstant(-17.));
+  REQUIRE(write_parent.bottomRows(3).isConstant(-17.));
+}
+
 TEST_CASE("precompiled direct-map sparse products match dense algebra") {
   const auto make_sparse = [](size_t rows, size_t cols) {
     sparse_matrix value;
