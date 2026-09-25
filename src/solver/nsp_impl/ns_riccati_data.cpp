@@ -464,20 +464,30 @@ void ns_riccati_data::build_lifted_hard_geometry(
         if (C_u) {
             auto dst = C_u->middleRows(row, n);
             dst.setZero();
-            linear_backend::write_dense(approx[cf].jac_[__u], dst);
-            linear_backend::right_multiply(approx[cf].jac_[__y], F_u, dst,
-                                           -1.);
-            linear_backend::right_multiply(approx[cf].jac_[__l],
-                                           lifting_.l_u(), dst, -1.);
+            linear_backend::run_dense_write(
+                approx[cf].jac_[__u], dst.data(), dst.outerStride(), 1., false);
+            linear_backend::run_sparse_product(
+                F_u, approx[cf].jac_[__y],
+                linear_backend::product_op::right_times, -1., dst.data(),
+                dst.outerStride(), dst.cols());
+            linear_backend::run_sparse_product(
+                lifting_.l_u(), approx[cf].jac_[__l],
+                linear_backend::product_op::right_times, -1., dst.data(),
+                dst.outerStride(), dst.cols());
         }
         if (C_x) {
             auto dst = C_x->middleRows(row, n);
             dst.setZero();
-            linear_backend::write_dense(approx[cf].jac_[__x], dst);
-            linear_backend::right_multiply(approx[cf].jac_[__y], F_x, dst,
-                                           -1.);
-            linear_backend::right_multiply(approx[cf].jac_[__l],
-                                           lifting_.l_x(), dst, -1.);
+            linear_backend::run_dense_write(
+                approx[cf].jac_[__x], dst.data(), dst.outerStride(), 1., false);
+            linear_backend::run_sparse_product(
+                F_x, approx[cf].jac_[__y],
+                linear_backend::product_op::right_times, -1., dst.data(),
+                dst.outerStride(), dst.cols());
+            linear_backend::run_sparse_product(
+                lifting_.l_x(), approx[cf].jac_[__l],
+                linear_backend::product_op::right_times, -1., dst.data(),
+                dst.outerStride(), dst.cols());
         }
         if (c_0) {
             auto dst = c_0->segment(row, n);
@@ -607,17 +617,22 @@ void ns_riccati_data::prepare_linear_backend() {
   for (const auto field : hard_constr_fields_non_dyn) {
     const size_t rows = dense_->approx_[field].v_.size();
     if (!rows) continue;
+    for (const auto primal : {__u, __x}) {
+      const auto &jac = dense_->approx_[field].jac_[primal];
+      if (!jac.is_empty())
+        prepare_dense_write(jac, ncstr, 1., false);
+    }
     const auto &jac_y = dense_->approx_[field].jac_[__y];
-    prepare_sparse_product(F_u, jac_y, product_op::right_times, -1., rows,
+    prepare_sparse_product(F_u, jac_y, product_op::right_times, -1., ncstr,
                            nu);
-    prepare_sparse_product(F_x, jac_y, product_op::right_times, -1., rows,
+    prepare_sparse_product(F_x, jac_y, product_op::right_times, -1., ncstr,
                            nx);
     if (dense_->prob_->tdim(__l)) {
       const auto &jac_l = dense_->approx_[field].jac_[__l];
       prepare_sparse_product(lifting_.l_u(), jac_l,
-                             product_op::right_times, -1., rows, nu);
+                             product_op::right_times, -1., ncstr, nu);
       prepare_sparse_product(lifting_.l_x(), jac_l,
-                             product_op::right_times, -1., rows, nx);
+                             product_op::right_times, -1., ncstr, nx);
     }
   }
 

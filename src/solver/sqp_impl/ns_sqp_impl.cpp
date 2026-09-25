@@ -184,7 +184,10 @@ ns_sqp::kkt_info ns_sqp::initialize(storage_type &graph) {
                 [this](const generic_constr &c, func_approx_data &d) {
                     c.setup_workspace_data(d, &settings);
                 });
-            solver::ineq_soft::bind_runtime(cur);
+            if (settings.ipm.warm_start)
+                solver::ineq_soft::bind_runtime(cur);
+            else
+                solver::ineq_soft::bind_and_invalidate(cur);
             cur->configure_scaling_profile(
                 settings.scaling.mode != scaling_settings::mode_t::none);
         });

@@ -5,8 +5,10 @@
 #include <moto/ocp/constr.hpp>
 #include <moto/ocp/cost.hpp>
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
+#include <moto/ocp/impl/node_data.hpp>
 #include <moto/solver/equality_init/eq_init_overlay.hpp>
 #include <moto/solver/ipm/ipm_constr.hpp>
+#include <moto/solver/ns_riccati/ns_riccati_data.hpp>
 #include <moto/solver/ns_sqp.hpp>
 
 namespace {
@@ -241,4 +243,105 @@ TEST_CASE("equality multiplier initialization updates soft equalities and leaves
     }
 
     REQUIRE(saw_soft_dual);
+}
+
+TEST_CASE("disabling IPM warm start rebuilds inequality slack and multiplier state") {
+    ns_sqp sqp;
+    configure_solver(sqp, false, 1);
+
+    sqp.settings.ipm.warm_start = false;
+    REQUIRE_NOTHROW(sqp.update(0, false));
+    REQUIRE(sqp.solver_nodes().size() == 1);
+    auto *node = sqp.solver_nodes().front();
+
+    node->for_each(__ineq_xu, [](const solver::ipm_constr &c,
+                                 solver::ipm_constr::approx_data &d) {
+        REQUIRE(d.initialized_);
+        for (const auto side : box_sides) {
+            if (!c.box_info()->has_side[side])
+                continue;
+            d.box_side_[side]->slack.setConstant(7.);
+            d.box_side_[side]->multiplier.setConstant(9.);
+        }
+    });
+
+    sqp.settings.ipm.warm_start = true;
+    REQUIRE_NOTHROW(sqp.update(0, false));
+    node = sqp.solver_nodes().front();
+    node->for_each(__ineq_xu, [](const solver::ipm_constr &c,
+                                 solver::ipm_constr::approx_data &d) {
+        for (const auto side : box_sides) {
+            if (!c.box_info()->has_side[side])
+                continue;
+            REQUIRE(d.box_side_[side]->slack.isConstant(7.));
+            REQUIRE(d.box_side_[side]->multiplier.isConstant(9.));
+        }
+    });
+
+    sqp.settings.ipm.warm_start = false;
+    REQUIRE_NOTHROW(sqp.update(0, false));
+    node = sqp.solver_nodes().front();
+    node->for_each(__ineq_xu, [](const solver::ipm_constr &c,
+                                 solver::ipm_constr::approx_data &d) {
+        REQUIRE(d.initialized_);
+        for (const auto side : box_sides) {
+            if (!c.box_info()->has_side[side])
+                continue;
+            REQUIRE_FALSE(d.box_side_[side]->slack.isConstant(7.));
+            REQUIRE(d.box_side_[side]->multiplier.isConstant(1.));
+        }
+    });
+}
+
+TEST_CASE("mixed state and input equality geometry preserves stacked row layout") {
+    auto [x, y] = sym::states("mixed_hard_geometry_x", 3);
+    auto u = sym::inputs("mixed_hard_geometry_u", 4);
+    const cs::SX &sx = x;
+    const cs::SX &sy = y;
+    const cs::SX &su = u;
+
+    auto dyn = dynamics(new dense_dynamics(
+        "mixed_hard_geometry_dyn", var_inarg_list(var_list{x, y}), sy - sx,
+        approx_order::first, __dyn));
+    auto state_eq = generic_constr::create(
+        "mixed_hard_geometry_state",
+        var_inarg_list(var_list{x, y}),
+        cs::SX::vertcat({sx(0) + scalar_t(2.) * sy(0),
+                         sx(1) + scalar_t(3.) * sy(1)}),
+        approx_order::first, __eq_x);
+    auto input_eq = generic_constr::create(
+        "mixed_hard_geometry_input", var_inarg_list(var_list{u}),
+        cs::SX::vertcat(
+            {su(0) + scalar_t(2.) * su(1) + scalar_t(3.) * su(2) +
+                 scalar_t(4.) * su(3),
+             scalar_t(5.) * su(0) + scalar_t(6.) * su(1) +
+                 scalar_t(7.) * su(2) + scalar_t(8.) * su(3)}),
+        approx_order::first, __eq_xu);
+
+    auto problem = stage_ocp::create();
+    problem->add(*dyn);
+    problem->add(*state_eq);
+    problem->add(*input_eq);
+    problem->wait_until_ready();
+
+    node_data runtime(problem);
+    runtime.sym_val().get(x).setZero();
+    runtime.sym_val().get(y).setZero();
+    runtime.sym_val().get(u).setZero();
+    runtime.update_approximation(node_data::update_mode::eval_all);
+
+    solver::ns_riccati::ns_riccati_data projected(&runtime);
+    projected.update_projected_dynamics();
+    matrix C_u;
+    matrix C_x;
+    projected.build_lifted_hard_geometry(&C_u, &C_x, nullptr);
+
+    matrix expected_u = matrix::Zero(4, 4);
+    expected_u.bottomRows(2) << 1., 2., 3., 4., 5., 6., 7., 8.;
+    matrix expected_x = matrix::Zero(4, 3);
+    expected_x(0, 0) = 3.;
+    expected_x(1, 1) = 4.;
+
+    REQUIRE(C_u.isApprox(expected_u, 1e-12));
+    REQUIRE(C_x.isApprox(expected_x, 1e-12));
 }
