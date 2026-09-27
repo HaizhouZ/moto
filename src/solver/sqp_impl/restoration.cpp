@@ -67,6 +67,23 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
         throw std::runtime_error("restoration mode is incompatible with merit_backtracking");
     }
 
+    const size_t remaining = update_iter_limit > iter_before.num_iter
+        ? update_iter_limit - iter_before.num_iter : size_t(0);
+    const size_t max_resto_iters = std::min(settings.restoration.max_iter, remaining);
+    if (!max_resto_iters) {
+        // Do not build/evaluate an overlay that cannot take a single step.
+        // Returned residuals must describe the unchanged outer iterate.
+        result_type result;
+        static_cast<kkt_info &>(result) = kkt_before;
+        result.iter = iter_before;
+        result.iter.result = iter_result_t::restoration_reached_max_iter;
+        if (settings.verbose)
+            fmt::println("[resto] skipped: no restoration iterations available (remaining update budget={}, restoration max_iter={}); outer primal residual={}",
+                         remaining, settings.restoration.max_iter, kkt_before.primal.inf_res);
+        return result;
+    }
+
+    const solver::ipm_config ipm_before = settings.ipm;
     auto &outer_graph = active_data();
     auto &resto_graph = restoration_graph();
     const auto outer_ipm_backup = settings.has_ipm_ineq
@@ -74,6 +91,7 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
                                       : std::vector<ipm_pair_snapshot>{};
     if (settings.verbose) {
         fmt::print("\n=== enter restoration ===\n");
+        fmt::println("  restoration iteration budget={}", max_resto_iters);
         fmt::print("  entry iter={}  outer aug_obj={:.3e}  outer ls_obj={:.3e}  prim={:.3e}  dual={:.3e}  comp={:.3e}\n",
                    iter_before.num_iter, kkt_before.barrier_objective.augmented_objective, kkt_before.barrier_objective.ls_objective,
                    kkt_before.primal.res_l1, kkt_before.dual.inf_res, kkt_before.primal.inf_comp);
@@ -189,11 +207,17 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
     };
 
     const auto restore_failed_restoration = [&]() {
+        static_cast<solver::ipm_config &>(settings.ipm) = ipm_before;
         restore_outer_ipm_pairs(outer_ipm_backup);
         phase_graph.use_default_graph(false);
         solver::for_each(solver::par, outer_graph, [](data *d) {
-            d->update_approximation(node_data::update_mode::eval_val, true);
+            d->update_approximation(node_data::update_mode::eval_all, true);
         });
+        // The overlay was discarded. Return the actual accepted outer point,
+        // not elastic residuals from the unsuccessful restoration problem.
+        static_cast<kkt_info &>(rest_state) = kkt_before;
+        update_primal_info(rest_state, point_value_mask::primal | point_value_mask::barrier_objective);
+        update_stat_info(rest_state);
     };
 
     const auto finish_restoration = [&](bool success) {
@@ -217,10 +241,7 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
 
     update_primal_info(rest_state, point_value_mask::primal | point_value_mask::barrier_objective);
     update_stat_info(rest_state);
-    kkt_info kkt_outer_trial{};
-    const size_t max_resto_iters =
-        std::min(settings.restoration.max_iter,
-                 update_iter_limit > iter_before.num_iter ? update_iter_limit - iter_before.num_iter : size_t(0));
+    kkt_info kkt_outer_trial = kkt_before;
     const scalar_t accepted_outer_prim_res =
         settings.restoration.restoration_improvement_frac * kkt_before.primal.res_l1;
 
@@ -267,8 +288,8 @@ ns_sqp::result_type ns_sqp::restoration_update(const kkt_info &kkt_before, const
     }
     finish_restoration(rest_state.iter.result == iter_result_t::success);
     if (settings.verbose) {
-        fmt::print("[resto]: primal residual(L1): {} before {}\n", kkt_outer_trial.primal.res_l1, kkt_before.primal.res_l1);
-        fmt::print("[resto]: primal residual(Linf): {} before {}\n", kkt_outer_trial.primal.inf_res, kkt_before.primal.inf_res);
+        fmt::print("[resto]: returned outer primal residual(L1): {} before {}\n", rest_state.primal.res_l1, kkt_before.primal.res_l1);
+        fmt::print("[resto]: returned outer primal residual(Linf): {} before {}\n", rest_state.primal.inf_res, kkt_before.primal.inf_res);
         fmt::print("=== leave restoration: {} ===\n\n", magic_enum::enum_name<iter_result_t>(rest_state.iter.result));
     }
     return rest_state;

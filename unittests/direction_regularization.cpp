@@ -177,3 +177,109 @@ TEST_CASE("Restoration proximity uses tangent dimensions for manifold states") {
 }
 
 #endif
+
+TEST_CASE("Restoration budgets and returned metrics describe the accepted outer state") {
+    fixture f("restoration_budget");
+    f.stage->add(*objective("restoration_budget_cost", 25.*(f.su-.5)*(f.su-.5)));
+    f.sqp.ed().add(*generic_constr::create("restoration_budget_target", {}, f.sx-1., approx_order::first));
+    f.start(2);
+    auto &nodes = f.sqp.solver_nodes();
+    nodes[0]->sym_val().value_[__y](0) = 2.;
+    nodes[1]->sym_val().value_[__x](0) = 2.;
+    nodes[1]->sym_val().value_[__y](0) = 2.;
+    auto &s = f.sqp.settings;
+    s.ls.constr_vio_min_frac = 10.;
+    s.ls.s_phi = s.ls.s_theta = 1.;
+    s.ls.armijo_dec_frac = 3.;
+    s.ls.max_steps = 5;
+    s.ls.enable_flat_obj_accept = false;
+    s.restoration.enabled = true;
+    s.restoration.max_iter = 20;
+    s.restoration.alpha_min_factor = .2;
+    s.restoration.rho_eq = .1;
+    s.prim_tol = s.dual_tol = s.comp_tol = 1e-8;
+    bool should_recover = false;
+    size_t expected_iterations = 1;
+    size_t update_budget = 1;
+    SECTION("default respects update budget and skips empty restoration") {}
+    SECTION("recovery in the last allowed iteration is not KKT success") {
+        update_budget = 2;
+        should_recover = true;
+    }
+    SECTION("zero restoration budget preserves outer metrics") {
+        update_budget = 2;
+        s.restoration.max_iter = 0;
+    }
+    SECTION("exhausted nonzero restoration budget rolls back outer state") {
+        update_budget = 2;
+        s.restoration.max_iter = 1;
+        s.restoration.restoration_improvement_frac = 1e-12;
+        expected_iterations = 2;
+    }
+    const auto result = f.sqp.update(update_budget, false);
+    // Independent evaluation of the original OCP at the returned trajectory.
+    scalar_t cost = 0., inf_res = 0., l1_res = 0.;
+    for (auto *d : nodes) {
+        const scalar_t u = d->sym_val().value_[__u](0);
+        const scalar_t residual = d->sym_val().value_[__y](0) - d->sym_val().value_[__x](0) - u;
+        cost += 25.*(u-.5)*(u-.5);
+        inf_res = std::max(inf_res, std::abs(residual));
+        l1_res += std::abs(residual);
+    }
+    const scalar_t terminal = std::abs(nodes.back()->sym_val().value_[__y](0)-1.);
+    inf_res = std::max(inf_res, terminal);
+    l1_res += terminal;
+    REQUIRE(std::abs(result.primal.inf_res-inf_res) < 1e-12);
+    REQUIRE(std::abs(result.primal.res_l1-l1_res) < 1e-12);
+    REQUIRE(std::abs(result.barrier_objective.cost-cost) < 1e-12);
+    if (should_recover) {
+        REQUIRE(result.iter.num_iter > 1);
+        REQUIRE(result.iter.num_iter == update_budget);
+        REQUIRE(result.iter.result == ns_sqp::iter_result_t::exceed_max_iter);
+        REQUIRE(inf_res < 2.);
+        REQUIRE(result.dual.inf_res >= s.dual_tol);
+    } else {
+        REQUIRE(result.iter.result == ns_sqp::iter_result_t::restoration_reached_max_iter);
+        REQUIRE(result.iter.num_iter == expected_iterations);
+        REQUIRE(inf_res == 2.);
+        REQUIRE(nodes[0]->sym_val().value_[__u](0) == 0.);
+        REQUIRE(nodes[1]->sym_val().value_[__u](0) == 0.);
+        REQUIRE(nodes[0]->sym_val().value_[__y](0) == 2.);
+        REQUIRE(nodes[1]->sym_val().value_[__y](0) == 2.);
+    }
+}
+
+TEST_CASE("Geometric backtracking finds feasible progress skipped by a coarse linear grid") {
+    fixture f("backtrack_small_step");
+    f.stage->add(*objective("backtrack_small_step_cost", .5*f.su*f.su));
+    f.stage->add(*generic_constr::create("backtrack_small_step_eq", {}, f.su*f.su-1., approx_order::first));
+    f.start();
+    auto *node = f.sqp.solver_nodes()[0];
+    node->sym_val().value_[__u](0) = .05;
+    node->sym_val().value_[__y](0) = .05;
+    auto &s = f.sqp.settings;
+    s.restoration.enabled = true;
+    s.prim_tol = s.dual_tol = s.comp_tol = 1e-8;
+    bool linear_grid = false;
+    SECTION("default search accepts an ordinary SQP step") {}
+    SECTION("explicit coarse linear grid misses the admissible step") {
+        s.ls.backtrack_scheme = ns_sqp::linesearch_setting::backtrack_scheme_t::linspace;
+        linear_grid = true;
+    }
+    // c(u)=u^2-1 at u=.05 gives du=9.975. The linear grid's last
+    // nonzero alpha=.2 increases |c|; geometric alpha=.125 decreases it.
+    const auto result = f.sqp.update(1, false);
+    REQUIRE(f.sqp.linear_solve_last.status == ns_sqp::linear_solve_status::success);
+    REQUIRE(f.sqp.linear_solve_last.regularization == 0.);
+    REQUIRE(result.iter.num_iter == 1);
+    const scalar_t u = node->sym_val().value_[__u](0);
+    REQUIRE(std::abs(result.primal.inf_res-std::abs(u*u-1.)) < 1e-12);
+    if (linear_grid) {
+        REQUIRE(result.iter.result == ns_sqp::iter_result_t::restoration_reached_max_iter);
+        REQUIRE(u == .05);
+    } else {
+        REQUIRE(result.iter.result == ns_sqp::iter_result_t::exceed_max_iter);
+        REQUIRE(std::abs(u-(.05+.125*9.975)) < 1e-12);
+        REQUIRE(result.primal.inf_res < .9975);
+    }
+}

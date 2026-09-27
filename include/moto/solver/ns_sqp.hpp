@@ -121,7 +121,7 @@ struct ns_sqp {
         enum class backtrack_scheme_t : size_t {
             linspace,  ///< alpha decreases by alpha_init / max_steps each step (uniform spacing)
             geometric, ///< alpha *= backtrack_factor each step (exponential decay)
-        } backtrack_scheme = backtrack_scheme_t::linspace;
+        } backtrack_scheme = backtrack_scheme_t::geometric;
         scalar_t backtrack_factor = 0.5; ///< geometric backtracking reduction factor (used when backtrack_scheme == geometric)
 
         enum class search_method : size_t {
