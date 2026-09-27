@@ -43,6 +43,8 @@ void register_submodule_ns_sqp(nb::module_ &m) {
 
     nb::class_<ns_sqp::regularization_settings>(sqp, "regularization_settings")
         .def_rw("enabled", &ns_sqp::regularization_settings::enabled)
+        .def_rw("validate_direction", &ns_sqp::regularization_settings::validate_direction,
+                "Whether to form full recovered KKT residuals and reject inaccurate directions")
         .def_rw("initial", &ns_sqp::regularization_settings::initial)
         .def_rw("increase_factor", &ns_sqp::regularization_settings::increase_factor)
         .def_rw("decrease_factor", &ns_sqp::regularization_settings::decrease_factor)

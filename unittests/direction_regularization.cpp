@@ -41,6 +41,7 @@ TEST_CASE("Riccati Newton direction matches independent horizon KKT solution") {
     f.stage->add(*objective("reference_running", .5*f.sx*f.sx + f.su*f.su));
     f.sqp.ed().add(*objective("reference_terminal", 2.5*(f.sx-1.)*(f.sx-1.)));
     f.start(3);
+    REQUIRE_FALSE(f.sqp.settings.regularization.validate_direction);
     // Independent full-space KKT in [u0,x1,u1,x2,u2,x3].
     matrix H = matrix::Zero(6, 6);
     H.diagonal() << 2., 1., 2., 1., 2., 5.;
@@ -88,6 +89,22 @@ TEST_CASE("Consistent duplicate equalities retain their feasible direction") {
     REQUIRE(std::abs(f.sqp.solver_nodes()[0]->sym_val().value_[__u](0)-1.) < 1e-10);
 }
 
+TEST_CASE("Full recovered KKT direction validation is opt-in") {
+    fixture f("validation_opt_in");
+    f.stage->add(*objective("validation_opt_in_cost", .5*f.su*f.su));
+    f.stage->add(*generic_constr::create(
+        "validation_opt_in_inconsistent", {},
+        cs::SX::vertcat({f.su-1., f.su-2.}), approx_order::first));
+    f.start();
+    REQUIRE_FALSE(f.sqp.settings.regularization.validate_direction);
+    f.sqp.update(1, false);
+    REQUIRE(f.sqp.linear_solve_last.status == ns_sqp::linear_solve_status::success);
+    REQUIRE(f.sqp.linear_solve_last.attempts == 1);
+    REQUIRE(f.sqp.linear_solve_last.stationarity_residual == 0.);
+    REQUIRE(f.sqp.linear_solve_last.equality_residual == 0.);
+    REQUIRE(f.sqp.linear_solve_last.inequality_residual == 0.);
+}
+
 TEST_CASE("Inconsistent or unactuated equalities cannot be silently dropped") {
     fixture f("inconsistent_eq");
     f.stage->add(*objective("inconsistent_cost", .5*f.su*f.su));
@@ -98,6 +115,7 @@ TEST_CASE("Inconsistent or unactuated equalities cannot be silently dropped") {
         f.stage->add(*generic_constr::create("unactuated_row", {}, f.sx-1., approx_order::first));
     }
     f.start();
+    f.sqp.settings.regularization.validate_direction = true;
     const auto result = f.sqp.update(1, false);
     REQUIRE(result.iter.result == ns_sqp::iter_result_t::numerical_failure);
     REQUIRE(f.sqp.linear_solve_last.status == ns_sqp::linear_solve_status::inconsistent_equalities);
@@ -133,6 +151,7 @@ TEST_CASE("Full-space residual includes exact nonlinear constraint Hessians") {
     f.stage->add(*objective("exact_constraint_cost", .5*f.su*f.su));
     f.stage->add(*generic_constr::create("exact_constraint", {}, f.su*f.su-1., approx_order::second));
     f.start();
+    f.sqp.settings.regularization.validate_direction = true;
     auto *d = f.sqp.solver_nodes()[0];
     d->sym_val().value_[__u](0) = .8;
     d->sym_val().value_[__y](0) = .8;

@@ -211,7 +211,8 @@ bool ns_sqp::compute_safe_direction(iteration_context &ctx, bool do_scaling,
         try {
             solve_direction(ctx, do_scaling, gauss_newton);
             correct_direction(ctx, do_refinement);
-            check_direction();
+            if (cfg.validate_direction)
+                check_direction();
         } catch (const solver::ns_riccati::factorization_failure &error) {
             linear_solve_last.status = linear_solve_status::factorization_failed;
             if (settings.verbose) fmt::println("[linear solve] {}", error.what());

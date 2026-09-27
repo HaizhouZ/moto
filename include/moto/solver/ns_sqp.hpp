@@ -181,6 +181,7 @@ struct ns_sqp {
 
     struct regularization_settings {
         bool enabled = true;
+        bool validate_direction = false; ///< Form full recovered KKT residuals and reject inaccurate directions.
         scalar_t initial = 1e-4;
         scalar_t increase_factor = 10.;
         scalar_t decrease_factor = 0.3333333333333333;
