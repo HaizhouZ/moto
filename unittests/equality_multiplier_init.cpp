@@ -210,6 +210,9 @@ TEST_CASE("equality multiplier initialization reduces initial hard-equality dual
 
     REQUIRE(changed_hard_dual);
     REQUIRE(kkt_with.dual.inf_res < kkt_without.dual.inf_res);
+    REQUIRE(with_init.linear_solve_last.status == ns_sqp::linear_solve_status::success);
+    REQUIRE(with_init.linear_solve_last.regularization == 0.);
+    REQUIRE(with_init.linear_solve_last.stationarity_residual < 1e-12);
 }
 
 TEST_CASE("equality multiplier initialization updates soft equalities and leaves inequality state unchanged") {

@@ -14,6 +14,9 @@ struct blasfeo_llt {
 
     bool valid() const {
         for (size_t i = 0; i < L_.data_.m; i++) {
+            // BLASFEO signals a nonpositive pivot with zero, not necessarily NaN.
+            if (!(BLASFEO_DMATEL(&L_.data_, i, i) > 0.))
+                return false;
             for (size_t j = 0; j <= i; j++) {
                 double &v = BLASFEO_DMATEL(&L_.data_, i, j);
                 if (std::isnan(v) || std::isinf(v))

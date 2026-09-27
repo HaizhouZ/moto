@@ -47,6 +47,12 @@ vector_ref pmm_constr::jacobian_step(data_map_t &data) const {
   return data.as<pmm_data>().jac_step_;
 }
 
+void pmm_constr::apply_corrector_step(data_map_t &data) const {
+    // PMM has no complementarity correction. Do not condense its original
+    // residual a second time when the IPM corrector shares this stage.
+    data.as<pmm_data>().g_.setZero();
+}
+
 void pmm_constr::finalize_newton_step(data_map_t &data) const {
     auto &d = data.as<pmm_data>();
     if (!d.runtime_bound_) {
@@ -67,6 +73,7 @@ void pmm_constr::finalize_newton_step(data_map_t &data) const {
         fmt::format("pmm_constr {} prim_step size mismatch: {} vs in_args {}",
                                              name(), d.prim_step_.size(), d.func_.in_args().size()));
     }
+    d.g_ = d.v_ - d.rho_ * d.multiplier_;
     // From row 2 of KKT: J*du - rho*dlam = -h  =>  dlam = (J*du + h) / rho
     d.d_multiplier_.noalias() = d.g_;
             d.d_multiplier_.noalias() += d.jac_step_;

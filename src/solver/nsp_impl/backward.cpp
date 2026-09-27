@@ -32,8 +32,7 @@ void generic_solver::riccati_recursion(ns_riccati_data *cur,
     d.V_yy.array() /= 2;
     d.V_yy = d.V_yy + d.V_yy.transpose().eval();
     if (d.V_yy.hasNaN() || !d.V_yy.allFinite()) {
-        print_debug(cur);
-        throw std::runtime_error("V_yy has NaN or inf");
+        throw factorization_failure("nonfinite propagated Hessian");
     }
 
     nsp.y_0_p_k.noalias() +=
@@ -47,9 +46,11 @@ void generic_solver::riccati_recursion(ns_riccati_data *cur,
     d.V_xx.noalias() += nsp.y_y_K.transpose() * nsp.y_0_p_K;
 
     if (nsp.Q_zz.rows()) {
+        if (!nsp.Q_zz.allFinite())
+            throw factorization_failure("nonfinite projected Hessian");
         nsp.llt_ns_.compute(nsp.Q_zz);
         if (!nsp.llt_ns_.valid())
-            throw std::runtime_error(
+            throw factorization_failure(
                 "projected primal Hessian is not positive definite");
         nsp.llt_ns_.solve(nsp.z_0_K, nsp.z_K, -1.0);
         d.Q_x.noalias() += nsp.z_0_k.transpose() * nsp.z_K;

@@ -30,7 +30,8 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def("get_profile_report", &ns_sqp::profile, "Get the latest SQP wall-clock profile report")
         .def_prop_ro("n_job", &ns_sqp::n_jobs,
                      "Effective maximum number of SQP worker threads")
-        .def_ro("settings", &ns_sqp::settings, "Get the settings of the SQP solver");
+        .def_ro("settings", &ns_sqp::settings, "Get the settings of the SQP solver")
+        .def_ro("linear_solve_last", &ns_sqp::linear_solve_last, "Diagnostics for the most recent Newton direction");
 
     nb::class_<ns_sqp::ipm_config>(sqp, "ipm_config")
         .def_rw("mu0", &ns_sqp::ipm_config::mu0, "Initial barrier parameter for the IPM solver")
@@ -39,6 +40,28 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("mu_monotone_fraction_threshold", &ns_sqp::ipm_config::mu_monotone_fraction_threshold, "Threshold for monotone decrease of mu (smaller is more likely to use monotone decrease)")
         .def_rw("mu_monotone_factor", &ns_sqp::ipm_config::mu_monotone_factor, "Factor for monotone decrease of mu (smaller -> faster decrease)")
         .def_rw("globalization", &ns_sqp::ipm_config::globalization, "Whether to use globalization in the IPM solver");
+
+    nb::class_<ns_sqp::regularization_settings>(sqp, "regularization_settings")
+        .def_rw("enabled", &ns_sqp::regularization_settings::enabled)
+        .def_rw("initial", &ns_sqp::regularization_settings::initial)
+        .def_rw("increase_factor", &ns_sqp::regularization_settings::increase_factor)
+        .def_rw("decrease_factor", &ns_sqp::regularization_settings::decrease_factor)
+        .def_rw("maximum", &ns_sqp::regularization_settings::maximum)
+        .def_rw("max_attempts", &ns_sqp::regularization_settings::max_attempts)
+        .def_rw("residual_tolerance", &ns_sqp::regularization_settings::residual_tolerance);
+    nb::enum_<ns_sqp::linear_solve_status>(sqp, "linear_solve_status")
+        .value("success", ns_sqp::linear_solve_status::success)
+        .value("factorization_failed", ns_sqp::linear_solve_status::factorization_failed)
+        .value("inaccurate_direction", ns_sqp::linear_solve_status::inaccurate_direction)
+        .value("inconsistent_equalities", ns_sqp::linear_solve_status::inconsistent_equalities)
+        .value("nonfinite_direction", ns_sqp::linear_solve_status::nonfinite_direction);
+    nb::class_<ns_sqp::linear_solve_info>(sqp, "linear_solve_info")
+        .def_ro("status", &ns_sqp::linear_solve_info::status)
+        .def_ro("attempts", &ns_sqp::linear_solve_info::attempts)
+        .def_ro("regularization", &ns_sqp::linear_solve_info::regularization)
+        .def_ro("stationarity_residual", &ns_sqp::linear_solve_info::stationarity_residual)
+        .def_ro("equality_residual", &ns_sqp::linear_solve_info::equality_residual)
+        .def_ro("inequality_residual", &ns_sqp::linear_solve_info::inequality_residual);
 
     nb::class_<ns_sqp::iterative_refinement_setting> rf_setting(sqp, "iterative_refinement_setting");
     rf_setting.def_rw("enabled", &ns_sqp::iterative_refinement_setting::enabled, "Whether to use iterative refinement")
@@ -110,6 +133,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("ipm_conditional_corrector", &ns_sqp::settings_t::ipm_conditional_corrector, "Whether to use conditional corrector in the IPM solver")
         .def_prop_ro("ipm", [](ns_sqp::settings_t &self) -> auto & { return self.ipm; }, "IPM settings")
         .def_rw("rf", &ns_sqp::settings_t::rf, "Iterative refinement settings")
+        .def_rw("regularization", &ns_sqp::settings_t::regularization, "Adaptive Newton direction safeguards")
         .def_prop_ro("restoration", [](ns_sqp::settings_t &self) -> auto & { return self.restoration; }, "Restoration settings")
         .def_prop_ro("eq_init", [](ns_sqp::settings_t &self) -> auto & { return self.eq_init; }, "Equality multiplier initialization settings")
         .def_rw("initial_state", &ns_sqp::settings_t::initial_state, "Initial-state treatment: fixed (default) or optimized through an internal virtual stage")

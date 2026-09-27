@@ -179,6 +179,28 @@ struct ns_sqp {
         optimized,
     };
 
+    struct regularization_settings {
+        bool enabled = true;
+        scalar_t initial = 1e-4;
+        scalar_t increase_factor = 10.;
+        scalar_t decrease_factor = 0.3333333333333333;
+        scalar_t maximum = 1e8;
+        size_t max_attempts = 14;
+        scalar_t residual_tolerance = 1e-6;
+    };
+    enum class linear_solve_status {
+        success, factorization_failed, inaccurate_direction, inconsistent_equalities,
+        nonfinite_direction
+    };
+    struct linear_solve_info {
+        linear_solve_status status = linear_solve_status::success;
+        size_t attempts = 0;
+        scalar_t regularization = 0.;
+        scalar_t stationarity_residual = 0.;
+        scalar_t equality_residual = 0.;
+        scalar_t inequality_residual = 0.;
+    } linear_solve_last;
+
     struct settings_t : public workspace_data_collection<linesearch_setting, ipm_config>,
                         public restoration_settings,
                         public equality_multiplier_init_settings {
@@ -197,6 +219,7 @@ struct ns_sqp {
 
         iterative_refinement_setting rf;
         scaling_settings scaling;
+        regularization_settings regularization;
 
         // TODO: replace this exception-suppression mode with explicit error-code
         // propagation from worker callbacks and the SQP update loop.
@@ -243,6 +266,7 @@ struct ns_sqp {
         restoration_failed,           ///< restoration was triggered but failed to make sufficient progress
         restoration_reached_max_iter, ///< restoration reached its iteration budget without satisfying the exit test
         infeasible_stationary,        ///< reached an infeasible stationary point (e.g. due to LICQ failure) and cannot make progress
+        numerical_failure,            ///< no accurate direction after bounded regularization retries
     };
 
     struct iter_info {
@@ -632,6 +656,9 @@ struct ns_sqp {
             finalize_ls_bound_and_set_to_max();
         }
     }
+    scalar_t last_primal_regularization_ = 0.;
+    bool compute_safe_direction(iteration_context &ctx, bool do_scaling, bool do_refinement, bool gauss_newton);
+    void check_direction();
     void solve_direction(iteration_context &ctx, bool do_scaling, bool gauss_newton);
     void correct_direction(iteration_context &ctx, bool do_refinement);
     void prepare_globalization(filter_linesearch_data &ls, iteration_context &ctx);

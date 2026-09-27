@@ -138,6 +138,14 @@ void node_data::update_approximation(update_mode config, bool include_original_c
                           eval_jacobian && _f.order() >= approx_order::first,
                           eval_hessian && _f.order() >= approx_order::second);
     });
+  if (eval_hessian && dense_->has_constraint_hessian_)
+    for (auto f : primal_fields) for (auto g : primal_fields) if (f >= g) {
+      auto &snapshot = dense_->constraint_hess_[f][g];
+      // Layout and allocated buffers are stable for this realized stage.
+      auto cache = snapshot.jit_cache_;
+      snapshot = dense_->hessian_modification_[f][g];
+      snapshot.jit_cache_ = std::move(cache);
+    }
   if (eval_jacobian)
     condense_soft_constraints(eval_hessian);
     for (const generic_custom_func &f : prob_->exprs(__post_comp)) {

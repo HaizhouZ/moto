@@ -508,9 +508,10 @@ ns_sqp::line_search_action ns_sqp::sqp_iter(filter_linesearch_data &ls, kkt_info
     iteration_context ctx{
         .current = kkt_current, // must do this because prepare_globalization will only update the step info
     };
-    reset_ls_workers();
-    solve_direction(ctx, do_scaling, gauss_newton);
-    correct_direction(ctx, do_refinement);
+    if (!compute_safe_direction(ctx, do_scaling, do_refinement, gauss_newton)) {
+        ls.reset_per_iter_data();
+        return line_search_action::failure;
+    }
     kkt_info current_backup;
     prepare_globalization(ls, ctx);
     current_backup = ctx.current;
@@ -714,6 +715,12 @@ ns_sqp::result_type ns_sqp::update(size_t n_iter, bool verbose, bool profile) {
                 if (i_iter < n_iter)
                     iter_last.result = iter_result_t::unknown;
                 continue;
+            }
+
+            if (action == line_search_action::failure &&
+                linear_solve_last.status != linear_solve_status::success) {
+                iter_last.result = iter_result_t::numerical_failure;
+                break;
             }
 
             if (kkt_last.dual.inf_res < settings.dual_tol &&

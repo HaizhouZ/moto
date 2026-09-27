@@ -143,19 +143,22 @@ void generic_solver::compute_kkt_residual(ns_riccati_data *cur) {
         const auto fi = primal_fields[i];
         for (size_t j = 0; j <= i; ++j) {
             const auto fj = primal_fields[j];
-            const auto &h = dense->lag_hess_[fi][fj];
-            if (!h.is_empty()) {
-                linear_backend::multiply(h, d.trial_prim_step[fj],
-                                         d.kkt_stat_err_[fi]);
-                if (i != j)
-                    linear_backend::right_transpose_multiply(
-                        d.trial_prim_step[fi], h,
-                        d.kkt_stat_err_[fj]);
+            for (const auto *block : {&dense->lag_hess_[fi][fj], &dense->constraint_hess_[fi][fj]}) {
+                const auto &h = *block;
+                if (!h.is_empty()) {
+                    linear_backend::multiply(h, d.trial_prim_step[fj],
+                                             d.kkt_stat_err_[fi]);
+                    if (i != j)
+                        linear_backend::right_transpose_multiply(
+                            d.trial_prim_step[fi], h,
+                            d.kkt_stat_err_[fj]);
+                }
             }
         }
     }
 
     for (auto f : primal_fields) {
+        d.kkt_stat_err_[f].noalias() += d.primal_regularization[f] * d.trial_prim_step[f];
         for (auto constr : constr_fields) {
             if (dense->approx_[constr].jac_[f].is_empty() || d.trial_dual_step[constr].size() == 0) {
                 continue;
