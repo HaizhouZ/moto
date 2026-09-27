@@ -48,6 +48,8 @@ sym_data::sym_data(ocp *prob) : prob_(prob) {
         }
     }
     for (const sym &s : prob_->exprs(__usr_var)) {
+        usr_value_.try_emplace(s.uid(), vector::Zero(
+            static_cast<Eigen::Index>(s.dim())));
         set_default_val(s);
     }
 }

@@ -215,6 +215,23 @@ TEST_CASE("equality multiplier initialization reduces initial hard-equality dual
     REQUIRE(with_init.linear_solve_last.stationarity_residual < 1e-12);
 }
 
+TEST_CASE("warm initialization preserves accepted equality multipliers") {
+    ns_sqp sqp;
+    configure_solver(sqp, true, 1);
+
+    REQUIRE_NOTHROW(sqp.update(0, false));
+    auto *node = sqp.solver_nodes().front();
+    REQUIRE(node->dense().dual_[__eq_x].size() > 0);
+    REQUIRE(node->dense().dual_[__eq_x_soft].size() > 0);
+    node->dense().dual_[__eq_x].setConstant(17.0);
+    node->dense().dual_[__eq_x_soft].setConstant(-23.0);
+
+    sqp.settings.ipm.warm_start = true;
+    REQUIRE_NOTHROW(sqp.update(0, false));
+    REQUIRE(node->dense().dual_[__eq_x].isConstant(17.0));
+    REQUIRE(node->dense().dual_[__eq_x_soft].isConstant(-23.0));
+}
+
 TEST_CASE("equality multiplier initialization updates soft equalities and leaves inequality state unchanged") {
     ns_sqp without_init;
     ns_sqp with_init;

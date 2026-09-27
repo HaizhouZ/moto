@@ -185,6 +185,11 @@ generated_lifted::data::data(generic_constr::approx_data &&base,
     jac_.clear();
     for (const auto &[argument, block] : function.jacobian_panels_) {
         const sym &symbol = func_.in_args(argument);
+        if (!problem.is_active(symbol)) {
+            static matrix empty;
+            jac_.push_back(empty);
+            continue;
+        }
         jac_.push_back(approx_->jac_[symbol.field()].insert(
             function_start + block.row_offset,
             problem.get_expr_start_tangent(symbol) + block.col_offset,

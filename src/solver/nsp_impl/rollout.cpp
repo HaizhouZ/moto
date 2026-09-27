@@ -57,7 +57,7 @@ void generic_solver::finalize_dual_newton_step(ns_riccati_data *cur) {
                              d.d_lbd_f, -1.);
     // update hard constraint multipliers
     if (d.ncstr > 0 && d.rank_status_ != rank_status::unconstrained) {
-        // LU.solve([rhs])
+        // Recover multipliers through the hard-equality LQ factor.
         d.d_lbd_s_c_pre_solve.noalias() = -d.Q_u.transpose();
         linear_backend::multiply(d.Q_ux, d.trial_prim_step[__x], d.d_lbd_s_c_pre_solve, -1.);
         linear_backend::multiply(d.Q_ux_mod, d.trial_prim_step[__x], d.d_lbd_s_c_pre_solve, -1.);
@@ -84,7 +84,8 @@ void generic_solver::finalize_dual_newton_step(ns_riccati_data *cur) {
         // fmt::print("y_0_p_K: \n{}\n", nsp.y_0_p_K);
         // fmt::print("d_lbd_f: \n{}\n", d.d_lbd_f.transpose());
         // fmt::print("d_lbd_s_c_pre_solve: \n{}\n", d.d_lbd_s_c_pre_solve.transpose());
-        d.d_lbd_s_c.noalias() = nsp.lu_eq_.transpose().solve(d.d_lbd_s_c_pre_solve);
+        nsp.lq_eq_.transpose_solve(d.d_lbd_s_c_pre_solve,
+                                   d.d_lbd_s_c);
         // fmt::print("pre solve hard constr multipliers: {}\n", d.d_lbd_s_c_pre_solve.transpose());
 
         size_t cur_idx = 0;

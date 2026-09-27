@@ -252,8 +252,9 @@ linear_backend::graph_kernel build_unconstrained_presolve_graph(
     const auto h_lu_total = h_lu + h_lu_mod;
     const auto h_ly_total = h_ly + h_ly_mod;
     const auto q_ll_total = q_ll + q_ll_mod;
-    const auto basis_u = q_uu + q_uu_mod +
-                         product(h_yu_total.T(), z_y) +
+    // Q_uu panels may be fragmented runtime views.  Keep their direct sum
+    // outside the MX graph and fuse only the response contractions here.
+    const auto basis_u = product(h_yu_total.T(), z_y) +
                          product(h_lu_total.T(), z_l);
     const auto basis_y = h_yu_total + product(h_ly_total.T(), z_l);
     const auto basis_l = h_lu_total + product(h_ly_total, z_y) +
@@ -294,9 +295,9 @@ linear_backend::graph_kernel build_unconstrained_presolve_graph(
     }
     const std::string artifact_identity =
         lifted_program
-            ? "nsp_integrated_presolve_v4_" +
+            ? "nsp_integrated_presolve_v5_" +
                   lifted_program->artifact_identity
-            : "nsp_unconstrained_presolve_v3";
+            : "nsp_unconstrained_presolve_v4";
     return compile_graph(artifact_identity,
                          inputs, entries, layouts, nullptr,
                          "gen/linear_backend",
@@ -722,6 +723,8 @@ void ns_riccati_data::run_unconstrained_presolve_graph() {
         plan.pointers[offset] = V_xx.data();
     }
     plan.presolve(0, plan.pointers);
+    linear_backend::write_dense(Q_uu, nsp_.Q_zz);
+    linear_backend::write_dense(Q_uu_mod, nsp_.Q_zz);
     linear_backend::write_dense(Q_xx, V_xx);
     linear_backend::write_dense(Q_xx_mod, V_xx);
     plan.projection_active = plan.integrated;

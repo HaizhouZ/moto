@@ -22,7 +22,11 @@ void graph_composer::append_placement(
             found->active = found->active || active;
     };
 
-    for (field_t f : func_fields) {
+    for (field_t f : runtime_func_fields) {
+        // Precomputes are dependency nodes, not independently placed stage
+        // terms. Their consumers close and remap the producer DAG below.
+        if (f == __pre_comp)
+            continue;
         for (const expr_handle &expr : source->exprs(f)) {
             if (!source->has_role(*expr, role))
                 continue;
@@ -66,7 +70,7 @@ void graph_composer::resolve_status(const status_request_list &status,
             auto &list = request.active ? config.activate_list : config.deactivate_list;
             list.emplace_back(request.expression);
         }
-        if (in_field(request.expression->field(), func_fields)) {
+        if (in_field(request.expression->field(), runtime_func_fields)) {
             resolved_functions.emplace_back(request.expression);
         }
     }

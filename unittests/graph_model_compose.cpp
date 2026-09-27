@@ -17,6 +17,7 @@
 #include <moto/ocp/graph_model.hpp>
 #include <moto/ocp/graph_composer.hpp>
 #include <moto/ocp/ineq_constr.hpp>
+#include <moto/ocp/pre_comp.hpp>
 #include <moto/solver/ns_sqp.hpp>
 
 namespace {
@@ -629,6 +630,187 @@ TEST_CASE("authored endpoint handles access lowered runtime data", "[graph][mapp
     const sym &source_x = x;
     REQUIRE(runtime[source_x].data() == node->sym_val()[y].data());
     REQUIRE(std::abs(runtime.jac(source_x)(0, 0) - 1.) < 1e-12);
+}
+
+TEST_CASE("symbolic endpoint precompute caches values and total Jacobians",
+          "[graph][mapping][precompute][remap]") {
+    using namespace moto;
+
+    auto [x, y] = sym::states("x_endpoint_precompute", 2);
+    const cs::SX leaf_x = cs::SX::sym("endpoint_precompute_leaf_x", 2);
+    const cs::Function leaf(
+        "endpoint_precompute_leaf", {leaf_x},
+        {cs::SX::vertcat({leaf_x(0) + leaf_x(1), cs::SX(0),
+                          leaf_x(0) * leaf_x(1)})});
+    cs::SXVector leaf_outputs;
+    leaf.call({static_cast<const cs::SX &>(x)}, leaf_outputs, false, true);
+    const cs::SX features = leaf_outputs.front();
+    auto precompute = pre_compute::create(
+        "endpoint_feature_precompute", {features});
+    const var feature_cache = precompute->outputs().at(0);
+    auto fixed_parameter = sym::params("endpoint_fixed_parameter", 1);
+    auto fixed_precompute = pre_compute::create(
+        "endpoint_fixed_precompute",
+        {2. * static_cast<const cs::SX &>(fixed_parameter)});
+    const var fixed_cache = fixed_precompute->outputs().at(0);
+
+    auto constraint = generic_constr::create(
+        "endpoint_cached_constraint", feature_cache(2) + fixed_cache,
+        approx_order::first);
+
+    auto stage = stage_ocp::create();
+    // Producers are dependencies of the consumer and inherit endpoint
+    // placement automatically.
+    stage->ed().add(*constraint);
+
+    ns_sqp sqp;
+    sqp.stages().push_back(stage->copy());
+    auto *node = sqp.solver_nodes().front();
+    REQUIRE(node->problem_ptr()->exprs(__pre_comp).size() == 2);
+    node->sym_val()[y] << 2., 3.;
+    node->sym_val()[fixed_parameter] << 4.;
+    node->update_approximation(node_data::update_mode::eval_all);
+
+    const auto &placed_precomputes = node->problem_ptr()->exprs(__pre_comp);
+    const auto feature_it = std::ranges::find_if(
+        placed_precomputes, [](const expr_handle &entry) {
+            return entry->name() == "endpoint_feature_precompute";
+        });
+    const auto fixed_it = std::ranges::find_if(
+        placed_precomputes, [](const expr_handle &entry) {
+            return entry->name() == "endpoint_fixed_precompute";
+        });
+    REQUIRE(feature_it != placed_precomputes.end());
+    REQUIRE(fixed_it != placed_precomputes.end());
+    const auto placed_feature = expr_cast<generic_pre_compute>(*feature_it);
+    const auto placed_fixed = expr_cast<generic_pre_compute>(*fixed_it);
+    REQUIRE(node->value(placed_feature->outputs().front()).isApprox(
+        (vector(3) << 5., 0., 6.).finished()));
+    REQUIRE(std::abs(node->value(placed_fixed->outputs().front())(0) - 8.) < 1e-12);
+    auto &runtime = static_cast<node_data &>(*node).data(constraint);
+    const sym &source_x = x;
+    REQUIRE(std::abs(runtime.v_(0) - 14.) < 1e-12);
+    REQUIRE(runtime.jac(source_x).isApprox(
+        (matrix(1, 2) << 3., 2.).finished()));
+    REQUIRE(runtime[source_x].data() == node->sym_val()[y].data());
+
+    auto [other_x, other_y] = sym::states("x_endpoint_precompute_other", 2);
+    (void)other_y;
+    generic_func::symbol_remap remap{{x, other_x}};
+    auto first = expr_cast<generic_pre_compute>(
+        precompute->instantiate(var_inarg_list{*other_x}));
+    auto second = expr_cast<generic_pre_compute>(precompute->instantiate(remap));
+    REQUIRE(first.get() == second.get());
+    REQUIRE(first->outputs().size() == 1);
+    REQUIRE(first->outputs().at(0)->uid() != feature_cache->uid());
+    REQUIRE(first->in_args().size() > first->outputs().size());
+
+    auto remapped_constraint = expr_cast<generic_func>(constraint->reuse_remap({
+        {feature_cache, first->outputs().front()},
+    }));
+    REQUIRE(remapped_constraint->has_arg(*other_x));
+    REQUIRE_FALSE(remapped_constraint->has_arg(*x));
+}
+
+TEST_CASE("exact Hessian consumers reject first-order precompute caches",
+          "[precompute][hessian]") {
+    using namespace moto;
+
+    auto x = sym::state("x_precompute_exact_hessian", 1);
+    auto precompute = pre_compute::create(
+        "exact_hessian_precompute", {x * x});
+    auto consumer = generic_constr::create(
+        "exact_hessian_cached_consumer", precompute->outputs().front(),
+        approx_order::second);
+    REQUIRE_THROWS_WITH(
+        consumer->finalize(),
+        Catch::Matchers::ContainsSubstring("exact Hessian through a symbolic precompute"));
+}
+
+TEST_CASE("chained precomputes reuse upstream values and total tangents",
+          "[precompute][dependency]") {
+    using namespace moto;
+
+    auto x = sym::state("chained_precompute_x", 1);
+    auto upstream = pre_compute::create(
+        "chained_precompute_upstream", {x * x});
+    const var upstream_cache = upstream->outputs().front();
+    auto downstream = pre_compute::create(
+        "chained_precompute_downstream",
+        {2. * static_cast<const cs::SX &>(upstream_cache) + 1.});
+    const var downstream_cache = downstream->outputs().front();
+    auto constraint = generic_constr::create(
+        "chained_precompute_constraint", downstream_cache,
+        approx_order::first);
+
+    auto problem = ocp::create();
+    // Adding a consumer closes the complete producer DAG automatically.
+    problem->add(*constraint);
+    problem->wait_until_ready();
+
+    REQUIRE(problem->exprs(__pre_comp).at(0)->uid() == upstream->uid());
+    REQUIRE(problem->exprs(__pre_comp).at(1)->uid() == downstream->uid());
+
+    node_data node(problem);
+    node.sym_val()[x] << 3.;
+    node.update_approximation(node_data::update_mode::eval_all);
+    REQUIRE(node.value(upstream_cache).isApprox(
+        (vector(1) << 9.).finished()));
+    REQUIRE(node.value(downstream_cache).isApprox(
+        (vector(1) << 19.).finished()));
+    auto &runtime = node.data(constraint);
+    REQUIRE(runtime.v_.isApprox((vector(1) << 19.).finished()));
+    REQUIRE(runtime.jac(*x).isApprox((matrix(1, 1) << 12.).finished()));
+
+    auto other_x = sym::state("chained_precompute_other_x", 1);
+    auto other_upstream = expr_cast<generic_pre_compute>(
+        upstream->instantiate(var_inarg_list{*other_x}));
+    auto other_downstream = expr_cast<generic_pre_compute>(
+        downstream->instantiate(
+            var_inarg_list{*other_upstream->outputs().front()}));
+    auto other_constraint = expr_cast<generic_func>(constraint->reuse_remap({
+        {downstream_cache, other_downstream->outputs().front()},
+    }));
+    auto other_problem = ocp::create();
+    other_problem->add(*other_constraint);
+    other_problem->wait_until_ready();
+    node_data other_node(other_problem);
+    other_node.sym_val()[other_x] << 4.;
+    other_node.update_approximation(node_data::update_mode::eval_all);
+    REQUIRE(other_node.value(other_upstream->outputs().front()).isApprox(
+        (vector(1) << 16.).finished()));
+    REQUIRE(other_node.value(other_downstream->outputs().front()).isApprox(
+        (vector(1) << 33.).finished()));
+    auto &other_runtime =
+        static_cast<node_data &>(other_node).data(other_constraint);
+    REQUIRE(other_runtime.jac(*other_x).isApprox(
+        (matrix(1, 1) << 16.).finished()));
+}
+
+TEST_CASE("output-inferred internal-call inputs survive finalization",
+          "[graph][codegen][internal-call]") {
+    using namespace moto;
+
+    auto x = sym::state("internal_call_input_x", 2);
+    const cs::SX leaf_x = cs::SX::sym("internal_call_leaf_x", 2);
+    const cs::Function leaf("internal_call_leaf", {leaf_x},
+                            {leaf_x(0) + 2. * leaf_x(1)});
+    cs::SXVector outputs;
+    leaf.call({static_cast<const cs::SX &>(x)}, outputs, false, true);
+    auto constraint = generic_constr::create(
+        "internal_call_constraint", outputs.front(), approx_order::first);
+    auto problem = ocp::create();
+    problem->add(*constraint);
+    problem->wait_until_ready();
+
+    REQUIRE(constraint->has_arg(*x));
+    node_data node(problem);
+    node.sym_val()[x] << 3., 4.;
+    node.update_approximation(node_data::update_mode::eval_all);
+    auto &runtime = node.data(constraint);
+    REQUIRE(std::abs(runtime.v_(0) - 11.) < 1e-12);
+    REQUIRE(runtime.jac(*x).isApprox(
+        (matrix(1, 2) << 1., 2.).finished()));
 }
 
 TEST_CASE("appending stage copies advances the current end boundary", "[graph][path]") {

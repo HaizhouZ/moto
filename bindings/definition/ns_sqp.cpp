@@ -87,7 +87,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
     nb::class_<ns_sqp::equality_multiplier_init_settings> eq_init_setting(sqp, "equality_multiplier_init_settings");
     eq_init_setting
         .def_rw("enabled", &ns_sqp::equality_multiplier_init_settings::enabled,
-                "Whether equality-type multipliers are rebuilt during initialization")
+                "Whether equality-type multipliers are rebuilt during cold initialization")
         .def_rw("rebuild_after_restoration_exit", &ns_sqp::equality_multiplier_init_settings::rebuild_after_restoration_exit,
                 "Whether to rebuild equality-type multipliers after restoration exits successfully")
         .def_rw("rho_eq", &ns_sqp::equality_multiplier_init_settings::rho_eq,

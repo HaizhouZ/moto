@@ -19,6 +19,7 @@ from moto import (
     ineq as ineq,
     lifted as lifted,
     pmm_constr as pmm_constr,
+    precompute as precompute,
     semi_implicit_euler as semi_implicit_euler,
     sqp as ns_sqp_impl,
     sqp as sqp,
@@ -128,6 +129,9 @@ approx_order_zero: moto.approx_order = moto.approx_order.approx_order_zero
 approx_order_first: moto.approx_order = moto.approx_order.approx_order_first
 
 approx_order_second: moto.approx_order = moto.approx_order.approx_order_second
+
+class custom_func(moto.func):
+    pass
 
 class linesearch_config:
     @property

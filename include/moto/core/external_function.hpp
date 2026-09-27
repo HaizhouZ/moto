@@ -23,6 +23,7 @@ void *load_from_shared(const std::string &lib_path, const std::string &func_name
 struct ext_func {
     using input_list = std::vector<vector_ref>;
     using value_func = void (*)(const input_list &, vector_ref);
+    using value_list_func = void (*)(const input_list &, std::vector<vector_ref> &);
     using jacobian_func = void (*)(const input_list &, std::vector<matrix_ref> &);
     using hessian_func = void (*)(const input_list &, std::vector<std::vector<matrix_ref>> &);
 
@@ -49,6 +50,9 @@ struct ext_func {
      */
     void invoke(const input_list &input, vector_ref output) const {
         reinterpret_cast<value_func>(func_)(input, output);
+    }
+    void invoke(const input_list &input, std::vector<vector_ref> &output) const {
+        reinterpret_cast<value_list_func>(func_)(input, output);
     }
     void invoke(const input_list &input, std::vector<matrix_ref> &output) const {
         reinterpret_cast<jacobian_func>(func_)(input, output);

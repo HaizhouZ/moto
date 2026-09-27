@@ -3,6 +3,7 @@
 #include <moto/ocp/cost.hpp>
 #include <moto/ocp/ineq_constr.hpp>
 #include <moto/ocp/lifted.hpp>
+#include <moto/ocp/pre_comp.hpp>
 #include <moto/ocp/sym.hpp>
 #include <moto/solver/soft_constr/pmm_constr.hpp>
 #include <type_cast.hpp>
@@ -96,6 +97,18 @@ std::shared_ptr<moto::generic_func> ready_func(moto::expr_handle handle) {
             fmt::format("function {} is not ready", result->name()));
     return result;
 }
+
+std::shared_ptr<moto::generic_pre_compute> ready_precompute(
+    moto::expr_handle handle) {
+    auto result = moto::expr_cast<moto::generic_pre_compute>(handle);
+    if (!result->finalized() && !result->finalize())
+        throw std::runtime_error(fmt::format(
+            "precompute {} could not be finalized", result->name()));
+    if (!result->wait_until_ready())
+        throw std::runtime_error(fmt::format(
+            "precompute {} is not ready", result->name()));
+    return result;
+}
 } // namespace
 namespace nanobind {
 namespace detail {
@@ -161,7 +174,8 @@ void register_submodule_functional(nb::module_ &m) {
         .def_static("states", &sym::states, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
         .def_static("inputs", &sym::inputs, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
         .def_static("lifted", &sym::lifted, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
-        .def_static("params", &sym::params, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none());
+        .def_static("params", &sym::params, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
+        .def_static("usr_var", &sym::usr_var, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none());
 
     nb::class_<generic_func, expr>(m, "func")
         .def_prop_ro("in_args", [](generic_func &self) -> auto & { return static_cast<const std::vector<var> &>(self.in_args()); }, nb::rv_policy::reference_internal)
@@ -195,6 +209,42 @@ void register_submodule_functional(nb::module_ &m) {
                  return ready_func(self.reuse_remap(cast_remap(remap)));
              }, nb::arg("remap"), "Reuse the cached function for this remap");
 
+    nb::class_<generic_custom_func, generic_func>(m, "custom_func");
+
+    nb::class_<generic_pre_compute, generic_custom_func>(m, "precompute")
+        .def_static(
+            "create",
+            [](const std::string &name, const std::vector<cs::SX> &outputs) {
+                return generic_pre_compute::create(name, outputs);
+            },
+            nb::arg("name"), nb::arg("outputs"))
+        .def_prop_ro(
+            "outputs",
+            [](generic_pre_compute &self) -> const std::vector<var> & {
+                return static_cast<const std::vector<var> &>(self.outputs());
+            },
+            nb::rv_policy::reference_internal)
+        .def(
+            "instantiate",
+            [](generic_pre_compute &self, const var_inarg_list &inputs) {
+                return ready_precompute(self.instantiate(inputs));
+            },
+            nb::arg("inputs"),
+            "Instantiate positionally on new inputs; Moto manages all caches")
+        .def(
+            "instantiate",
+            [](generic_pre_compute &self, const py_remap &input_remap) {
+                return ready_precompute(self.instantiate(cast_remap(input_remap)));
+            },
+            nb::arg("input_remap"),
+            "Instantiate on new inputs; Moto allocates and reuses output caches")
+        .def(
+            "reuse_remap",
+            [](generic_pre_compute &self, const py_remap &remap) {
+                return ready_precompute(self.reuse_remap(cast_remap(remap)));
+            },
+            nb::arg("remap"), "Reuse this symbolic precompute after remapping symbols");
+
     nb::class_<generic_constr, generic_func>(m, "constr")
         .def_static(
             "create",
@@ -220,6 +270,8 @@ void register_submodule_functional(nb::module_ &m) {
     auto lifted_class = nb::class_<generic_lifted, generic_constr>(m, "lifted");
     nb::class_<lifted_symbolic_partition>(lifted_class, "partition")
         .def_ro("name", &lifted_symbolic_partition::name)
+        .def_ro("uid", &lifted_symbolic_partition::uid)
+        .def_ro("source_uid", &lifted_symbolic_partition::source_uid)
         .def_ro("field", &lifted_symbolic_partition::field)
         .def_ro("offset", &lifted_symbolic_partition::offset)
         .def_ro("size", &lifted_symbolic_partition::size);

@@ -23,9 +23,12 @@ cs::SX tangent_map(const sym &input) {
 }
 
 cs::SX tangent_jacobian(const cs::SX &output, const sym &input) {
-    if (!input.has_non_trivial_integration())
-        return cs::SX::jacobian(output, input);
-    return cs::SX::mtimes(cs::SX::jacobian(output, input), tangent_map(input));
+    const cs::SX jacobian = cs::SX::jacobian(output, input);
+    const cs::SX map = tangent_map(input);
+    if (input.dim() == input.tdim() &&
+        cs::SX::simplify(map - cs::SX::eye(input.dim())).is_zero())
+        return jacobian;
+    return cs::SX::mtimes(jacobian, map);
 }
 
 void job_list::wait_until_finished() {
@@ -283,7 +286,11 @@ std::string process_generated_code(const std::string &raw_c_code,
     const std::vector<cs::SX> &sx_inputs,
     const std::vector<cs::SX> &sx_outputs,
     bool append,
-    bool with_aux) {
+    bool with_aux,
+    size_t work_arg,
+    size_t work_res,
+    size_t work_iw,
+    size_t work_w) {
     const bool is_hessian = func_name.ends_with("_hess");
     // Pre-compute CCS to (row, col) index maps
     std::vector<std::vector<std::pair<int, int>>> ij_pairs_all;
@@ -299,6 +306,7 @@ std::string process_generated_code(const std::string &raw_c_code,
                         func_name.ends_with("_hess_panel");
 
     bool vec_out = !is_jac && !is_hessian;
+    bool vec_out_list = vec_out && sx_outputs.size() > 1;
 
     // Lambda for generating replacement strings
     auto make_input_ref_access = [&](int arg_idx, int index) -> std::string {
@@ -318,7 +326,10 @@ std::string process_generated_code(const std::string &raw_c_code,
             out << fmt::format("if (outputs[{}][{}].data()) ", row, col);
             out << fmt::format("outputs[{}][{}]({},{})", row, col, i, j);
         } else if (vec_out) {
-            out << fmt::format("outputs({})", i);
+            if (vec_out_list)
+                out << fmt::format("outputs[{}]({})", arg_idx, i);
+            else
+                out << fmt::format("outputs({})", i);
         } else {
             out << fmt::format("if (outputs[{}].data()) ", arg_idx);
             out << fmt::format("outputs[{}]({},{})", arg_idx, i, j);
@@ -338,6 +349,89 @@ std::string process_generated_code(const std::string &raw_c_code,
          "(\"default\")))\n"
                    << "#endif\n\n"
                    << "extern \"C\" {\n\n";
+
+    // A never-inline CasADi call introduces internal casadi_f1, casadi_f2, ...
+    // functions and makes casadi_f0 use pointer/work arrays.  Preserve those
+    // internal functions and call f0 through a fixed-size thread-local workspace;
+    // the straight-line path below remains allocation-free and unchanged.
+    if (raw_c_code.find("static int casadi_f1") != std::string::npos) {
+        const auto internal_begin = raw_c_code.find(
+            "/* How to prefix internal symbols */");
+        const auto exported_begin = raw_c_code.find(
+            "CASADI_SYMBOL_EXPORT int " + func_name + "(");
+        if (internal_begin == std::string::npos ||
+            exported_begin == std::string::npos ||
+            exported_begin <= internal_begin) {
+            throw std::runtime_error(fmt::format(
+                "could not locate CasADi internal-call body for {}", func_name));
+        }
+        processed_code << raw_c_code.substr(
+            internal_begin, exported_begin - internal_begin);
+        processed_code << "CASADI_SYMBOL_EXPORT void " << func_name << "(\n"
+                       << "  const std::vector<Eigen::Ref<Eigen::" << vec_type()
+                       << ">>& inputs,\n";
+        if (vec_out_list) {
+            processed_code << "  std::vector<Eigen::Ref<Eigen::" << vec_type()
+                           << ">>& outputs) {\n";
+        } else if (vec_out) {
+            processed_code << "  Eigen::Ref<Eigen::" << vec_type()
+                           << "> outputs) {\n";
+        } else if (is_hessian) {
+            processed_code << "  std::vector<std::vector<Eigen::Ref<Eigen::"
+                           << mat_type() << ">>>& outputs) {\n";
+        } else {
+            processed_code << "  std::vector<Eigen::Ref<Eigen::" << mat_type()
+                           << ">>& outputs) {\n";
+        }
+        processed_code << fmt::format(
+            "  thread_local const casadi_real* arg[{}] = {{}};\n"
+            "  thread_local casadi_real* res[{}] = {{}};\n"
+            "  thread_local casadi_int iw[{}] = {{}};\n"
+            "  thread_local casadi_real w[{}] = {{}};\n",
+            std::max<size_t>(work_arg, 1),
+            std::max<size_t>(work_res, 1),
+            std::max<size_t>(work_iw, 1),
+            std::max<size_t>(work_w, 1));
+        for (size_t i = 0; i < n_in; ++i)
+            processed_code << fmt::format(
+                "  arg[{}] = inputs[{}].data();\n", i, i);
+
+        std::vector<bool> direct_output(sx_outputs.size(), false);
+        for (size_t i = 0; i < sx_outputs.size(); ++i) {
+            const auto output_data = [&]() {
+                if (is_hessian) {
+                    const size_t width = n_in - with_aux;
+                    return fmt::format("outputs[{}][{}].data()", i / width,
+                                       i % width);
+                }
+                if (vec_out_list)
+                    return fmt::format("outputs[{}].data()", i);
+                if (vec_out)
+                    return std::string("outputs.data()");
+                return fmt::format("outputs[{}].data()", i);
+            }();
+            direct_output[i] = !append && sx_outputs[i].sparsity().is_dense();
+            if (direct_output[i]) {
+                processed_code << fmt::format(
+                    "  res[{}] = {};\n", i, output_data);
+            } else {
+                processed_code << fmt::format(
+                    "  casadi_real result_{}[{}] = {{}};\n"
+                    "  res[{}] = result_{};\n",
+                    i, std::max<casadi_int>(sx_outputs[i].nnz(), 1), i, i);
+            }
+        }
+        processed_code << "  if (casadi_f0(arg, res, iw, w, 0)) return;\n";
+        for (size_t i = 0; i < sx_outputs.size(); ++i) {
+            if (direct_output[i])
+                continue;
+            for (size_t j = 0; j < ij_pairs_all[n_in + i].size(); ++j)
+                processed_code << "  " << make_output_ref_access(i, j)
+                               << fmt::format(" = result_{}[{}];\n", i, j);
+        }
+        processed_code << "}\n\n} // extern \"C\"\n";
+        return processed_code.str();
+    }
 
     std::stringstream raw_stream(raw_c_code);
     std::string line;
@@ -384,7 +478,9 @@ std::string process_generated_code(const std::string &raw_c_code,
             if (line.find("static int casadi_f0") != std::string::npos) {
                 processed_code << "CASADI_SYMBOL_EXPORT void " << func_name << "(\n"
                                << "  const std::vector<Eigen::Ref<Eigen::" << vec_type() << ">>& inputs,\n";
-                if (vec_out) {
+                if (vec_out_list) {
+                    processed_code << "  std::vector<Eigen::Ref<Eigen::" << vec_type() << ">>& outputs) {\n";
+                } else if (vec_out) {
                     processed_code << "  Eigen::Ref<Eigen::" << vec_type() << "> outputs) {\n";
                 } else {
                     if (is_hessian) {
@@ -502,7 +598,10 @@ void run(std::string func_name,
     std::string raw_c_code = buffer.str();
 
     std::string processed_code =
-      process_generated_code(raw_c_code, func_name, sx_inputs_cs, filtered_outputs, append, !aux.is_empty());
+      process_generated_code(raw_c_code, func_name, sx_inputs_cs,
+                             filtered_outputs, append, !aux.is_empty(),
+                             casadi_func.sz_arg(), casadi_func.sz_res(),
+                             casadi_func.sz_iw(), casadi_func.sz_w());
 
     // Step 4: Write new C++ file with Eigen interface
     std::string final_cpp_path = fs::path(output_dir) / (func_name + ".cpp");
@@ -611,11 +710,20 @@ void run(std::string func_name,
 
 void task::finalize(job_list &jobs_) {
     std::string full_func_name = prefix.empty() ? func_name : prefix + "_" + func_name;
-    if (gen_eval)
-    jobs_.add(std::bind(
-        &impl::run, full_func_name,
+    if (gen_eval) {
+        std::vector<cs::SX> eval_outputs;
+        if (!value_outputs.empty()) {
+            eval_outputs = value_outputs;
+        } else {
+            eval_outputs = {
+                !gauss_newton
+                    ? sx_output
+                    : 0.5 * cs::SX::dot(sx_output, sx_output * weight_gn)};
+        }
+        jobs_.add(std::bind(
+            &impl::run, full_func_name,
                             sx_inputs,
-                            std::vector{!gauss_newton ? sx_output : 0.5 * cs::SX::dot(sx_output, sx_output * weight_gn)},
+                            std::move(eval_outputs),
                             output_dir,
                             eval_compile_flag,
                             force_recompile,
@@ -624,12 +732,13 @@ void task::finalize(job_list &jobs_) {
                             keep_generated_src,
                             verbose,
                             cs::SX()));
+    }
 
     // excluded = [e.name for e in exclude]
     std::set<size_t> excluded;
     // exclude non-primal storage-only inputs
     for (const sym &s : sx_inputs)
-        if (s.field() == __p || s.field() == __s)
+        if (s.field() == __p || s.field() == __s || s.field() == __usr_var)
             excluded.insert(s.uid());
     std::map<size_t, cs::SX> external_jac;
     for (auto &[in_arg, jac] : ext_jac) {

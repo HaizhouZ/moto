@@ -754,6 +754,42 @@ TEST_CASE("MX graph lowers a multi-RHS solve as one scheduled operation") {
   REQUIRE(output.isApprox(av.partialPivLu().solve(bv), 1e-12));
 }
 
+TEST_CASE("MX graph packs a diagonal multi-RHS solve operand") {
+  constexpr casadi_int n = 6;
+  const casadi::MX a = casadi::MX::sym("sparse_rhs_a", n, n);
+  const casadi::MX b = casadi::MX::sym(
+      "sparse_rhs_b", casadi::Sparsity::diag(n));
+  const auto kernel = compile_graph({a, b}, {casadi::MX::solve(a, b)});
+
+  matrix av = matrix::Random(n, n);
+  av.diagonal().array() += 5.;
+  const vector bv = vector::LinSpaced(n, .5, 1.5);
+  matrix output(n, n);
+  std::vector<scalar_t *> pointers{
+      av.data(), const_cast<scalar_t *>(bv.data()), output.data()};
+  kernel(pointers);
+  REQUIRE(output.isApprox(
+      av.partialPivLu().solve(bv.asDiagonal().toDenseMatrix()), 1e-12));
+}
+
+TEST_CASE("MX graph packs a diagonal solve factor") {
+  constexpr casadi_int n = 6, columns = 3;
+  const casadi::MX a = casadi::MX::sym(
+      "sparse_factor_a", casadi::Sparsity::diag(n));
+  const casadi::MX b = casadi::MX::sym("sparse_factor_b", n, columns);
+  const auto kernel = compile_graph({a, b}, {casadi::MX::solve(a, b)});
+
+  const vector av = vector::LinSpaced(n, 1., 2.);
+  const matrix bv = matrix::Random(n, columns);
+  matrix output(n, columns);
+  std::vector<scalar_t *> pointers{
+      const_cast<scalar_t *>(av.data()),
+      const_cast<scalar_t *>(bv.data()), output.data()};
+  kernel(pointers);
+  REQUIRE(output.isApprox(
+      av.asDiagonal().toDenseMatrix().partialPivLu().solve(bv), 1e-12));
+}
+
 TEST_CASE("MX graph lazily applies one shared factor to products and actions") {
   constexpr casadi_int n = 5, cols = 3;
   const casadi::MX a = casadi::MX::sym("inverse_a", n, n);

@@ -147,7 +147,7 @@ It solves a reduced system after:
 
 - projecting dynamics with `F_x`, `F_u`, `F_0`
 - stacking hard equalities into `s_c_stacked`
-- eliminating constrained control directions through LU / nullspace machinery
+- eliminating constrained control directions through LQ / nullspace machinery
 - solving the reduced LLT system in `Q_zz`
 
 Relevant files:

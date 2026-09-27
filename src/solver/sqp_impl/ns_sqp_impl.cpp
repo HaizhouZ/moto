@@ -203,7 +203,8 @@ ns_sqp::kkt_info ns_sqp::initialize(storage_type &graph) {
             cur->update_approximation(node_data::update_mode::eval_all);
         });
     }
-    initialize_equality_multipliers(graph);
+    if (!settings.ipm.warm_start)
+        initialize_equality_multipliers(graph);
     kkt_info kkt;
     {
         auto phase_profile = profile_scope(profile_phase::initialize_kkt);
