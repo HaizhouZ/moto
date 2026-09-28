@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-${{ github.ref }}-${{ matrix.python-version }}
+  group: build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
