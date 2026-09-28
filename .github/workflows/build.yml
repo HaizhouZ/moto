@@ -59,7 +59,7 @@ jobs:
 
       - name: Build
         shell: micromamba-shell {0}
-        run: cmake --build build -j6
+        run: cmake --build build -j2
 
       - name: Test
         shell: micromamba-shell {0}
@@ -67,7 +67,7 @@ jobs:
           OMP_NUM_THREADS: "1"
           OPENBLAS_NUM_THREADS: "1"
           MKL_NUM_THREADS: "1"
-        run: ctest --test-dir build --output-on-failure -j6
+        run: ctest --test-dir build --output-on-failure -j2
 
       - name: Install and import
         shell: micromamba-shell {0}
