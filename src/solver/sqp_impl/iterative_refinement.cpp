@@ -7,6 +7,27 @@
 #include <moto/utils/field_conversion.hpp>
 
 namespace moto {
+void ns_sqp::evaluate_recovered_stationarity_rows() {
+    auto &graph = active_data();
+    solver::for_each(solver::par, graph, [this](data *d) {
+        riccati_solver_.finalize_dual_newton_step(d);
+        riccati_solver_.compute_kkt_residual(d);
+    });
+}
+
+void ns_sqp::evaluate_recovered_stationarity() {
+    auto &graph = active_data();
+    evaluate_recovered_stationarity_rows();
+    solver::for_each(solver::par, solver::forward_edges(graph),
+                     [](data *d, data *next) {
+        if (next != nullptr && next->kkt_stat_err_[__x].size() > 0) {
+            next->kkt_stat_err_[__x].applyOnTheRight(
+                utils::permutation_from_y_to_x(&d->problem(), &next->problem()));
+            d->kkt_stat_err_[__y] += next->kkt_stat_err_[__x];
+        }
+    });
+}
+
 void ns_sqp::iterative_refinement() {
     auto phase_profile = profile_scope(profile_phase::iterative_refinement);
     auto &graph = active_data();
@@ -24,12 +45,11 @@ void ns_sqp::iterative_refinement() {
         {
             auto subphase_profile = profile_scope(profile_phase::iterative_refinement_check_residual);
             detail_timed_block_start("check_residual");
-            // finalize the dual step to get the correct dual variables for computing the residual, and compute the residual with the updated dual variables
-            solver::for_each(solver::par, graph,
-                [&](data *d) {
-                    riccati_solver_.finalize_dual_newton_step(d);
-                    riccati_solver_.compute_kkt_residual(d);
-                });
+            // Finalize recovered dual steps before evaluating stationarity.
+            solver::for_each(solver::par, graph, [this](data *d) {
+                riccati_solver_.finalize_dual_newton_step(d);
+                riccati_solver_.compute_kkt_residual(d);
+            });
             detail_timed_block_end("check_residual");
         }
         for (auto &w : thread_res) {
@@ -40,11 +60,10 @@ void ns_sqp::iterative_refinement() {
             if (d->kkt_stat_err_[__u].size() > 0) {
                 thread_res[tid].inf_kkt_stat_err_u = std::max(thread_res[tid].inf_kkt_stat_err_u, d->kkt_stat_err_[__u].cwiseAbs().maxCoeff());
             }
-            if (next != nullptr) {
-                if (next->kkt_stat_err_[__x].size() > 0) {
-                    next->kkt_stat_err_[__x].applyOnTheRight(utils::permutation_from_y_to_x(&d->problem(), &next->problem()));
-                    d->kkt_stat_err_[__y] += next->kkt_stat_err_[__x];
-                }
+            if (next != nullptr && next->kkt_stat_err_[__x].size() > 0) {
+                next->kkt_stat_err_[__x].applyOnTheRight(
+                    utils::permutation_from_y_to_x(&d->problem(), &next->problem()));
+                d->kkt_stat_err_[__y] += next->kkt_stat_err_[__x];
             }
             if (d->kkt_stat_err_[__y].size() > 0) {
                 thread_res[tid].inf_kkt_stat_err_y = std::max(thread_res[tid].inf_kkt_stat_err_y, d->kkt_stat_err_[__y].cwiseAbs().maxCoeff());
@@ -91,6 +110,13 @@ void ns_sqp::iterative_refinement() {
             detail_timed_block_end("iterative_refinement_step");
         }
         iter_refine++;
+        if (settings.regularization.validate_direction &&
+            iter_refine == iter_refine_max) {
+            auto subphase_profile = profile_scope(profile_phase::iterative_refinement_check_residual);
+            detail_timed_block_start("check_residual");
+            evaluate_recovered_stationarity();
+            detail_timed_block_end("check_residual");
+        }
     }
     detail_timed_block_end("iterative_refinement");
 }

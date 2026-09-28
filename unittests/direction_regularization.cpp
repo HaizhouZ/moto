@@ -163,6 +163,61 @@ TEST_CASE("Full-space residual includes exact nonlinear constraint Hessians") {
     REQUIRE(d->dense().has_constraint_hessian_);
 }
 
+TEST_CASE("Direction validation consumes final iterative-refinement stationarity") {
+    fixture f("refinement_stationarity_reuse");
+    f.stage->add(*objective("refinement_stationarity_cost", .5*f.su*f.su));
+    f.sqp.ed().add(*objective("refinement_stationarity_terminal", 2.5*(f.sx-1.)*(f.sx-1.)));
+    f.start(3);
+    f.sqp.settings.regularization.validate_direction = true;
+    SECTION("refinement exits after an already accurate residual") {
+        f.sqp.settings.rf.prim_res_tol = 1.;
+        f.sqp.settings.rf.dual_res_tol = 1.;
+    }
+    SECTION("the last correction is followed by a current residual") {
+        f.sqp.settings.rf.max_iters = 1;
+        f.sqp.settings.rf.prim_res_tol = 0.;
+        f.sqp.settings.rf.dual_res_tol = 0.;
+    }
+    const auto result = f.sqp.update(1, false);
+    REQUIRE(result.iter.result == ns_sqp::iter_result_t::success);
+    REQUIRE(f.sqp.linear_solve_last.status == ns_sqp::linear_solve_status::success);
+    REQUIRE(f.sqp.linear_solve_last.attempts == 1);
+    REQUIRE(f.sqp.linear_solve_last.stationarity_residual < 1e-12);
+}
+
+TEST_CASE("Direction validation evaluates stationarity when refinement is disabled") {
+    fixture f("validation_without_refinement");
+    f.stage->add(*objective("validation_without_refinement_cost", .5*f.su*f.su));
+    f.stage->add(*generic_constr::create(
+        "validation_without_refinement_inconsistent", {},
+        cs::SX::vertcat({f.su-1., f.su-2.}), approx_order::first));
+    f.start();
+    f.sqp.settings.rf.enabled = false;
+    f.sqp.settings.regularization.validate_direction = true;
+    const auto result = f.sqp.update(1, false);
+    REQUIRE(result.iter.result == ns_sqp::iter_result_t::numerical_failure);
+    REQUIRE(f.sqp.linear_solve_last.status == ns_sqp::linear_solve_status::inconsistent_equalities);
+    REQUIRE(f.sqp.linear_solve_last.attempts == 1);
+}
+
+TEST_CASE("Strict final validation drives bounded regularization retries") {
+    fixture f("validation_retry");
+    const cs::SX &y = f.y;
+    f.stage->add(*objective("validation_retry_cost",
+                            .5*f.su*f.su + .5*y*y + .3*f.su*y - y));
+    f.start();
+    f.sqp.settings.rf.enabled = false;
+    auto &regularization = f.sqp.settings.regularization;
+    regularization.validate_direction = true;
+    regularization.residual_tolerance = 1e-30;
+    regularization.max_attempts = 2;
+    const auto result = f.sqp.update(1, false);
+    REQUIRE(result.iter.result == ns_sqp::iter_result_t::numerical_failure);
+    REQUIRE(f.sqp.linear_solve_last.status == ns_sqp::linear_solve_status::inaccurate_direction);
+    REQUIRE(f.sqp.linear_solve_last.attempts == regularization.max_attempts);
+    REQUIRE(f.sqp.linear_solve_last.regularization > 0.);
+}
+
 #ifdef MOTO_TEST_MULTIBODY
 TEST_CASE("Restoration proximity uses tangent dimensions for manifold states") {
     using namespace solver::restoration;

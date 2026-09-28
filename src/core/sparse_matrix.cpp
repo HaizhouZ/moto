@@ -323,4 +323,108 @@ matrix sparse_matrix::dense() const {
   linear_backend::run_dense_write(*this, out.data(), out.rows(), 1., false);
   return out;
 }
+
+scalar_t sparse_matrix::induced_inf_norm(bool transpose) const {
+  if (is_empty() || rows_ == 0 || cols_ == 0) return 0.;
+
+  struct diagonal_view {
+    size_t row = 0, col = 0, size = 0;
+    const scalar_t *data = nullptr;
+    bool identity = false;
+  };
+  thread_local std::vector<diagonal_view> diagonals;
+  thread_local vector sums;
+  thread_local matrix dense_fallback;
+  diagonals.clear();
+  diagonals.reserve(diagonal_segments_.size() +
+                    (diagonal_segments_.empty() ? diag_panels_.size() : 0) +
+                    eye_panels_.size());
+  if (diagonal_segments_.empty()) {
+    for (const auto &panel : diag_panels_)
+      diagonals.push_back({static_cast<size_t>(panel.row_st_),
+                           static_cast<size_t>(panel.col_st_),
+                           static_cast<size_t>(std::min(panel.rows_, panel.cols_)),
+                           panel.data_.data(), false});
+  } else {
+    for (const auto &segment : diagonal_segments_)
+      diagonals.push_back(
+          {segment.row, segment.col, std::min(segment.rows, segment.cols),
+           diag_panels_[segment.storage_panel].data_.data() +
+               segment.storage_offset,
+           false});
+  }
+  for (const auto &panel : eye_panels_)
+    diagonals.push_back({static_cast<size_t>(panel.row_st_),
+                         static_cast<size_t>(panel.col_st_),
+                         static_cast<size_t>(std::min(panel.rows_, panel.cols_)),
+                         panel.data_.data(), !dynamic_eye_});
+
+  const auto rectangle_overlap = [](const auto &a, const auto &b) {
+    return a.row_st_ < b.row_ed_ && b.row_st_ < a.row_ed_ &&
+           a.col_st_ < b.col_ed_ && b.col_st_ < a.col_ed_;
+  };
+  bool requires_dense_fallback = false;
+  for (size_t i = 0; i < dense_panels_.size() && !requires_dense_fallback; ++i)
+    for (size_t j = i + 1; j < dense_panels_.size(); ++j)
+      if (rectangle_overlap(dense_panels_[i], dense_panels_[j])) {
+        requires_dense_fallback = true;
+        break;
+      }
+  for (size_t i = 0; i < diagonals.size() && !requires_dense_fallback; ++i) {
+    const auto &a = diagonals[i];
+    const auto a_offset = static_cast<std::ptrdiff_t>(a.row) -
+                          static_cast<std::ptrdiff_t>(a.col);
+    for (size_t j = i + 1; j < diagonals.size(); ++j) {
+      const auto &b = diagonals[j];
+      const auto b_offset = static_cast<std::ptrdiff_t>(b.row) -
+                            static_cast<std::ptrdiff_t>(b.col);
+      if (a_offset == b_offset && a.row < b.row + b.size &&
+          b.row < a.row + a.size) {
+        requires_dense_fallback = true;
+        break;
+      }
+    }
+  }
+
+  const size_t output_size = transpose ? cols_ : rows_;
+  sums.resize(static_cast<Eigen::Index>(output_size));
+  sums.setZero();
+  if (requires_dense_fallback) {
+    dense_fallback.resize(static_cast<Eigen::Index>(rows_),
+                          static_cast<Eigen::Index>(cols_));
+    dense_fallback.setZero();
+    linear_backend::run_dense_write(*this, dense_fallback.data(), rows_, 1.,
+                                    false);
+    for (Eigen::Index col = 0; col < dense_fallback.cols(); ++col)
+      for (Eigen::Index row = 0; row < dense_fallback.rows(); ++row)
+        sums(transpose ? col : row) += std::abs(dense_fallback(row, col));
+  } else {
+    for (const auto &panel : dense_panels_)
+      for (Eigen::Index col = 0; col < panel.data_.cols(); ++col)
+        for (Eigen::Index row = 0; row < panel.data_.rows(); ++row)
+          sums(transpose ? panel.col_st_ + col : panel.row_st_ + row) +=
+              std::abs(panel.data_(row, col));
+    for (const auto &diagonal : diagonals)
+      for (size_t i = 0; i < diagonal.size; ++i) {
+        const size_t row = diagonal.row + i;
+        const size_t col = diagonal.col + i;
+        const scalar_t value = diagonal.identity ? 1. : diagonal.data[i];
+        scalar_t dense_value = 0.;
+        for (const auto &panel : dense_panels_)
+          if (row >= static_cast<size_t>(panel.row_st_) &&
+              row < static_cast<size_t>(panel.row_ed_) &&
+              col >= static_cast<size_t>(panel.col_st_) &&
+              col < static_cast<size_t>(panel.col_ed_)) {
+            dense_value = panel.data_(row - panel.row_st_,
+                                      col - panel.col_st_);
+            break;
+          }
+        sums(transpose ? col : row) +=
+            std::abs(dense_value + value) - std::abs(dense_value);
+      }
+  }
+  for (Eigen::Index i = 0; i < sums.size(); ++i)
+    if (!std::isfinite(sums(i))) return sums(i);
+  return sums.maxCoeff();
+}
 } // namespace moto

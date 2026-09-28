@@ -783,11 +783,20 @@ class sqp:
         @property
         def enabled(self) -> bool:
             """
-            Whether equality-type multipliers are rebuilt during cold initialization
+            Whether equality-type multipliers are recovered during solver initialization
             """
 
         @enabled.setter
         def enabled(self, arg: bool, /) -> None: ...
+
+        @property
+        def recover_on_warm_start(self) -> bool:
+            """
+            Whether to recover equality-type multipliers when IPM warm start is enabled
+            """
+
+        @recover_on_warm_start.setter
+        def recover_on_warm_start(self, arg: bool, /) -> None: ...
 
         @property
         def rebuild_after_restoration_exit(self) -> bool:
@@ -949,7 +958,7 @@ class sqp:
 
         @property
         def backtrack_scheme(self) -> sqp.backtrack_scheme:
-            """Backtracking scheme: linspace (default) or geometric"""
+            """Backtracking scheme: geometric (default) or linspace"""
 
         @backtrack_scheme.setter
         def backtrack_scheme(self, arg: sqp.backtrack_scheme, /) -> None: ...

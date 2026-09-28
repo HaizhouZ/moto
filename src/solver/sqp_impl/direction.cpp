@@ -3,7 +3,6 @@
 #include <moto/solver/soft_constr/pmm_constr.hpp>
 #include <moto/solver/restoration/resto_overlay.hpp>
 #include <moto/core/linear_backend.hpp>
-#include <moto/utils/field_conversion.hpp>
 
 #include <cmath>
 
@@ -13,20 +12,16 @@ scalar_t inf_norm(const auto &v) {
     return v.size() ? v.cwiseAbs().maxCoeff() : 0.;
 }
 scalar_t operator_norm(const sparse_matrix &a, bool transpose = false) {
-    if (a.is_empty()) return 0.;
-    const matrix dense = a.dense().cwiseAbs();
-    return transpose ? dense.colwise().sum().maxCoeff() : dense.rowwise().sum().maxCoeff();
+    return a.induced_inf_norm(transpose);
 }
 }
 
-void ns_sqp::check_direction() {
+void ns_sqp::check_direction(bool recovered_stationarity_current) {
     auto &graph = active_data();
     // The backward pass mutates gradients. Evaluate the full-space equations
     // from their saved stage gradients, not from the propagated value function.
-    solver::for_each(solver::par, graph, [this](data *d) {
-        riccati_solver_.finalize_dual_newton_step(d);
-        riccati_solver_.compute_kkt_residual(d);
-    });
+    if (!recovered_stationarity_current)
+        evaluate_recovered_stationarity();
     std::vector<array_type<scalar_t, primal_fields>> scales(graph.nodes().size());
     for (size_t k = 0; k < graph.nodes().size(); ++k) {
         auto &d = *graph.nodes()[k];
@@ -149,12 +144,10 @@ void ns_sqp::check_direction() {
         auto &d = *graph.nodes()[k];
         // x[0] is fixed; every other x is the previous interval's y. The
         // optimized initial state is represented by an existing virtual stage.
-        row_vector state_residual = d.kkt_stat_err_[__y];
+        const row_vector &state_residual = d.kkt_stat_err_[__y];
         scalar_t state_scale = scales[k][__y];
         if (k + 1 < graph.nodes().size()) {
             auto &next = *graph.nodes()[k + 1];
-            state_residual += (next.kkt_stat_err_[__x] *
-                utils::permutation_from_y_to_x(&d.problem(), &next.problem())).eval();
             state_scale += scales[k + 1][__x];
         }
         linear_solve_last.stationarity_residual = std::max({linear_solve_last.stationarity_residual,
@@ -212,7 +205,8 @@ bool ns_sqp::compute_safe_direction(iteration_context &ctx, bool do_scaling,
             solve_direction(ctx, do_scaling, gauss_newton);
             correct_direction(ctx, do_refinement);
             if (cfg.validate_direction)
-                check_direction();
+                check_direction(do_refinement && settings.rf.enabled &&
+                                settings.rf.max_iters > 0);
         } catch (const solver::ns_riccati::factorization_failure &error) {
             linear_solve_last.status = linear_solve_status::factorization_failed;
             if (settings.verbose) fmt::println("[linear solve] {}", error.what());

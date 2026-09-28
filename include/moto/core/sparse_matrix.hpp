@@ -57,6 +57,10 @@ struct sparse_matrix {
     return insert(r_st, c_st, dim, dim, Sp);
   }
   matrix dense() const;
+  /// Maximum absolute row sum, or maximum absolute column sum when
+  /// `transpose` is true.  Canonical panel layouts are evaluated without
+  /// materializing the full matrix.
+  scalar_t induced_inf_norm(bool transpose = false) const;
 };
 
 } // namespace moto

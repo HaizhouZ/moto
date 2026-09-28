@@ -165,6 +165,7 @@ struct ns_sqp {
 
     struct equality_multiplier_init_settings {
         bool enabled = true;
+        bool recover_on_warm_start = true;
         bool rebuild_after_restoration_exit = true;
         scalar_t rho_eq = 1.0;
         iterative_refinement_setting rf = [] {
@@ -502,7 +503,11 @@ struct ns_sqp {
     bool initialize_equality_multipliers(storage_type &outer_graph, bool refresh_outer_derivatives = true);
     result_type restoration_update(const kkt_info &kkt_before, const iter_info &iter_before,
                                    filter_linesearch_data &ls, size_t update_iter_limit);
-    /// perform iterative refinement to improve the solution accuracy, will modify the current solution in place
+    /// Evaluate stage-local recovered stationarity rows.
+    void evaluate_recovered_stationarity_rows();
+    /// Evaluate and condense recovered stationarity into solver state ownership.
+    void evaluate_recovered_stationarity();
+    /// Perform iterative refinement to improve the solution accuracy.
     void iterative_refinement();
     /// update the line search bounds with the (probably updated) max value
     void finalize_ls_bound_and_set_to_max();
@@ -659,7 +664,7 @@ struct ns_sqp {
     }
     scalar_t last_primal_regularization_ = 0.;
     bool compute_safe_direction(iteration_context &ctx, bool do_scaling, bool do_refinement, bool gauss_newton);
-    void check_direction();
+    void check_direction(bool recovered_stationarity_current);
     void solve_direction(iteration_context &ctx, bool do_scaling, bool gauss_newton);
     void correct_direction(iteration_context &ctx, bool do_refinement);
     void prepare_globalization(filter_linesearch_data &ls, iteration_context &ctx);
