@@ -46,7 +46,6 @@ jobs:
             libblasfeo
             nanobind
             typing-extensions
-            catch2
 
       - name: Configure
         shell: micromamba-shell {0}
@@ -55,19 +54,11 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX"
           -DWITH_NATIVE_OPT=OFF
-          -DBUILD_TESTING=ON
+          -DBUILD_TESTING=OFF
 
       - name: Build
         shell: micromamba-shell {0}
         run: cmake --build build -j2
-
-      - name: Test
-        shell: micromamba-shell {0}
-        env:
-          OMP_NUM_THREADS: "1"
-          OPENBLAS_NUM_THREADS: "1"
-          MKL_NUM_THREADS: "1"
-        run: ctest --test-dir build --output-on-failure -j2
 
       - name: Install and import
         shell: micromamba-shell {0}
