@@ -389,28 +389,45 @@ class pmm_constr(constr):
     def rho(self, arg: float, /) -> None: ...
 
 class precompute(moto_pywrap.custom_func):
-    """Public API type ``moto.precompute``."""
+    """
+    Generated node-local symbolic precompute with automatic dependency placement
+    """
 
     @staticmethod
-    def create(name: str, outputs: Sequence[casadi.SX]) -> precompute: ...
+    def create(name: str, outputs: Sequence[casadi.SX]) -> precompute:
+        """Create one precompute from SX outputs and allocate public value caches"""
 
     @property
-    def outputs(self) -> list[var]: ...
+    def outputs(self) -> list[var]:
+        """Public node-local value caches populated before dependent functions"""
 
     @overload
     def instantiate(self, inputs: Sequence[var]) -> precompute:
-        """Instantiate positionally on new inputs; Moto manages all caches"""
+        """
+        Instantiate positionally on new inputs; Moto allocates and reuses value and derivative caches
+        """
 
     @overload
     def instantiate(self, input_remap: Sequence[tuple[var, var]]) -> precompute:
-        """Instantiate on new inputs; Moto allocates and reuses output caches"""
+        """
+        Instantiate with an input-only remap; Moto allocates and reuses value and derivative caches
+        """
 
     def reuse_remap(self, remap: Sequence[tuple[var, var]]) -> precompute:
-        """Reuse this symbolic precompute after remapping symbols"""
+        """
+        Low-level complete-symbol remap that reuses this generated implementation
+        """
 
     @staticmethod
     def canonical(prefix: str, identity: object, inputs: Iterable[object], output_factory: Callable[[], Iterable[object]]) -> tuple[object, ...]:
-        """Return public cache outputs from one canonical lazy precompute."""
+        """
+        Create once per structural identity and return remapped value caches.
+
+                ``output_factory`` is evaluated only for the first call with a given
+                ``prefix`` and hashable ``identity``. Later calls instantiate the
+                canonical generated precompute on ``inputs`` while Moto allocates and
+                reuses its value and derivative caches.
+        """
 
 class semi_implicit_euler(lifted):
     """Public API type ``moto.semi_implicit_euler``."""
@@ -587,7 +604,10 @@ class sqp:
         """Public API type ``moto.sqp.regularization_settings``."""
 
         @property
-        def enabled(self) -> bool: ...
+        def enabled(self) -> bool:
+            """
+            Whether failed or inaccurate Newton directions are retried with primal regularization (default: true)
+            """
 
         @enabled.setter
         def enabled(self, arg: bool, /) -> None: ...
@@ -595,44 +615,60 @@ class sqp:
         @property
         def validate_direction(self) -> bool:
             """
-            Whether to form full recovered KKT residuals and reject inaccurate directions
+            Whether to form normalized full recovered KKT residuals and reject inaccurate directions (default: false)
             """
 
         @validate_direction.setter
         def validate_direction(self, arg: bool, /) -> None: ...
 
         @property
-        def initial(self) -> float: ...
+        def initial(self) -> float:
+            """
+            Initial positive primal regularization after an unregularized attempt fails (default: 1e-4)
+            """
 
         @initial.setter
         def initial(self, arg: float, /) -> None: ...
 
         @property
-        def increase_factor(self) -> float: ...
+        def increase_factor(self) -> float:
+            """
+            Multiplier applied to primal regularization between retry attempts (default: 10)
+            """
 
         @increase_factor.setter
         def increase_factor(self, arg: float, /) -> None: ...
 
         @property
-        def decrease_factor(self) -> float: ...
+        def decrease_factor(self) -> float:
+            """
+            Multiplier applied to the last successful regularization when seeding a later solve (default: 1/3)
+            """
 
         @decrease_factor.setter
         def decrease_factor(self, arg: float, /) -> None: ...
 
         @property
-        def maximum(self) -> float: ...
+        def maximum(self) -> float:
+            """Upper bound for an attempted primal regularization (default: 1e8)"""
 
         @maximum.setter
         def maximum(self, arg: float, /) -> None: ...
 
         @property
-        def max_attempts(self) -> int: ...
+        def max_attempts(self) -> int:
+            """
+            Maximum Newton solve attempts per direction, including the unregularized attempt (default: 14)
+            """
 
         @max_attempts.setter
         def max_attempts(self, arg: int, /) -> None: ...
 
         @property
-        def residual_tolerance(self) -> float: ...
+        def residual_tolerance(self) -> float:
+            """
+            Acceptance tolerance for normalized full direction residuals when validation is enabled (default: 1e-6)
+            """
 
         @residual_tolerance.setter
         def residual_tolerance(self, arg: float, /) -> None: ...
@@ -654,22 +690,34 @@ class sqp:
         """Public API type ``moto.sqp.linear_solve_info``."""
 
         @property
-        def status(self) -> sqp.linear_solve_status: ...
+        def status(self) -> sqp.linear_solve_status:
+            """Acceptance status of the most recent Newton direction"""
 
         @property
-        def attempts(self) -> int: ...
+        def attempts(self) -> int:
+            """Number of Newton solve attempts used by the most recent direction"""
 
         @property
-        def regularization(self) -> float: ...
+        def regularization(self) -> float:
+            """Primal regularization used by the most recent solve attempt"""
 
         @property
-        def stationarity_residual(self) -> float: ...
+        def stationarity_residual(self) -> float:
+            """
+            Maximum normalized recovered-stationarity residual from final direction validation
+            """
 
         @property
-        def equality_residual(self) -> float: ...
+        def equality_residual(self) -> float:
+            """
+            Maximum normalized hard-equality residual from final direction validation
+            """
 
         @property
-        def inequality_residual(self) -> float: ...
+        def inequality_residual(self) -> float:
+            """
+            Maximum normalized inequality, soft-equality, or restoration residual from final direction validation
+            """
 
     class iterative_refinement_setting:
         """Public API type ``moto.sqp.iterative_refinement_setting``."""
@@ -783,7 +831,7 @@ class sqp:
         @property
         def enabled(self) -> bool:
             """
-            Whether equality-type multipliers are recovered during solver initialization
+            Master switch for equality and soft-equality multiplier recovery (default: true)
             """
 
         @enabled.setter
@@ -792,7 +840,7 @@ class sqp:
         @property
         def recover_on_warm_start(self) -> bool:
             """
-            Whether to recover equality-type multipliers when IPM warm start is enabled
+            Whether warm SQP initialization recovers equality multipliers instead of preserving them (default: true)
             """
 
         @recover_on_warm_start.setter
@@ -801,7 +849,7 @@ class sqp:
         @property
         def rebuild_after_restoration_exit(self) -> bool:
             """
-            Whether to rebuild equality-type multipliers after restoration exits successfully
+            Whether to recover equality multipliers after restoration exits successfully (default: true)
             """
 
         @rebuild_after_restoration_exit.setter
@@ -810,7 +858,7 @@ class sqp:
         @property
         def rho_eq(self) -> float:
             """
-            PMM penalty used for equality-type constraints in the equality-init overlay
+            PMM penalty used for equality-type constraints in the equality-init overlay (default: 1)
             """
 
         @rho_eq.setter
@@ -819,7 +867,7 @@ class sqp:
         @property
         def rf(self) -> sqp.iterative_refinement_setting:
             """
-            Dedicated iterative-refinement settings used only during equality-multiplier initialization
+            Dedicated iterative-refinement settings used only during equality-multiplier recovery (disabled by default)
             """
 
         @rf.setter

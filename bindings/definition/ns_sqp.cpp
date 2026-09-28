@@ -42,15 +42,22 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("globalization", &ns_sqp::ipm_config::globalization, "Whether to use globalization in the IPM solver");
 
     nb::class_<ns_sqp::regularization_settings>(sqp, "regularization_settings")
-        .def_rw("enabled", &ns_sqp::regularization_settings::enabled)
+        .def_rw("enabled", &ns_sqp::regularization_settings::enabled,
+                "Whether failed or inaccurate Newton directions are retried with primal regularization (default: true)")
         .def_rw("validate_direction", &ns_sqp::regularization_settings::validate_direction,
-                "Whether to form full recovered KKT residuals and reject inaccurate directions")
-        .def_rw("initial", &ns_sqp::regularization_settings::initial)
-        .def_rw("increase_factor", &ns_sqp::regularization_settings::increase_factor)
-        .def_rw("decrease_factor", &ns_sqp::regularization_settings::decrease_factor)
-        .def_rw("maximum", &ns_sqp::regularization_settings::maximum)
-        .def_rw("max_attempts", &ns_sqp::regularization_settings::max_attempts)
-        .def_rw("residual_tolerance", &ns_sqp::regularization_settings::residual_tolerance);
+                "Whether to form normalized full recovered KKT residuals and reject inaccurate directions (default: false)")
+        .def_rw("initial", &ns_sqp::regularization_settings::initial,
+                "Initial positive primal regularization after an unregularized attempt fails (default: 1e-4)")
+        .def_rw("increase_factor", &ns_sqp::regularization_settings::increase_factor,
+                "Multiplier applied to primal regularization between retry attempts (default: 10)")
+        .def_rw("decrease_factor", &ns_sqp::regularization_settings::decrease_factor,
+                "Multiplier applied to the last successful regularization when seeding a later solve (default: 1/3)")
+        .def_rw("maximum", &ns_sqp::regularization_settings::maximum,
+                "Upper bound for an attempted primal regularization (default: 1e8)")
+        .def_rw("max_attempts", &ns_sqp::regularization_settings::max_attempts,
+                "Maximum Newton solve attempts per direction, including the unregularized attempt (default: 14)")
+        .def_rw("residual_tolerance", &ns_sqp::regularization_settings::residual_tolerance,
+                "Acceptance tolerance for normalized full direction residuals when validation is enabled (default: 1e-6)");
     nb::enum_<ns_sqp::linear_solve_status>(sqp, "linear_solve_status")
         .value("success", ns_sqp::linear_solve_status::success)
         .value("factorization_failed", ns_sqp::linear_solve_status::factorization_failed)
@@ -58,12 +65,18 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .value("inconsistent_equalities", ns_sqp::linear_solve_status::inconsistent_equalities)
         .value("nonfinite_direction", ns_sqp::linear_solve_status::nonfinite_direction);
     nb::class_<ns_sqp::linear_solve_info>(sqp, "linear_solve_info")
-        .def_ro("status", &ns_sqp::linear_solve_info::status)
-        .def_ro("attempts", &ns_sqp::linear_solve_info::attempts)
-        .def_ro("regularization", &ns_sqp::linear_solve_info::regularization)
-        .def_ro("stationarity_residual", &ns_sqp::linear_solve_info::stationarity_residual)
-        .def_ro("equality_residual", &ns_sqp::linear_solve_info::equality_residual)
-        .def_ro("inequality_residual", &ns_sqp::linear_solve_info::inequality_residual);
+        .def_ro("status", &ns_sqp::linear_solve_info::status,
+                "Acceptance status of the most recent Newton direction")
+        .def_ro("attempts", &ns_sqp::linear_solve_info::attempts,
+                "Number of Newton solve attempts used by the most recent direction")
+        .def_ro("regularization", &ns_sqp::linear_solve_info::regularization,
+                "Primal regularization used by the most recent solve attempt")
+        .def_ro("stationarity_residual", &ns_sqp::linear_solve_info::stationarity_residual,
+                "Maximum normalized recovered-stationarity residual from final direction validation")
+        .def_ro("equality_residual", &ns_sqp::linear_solve_info::equality_residual,
+                "Maximum normalized hard-equality residual from final direction validation")
+        .def_ro("inequality_residual", &ns_sqp::linear_solve_info::inequality_residual,
+                "Maximum normalized inequality, soft-equality, or restoration residual from final direction validation");
 
     nb::class_<ns_sqp::iterative_refinement_setting> rf_setting(sqp, "iterative_refinement_setting");
     rf_setting.def_rw("enabled", &ns_sqp::iterative_refinement_setting::enabled, "Whether to use iterative refinement")
@@ -87,15 +100,15 @@ void register_submodule_ns_sqp(nb::module_ &m) {
     nb::class_<ns_sqp::equality_multiplier_init_settings> eq_init_setting(sqp, "equality_multiplier_init_settings");
     eq_init_setting
         .def_rw("enabled", &ns_sqp::equality_multiplier_init_settings::enabled,
-                "Whether equality-type multipliers are recovered during solver initialization")
+                "Master switch for equality and soft-equality multiplier recovery (default: true)")
         .def_rw("recover_on_warm_start", &ns_sqp::equality_multiplier_init_settings::recover_on_warm_start,
-                "Whether to recover equality-type multipliers when IPM warm start is enabled")
+                "Whether warm SQP initialization recovers equality multipliers instead of preserving them (default: true)")
         .def_rw("rebuild_after_restoration_exit", &ns_sqp::equality_multiplier_init_settings::rebuild_after_restoration_exit,
-                "Whether to rebuild equality-type multipliers after restoration exits successfully")
+                "Whether to recover equality multipliers after restoration exits successfully (default: true)")
         .def_rw("rho_eq", &ns_sqp::equality_multiplier_init_settings::rho_eq,
-                "PMM penalty used for equality-type constraints in the equality-init overlay")
+                "PMM penalty used for equality-type constraints in the equality-init overlay (default: 1)")
         .def_rw("rf", &ns_sqp::equality_multiplier_init_settings::rf,
-                "Dedicated iterative-refinement settings used only during equality-multiplier initialization");
+                "Dedicated iterative-refinement settings used only during equality-multiplier recovery (disabled by default)");
 
     auto ls_config_base = nb::class_<solver::linesearch_config>(m, "linesearch_config");
     ls_config_base.def_rw("update_alpha_dual", &solver::linesearch_config::update_alpha_dual, "Whether to update the dual step size during line search")

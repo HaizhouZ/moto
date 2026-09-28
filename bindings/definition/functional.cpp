@@ -211,39 +211,44 @@ void register_submodule_functional(nb::module_ &m) {
 
     nb::class_<generic_custom_func, generic_func>(m, "custom_func");
 
-    nb::class_<generic_pre_compute, generic_custom_func>(m, "precompute")
+    nb::class_<generic_pre_compute, generic_custom_func>(
+        m, "precompute",
+        "Generated node-local symbolic precompute with automatic dependency placement")
         .def_static(
             "create",
             [](const std::string &name, const std::vector<cs::SX> &outputs) {
                 return generic_pre_compute::create(name, outputs);
             },
-            nb::arg("name"), nb::arg("outputs"))
+            nb::arg("name"), nb::arg("outputs"),
+            "Create one precompute from SX outputs and allocate public value caches")
         .def_prop_ro(
             "outputs",
             [](generic_pre_compute &self) -> const std::vector<var> & {
                 return static_cast<const std::vector<var> &>(self.outputs());
             },
-            nb::rv_policy::reference_internal)
+            nb::rv_policy::reference_internal,
+            "Public node-local value caches populated before dependent functions")
         .def(
             "instantiate",
             [](generic_pre_compute &self, const var_inarg_list &inputs) {
                 return ready_precompute(self.instantiate(inputs));
             },
             nb::arg("inputs"),
-            "Instantiate positionally on new inputs; Moto manages all caches")
+            "Instantiate positionally on new inputs; Moto allocates and reuses value and derivative caches")
         .def(
             "instantiate",
             [](generic_pre_compute &self, const py_remap &input_remap) {
                 return ready_precompute(self.instantiate(cast_remap(input_remap)));
             },
             nb::arg("input_remap"),
-            "Instantiate on new inputs; Moto allocates and reuses output caches")
+            "Instantiate with an input-only remap; Moto allocates and reuses value and derivative caches")
         .def(
             "reuse_remap",
             [](generic_pre_compute &self, const py_remap &remap) {
                 return ready_precompute(self.reuse_remap(cast_remap(remap)));
             },
-            nb::arg("remap"), "Reuse this symbolic precompute after remapping symbols");
+            nb::arg("remap"),
+            "Low-level complete-symbol remap that reuses this generated implementation");
 
     nb::class_<generic_constr, generic_func>(m, "constr")
         .def_static(

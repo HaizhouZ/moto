@@ -47,7 +47,13 @@ def install_canonical_reuse(precompute_type, function_type):
         inputs: Iterable[object],
         output_factory: Callable[[], Iterable[object]],
     ) -> tuple[object, ...]:
-        """Return public cache outputs from one canonical lazy precompute."""
+        """Create once per structural identity and return remapped value caches.
+
+        ``output_factory`` is evaluated only for the first call with a given
+        ``prefix`` and hashable ``identity``. Later calls instantiate the
+        canonical generated precompute on ``inputs`` while Moto allocates and
+        reuses its value and derivative caches.
+        """
         key, name = _key_and_name(prefix, identity)
         current_inputs = tuple(inputs)
         with _reuse_lock:
