@@ -781,17 +781,19 @@ dual blocks are reset afterward according to the configured threshold rule.
 
 ### 6.5 Return Semantics
 
-If restoration exhausts its budget without satisfying the exit test, the solver
-returns
+Restoration shares the remaining budget of `update(n_iter)`;
+`settings.restoration.max_iter` is an additional cap, not extra iterations.
+If the triggering normal iteration consumed the update budget, the solver
+skips overlay initialization and returns `restoration_reached_max_iter` with
+the unchanged outer residuals. In particular, `update(1)` cannot perform a
+normal attempt followed by restoration.
 
-$$
-\texttt{restoration\_reached\_max\_iter}.
-$$
-
-If restoration succeeds, it does **not** mark the whole SQP solve as
-converged. Instead it returns control to the normal phase with the updated
-outer state, and the main SQP loop continues from the post-restoration
-iteration count.
+When restoration fails or exhausts its budget, its candidate is discarded,
+the outer IPM/barrier state is restored, and returned diagnostics describe
+the retained outer trajectory, not the elastic subproblem. Successful
+restoration means feasibility progress. The normal phase continues if budget
+remains; otherwise the solver returns `exceed_max_iter`, unless the original
+KKT convergence tests also pass.
 
 ## 7. Summary
 

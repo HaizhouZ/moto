@@ -712,9 +712,17 @@ ns_sqp::result_type ns_sqp::update(size_t n_iter, bool verbose, bool profile) {
                     iter_last.result == iter_result_t::infeasible_stationary) {
                     break;
                 }
+                // Restoration success means feasibility progress, not normal
+                // KKT convergence. This matters when recovery uses the last
+                // iteration and no normal step follows.
+                if (kkt_last.dual.inf_res < settings.dual_tol &&
+                    kkt_last.primal.inf_res < settings.prim_tol &&
+                    kkt_last.primal.inf_comp < settings.comp_tol) {
+                    iter_last.result = iter_result_t::success;
+                    break;
+                }
                 i_iter = iter_last.num_iter;
-                if (i_iter < n_iter)
-                    iter_last.result = iter_result_t::unknown;
+                iter_last.result = iter_result_t::unknown;
                 continue;
             }
 

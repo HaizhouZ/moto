@@ -120,7 +120,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("flat_obj_prim_tol", &ns_sqp::linesearch_setting::flat_obj_prim_tol, "Primal residual must be below this for flat-objective accept")
         .def_rw("flat_obj_step_tol", &ns_sqp::linesearch_setting::flat_obj_step_tol, "Step norm must exceed this for flat-objective accept (ensures non-trivial step)");
 
-    ls_setting.def_rw("backtrack_scheme", &ns_sqp::linesearch_setting::backtrack_scheme, "Backtracking scheme: linspace (default) or geometric")
+    ls_setting.def_rw("backtrack_scheme", &ns_sqp::linesearch_setting::backtrack_scheme, "Backtracking scheme: geometric (default) or linspace")
         .def_rw("backtrack_factor", &ns_sqp::linesearch_setting::backtrack_factor, "Geometric reduction factor applied to alpha at each backtracking step");
 
     moto::export_enum<ns_sqp::linesearch_setting::failure_backup_strategy>(ls_setting);
