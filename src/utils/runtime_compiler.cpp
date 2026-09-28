@@ -1,8 +1,13 @@
 #include "runtime_compiler.hpp"
 
+#include <cerrno>
 #include <cstdlib>
+#include <cstring>
+#include <fcntl.h>
 #include <optional>
 #include <stdexcept>
+#include <sys/file.h>
+#include <unistd.h>
 #include <vector>
 
 #ifndef _WIN32
@@ -42,6 +47,30 @@ std::optional<std::filesystem::path> installed_prefix() {
 #endif
 
 } // namespace
+
+process_file_lock::process_file_lock(const std::filesystem::path &lock_path) {
+    fd_ = ::open(lock_path.c_str(), O_CREAT | O_RDWR, 0666);
+    if (fd_ == -1)
+        throw std::runtime_error("failed to open runtime compilation lock " +
+                                 lock_path.string() + ": " +
+                                 std::strerror(errno));
+    while (::flock(fd_, LOCK_EX) == -1) {
+        if (errno == EINTR)
+            continue;
+        const std::string message = std::strerror(errno);
+        ::close(fd_);
+        fd_ = -1;
+        throw std::runtime_error("failed to lock runtime compilation file " +
+                                 lock_path.string() + ": " + message);
+    }
+}
+
+process_file_lock::~process_file_lock() {
+    if (fd_ != -1) {
+        ::flock(fd_, LOCK_UN);
+        ::close(fd_);
+    }
+}
 
 std::string runtime_compile_toolchain::fingerprint() const {
     return cxx + "\n" + eigen_include.string();

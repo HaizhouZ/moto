@@ -1,6 +1,8 @@
 #include <moto/ocp/impl/sym_data.hpp>
 #include <moto/solver/data_base.hpp>
 
+#include <cassert>
+
 // #define ENABLE_TIMED_BLOCK
 #include <moto/utils/timed_block.hpp>
 

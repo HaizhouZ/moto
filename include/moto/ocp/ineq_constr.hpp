@@ -137,8 +137,10 @@ class ineq_constr : public soft_constr {
             spec->present_mask[side] = Eigen::Array<bool, Eigen::Dynamic, 1>::Constant(dim, side == box_side::ub);
             spec->has_side[side] = side == box_side::ub;
             spec->bound_source[side] = box_bound_source::constant;
-            spec->bound_constant_value[side] =
-                side == box_side::ub ? vector::Zero(dim) : vector::Constant(dim, -std::numeric_limits<scalar_t>::infinity());
+            spec->bound_constant_value[side] = vector::Constant(
+                dim, -std::numeric_limits<scalar_t>::infinity());
+            if (side == box_side::ub)
+                spec->bound_constant_value[side].setZero();
         }
         box_spec_ = std::move(spec);
     }

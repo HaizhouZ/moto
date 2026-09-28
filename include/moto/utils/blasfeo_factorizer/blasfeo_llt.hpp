@@ -4,6 +4,8 @@
 #include <blasfeo.h>
 #include <moto/utils/blasfeo_factorizer/blasfeo_buffer.hpp>
 
+#include <cassert>
+
 namespace moto {
 namespace utils {
 struct blasfeo_llt {

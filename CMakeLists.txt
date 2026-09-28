@@ -12,6 +12,11 @@ if(POLICY CMP0148)
   cmake_policy(SET CMP0148 OLD)
 endif()
 
+if(NOT Python_EXECUTABLE AND DEFINED ENV{CONDA_PREFIX})
+  set(Python_ROOT_DIR "$ENV{CONDA_PREFIX}")
+  set(Python_FIND_STRATEGY LOCATION)
+endif()
+
 include(cmake/depHelpers.cmake)
 include(cmake/Findccache.cmake)
 

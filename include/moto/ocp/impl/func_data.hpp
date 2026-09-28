@@ -4,6 +4,8 @@
 #include <moto/ocp/impl/lag_data.hpp>
 #include <moto/ocp/impl/sym_data.hpp>
 
+#include <cassert>
+
 namespace moto {
 struct func_arg_map;
 def_unique_ptr(func_arg_map);

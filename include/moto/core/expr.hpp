@@ -7,6 +7,8 @@
 #include <moto/utils/shared.hpp>
 #include <moto/utils/unique_id.hpp>
 
+#include <cassert>
+
 namespace moto {
 class expr;                              // forward declaration of expr
 using expr_handle = utils::shared<expr>; ///< owning identity handle; copying never clones

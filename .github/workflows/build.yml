@@ -45,6 +45,7 @@ jobs:
             openssl
             libblasfeo
             nanobind
+            typing-extensions
             catch2
 
       - name: Configure

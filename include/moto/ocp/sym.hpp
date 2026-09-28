@@ -5,6 +5,8 @@
 #include <moto/core/expr.hpp>
 #include <moto/utils/func_traits.hpp>
 
+#include <cassert>
+
 namespace moto {
 class sym;
 namespace cs = casadi;

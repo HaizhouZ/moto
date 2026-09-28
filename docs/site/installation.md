@@ -16,6 +16,7 @@ Create a conda environment containing the C++ and Python dependencies:
 
 ```bash
 conda create -n moto python=3.11 cxx-compiler casadi eigen magic_enum fmt re2 nanobind \
+  typing-extensions \
   nlohmann_json pinocchio example-robot-data \
   example-robot-data-loaders mujoco libblasfeo -c conda-forge
 conda activate moto

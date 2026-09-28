@@ -459,6 +459,7 @@ void *compile_source(const std::string &source,
   }
   {
     std::filesystem::create_directories(cache_dir);
+    utils::process_file_lock process_lock(cache_dir / (key + ".lock"));
     if (!std::filesystem::exists(lib)) {
       std::ofstream out(cpp);
       if (!out)

@@ -2,6 +2,8 @@
 #include <moto/ocp/cost.hpp>
 #include <moto/utils/codegen.hpp>
 
+#include <cassert>
+
 namespace moto {
 cost generic_cost::make_tracking(const std::string &name,
                                  const var_inarg_list &args,

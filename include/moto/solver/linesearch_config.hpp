@@ -3,6 +3,8 @@
 
 #include <moto/core/fwd.hpp>
 
+#include <cassert>
+
 namespace moto {
 namespace solver {
 

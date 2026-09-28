@@ -6,6 +6,17 @@
 
 namespace moto::utils {
 
+class process_file_lock {
+  public:
+    explicit process_file_lock(const std::filesystem::path &lock_path);
+    process_file_lock(const process_file_lock &) = delete;
+    process_file_lock &operator=(const process_file_lock &) = delete;
+    ~process_file_lock();
+
+  private:
+    int fd_ = -1;
+};
+
 struct runtime_compile_toolchain {
     std::string cxx;
     std::filesystem::path eigen_include;
