@@ -3,7 +3,7 @@
 
 #include <moto/solver/data_base.hpp>
 #include <Eigen/Cholesky>
-#include <moto/utils/blasfeo_factorizer/blasfeo_lq.hpp>
+#include <Eigen/LU>
 #include <moto/utils/blasfeo_factorizer/blasfeo_llt.hpp>
 #include <memory>
 #include <unordered_map>
@@ -65,7 +65,7 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
         matrix y_y_K;                    ///< same as @ref y_y_k
         vector l_y_k;                    ///< lifted-primal particular solution
         matrix l_y_K;                    ///< lifted-primal state sensitivity
-        utils::blasfeo_lq lq_eq_; ///< LQ factorizer of the eq constraints
+        Eigen::FullPivLU<matrix> lu_eq_; ///< LU factorizer of the eq constraints
         // Eigen::LLT<matrix> llt_ns_;      ///< LLT solver of the projected hessian
         utils::blasfeo_llt llt_ns_; ///< LLT solver of the projected hessian
         size_t rank{0};             ///< rank of the equality constraints, 0 if unconstrained, ncstr if fully constrained
