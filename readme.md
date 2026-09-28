@@ -1,5 +1,9 @@
 # Moto
 
+<p align="center">
+  <img src="docs/figures/moto-readme.png" alt="Moto mascot and robot" width="520">
+</p>
+
 Moto is a C++20/Python trajectory optimizer with graph-first symbolic OCP
 modeling, sparse generated derivatives, a nonsmooth SQP method, and a
 stagewise nullspace/Riccati QP solver.

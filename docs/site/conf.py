@@ -19,6 +19,7 @@ html_theme = "furo"
 html_title = "Moto Documentation"
 html_baseurl = "https://haizhouz.github.io/moto/"
 html_logo = "_static/moto-logo.png"
+html_favicon = "_static/moto-favicon.png"
 html_theme_options = {
     "sidebar_hide_name": True,
     "source_repository": "https://github.com/HaizhouZ/moto/",
