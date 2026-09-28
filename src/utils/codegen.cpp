@@ -1,5 +1,7 @@
 #include <moto/utils/codegen.hpp>
 
+#include "runtime_compiler.hpp"
+
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
@@ -550,11 +552,15 @@ void run(std::string func_name,
     fs::path json_tmp_path = json_path;
     json_tmp_path += ".tmp";
     const std::string cache_key = (fs::path(output_dir) / func_name).string();
+    const auto toolchain = runtime_compile_toolchain_config();
+    const std::string compile_identity =
+        compile_flag + "\n" + toolchain.fingerprint();
 
     if (!force_recompile) {
         std::lock_guard<std::mutex> lock(func_mutex_map_mutex_);
         auto it = completed_compile_flags_.find(cache_key);
-        if (it != completed_compile_flags_.end() && it->second == compile_flag) {
+        if (it != completed_compile_flags_.end() &&
+            it->second == compile_identity) {
             if (std::getenv("MOTO_DEBUG_CODEGEN") != nullptr) {
                 fmt::print("[codegen] reuse {}\n", func_name);
             }
@@ -625,7 +631,10 @@ void run(std::string func_name,
                 std::ifstream jf(json_path);
                 data = json::parse(jf);
             }
-            if (data["md5"] == md5_hash && data["compile_flag"] == compile_flag) {
+            if (data["md5"] == md5_hash &&
+                data["compile_flag"] == compile_flag &&
+                data.value("toolchain", std::string{}) ==
+                    toolchain.fingerprint()) {
                 if (verbose)
                     std::cout << "Skipping " << func_name << " as it is already up-to-date." << std::endl;
                 needs_compile = false;
@@ -657,10 +666,11 @@ void run(std::string func_name,
     }
 
     if (needs_compile) {
-        std::string eigen_include_path = "/usr/include/eigen3"; // Adjust if necessary
-        std::string compile_command = "g++ -shared -fPIC -std=c++20 " + compile_flag +
-                                      " -o " + so_tmp_path.string() + " " + final_cpp_path +
-                                      " -I " + eigen_include_path;
+        const std::string compile_command =
+            shell_quote(toolchain.cxx) + " -shared -fPIC -std=c++20 " +
+            compile_flag + " -o " + shell_quote(so_tmp_path.string()) +
+            " " + shell_quote(final_cpp_path) + " -I " +
+            shell_quote(toolchain.eigen_include.string());
         int ret = std::system(compile_command.c_str());
         if (verbose) {
             if (ret == 0) {
@@ -689,6 +699,7 @@ void run(std::string func_name,
         }
         j["md5"] = md5_hash;
         j["compile_flag"] = compile_flag;
+        j["toolchain"] = toolchain.fingerprint();
 
         std::ofstream o(json_tmp_path);
         o << std::setw(4) << j << std::endl;
@@ -702,7 +713,7 @@ void run(std::string func_name,
 
     if (!force_recompile) {
         std::lock_guard<std::mutex> lock(func_mutex_map_mutex_);
-        completed_compile_flags_[cache_key] = compile_flag;
+        completed_compile_flags_[cache_key] = compile_identity;
     }
 }
 

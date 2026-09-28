@@ -1,0 +1,84 @@
+name: Build
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}-${{ matrix.python-version }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.14"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Create conda-forge build environment
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: moto-ci
+          cache-environment: true
+          create-args: >-
+            python=${{ matrix.python-version }}
+            cmake
+            ninja
+            cxx-compiler
+            eigen
+            magic_enum
+            fmt
+            libgomp
+            casadi
+            re2
+            nlohmann_json
+            openssl
+            libblasfeo
+            nanobind
+            catch2
+
+      - name: Configure
+        shell: micromamba-shell {0}
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX"
+          -DWITH_NATIVE_OPT=OFF
+          -DBUILD_TESTING=ON
+
+      - name: Build
+        shell: micromamba-shell {0}
+        run: cmake --build build -j6
+
+      - name: Test
+        shell: micromamba-shell {0}
+        env:
+          OMP_NUM_THREADS: "1"
+          OPENBLAS_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+        run: ctest --test-dir build --output-on-failure -j6
+
+      - name: Install and import
+        shell: micromamba-shell {0}
+        run: |
+          cmake --install build
+          expected_version="$(tr -d '[:space:]' < VERSION)"
+          python -c "import moto; assert moto.__version__ == '${expected_version}'"
+
+      - name: Test installed runtime compilation
+        shell: micromamba-shell {0}
+        run: |
+          runtime_test_dir="$(mktemp -d)"
+          cd "$runtime_test_dir"
+          MOTO_SYNC_CODEGEN=1 \
+            python "$GITHUB_WORKSPACE/unittests/canonical_reuse.py"

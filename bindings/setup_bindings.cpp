@@ -9,6 +9,7 @@ extern void register_submodule_multibody(nb::module_ &m);
 #endif
 NB_MODULE(moto_pywrap, m) {
     nb::set_leak_warnings(false);
+    m.attr("__version__") = MOTO_VERSION;
     register_submodule_fields(m);
     register_submodule_node_data(m);
     register_submodule_functional(m);

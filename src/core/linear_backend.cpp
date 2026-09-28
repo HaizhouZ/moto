@@ -5,6 +5,7 @@
 #include <moto/core/external_function.hpp>
 #include <moto/core/sparse_matrix.hpp>
 #include <moto/utils/codegen.hpp>
+#include <utils/runtime_compiler.hpp>
 
 #include <Eigen/Cholesky>
 #include <Eigen/LU>
@@ -394,13 +395,6 @@ std::vector<std::vector<casadi::MX>> batch_independent_mx_products(
   }
 }
 
-std::string shell_quote(const std::filesystem::path &path) {
-  std::string out = "'";
-  for (const char c : path.string())
-    out += c == '\'' ? "'\\''" : std::string(1, c);
-  return out + "'";
-}
-
 size_t pair_index(size_t n, size_t lhs, size_t rhs) {
   if (lhs > rhs)
     std::swap(lhs, rhs);
@@ -437,11 +431,13 @@ condensation_pairs(const condensation_spec &spec) {
 void *compile_source(const std::string &source,
                      const std::filesystem::path &cache_dir,
                      std::string_view optimization = "-O3") {
+  const auto toolchain = utils::runtime_compile_toolchain_config();
   const std::string key = utils::compute_md5_from_bytes(
       optimization == "-O3"
-          ? source
+          ? source + "\n:moto-jit-toolchain:" + toolchain.fingerprint()
           : source + "\n:moto-jit-optimization:" +
-                std::string(optimization));
+                std::string(optimization) + "\n:moto-jit-toolchain:" +
+                toolchain.fingerprint());
   const auto cpp = cache_dir / (key + ".cpp");
   const auto lib = cache_dir / ("lib" + key + ".so");
   const auto tmp = cache_dir / ("lib" + key + ".so.tmp");
@@ -470,14 +466,17 @@ void *compile_source(const std::string &source,
       out << source;
       out.close();
       const std::string command =
-          "g++ -shared -fPIC -std=c++20 " + std::string(optimization) +
+          utils::shell_quote(toolchain.cxx) +
+          " -shared -fPIC -std=c++20 " + std::string(optimization) +
           " -DNDEBUG -march=native "
-          "-fopenmp-simd -ffp-contract=fast -I/usr/include/eigen3 -o " +
-          shell_quote(tmp) + " " + shell_quote(cpp) + [&] {
+          "-fopenmp-simd -ffp-contract=fast -I " +
+          utils::shell_quote(toolchain.eigen_include.string()) + " -o " +
+          utils::shell_quote(tmp.string()) + " " +
+          utils::shell_quote(cpp.string()) + [&] {
             Dl_info info{};
             return dladdr(reinterpret_cast<void *>(&compile_source), &info) &&
                            info.dli_fname
-                       ? " " + shell_quote(info.dli_fname)
+                       ? " " + utils::shell_quote(info.dli_fname)
                        : std::string{};
           }();
       if (const int status = std::system(command.c_str()); status != 0) {

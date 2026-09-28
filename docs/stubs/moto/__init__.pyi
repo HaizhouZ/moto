@@ -1603,4 +1603,4 @@ class var(casadi.casadi.SX):
     def sx(self):
         """Underlying CasADi SX expression."""
 
-__all__: list = ['approx_order', 'casadi_manifold', 'constr', 'cost', 'dense_dynamics', 'endpoint', 'expr', 'field', 'func', 'ineq', 'lifted', 'pmm_constr', 'precompute', 'semi_implicit_euler', 'sqp', 'stage', 'stage_ocp', 'sym', 'var']
+__all__: list = ['__version__', 'approx_order', 'casadi_manifold', 'constr', 'cost', 'dense_dynamics', 'endpoint', 'expr', 'field', 'func', 'ineq', 'lifted', 'pmm_constr', 'precompute', 'semi_implicit_euler', 'sqp', 'stage', 'stage_ocp', 'sym', 'var']

@@ -57,6 +57,14 @@ set(PYTHON_BINDING_FILES
 nanobind_add_module(${PYTHON_MODULE_NAME} NB_STATIC ${BINDING_FILES} setup_bindings.cpp)
 target_link_libraries(${PYTHON_MODULE_NAME} PRIVATE ${PROJECT_NAME} ${PLUGIN_LIBS})
 target_include_directories(${PYTHON_MODULE_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(${PYTHON_MODULE_NAME} PRIVATE MOTO_VERSION="${PROJECT_VERSION}")
+if(APPLE)
+  set_target_properties(${PYTHON_MODULE_NAME} PROPERTIES
+    INSTALL_RPATH "@loader_path/../../..")
+elseif(UNIX)
+  set_target_properties(${PYTHON_MODULE_NAME} PROPERTIES
+    INSTALL_RPATH "$ORIGIN/../../..")
+endif()
 if(BUILD_MULTIBODY)
   target_compile_definitions(${PYTHON_MODULE_NAME} PRIVATE MOTO_BUILD_MULTIBODY)
 endif()
