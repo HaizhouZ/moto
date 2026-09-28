@@ -18,7 +18,9 @@ myst_enable_extensions = ["colon_fence", "deflist", "fieldlist"]
 html_theme = "furo"
 html_title = "Moto Documentation"
 html_baseurl = "https://haizhouz.github.io/moto/"
+html_logo = "_static/moto-logo.png"
 html_theme_options = {
+    "sidebar_hide_name": True,
     "source_repository": "https://github.com/HaizhouZ/moto/",
     "source_branch": "main",
     "source_directory": "docs/site/",
