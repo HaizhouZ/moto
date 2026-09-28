@@ -56,19 +56,17 @@ jobs:
           -DWITH_NATIVE_OPT=OFF
           -DBUILD_TESTING=OFF
 
-      - name: Build
+      - name: Build core library
         shell: micromamba-shell {0}
-        run: |
-          set -o pipefail
-          if ! cmake --build build -j2 2>&1 | tee build.log; then
-            grep -E 'FAILED:|error:|fatal error:|Killed|ninja:' build.log \
-              | tail -n 20 \
-              | sed 's/%/%25/g; s/\r/%0D/g' \
-              | while IFS= read -r line; do
-                  echo "::error title=Build failure::$line"
-                done
-            exit 1
-          fi
+        run: cmake --build build --target moto -j2
+
+      - name: Build multibody library
+        shell: micromamba-shell {0}
+        run: cmake --build build --target moto_multibody -j2
+
+      - name: Build Python bindings and stubs
+        shell: micromamba-shell {0}
+        run: cmake --build build --target moto_pywrap_stub -j2
 
       - name: Install and import
         shell: micromamba-shell {0}
