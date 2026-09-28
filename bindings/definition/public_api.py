@@ -19,24 +19,40 @@ PUBLIC_BINDINGS = {
 }
 
 
+def _set_metadata(obj, **metadata):
+    """Update display metadata when the binding object permits it."""
+    for attribute, value in metadata.items():
+        try:
+            setattr(obj, attribute, value)
+        except (AttributeError, TypeError):
+            # Recent nanobind releases expose some nb_func metadata as
+            # read-only.  Exporting the binding must not depend on cosmetic
+            # module/qualname rewriting being available.
+            pass
+
+
 def publish_type(cls, public_name):
     source_module = cls.__module__
     visited = set()
 
     def publish_function(function, qualname):
         if getattr(function, "__module__", None) == source_module:
-            function.__module__ = "moto"
-            function.__qualname__ = qualname
+            _set_metadata(function, __module__="moto", __qualname__=qualname)
 
     def publish(current, qualname):
         if id(current) in visited:
             return
         visited.add(id(current))
-        current.__module__ = "moto"
-        current.__name__ = qualname.rsplit(".", 1)[-1]
-        current.__qualname__ = qualname
+        _set_metadata(
+            current,
+            __module__="moto",
+            __name__=qualname.rsplit(".", 1)[-1],
+            __qualname__=qualname,
+        )
         if current.__doc__ is None:
-            current.__doc__ = f"Public API type ``moto.{qualname}``."
+            _set_metadata(
+                current, __doc__=f"Public API type ``moto.{qualname}``."
+            )
         for name, child in vars(current).items():
             if isinstance(child, type) and child.__module__ == source_module:
                 publish(child, f"{qualname}.{name}")
