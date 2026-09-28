@@ -76,7 +76,13 @@ jobs:
         shell: micromamba-shell {0}
         run: |
           expected_version="$(tr -d '[:space:]' < VERSION)"
-          python -c "import moto; assert moto.__version__ == '${expected_version}'"
+          if ! import_output="$(python -c "import moto; assert moto.__version__ == '${expected_version}'" 2>&1)"; then
+            import_output="${import_output//'%'/'%25'}"
+            import_output="${import_output//$'\r'/'%0D'}"
+            import_output="${import_output//$'\n'/'%0A'}"
+            echo "::error title=Installed import failed::$import_output"
+            exit 1
+          fi
 
       - name: Test installed runtime compilation
         shell: micromamba-shell {0}
