@@ -61,8 +61,12 @@ jobs:
         run: |
           set -o pipefail
           if ! cmake --build build -j2 2>&1 | tee build.log; then
-            build_log="$(tail -c 6000 build.log | base64 -w0)"
-            echo "::error title=Build log (base64)::$build_log"
+            grep -E 'FAILED:|error:|fatal error:|Killed|ninja:' build.log \
+              | tail -n 20 \
+              | sed 's/%/%25/g; s/\r/%0D/g' \
+              | while IFS= read -r line; do
+                  echo "::error title=Build failure::$line"
+                done
             exit 1
           fi
 
