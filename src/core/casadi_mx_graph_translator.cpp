@@ -131,6 +131,11 @@ struct value_layout {
       if (csc[i].panel != 0 || csc[i].offset != i) return false;
     return true;
   }
+
+  bool direct_dense_panel() const {
+    return direct_csc_panel() &&
+           matrix.panels[0].pattern == sparsity::dense;
+  }
 };
 
 void rebuild_csc_map(value_layout &layout);
@@ -1328,7 +1333,7 @@ void materialize_solve_inputs(casadi_mx_graph_plan_impl &plan) {
   for (const auto &operation : plan.operations) {
     const auto *solve = dynamic_cast<const solve_operation *>(operation.get());
     if (!solve) continue;
-    if (!plan.values[solve->matrix_value].direct_csc_panel())
+    if (!plan.values[solve->matrix_value].direct_dense_panel())
       entries[solve->matrix_value] |= solve->entries;
     const auto &rhs = plan.values[solve->rhs];
     const sparse_index rhs_index(rhs.sparsity);
@@ -1338,7 +1343,7 @@ void materialize_solve_inputs(casadi_mx_graph_plan_impl &plan) {
         all_columns_active = false;
         break;
       }
-    if (!rhs.direct_csc_panel() && all_columns_active)
+    if (!rhs.direct_dense_panel() && all_columns_active)
       rhs_entries[solve->rhs] |= solve->entries;
   }
   std::map<size_t, std::unique_ptr<operation>> materializations;
@@ -1827,7 +1832,7 @@ bool emit_generated_solve(generated_source &source,
                           const casadi_mx_graph_plan_impl &plan,
                           const solve_operation &operation) {
   const auto &factor_layout = plan.values[operation.matrix_value];
-  if (!factor_layout.direct_csc_panel()) return false;
+  if (!factor_layout.direct_dense_panel()) return false;
   const size_t n = factor_layout.matrix.rows;
   const size_t factor_pointer =
       plan.panel_pointer_offsets[operation.matrix_value];
@@ -1849,7 +1854,7 @@ bool emit_generated_solve(generated_source &source,
     zero_output();
     return true;
   }
-  if (operation.identity_rhs && output.direct_csc_panel()) {
+  if (operation.identity_rhs && output.direct_dense_panel()) {
     const size_t output_pointer = plan.panel_pointer_offsets[operation.output];
     if (n <= 3) {
       source.line("moto_graph_small_inverse(p[" +
@@ -1869,7 +1874,7 @@ bool emit_generated_solve(generated_source &source,
                 std::to_string(n) + ");");
     return true;
   }
-  if (rhs.direct_csc_panel() && output.direct_csc_panel() &&
+  if (rhs.direct_dense_panel() && output.direct_dense_panel() &&
       operation.active_columns.size() ==
           static_cast<size_t>(rhs_index.cols)) {
     const size_t rhs_pointer = plan.panel_pointer_offsets[operation.rhs];

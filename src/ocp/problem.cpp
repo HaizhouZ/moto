@@ -2,6 +2,7 @@
 #include <array>
 #include <map>
 #include <moto/ocp/dynamics.hpp>
+#include <moto/ocp/pre_comp.hpp>
 #include <moto/ocp/problem.hpp>
 #include <moto/utils/codegen.hpp>
 
@@ -20,9 +21,17 @@ bool has_active_primal_arg(const generic_func &func, const ocp_base *prob) {
     return false;
 }
 
+bool has_primal_arg(const generic_func &func) {
+    return std::ranges::any_of(func.in_args(), [](const sym &arg) {
+        return in_field(arg.field(), primal_fields);
+    });
+}
+
 bool can_be_active_by_status(const generic_func &func, ocp_base *prob,
                              bool predicate_resolved = false) {
-    return has_active_primal_arg(func, prob) &&
+    const bool parameter_only_custom =
+        in_field(func.field(), custom_func_fields) && !has_primal_arg(func);
+    return (parameter_only_custom || has_active_primal_arg(func, prob)) &&
            (predicate_resolved || func.check_enable(prob));
 }
 
@@ -248,12 +257,73 @@ size_t ocp_base::get_expr_start_tangent(const expr &ex) const {
     field_read_guard();
     return field_tangent_start(ex);
 }
+
+void ocp_base::maintain_precompute_order() {
+    auto &entries = field_entries(__pre_comp);
+    if (entries.size() < 2)
+        return;
+
+    std::unordered_map<size_t, size_t> producer_by_cache;
+    for (size_t i = 0; i < entries.size(); ++i) {
+        const auto *precompute =
+            dynamic_cast<const generic_pre_compute *>(entries[i].get());
+        if (!precompute)
+            continue;
+        for (const var &cache : precompute->runtime_outputs_)
+            producer_by_cache.emplace(cache->uid(), i);
+    }
+
+    std::vector<std::vector<size_t>> consumers(entries.size());
+    std::vector<size_t> indegree(entries.size(), 0);
+    for (size_t consumer = 0; consumer < entries.size(); ++consumer) {
+        const auto *function =
+            dynamic_cast<const generic_func *>(entries[consumer].get());
+        if (!function)
+            continue;
+        std::unordered_set<size_t> predecessors;
+        for (const var &input : function->in_args()) {
+            auto producer = producer_by_cache.find(input->uid());
+            if (producer == producer_by_cache.end() ||
+                producer->second == consumer ||
+                !predecessors.insert(producer->second).second)
+                continue;
+            consumers[producer->second].push_back(consumer);
+            ++indegree[consumer];
+        }
+    }
+
+    std::vector<size_t> order;
+    order.reserve(entries.size());
+    std::vector<bool> emitted(entries.size(), false);
+    for (size_t count = 0; count < entries.size(); ++count) {
+        size_t next = entries.size();
+        for (size_t i = 0; i < entries.size(); ++i)
+            if (!emitted[i] && indegree[i] == 0) {
+                next = i;
+                break;
+            }
+        if (next == entries.size())
+            throw std::runtime_error(
+                "symbolic precompute dependency graph contains a cycle");
+        emitted[next] = true;
+        order.push_back(next);
+        for (size_t consumer : consumers[next])
+            --indegree[consumer];
+    }
+    expr_list ordered;
+    ordered.reserve(entries.size());
+    for (size_t index : order)
+        ordered.push_back(std::move(entries[index]));
+    entries = std::move(ordered);
+}
+
 void ocp_base::finalize() {
     static std::mutex finalize_mutex_;
     std::lock_guard lock(finalize_mutex_);
     if (!finalized_) {
         if (!field_empty(__dyn) && automatic_reorder_primal_)
             maintain_order();
+        maintain_precompute_order();
         rebuild_layout();
         for (const expr_handle &entry : exprs(__dyn)) {
             const auto *dyn = dynamic_cast<const generic_dynamics *>(entry.get());
@@ -400,10 +470,9 @@ void ocp_base::build_linear_profile() {
                     entry.name(), owner->name()));
         }
         for (const constr &constraint : owner->subconstraints()) {
-            if (!contains(*constraint) || !is_active(*constraint) ||
-                constraint->field() != __lift)
+            if (!contains(*constraint) || constraint->field() != __lift)
                 throw std::runtime_error(fmt::format(
-                    "dynamics {} sub-constraint {} must be an active "
+                    "dynamics {} sub-constraint {} must be a registered "
                     "__lift constraint in the same stage",
                     owner->name(), constraint->name()));
         }
@@ -957,7 +1026,9 @@ bool stage_ocp::validate_endpoint_term(const expr_handle &ex, std::string *reaso
         }
         return false;
     }
-    if (!func->has_pure_x_primal_args()) {
+    const bool parameter_only_custom =
+        in_field(func->field(), custom_func_fields) && !has_primal_arg(*func);
+    if (!parameter_only_custom && !func->has_pure_x_primal_args()) {
         if (reason != nullptr) {
             *reason = "endpoint only accepts terms with x/prm-style dependencies and no u or y arguments";
         }
@@ -1033,7 +1104,11 @@ void ocp_base::resolve_composed_status(
     for (const expr &function : resolved_functions) {
         resolved_predicate_uids_.insert(function.uid());
     }
-    finalized_ = false;
+    // Adding a graph-owned expression also adds all of its dependencies.
+    // Some of those dependencies may be inactive in the source stage (for
+    // example a registered lifted subconstraint gated by a disabled contact
+    // variable), so re-run predicate pruning after mapped statuses settle.
+    update_active_status({});
 }
 void ocp_base::update_active_status(const active_status_config &config) {
     for (expr &ex : config.activate_list) {

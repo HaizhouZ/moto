@@ -44,6 +44,8 @@ class pmm_constr : public soft_constr {
   condensation_view condensation(data_map_t &data, bool hessian) const override;
   vector_ref jacobian_step(data_map_t &data) const override;
 
+    void apply_corrector_step(data_map_t &data) const override;
+
     /// @brief initialize: set lambda = 0 (cold start)
     void initialize(data_map_t &data) const override final;
     /// @brief compute d_multiplier = (J*du + h) / rho  from row 2 of KKT

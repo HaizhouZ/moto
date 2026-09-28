@@ -85,6 +85,7 @@ class expr : public std::enable_shared_from_this<expr>, public utils::clone_base
     bool default_active_status() const { return default_active_status_; }
 
     auto &dep() { return dep_; } ///< get the dependencies of this expression
+    const auto &dep() const { return dep_; }
 
     template <typename T>
     void add_dep(T &&e) {

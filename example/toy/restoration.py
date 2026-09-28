@@ -55,7 +55,8 @@ def main():
     sqp.settings.comp_tol = 1e-8
 
     recovery = sqp.update(2, verbose=True)
-    assert recovery.solved, f"restoration did not recover: {recovery.result}"
+    assert recovery.result == moto.sqp.iter_result_exceed_max_iter, recovery.result
+    assert not recovery.solved, "feasibility recovery is not full KKT convergence"
     assert recovery.inf_prim_res < 2.0
 
     # Continue from the recovered point with ordinary globalization settings.

@@ -4,12 +4,17 @@
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
 
 #include <span>
+#include <stdexcept>
 
 namespace moto {
 struct workspace_data;
 struct node_data;
 namespace solver {
 namespace ns_riccati {
+struct factorization_failure : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
 struct generic_solver {
 
     /// Build the NSP executable graph once from the complete OCP layout and

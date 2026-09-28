@@ -11,6 +11,7 @@ PUBLIC_BINDINGS = {
     "ineq": "ineq",
     "lifted": "lifted",
     "pmm_constr": "pmm_constr",
+    "precompute": "precompute",
     "semi_implicit_euler": "semi_implicit_euler",
     "sqp": "sqp",
     "stage_ocp": "stage_ocp",

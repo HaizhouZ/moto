@@ -59,6 +59,7 @@ constexpr auto ineq_soft_constr_fields = concat_fields(ineq_constr_fields, soft_
 constexpr auto constr_fields = concat_fields(hard_constr_fields, ineq_soft_constr_fields);
 constexpr auto func_fields = concat_fields(constr_fields, std::array{__cost});
 constexpr auto custom_func_fields = std::array{__pre_comp, __post_comp, __usr_func, __func_stack};
+constexpr auto runtime_func_fields = concat_fields(func_fields, custom_func_fields);
 
 namespace field {
 constexpr auto name(field_t f) { return magic_enum::enum_name<field_t>(f); }

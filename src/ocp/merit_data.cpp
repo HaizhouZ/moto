@@ -25,6 +25,9 @@ lag_data::lag_data(ocp *prob) : prob_(prob) {
         dual_[i].resize(prob_->dim(i));
         dual_[i].setZero();
     }
+    for (auto field : constr_fields)
+        for (const generic_func &f : prob_->exprs(field))
+            has_constraint_hessian_ |= f.order() >= approx_order::second;
     // dynamics data
     dynamics_data_.proj_f_res_.resize(prob_->dim(__dyn));
     dynamics_data_.proj_f_res_.setZero();

@@ -49,6 +49,7 @@ if(BUILD_MULTIBODY)
   list(APPEND BINDING_FILES definition/multibody.cpp)
 endif()
 set(PYTHON_BINDING_FILES
+  definition/canonical_reuse.py
   definition/public_api.py
   definition/var.py
 )
@@ -99,6 +100,7 @@ add_custom_target(update_python_doc_stub
           ${CMAKE_CURRENT_SOURCE_DIR}/package_init.py
           ${PYTHON_DOC_STAGE_DIR}/__init__.py
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          ${CMAKE_CURRENT_SOURCE_DIR}/definition/canonical_reuse.py
           ${CMAKE_CURRENT_SOURCE_DIR}/definition/public_api.py
           ${CMAKE_CURRENT_SOURCE_DIR}/definition/var.py
           ${PYTHON_DOC_STAGE_DEFINITION_DIR}

@@ -57,6 +57,8 @@ add_moto_test(ineq_jac_sparsity)
 add_moto_test(equality_multiplier_init)
 add_moto_test(restoration)
 add_moto_test(linear_backend)
+add_moto_test(blasfeo_factorization)
+add_moto_test(direction_regularization)
 add_moto_test(semi_implicit_euler)
 target_link_libraries(semi_implicit_euler_test PRIVATE moto_multibody)
 add_moto_python_test(restoration_demo example/toy/restoration.py)
@@ -66,6 +68,7 @@ add_moto_python_test(stage_graph_editing_demo example/toy/stage_graph_editing.py
 add_moto_python_test(lifted_input_demo example/toy/lifted_input.py)
 add_moto_python_test(lifted_sparse_elimination_graph
                      example/toy/lifted_sparse_elimination.py)
+add_moto_python_test(canonical_reuse unittests/canonical_reuse.py)
 
 add_executable(graph_model_compose_test graph_model_compose.cpp)
 target_include_directories(graph_model_compose_test PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -86,3 +89,8 @@ foreach(graph_shard IN ITEMS mapping remap path mutation validation concurrency 
         ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}:$ENV{LD_LIBRARY_PATH}"
     )
 endforeach()
+
+if(TARGET moto_multibody)
+  target_link_libraries(direction_regularization_test PRIVATE moto_multibody)
+  target_compile_definitions(direction_regularization_test PRIVATE MOTO_TEST_MULTIBODY)
+endif()

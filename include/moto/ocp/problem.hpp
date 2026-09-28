@@ -112,6 +112,7 @@ class ocp_base : protected field_layout_store<expr_list> {
     ~ocp_base();
     bool add_impl(expr_handle);
     void maintain_order();
+    void maintain_precompute_order();
     virtual void on_modified();
     bool finalized_ = false;
     utils::unique_id<ocp_base> uid_;

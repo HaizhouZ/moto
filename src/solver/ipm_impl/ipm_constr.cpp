@@ -88,13 +88,14 @@ void compute_side_newton_step(
                               ipm_constr::approx_data::side_data &side,
                               const Eigen::Array<bool, Eigen::Dynamic, 1> &present,
                               scalar_t mu,
-                              bool affine_step) {
+                              bool affine_step, bool use_corrector) {
     const auto denom = present.select(side.reg_T_inv.array(), scalar_t(1));
     if (affine_step) {
         pair.d_multiplier.array() = present.select(
         -(side.r_s.array() + pair.multiplier.array() * pair.d_slack.array()) / denom, scalar_t(0));
     } else {
-        pair.d_multiplier.array() = present.select(-(side.r_s.array() - mu + pair.multiplier.array() * pair.d_slack.array()) / denom, scalar_t(0));
+        const auto correction = use_corrector ? side.corrector : vector::Zero(side.corrector.size()).eval();
+        pair.d_multiplier.array() = present.select(-(side.r_s.array() - mu + correction.array() + pair.multiplier.array() * pair.d_slack.array()) / denom, scalar_t(0));
     }
     pair.d_slack.array() += side.reg.array() * pair.d_multiplier.array();
 }
@@ -154,7 +155,8 @@ void ipm_constr::finalize_newton_step(ipm::data_map_t &data) const {
                           pair, ipm_side,
                                  present,
                                  d.ipm_cfg->mu,
-                                 d.ipm_cfg->ipm_computing_affine_step());
+                                 d.ipm_cfg->ipm_computing_affine_step(),
+                                 d.ipm_cfg->ipm_accept_corrector());
     });
     refresh_box_state(d);
 }

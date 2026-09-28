@@ -61,6 +61,7 @@ class generic_func : public expr, protected field_layout_store<var_list> {
 
     sparsity default_hess_sp_ = sparsity::dense;
     bool detect_jacobian_sparsity_ = true;
+    bool uses_precompute_chain_rule_ = false;
 
     friend class func_arg_map;
     friend class func_approx_data;

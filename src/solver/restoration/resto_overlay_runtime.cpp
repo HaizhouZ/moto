@@ -78,7 +78,11 @@ void fill_sigma_tangent(const sym &arg,
     if (sigma_sq.size() == 0) {
         return;
     }
-    sigma_sq = weight * ref.array().abs().max(eps).inverse().square().min(1.);
+    if (arg.dim() != arg.tdim()) {
+        sigma_sq.setConstant(weight);
+    } else {
+        sigma_sq = weight * ref.array().abs().max(eps).inverse().square().min(1.);
+    }
 }
 
 vector compute_tangent_delta(const sym &arg, vector_ref x, vector_ref ref) {

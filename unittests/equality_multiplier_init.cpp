@@ -210,6 +210,37 @@ TEST_CASE("equality multiplier initialization reduces initial hard-equality dual
 
     REQUIRE(changed_hard_dual);
     REQUIRE(kkt_with.dual.inf_res < kkt_without.dual.inf_res);
+    REQUIRE(with_init.linear_solve_last.status == ns_sqp::linear_solve_status::success);
+    REQUIRE(with_init.linear_solve_last.regularization == 0.);
+    REQUIRE(with_init.linear_solve_last.stationarity_residual < 1e-12);
+}
+
+TEST_CASE("warm-start equality multiplier recovery is enabled by default and configurable") {
+    ns_sqp sqp;
+    configure_solver(sqp, true, 1);
+
+    REQUIRE(sqp.settings.eq_init.recover_on_warm_start);
+
+    REQUIRE_NOTHROW(sqp.update(0, false));
+    auto *node = sqp.solver_nodes().front();
+    REQUIRE(node->dense().dual_[__eq_x].size() > 0);
+    REQUIRE(node->dense().dual_[__eq_x_soft].size() > 0);
+    node->dense().dual_[__eq_x].setConstant(17.0);
+    node->dense().dual_[__eq_x_soft].setConstant(-23.0);
+
+    sqp.settings.ipm.warm_start = true;
+    SECTION("the default recovers warm-start equality multipliers") {
+        REQUIRE_NOTHROW(sqp.update(0, false));
+        const bool hard_preserved = node->dense().dual_[__eq_x].isConstant(17.0);
+        const bool soft_preserved = node->dense().dual_[__eq_x_soft].isConstant(-23.0);
+        REQUIRE_FALSE((hard_preserved && soft_preserved));
+    }
+    SECTION("the opt-out preserves accepted equality multipliers") {
+        sqp.settings.eq_init.recover_on_warm_start = false;
+        REQUIRE_NOTHROW(sqp.update(0, false));
+        REQUIRE(node->dense().dual_[__eq_x].isConstant(17.0));
+        REQUIRE(node->dense().dual_[__eq_x_soft].isConstant(-23.0));
+    }
 }
 
 TEST_CASE("equality multiplier initialization updates soft equalities and leaves inequality state unchanged") {

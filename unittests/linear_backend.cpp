@@ -15,6 +15,83 @@
 
 namespace moto::linear_backend {
 
+TEST_CASE("sparse induced norms match dense assembly") {
+  const auto check = [](const sparse_matrix &sparse) {
+    const matrix dense = sparse.dense();
+    const scalar_t row_norm = dense.cwiseAbs().rowwise().sum().maxCoeff();
+    const scalar_t col_norm = dense.cwiseAbs().colwise().sum().maxCoeff();
+    REQUIRE(std::abs(sparse.induced_inf_norm() - row_norm) < 1e-12);
+    REQUIRE(std::abs(sparse.induced_inf_norm(true) - col_norm) < 1e-12);
+  };
+
+  SECTION("disjoint dense, packed diagonal, and identity panels") {
+    sparse_matrix sparse;
+    sparse.resize(8, 7);
+    const std::array blocks{
+        sparse_block_spec{0, 0, 2, 3, sparsity::dense},
+        sparse_block_spec{3, 1, 3, 3, sparsity::diag},
+        sparse_block_spec{6, 5, 2, 2, sparsity::eye}};
+    auto layout = make_sparse_layout_plan(blocks);
+    layout.pack_diagonal_storage = true;
+    sparse.plan(layout);
+    sparse.bind(0, 0, 2, 3, sparsity::dense).setRandom();
+    sparse.bind(3, 1, 3, 3, sparsity::diag).setRandom();
+    sparse.bind(6, 5, 2, 2, sparsity::eye);
+    check(sparse);
+  }
+
+  SECTION("diagonal contribution cancels entries in a dense panel") {
+    sparse_matrix sparse;
+    sparse.resize(4, 4);
+    auto dense = sparse.insert(0, 0, 4, 4, sparsity::dense);
+    dense.setRandom();
+    auto diagonal = sparse.insert(0, 0, 4, 4, sparsity::diag);
+    diagonal = -dense.diagonal();
+    check(sparse);
+  }
+
+  SECTION("dynamic identity storage is treated as a diagonal") {
+    sparse_matrix sparse;
+    sparse.resize(4, 4);
+    sparse.set_dynamic_eye(true);
+    auto diagonal = sparse.insert(0, 0, 4, 4, sparsity::eye);
+    diagonal.setRandom();
+    check(sparse);
+  }
+
+  SECTION("overlapping dense panels use the exact fallback") {
+    sparse_matrix sparse;
+    sparse.resize(4, 4);
+    auto first = sparse.insert(0, 0, 3, 3, sparsity::dense);
+    auto second = sparse.insert(1, 1, 3, 3, sparsity::dense);
+    first.setRandom();
+    second.setRandom();
+    second.block(0, 0, 2, 2) = -first.block(1, 1, 2, 2);
+    check(sparse);
+  }
+
+  SECTION("overlapping diagonal panels use the exact fallback") {
+    sparse_matrix sparse;
+    sparse.resize(5, 5);
+    auto first = sparse.insert(0, 0, 4, 4, sparsity::diag);
+    auto second = sparse.insert(1, 1, 4, 4, sparsity::diag);
+    first.setRandom();
+    second.setRandom();
+    second.block(0, 0, 3, 1) = -first.block(1, 0, 3, 1);
+    check(sparse);
+  }
+
+  SECTION("nonfinite panel values remain visible to validation") {
+    sparse_matrix sparse;
+    sparse.resize(2, 2);
+    auto dense = sparse.insert(0, 0, 2, 2, sparsity::dense);
+    dense.setOnes();
+    dense(1, 1) = std::numeric_limits<scalar_t>::quiet_NaN();
+    REQUIRE(std::isnan(sparse.induced_inf_norm()));
+    REQUIRE(std::isnan(sparse.induced_inf_norm(true)));
+  }
+}
+
 TEST_CASE("JIT panel products match dense algebra") {
   matrix dense = matrix::Zero(8, 7);
   matrix panel = matrix::Random(3, 2);
@@ -752,6 +829,42 @@ TEST_CASE("MX graph lowers a multi-RHS solve as one scheduled operation") {
   std::vector<scalar_t *> pointers{av.data(), bv.data(), output.data()};
   kernel(pointers);
   REQUIRE(output.isApprox(av.partialPivLu().solve(bv), 1e-12));
+}
+
+TEST_CASE("MX graph packs a diagonal multi-RHS solve operand") {
+  constexpr casadi_int n = 6;
+  const casadi::MX a = casadi::MX::sym("sparse_rhs_a", n, n);
+  const casadi::MX b = casadi::MX::sym(
+      "sparse_rhs_b", casadi::Sparsity::diag(n));
+  const auto kernel = compile_graph({a, b}, {casadi::MX::solve(a, b)});
+
+  matrix av = matrix::Random(n, n);
+  av.diagonal().array() += 5.;
+  const vector bv = vector::LinSpaced(n, .5, 1.5);
+  matrix output(n, n);
+  std::vector<scalar_t *> pointers{
+      av.data(), const_cast<scalar_t *>(bv.data()), output.data()};
+  kernel(pointers);
+  REQUIRE(output.isApprox(
+      av.partialPivLu().solve(bv.asDiagonal().toDenseMatrix()), 1e-12));
+}
+
+TEST_CASE("MX graph packs a diagonal solve factor") {
+  constexpr casadi_int n = 6, columns = 3;
+  const casadi::MX a = casadi::MX::sym(
+      "sparse_factor_a", casadi::Sparsity::diag(n));
+  const casadi::MX b = casadi::MX::sym("sparse_factor_b", n, columns);
+  const auto kernel = compile_graph({a, b}, {casadi::MX::solve(a, b)});
+
+  const vector av = vector::LinSpaced(n, 1., 2.);
+  const matrix bv = matrix::Random(n, columns);
+  matrix output(n, columns);
+  std::vector<scalar_t *> pointers{
+      const_cast<scalar_t *>(av.data()),
+      const_cast<scalar_t *>(bv.data()), output.data()};
+  kernel(pointers);
+  REQUIRE(output.isApprox(
+      av.asDiagonal().toDenseMatrix().partialPivLu().solve(bv), 1e-12));
 }
 
 TEST_CASE("MX graph lazily applies one shared factor to products and actions") {

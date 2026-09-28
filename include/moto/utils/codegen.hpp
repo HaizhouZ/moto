@@ -77,6 +77,7 @@ struct task {
     using in_arg_list_t = var_list;
     in_arg_list_t sx_inputs;
     cs::SX sx_output;
+    std::vector<cs::SX> value_outputs; ///< optional independent value outputs
     bool gen_eval = true;
     bool gen_jacobian = false;
     bool gen_hessian = false;

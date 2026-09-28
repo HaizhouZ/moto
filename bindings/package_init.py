@@ -11,5 +11,8 @@ _export_public_bindings(_moto_pywrap, globals())
 
 from .definition.var import var  # noqa: E402,F401
 _publish_type(var, "var")
+from .definition.canonical_reuse import install_canonical_reuse as _install_canonical_reuse  # noqa: E402
+
+_install_canonical_reuse(precompute, func)
 
 __all__ = sorted((*_PUBLIC_BINDINGS, "stage", "var"))

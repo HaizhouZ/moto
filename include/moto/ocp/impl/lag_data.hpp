@@ -61,6 +61,10 @@ struct lag_data {
     /// cost hessian h[a][b] is h_ab. Note only the upper block-triangular part is stored
     array<array<sparse_matrix, field::num_prim>, field::num_prim> lag_hess_;
     array<array<sparse_matrix, field::num_prim>, field::num_prim> hessian_modification_;
+    // Uncondensed constraint curvature for full-space KKT residuals. Only
+    // allocated when second-order constraints are present; excludes J^T D J.
+    bool has_constraint_hessian_ = false;
+    array<array<sparse_matrix, field::num_prim>, field::num_prim> constraint_hess_;
 };
 def_unique_ptr(lag_data);
 } // namespace moto

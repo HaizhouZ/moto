@@ -42,6 +42,7 @@ struct MOTO_ALIGN_NO_SHARING data_base {
     array_type<row_vector, primal_fields> base_lag_grad_backup;
     array_type<row_vector, primal_fields> kkt_stat_err_;
     matrix V_xx, V_yy;
+    array_type<scalar_t, primal_fields> primal_regularization{};
     array_type<vector, primal_fields> trial_prim_step;      ///< primal (newton) trial step
     array_type<vector, primal_fields> prim_corr;            ///< correction for the primal step
     array_type<vector, primal_fields> trial_prim_state_bak; ///< backup of the original primal state for line search

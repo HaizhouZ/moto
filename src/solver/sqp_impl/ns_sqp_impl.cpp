@@ -203,7 +203,8 @@ ns_sqp::kkt_info ns_sqp::initialize(storage_type &graph) {
             cur->update_approximation(node_data::update_mode::eval_all);
         });
     }
-    initialize_equality_multipliers(graph);
+    if (!settings.ipm.warm_start || settings.eq_init.recover_on_warm_start)
+        initialize_equality_multipliers(graph);
     kkt_info kkt;
     {
         auto phase_profile = profile_scope(profile_phase::initialize_kkt);
@@ -508,9 +509,10 @@ ns_sqp::line_search_action ns_sqp::sqp_iter(filter_linesearch_data &ls, kkt_info
     iteration_context ctx{
         .current = kkt_current, // must do this because prepare_globalization will only update the step info
     };
-    reset_ls_workers();
-    solve_direction(ctx, do_scaling, gauss_newton);
-    correct_direction(ctx, do_refinement);
+    if (!compute_safe_direction(ctx, do_scaling, do_refinement, gauss_newton)) {
+        ls.reset_per_iter_data();
+        return line_search_action::failure;
+    }
     kkt_info current_backup;
     prepare_globalization(ls, ctx);
     current_backup = ctx.current;
@@ -710,10 +712,24 @@ ns_sqp::result_type ns_sqp::update(size_t n_iter, bool verbose, bool profile) {
                     iter_last.result == iter_result_t::infeasible_stationary) {
                     break;
                 }
+                // Restoration success means feasibility progress, not normal
+                // KKT convergence. This matters when recovery uses the last
+                // iteration and no normal step follows.
+                if (kkt_last.dual.inf_res < settings.dual_tol &&
+                    kkt_last.primal.inf_res < settings.prim_tol &&
+                    kkt_last.primal.inf_comp < settings.comp_tol) {
+                    iter_last.result = iter_result_t::success;
+                    break;
+                }
                 i_iter = iter_last.num_iter;
-                if (i_iter < n_iter)
-                    iter_last.result = iter_result_t::unknown;
+                iter_last.result = iter_result_t::unknown;
                 continue;
+            }
+
+            if (action == line_search_action::failure &&
+                linear_solve_last.status != linear_solve_status::success) {
+                iter_last.result = iter_result_t::numerical_failure;
+                break;
             }
 
             if (kkt_last.dual.inf_res < settings.dual_tol &&

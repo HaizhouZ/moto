@@ -1698,7 +1698,7 @@ graph_kernel compile_graph(
   }
   if (!plan) {
     std::filesystem::create_directories(cache_dir);
-    const auto plan_cache = cache_dir / ("plan_v13_" + key + ".cbor");
+    const auto plan_cache = cache_dir / ("plan_v14_" + key + ".cbor");
     const auto mx_cache = cache_dir / ("graph_" + key + ".casadi");
     if (std::filesystem::exists(plan_cache)) {
       try {

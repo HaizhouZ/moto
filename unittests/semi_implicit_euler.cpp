@@ -4,7 +4,9 @@
 #include <moto/ocp/dynamics/dense_dynamics.hpp>
 #include <moto/ocp/dynamics/semi_implicit_euler.hpp>
 #include <moto/ocp/cost.hpp>
+#include <moto/ocp/constr.hpp>
 #include <moto/ocp/impl/node_data.hpp>
+#include <moto/ocp/pre_comp.hpp>
 #include <moto/multibody/casadi_manifold.hpp>
 #include <moto/solver/ns_riccati/ns_riccati_data.hpp>
 #include <moto/solver/ns_sqp.hpp>
@@ -329,10 +331,11 @@ TEST_CASE("lifted graph artifact identity includes elimination algebra") {
 TEST_CASE("integrated lifted presolve retains overlapping state Hessians") {
   auto [x, y] = sym::states("lifted_presolve_x");
   auto u = sym::inputs("lifted_presolve_u");
+  auto extra_u = sym::inputs("lifted_presolve_extra_u", 2);
   auto l = sym::lifted("lifted_presolve_l");
-  const cs::SX &sx = x, &sy = y, &su = u, &sl = l;
+  const cs::SX &sx = x, &sy = y, &su = u, &seu = extra_u, &sl = l;
   dynamics dyn = std::make_shared<semi_implicit_euler>(
-      "lifted_presolve_dyn", sy - sx - sl,
+      "lifted_presolve_dyn", sy - sx - sl - seu(0) - 2. * seu(1),
       semi_implicit_euler::state_t::pos, approx_order::first);
   auto lifting = std::make_shared<implicit_lifted>(
       "lifted_presolve_constraint", sl - su, var_inarg_list{l},
@@ -350,16 +353,33 @@ TEST_CASE("integrated lifted presolve retains overlapping state Hessians") {
   auto state_1 = generic_cost::from_scalar(
       "lifted_presolve_state_1", var_inarg_list{},
       5. * (sx + .25) * (sx + .25));
+  auto input_cost = generic_cost::from_scalar(
+      "lifted_presolve_input", var_inarg_list{},
+      7. * (su - .3) * (su - .3));
+  auto lifted_cost = generic_cost::from_scalar(
+      "lifted_presolve_lifted", var_inarg_list{},
+      11. * (sl + .2) * (sl + .2));
+  auto extra_input_cost_0 = generic_cost::from_scalar(
+      "lifted_presolve_extra_input_0", var_inarg_list{},
+      13. * (seu(0) - .1) * (seu(0) - .1));
+  auto extra_input_cost_1 = generic_cost::from_scalar(
+      "lifted_presolve_extra_input_1", var_inarg_list{},
+      17. * (seu(1) + .4) * (seu(1) + .4));
   auto problem = ocp::create();
   problem->add(*dyn);
   problem->add(*state_0);
   problem->add(*state_1);
+  problem->add(*input_cost);
+  problem->add(*lifted_cost);
+  problem->add(*extra_input_cost_0);
+  problem->add(*extra_input_cost_1);
   problem->wait_until_ready();
 
   node_data runtime(problem);
   runtime.sym_val().get(x).setZero();
   runtime.sym_val().get(y).setZero();
   runtime.sym_val().get(u).setZero();
+  runtime.sym_val().get(extra_u).setZero();
   runtime.sym_val().get(l).setZero();
   runtime.prepare_linear_plan();
   runtime.update_approximation(node_data::update_mode::eval_all);
@@ -376,6 +396,61 @@ TEST_CASE("integrated lifted presolve retains overlapping state Hessians") {
   linear_backend::write_dense(projected.Q_xx, expected);
   linear_backend::write_dense(projected.Q_xx_mod, expected);
   REQUIRE(projected.V_xx.isApprox(expected, 1e-12));
+}
+
+TEST_CASE("lifted groups filter inactive registered subconstraints") {
+  using namespace moto;
+
+  auto [x, y] = sym::states("active_lifted_x", 2);
+  auto l0 = sym::lifted("active_lifted_l0", 1);
+  auto l1 = sym::lifted("active_lifted_l1", 1);
+  const cs::SX &sx = x, &sy = y, &sl0 = l0, &sl1 = l1;
+  dynamics source = std::make_shared<dense_dynamics>(
+      "active_lifted_dynamics",
+      cs::SX::vertcat({sy(0) - sx(0) - sl0,
+                       sy(1) - sx(1) - sl1}),
+      approx_order::first);
+  constr c0 = std::make_shared<implicit_lifted>(
+      "active_lifted_c0", sy(0), var_inarg_list{l0},
+      approx_order::first);
+  constr c1 = std::make_shared<implicit_lifted>(
+      "active_lifted_c1", sy(1), var_inarg_list{l1},
+      approx_order::first);
+  c0->enable_if_all({l0});
+  c1->enable_if_all({l1});
+
+  dynamics group = source->with_elimination_graph(
+      [](const lifted_symbolic_system &system) {
+        const auto factor = system.solve(system.h_l());
+        return system.eliminate(
+            [&](const cs::MX &rhs) { return factor.solve(rhs); });
+      }, std::vector<constr>{c0, c1});
+
+  auto stage = stage_ocp::create();
+  stage->add(*group);
+  auto all = stage->copy();
+  auto filtered = stage->copy(ocp::active_status_config{{l1}, {}});
+  all->wait_until_ready();
+  filtered->wait_until_ready();
+
+  REQUIRE(all->dim(__lift) == 2);
+  REQUIRE(all->tdim(__l) == 2);
+  REQUIRE(filtered->dim(__lift) == 1);
+  REQUIRE(filtered->tdim(__l) == 1);
+  REQUIRE(filtered->is_active(*c0));
+  REQUIRE_FALSE(filtered->is_active(*c1));
+  REQUIRE(group->owns_subconstraint(*c1));
+  REQUIRE(filtered->linear_profile().lifted_program != nullptr);
+
+  ns_sqp sqp;
+  sqp.stages().push_back(all);
+  sqp.stages().push_back(filtered);
+  const auto &nodes = sqp.solver_nodes();
+  REQUIRE(nodes.size() == 2);
+  REQUIRE(nodes[0]->problem().dim(__lift) == 2);
+  REQUIRE(nodes[0]->problem().tdim(__l) == 2);
+  REQUIRE(nodes[1]->problem().dim(__lift) == 1);
+  REQUIRE(nodes[1]->problem().tdim(__l) == 1);
 }
 
 TEST_CASE("semi-implicit projections match dense dynamics") {
@@ -539,6 +614,38 @@ TEST_CASE("position Euler supports generic nonlinear manifolds") {
   fallback->apply_jac_y_inverse_transpose(
       dense_data.data(fallback), rhs, dense_out);
   REQUIRE(euler_out.isApprox(dense_out, 1e-12));
+}
+
+TEST_CASE("precompute uses manifold tangents before symbol finalization",
+          "[precompute][manifold]") {
+  const cs::SX base = cs::SX::sym("precompute_circle_base", 2);
+  const cs::SX step = cs::SX::sym("precompute_circle_step");
+  const cs::SX other = cs::SX::sym("precompute_circle_other", 2);
+  const cs::SX angle = cs::SX::atan2(base(1), base(0));
+  auto [q, qn] = multibody::casadi_manifold::create(
+      "precompute_circle", base, step,
+      cs::SX::vertcat({cs::SX::cos(angle + step),
+                       cs::SX::sin(angle + step)}),
+      other, angle - cs::SX::atan2(other(1), other(0)),
+      (vector(2) << 1., 0.).finished());
+  (void)qn;
+  auto precompute = pre_compute::create(
+      "precompute_circle_feature", {static_cast<const cs::SX &>(q)});
+  auto constraint = generic_constr::create(
+      "precompute_circle_constraint", precompute->outputs().front()(1),
+      approx_order::first);
+  auto problem = ocp::create();
+  problem->add(*precompute);
+  problem->add(*constraint);
+  problem->wait_until_ready();
+
+  node_data node(problem);
+  node.sym_val()[q] << 1., 0.;
+  node.update_approximation(node_data::update_mode::eval_all);
+  auto &runtime = node.data(constraint);
+  REQUIRE(runtime.jac(*q).rows() == 1);
+  REQUIRE(runtime.jac(*q).cols() == 1);
+  REQUIRE(std::abs(runtime.jac(*q)(0, 0) - 1.) < 1e-12);
 }
 
 TEST_CASE("multiple dynamics use independent local projections and shared input") {

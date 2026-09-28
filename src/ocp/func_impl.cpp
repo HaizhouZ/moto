@@ -4,6 +4,7 @@
 #include <moto/core/external_function.hpp>
 #include <moto/ocp/impl/custom_func.hpp>
 #include <moto/ocp/impl/func.hpp>
+#include <moto/ocp/pre_comp.hpp>
 #include <moto/utils/codegen.hpp>
 #include <mutex>
 
@@ -71,6 +72,7 @@ generic_func::generic_func(const generic_func &rhs)
       hess_panel_sp_(rhs.hess_panel_sp_),
       default_hess_sp_(rhs.default_hess_sp_),
       detect_jacobian_sparsity_(rhs.detect_jacobian_sparsity_),
+      uses_precompute_chain_rule_(rhs.uses_precompute_chain_rule_),
       remap_cache_(std::make_unique<remap_cache>()),
       value(rhs.value),
       jacobian(rhs.jacobian),
@@ -169,8 +171,12 @@ void generic_func::load_external_impl(const std::string &path) {
 }
 
 void generic_func::substitute(const sym &arg, const sym &rhs) {
+    const expr_handle source_producer = precompute_producer(arg);
+    const expr_handle target_producer = precompute_producer(rhs);
     if (gen_.task_) {
         gen_.task_->sx_output = cs::SX::substitute(gen_.task_->sx_output, arg, rhs);
+        for (cs::SX &output : gen_.task_->value_outputs)
+            output = cs::SX::substitute(output, arg, rhs);
         for (auto &[jac_arg, jac] : gen_.task_->ext_jac) {
             jac = cs::SX::substitute(jac, arg, rhs);
             if (jac_arg->uid() == arg.uid())
@@ -192,6 +198,18 @@ void generic_func::substitute(const sym &arg, const sym &rhs) {
     *in_arg_it = rhs;
     // update the dep_ to point to the new sym
     std::replace(dep_.begin(), dep_.end(), arg, rhs);
+    if (source_producer) {
+        const auto producer = std::ranges::find_if(
+            dep_, [&](const expr_handle &dependency) {
+                return dependency->uid() == source_producer->uid();
+            });
+        if (producer != dep_.end()) {
+            if (target_producer)
+                *producer = target_producer;
+            else
+                dep_.erase(producer);
+        }
+    }
 }
 
 void generic_func::substitute_argument(const sym &arg, const sym &rhs) {
@@ -300,7 +318,7 @@ bool generic_func::has_pure_x_primal_args() const {
 
 generic_func::normalized_remap generic_func::normalize_argument_remap(const symbol_remap &remap) const {
     normalized_remap normalized;
-    for (const auto &[from, to] : remap) {
+    for (const auto &[from, to] : expand_precompute_remap(remap)) {
         const auto from_uid = static_cast<size_t>(from->uid());
         const auto to_uid = static_cast<size_t>(to->uid());
         if (from_uid == to_uid) {
@@ -408,7 +426,8 @@ expr_handle generic_func::lower_expr_x_to_y_reuse(std::string_view context, size
             remap.emplace_back(var(arg), arg.next());
         }
     }
-    return reuse_remap(remap, context, problem_uid);
+    return reuse_remap(remap_precompute_dependencies(*this, remap),
+                       context, problem_uid);
 }
 
 expr_handle generic_func::remap_arguments(const symbol_remap &remap) {
@@ -424,10 +443,26 @@ void generic_func::set_from_casadi(const var_inarg_list &in_args, const cs::SX &
         for (sym &arg : in_args)
             global_registry::add(var(arg));
         add_arguments(in_args);
-        for (const var &arg : global_registry::infer_args(out))
+        for (const var &arg : global_registry::infer_args(out)) {
             add_argument(arg);
+            if (expr_handle producer = precompute_producer(*arg)) {
+                const bool already_added = std::ranges::any_of(
+                    dep_, [&](const expr_handle &dependency) {
+                        return dependency->uid() == producer->uid();
+                    });
+                if (!already_added)
+                    add_dep(std::move(producer));
+            }
+            // CasADi's C++ depends_on check can miss a primitive used only
+            // inside a never-inline call node. Output inference already proves
+            // that this symbol belongs to the authored expression, so it must
+            // survive the later convenience-argument pruning pass.
+            skip_unused_arg_check_.insert(arg->uid());
+        }
         gen_.task_ = new gen_info::task_type();
         gen_.task_->sx_output = out;
+        if (order_ >= approx_order::first)
+            uses_precompute_chain_rule_ = apply_precompute_chain_rule(*this, out);
     }
 }
 
@@ -445,6 +480,9 @@ void generic_func::finalize_impl() {
         auto &out = gen_.task_->sx_output;
         std::vector<size_t> unused_args;
         const auto derivative_uses = [&](const sym &s) {
+            for (const cs::SX &value_output : gen_.task_->value_outputs)
+                if (cs::SX::depends_on(value_output, s))
+                    return true;
             for (const auto &[arg, jac] : gen_.task_->ext_jac)
                 if (arg->uid() == s.uid() || cs::SX::depends_on(jac, s))
                     return true;
@@ -492,6 +530,14 @@ void generic_func::finalize_impl() {
     }
     if (gen_.task_ && !gen_.task_->sx_output.is_empty()) {
         utils::cs_codegen::task &t = *gen_.task_;
+        if (uses_precompute_chain_rule_ &&
+            order_ >= approx_order::second && !t.gauss_newton) {
+            throw std::runtime_error(fmt::format(
+                "func {} requests an exact Hessian through a symbolic "
+                "precompute; automatic precompute derivatives currently "
+                "support first-order functions and Gauss-Newton costs",
+                name_));
+        }
         // Function names are already modeled to be stable identifiers.
         // Reusing the same generated symbol name lets finalized clones share
         // the compiled artifact instead of forcing a rebuild per expr uid.

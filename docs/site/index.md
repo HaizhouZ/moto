@@ -10,6 +10,8 @@ The documentation is organized by task:
 - [Build and solve an OCP](tutorials/first_problem.md) with the stage-centric
   Python API.
 - Model [manifold states and structured Euler dynamics](modeling/manifolds.md).
+- [Reuse shared symbolic work](advanced/symbolic_precompute.md) across costs,
+  constraints, stages, and structurally equivalent scenes.
 - Supply [analytic derivatives](advanced/analytic_derivatives.md) or a
   [custom lifted elimination graph](advanced/lifted_elimination.md).
 - Browse the generated [Python API](reference/python.md) and
@@ -31,6 +33,7 @@ examples
 :hidden:
 
 modeling/manifolds
+advanced/symbolic_precompute
 advanced/analytic_derivatives
 advanced/lifted_elimination
 ```

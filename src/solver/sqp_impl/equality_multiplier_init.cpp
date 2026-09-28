@@ -79,8 +79,9 @@ bool ns_sqp::initialize_equality_multipliers(storage_type &outer_graph, bool ref
     ls.constr_vio_min = std::max(
         kkt_overlay.primal.res_l1 * settings.ls.constr_vio_min_frac,
         settings.prim_tol);
-    sqp_iter(ls, kkt_overlay, /*do_scaling=*/false,
-             /*do_refinement=*/settings.rf.enabled);
+    if (sqp_iter(ls, kkt_overlay, /*do_scaling=*/false,
+                 /*do_refinement=*/settings.rf.enabled) == line_search_action::failure)
+        return false;
 
     solver::for_each(
         solver::par, solver::zip(outer_graph, overlay_graph),
