@@ -6,6 +6,7 @@
 #include <moto/utils/func_traits.hpp>
 
 #include <cassert>
+#include <variant>
 
 namespace moto {
 class sym;
