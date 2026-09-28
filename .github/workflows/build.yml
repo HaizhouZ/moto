@@ -68,10 +68,13 @@ jobs:
         shell: micromamba-shell {0}
         run: cmake --build build --target moto_pywrap_stub -j2
 
-      - name: Install and import
+      - name: Install
+        shell: micromamba-shell {0}
+        run: cmake --install build
+
+      - name: Import installed package
         shell: micromamba-shell {0}
         run: |
-          cmake --install build
           expected_version="$(tr -d '[:space:]' < VERSION)"
           python -c "import moto; assert moto.__version__ == '${expected_version}'"
 
