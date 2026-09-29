@@ -19,15 +19,25 @@
   const selector = document.getElementById("moto-doc-version");
   if (!selector) return;
 
-  selector.addEventListener("change", () => {
+  selector.addEventListener("change", async () => {
     const currentRoot = {{ moto_doc_current_url | tojson }};
     const pathname = window.location.pathname;
     const offset = pathname.indexOf(currentRoot);
     const relativePage = offset >= 0
       ? pathname.slice(offset + currentRoot.length)
       : "";
+    const versionRoot = selector.value;
+    const candidate = versionRoot + relativePage;
+    let destination = versionRoot;
+    try {
+      const response = await fetch(candidate, { method: "HEAD" });
+      if (response.ok) destination = candidate;
+    } catch (_) {
+      // Fall back to the selected version's home page when the corresponding
+      // page does not exist or cannot be checked.
+    }
     window.location.assign(
-      selector.value + relativePage + window.location.search + window.location.hash
+      destination + window.location.search + window.location.hash
     );
   });
 })();
