@@ -42,12 +42,20 @@ jobs:
         shell: bash
         run: |
           build_state="$(
-            gh run list \
-              --workflow build.yml \
-              --commit "$GITHUB_SHA" \
-              --limit 1 \
-              --json status,conclusion \
-              --jq 'if length == 0 then "missing" else .[0].status + ":" + (.[0].conclusion // "") end'
+            gh api \
+              --method GET \
+              "/repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs" \
+              -f head_sha="$GITHUB_SHA" \
+              -f per_page=10 \
+              --jq '
+                [.workflow_runs[] | select(.event == "push")]
+                | sort_by(.run_number)
+                | if length == 0 then
+                    "missing"
+                  else
+                    .[-1].status + ":" + (.[-1].conclusion // "")
+                  end
+              '
           )"
           if [[ "$build_state" != "completed:success" ]]; then
             echo "Release requires a successful Build run for $GITHUB_SHA; found $build_state" >&2
