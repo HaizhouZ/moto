@@ -98,6 +98,16 @@ void restore_trial_state(node_data *cur) {
         sf.restore_trial_state(sd);
     });
 }
+void backup_watchdog_state(node_data *cur) {
+    for_each(cur, [](auto &&sf, auto &&sd) {
+        sf.backup_watchdog_state(sd);
+    });
+}
+void restore_watchdog_state(node_data *cur) {
+    for_each(cur, [](auto &&sf, auto &&sd) {
+        sf.restore_watchdog_state(sd);
+    });
+}
 void corrector_step_start(data_base *data) {
     auto *node = dynamic_cast<node_data *>(data);
     if (node == nullptr) {

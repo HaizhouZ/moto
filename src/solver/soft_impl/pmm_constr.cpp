@@ -97,5 +97,15 @@ void pmm_constr::restore_trial_state(data_map_t &data) const {
     d.multiplier_ = d.multiplier_backup_;
 }
 
+void pmm_constr::backup_watchdog_state(data_map_t &data) const {
+    auto &d = data.as<pmm_data>();
+    d.multiplier_watchdog_backup_ = d.multiplier_;
+}
+
+void pmm_constr::restore_watchdog_state(data_map_t &data) const {
+    auto &d = data.as<pmm_data>();
+    d.multiplier_ = d.multiplier_watchdog_backup_;
+}
+
 } // namespace solver
 } // namespace moto

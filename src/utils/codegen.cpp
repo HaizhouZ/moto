@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <numeric>
+#include <unordered_set>
 
 namespace moto {
 namespace utils {
@@ -226,7 +227,7 @@ namespace impl {
 // job_list jobs_{};
 std::mutex func_mutex_map_mutex_{};
 std::unordered_map<std::string, std::shared_ptr<std::mutex>> func_mutexes_{};
-std::unordered_map<std::string, std::string> completed_compile_flags_{};
+std::unordered_set<std::string> completed_artifacts_{};
 
 std::shared_ptr<std::mutex> get_func_mutex(const std::string &func_name) {
     std::lock_guard<std::mutex> lock(func_mutex_map_mutex_);
@@ -500,37 +501,17 @@ void run(std::string func_name,
     cs::Function func_ground_truth,
     bool keep_generated_src,
     bool verbose,
-    cs::SX aux) {
-    // Finalized clones intentionally share a stable generated symbol name.
-    // Serialize codegen per symbol to avoid concurrent writers racing on
-    // func_name_raw.c / func_name.cpp / func_name.json / libfunc_name.so.
+    cs::SX aux,
+    task::artifact_dir_ptr resolved_artifact_dir) {
+    // CasADi first emits one temporary name-based source.  Serialize that
+    // temporary slot; persistent binaries are content-addressed below.
     auto func_mutex = get_func_mutex(func_name);
     std::lock_guard<std::mutex> func_lock(*func_mutex);
     fs::create_directories(output_dir);
     process_file_lock process_lock(fs::path(output_dir) / (func_name + ".lock"));
-
-    fs::path so_file_path = fs::path(output_dir) / ("lib" + func_name + ".so");
-    fs::path so_tmp_path = so_file_path;
-    so_tmp_path += ".tmp";
-    fs::path json_path = fs::path(output_dir) / (func_name + ".json");
-    fs::path json_tmp_path = json_path;
-    json_tmp_path += ".tmp";
-    const std::string cache_key = (fs::path(output_dir) / func_name).string();
     const auto toolchain = runtime_compile_toolchain_config();
     const std::string compile_identity =
         compile_flag + "\n" + toolchain.fingerprint();
-
-    if (!force_recompile) {
-        std::lock_guard<std::mutex> lock(func_mutex_map_mutex_);
-        auto it = completed_compile_flags_.find(cache_key);
-        if (it != completed_compile_flags_.end() &&
-            it->second == compile_identity) {
-            if (std::getenv("MOTO_DEBUG_CODEGEN") != nullptr) {
-                fmt::print("[codegen] reuse {}\n", func_name);
-            }
-            return;
-        }
-    }
 
     // Step 1: Create CasADi function and filter near-zero elements
     std::vector<cs::SX> sx_inputs_cs; //(sx_inputs.begin(), sx_inputs.end());
@@ -573,17 +554,41 @@ void run(std::string func_name,
                              casadi_func.sz_arg(), casadi_func.sz_res(),
                              casadi_func.sz_iw(), casadi_func.sz_w());
 
-    // Step 4: Write new C++ file with Eigen interface
-    std::string final_cpp_path = fs::path(output_dir) / (func_name + ".cpp");
-    {
-        std::ofstream final_cpp_file(final_cpp_path);
-        final_cpp_file << processed_code;
-    }
-    if (verbose)
-        std::cout << "Generated: " << final_cpp_path << std::endl;
-
-    // Step 5: Compile if necessary
+    // Step 4: Resolve the persistent content-addressed artifact directory.
     std::string md5_hash = compute_md5_from_bytes(raw_c_code) + compute_md5_from_bytes(processed_code);
+    const std::string artifact_identity = compute_md5_from_bytes(
+        md5_hash + "\n" + compile_identity);
+    const fs::path artifact_dir = fs::path(output_dir) / ".moto_artifacts" /
+                                  func_name / artifact_identity;
+    fs::create_directories(artifact_dir);
+    *resolved_artifact_dir = artifact_dir.string();
+
+    const fs::path artifact_raw_c_path =
+        artifact_dir / (func_name + "_raw.c");
+    const fs::path final_cpp_path = artifact_dir / (func_name + ".cpp");
+    const fs::path so_file_path = artifact_dir / ("lib" + func_name + ".so");
+    fs::path so_tmp_path = so_file_path;
+    so_tmp_path += ".tmp";
+    const fs::path json_path = artifact_dir / (func_name + ".json");
+    fs::path json_tmp_path = json_path;
+    json_tmp_path += ".tmp";
+    const std::string cache_key = artifact_dir.string();
+
+    if (!force_recompile) {
+        std::lock_guard<std::mutex> lock(func_mutex_map_mutex_);
+        if (completed_artifacts_.contains(cache_key) &&
+            fs::exists(so_file_path) && fs::exists(json_path) &&
+            (!keep_generated_src ||
+             (fs::exists(final_cpp_path) && fs::exists(artifact_raw_c_path)))) {
+            fs::remove(raw_c_path);
+            if (std::getenv("MOTO_DEBUG_CODEGEN") != nullptr)
+                fmt::print("[codegen] reuse {} [{}]\n", func_name,
+                           artifact_identity);
+            return;
+        }
+    }
+
+    // Step 5: Compile if necessary.
 
     bool needs_compile = true;
     bool json_exists = fs::exists(json_path);
@@ -602,16 +607,24 @@ void run(std::string func_name,
                 if (verbose)
                     std::cout << "Skipping " << func_name << " as it is already up-to-date." << std::endl;
                 needs_compile = false;
-            } else {
-                fmt::print("Recompiling {}: md5 mismatch or compile flag changed.\n", func_name);
-                fmt::print("  Current md5: {}, compile flag: {}\n", md5_hash, compile_flag);
-                fmt::print("  Previous md5: {}, compile flag: {}\n", std::string(data["md5"]), std::string(data["compile_flag"]));
             }
         } catch (const json::parse_error &e) {
             fmt::print("Error parsing JSON for {}: {}\n", func_name, e.what());
             needs_compile = true;
         }
     }
+
+    if (needs_compile || (keep_generated_src && !fs::exists(final_cpp_path))) {
+        std::ofstream final_cpp_file(final_cpp_path);
+        final_cpp_file << processed_code;
+        if (verbose)
+            std::cout << "Generated: " << final_cpp_path << std::endl;
+    }
+    if (keep_generated_src && !fs::exists(artifact_raw_c_path)) {
+        std::ofstream raw_artifact_file(artifact_raw_c_path);
+        raw_artifact_file << raw_c_code;
+    }
+    fs::remove(raw_c_path);
 
     if (std::getenv("MOTO_DEBUG_CODEGEN") != nullptr) {
         if (needs_compile) {
@@ -633,7 +646,7 @@ void run(std::string func_name,
         const std::string compile_command =
             shell_quote(toolchain.cxx) + " -shared -fPIC -std=c++20 " +
             compile_flag + " -o " + shell_quote(so_tmp_path.string()) +
-            " " + shell_quote(final_cpp_path) + " -I " +
+            " " + shell_quote(final_cpp_path.string()) + " -I " +
             shell_quote(toolchain.eigen_include.string());
         int ret = std::system(compile_command.c_str());
         if (verbose) {
@@ -662,6 +675,7 @@ void run(std::string func_name,
             j["outputs"].push_back({e.rows(), e.columns()});
         }
         j["md5"] = md5_hash;
+        j["artifact_identity"] = artifact_identity;
         j["compile_flag"] = compile_flag;
         j["toolchain"] = toolchain.fingerprint();
 
@@ -670,14 +684,13 @@ void run(std::string func_name,
         o.close();
         fs::rename(json_tmp_path, json_path);
         if (!keep_generated_src) {
-            fs::remove(raw_c_path);
             fs::remove(final_cpp_path);
         }
     }
 
     if (!force_recompile) {
         std::lock_guard<std::mutex> lock(func_mutex_map_mutex_);
-        completed_compile_flags_[cache_key] = compile_identity;
+        completed_artifacts_.insert(cache_key);
     }
 }
 
@@ -686,6 +699,7 @@ void run(std::string func_name,
 void task::finalize(job_list &jobs_) {
     std::string full_func_name = prefix.empty() ? func_name : prefix + "_" + func_name;
     if (gen_eval) {
+        eval_artifact_dir = std::make_shared<std::string>();
         std::vector<cs::SX> eval_outputs;
         if (!value_outputs.empty()) {
             eval_outputs = value_outputs;
@@ -706,7 +720,7 @@ void task::finalize(job_list &jobs_) {
                             cs::Function(),
                             keep_generated_src,
                             verbose,
-                            cs::SX()));
+                            cs::SX(), eval_artifact_dir));
     }
 
     // excluded = [e.name for e in exclude]
@@ -775,6 +789,7 @@ void task::finalize(job_list &jobs_) {
                 jacs.push_back(cs::SX());
         }
         if (gen_jacobian and !jacs.empty()) {
+            jac_artifact_dir = std::make_shared<std::string>();
             cs::Function f_ad;
             if (!jac_outputs.empty()) {
                 jacs = jac_outputs;
@@ -825,7 +840,7 @@ void task::finalize(job_list &jobs_) {
                                 append_jac, // 'append' flag
                                 f_ad,
                                 keep_generated_src,
-                                verbose, cs::SX()));
+                                verbose, cs::SX(), jac_artifact_dir));
         }
     }
 
@@ -919,6 +934,7 @@ void task::finalize(job_list &jobs_) {
             }
         }
         if (hess_panels != nullptr) {
+            hess_panel_artifact_dir = std::make_shared<std::string>();
             jobs_.add(std::bind(&impl::run,
                                 full_func_name + "_hess_panel",
                                 sx_inputs,
@@ -930,7 +946,7 @@ void task::finalize(job_list &jobs_) {
                                 cs::Function(),
                                 keep_generated_src,
                                 verbose,
-                                lbd));
+                                lbd, hess_panel_artifact_dir));
             return;
         }
         // hess = [item for sublist in hess for item in sublist]
@@ -939,6 +955,7 @@ void task::finalize(job_list &jobs_) {
         for (auto &sublist : hess) {
             hess_flat.insert(hess_flat.end(), sublist.begin(), sublist.end());
         }
+        hess_artifact_dir = std::make_shared<std::string>();
         jobs_.add(std::bind(&impl::run,
                             full_func_name + "_hess",
                             sx_inputs,
@@ -950,7 +967,7 @@ void task::finalize(job_list &jobs_) {
                             cs::Function(),
                             keep_generated_src,
                             verbose,
-                            lbd));
+                            lbd, hess_artifact_dir));
     }
 }
 // Public entry point to start code generation

@@ -53,9 +53,11 @@ class ineq_constr : public soft_constr {
             vector residual;
             vector slack;
             vector slack_backup;
+            vector slack_watchdog_backup;
             vector d_slack;
             vector multiplier;
             vector multiplier_backup;
+            vector multiplier_watchdog_backup;
             vector d_multiplier;
             virtual ~box_pair_runtime() = default;
 

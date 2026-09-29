@@ -73,6 +73,7 @@ struct job_list {
 };
 
 struct task {
+    using artifact_dir_ptr = std::shared_ptr<std::string>;
     std::string func_name;
     using in_arg_list_t = var_list;
     in_arg_list_t sx_inputs;
@@ -100,6 +101,13 @@ struct task {
     std::string hess_compile_flag = "-O3 -DNDEBUG -march=native";
     std::string prefix = "";
     bool verbose = false; // verbose output
+
+    // Resolved after source generation.  Each callback loads its exact
+    // content-addressed library rather than a mutable name-only cache entry.
+    artifact_dir_ptr eval_artifact_dir;
+    artifact_dir_ptr jac_artifact_dir;
+    artifact_dir_ptr hess_artifact_dir;
+    artifact_dir_ptr hess_panel_artifact_dir;
 
     struct noncopyable_task : std::unique_ptr<task> {
         using base = std::unique_ptr<task>;

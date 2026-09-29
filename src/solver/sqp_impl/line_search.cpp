@@ -4,13 +4,71 @@
 
 namespace moto {
 
-scalar_t ns_sqp::current_linesearch_alpha_min(const filter_linesearch_per_iter_data &ls) const {
-    scalar_t alpha_min = settings.ls.primal.alpha_min;
-    if (settings.restoration.enabled)
-        alpha_min = std::max(alpha_min,
-                             settings.restoration.alpha_min_factor *
-                                 std::max(ls.initial_alpha_primal, scalar_t(1e-12)));
+scalar_t ns_sqp::current_linesearch_alpha_min(const filter_linesearch_data &ls,
+                                              const kkt_info &current_kkt) const {
+    if (settings.in_restoration) {
+        return std::max(settings.ls.primal.alpha_min,
+                        settings.restoration.alpha_min_factor *
+                            std::max(ls.initial_alpha_primal, scalar_t(1e-12)));
+    }
+
+    const scalar_t theta = current_kkt.primal.res_l1;
+    const scalar_t gbd = current_kkt.barrier_step.ls_objective_fullstep_dec;
+    scalar_t alpha_min = settings.ls.primal_gamma;
+    if (gbd < 0.) {
+        alpha_min = std::min(alpha_min,
+                             settings.ls.dual_gamma * theta / (-gbd));
+        if (theta <= ls.constr_vio_min) {
+            alpha_min = std::min(
+                alpha_min,
+                std::pow(theta, settings.ls.s_theta) /
+                    std::pow(-gbd, settings.ls.s_phi));
+        }
+    }
+    alpha_min = std::max(settings.ls.primal.alpha_min,
+                         settings.ls.alpha_min_frac * alpha_min);
+    // Preserve the explicit legacy restoration trigger when a caller also
+    // requests a finite backtracking cap.  The default Ipopt-style filter
+    // path has max_steps == 0 and is governed solely by the formula above.
+    if (settings.restoration.enabled && settings.ls.max_steps > 0) {
+        alpha_min = std::max(
+            alpha_min,
+            settings.restoration.alpha_min_factor *
+                std::max(ls.initial_alpha_primal, scalar_t(1e-12)));
+    }
     return alpha_min;
+}
+
+void ns_sqp::start_watchdog(filter_linesearch_data &ls,
+                            const iteration_context &ctx) {
+    auto &graph = active_data();
+    solver::for_each(solver::par, graph,
+                     [](data *d) { d->backup_watchdog_state(); });
+    ls.in_watchdog = true;
+    ls.watchdog_trial_iter = 0;
+    ls.watchdog_reference = ctx.current;
+    ls.watchdog_alpha_primal_test = ls.initial_alpha_primal;
+    ls.watchdog_mu = settings.ipm.mu;
+    if (settings.verbose)
+        fmt::print("  starting watchdog after {} consecutive shortened steps\n",
+                   ls.watchdog_shortened_iter);
+}
+
+void ns_sqp::stop_watchdog(filter_linesearch_data &ls) {
+    ls.in_watchdog = false;
+    ls.watchdog_trial_iter = 0;
+    ls.watchdog_shortened_iter = 0;
+}
+
+void ns_sqp::restore_watchdog_reference(filter_linesearch_data &ls,
+                                        kkt_info &current) {
+    auto &graph = active_data();
+    solver::for_each(solver::par, graph, [](data *d) {
+        d->restore_watchdog_state();
+        d->update_approximation(node_data::update_mode::eval_all, true);
+    });
+    current = ls.watchdog_reference;
+    stop_watchdog(ls);
 }
 
 void ns_sqp::finalize_ls_bound_and_set_to_max() {
@@ -50,6 +108,7 @@ ns_sqp::filter_linesearch_data::evaluate_normal_filter_step(const std::vector<po
                                                             const kkt_info &current_kkt,
                                                             scalar_t constr_vio_min,
                                                             const settings_t &settings,
+                                                            scalar_t alpha_primal_test,
                                                             bool allow_flat_objective) {
     normal_filter_eval_result result{
         .trial_point =
@@ -68,13 +127,13 @@ ns_sqp::filter_linesearch_data::evaluate_normal_filter_step(const std::vector<po
     result.fullstep_dec = current_kkt.barrier_step.ls_objective_fullstep_dec;
     result.switching_lhs =
         result.fullstep_dec < 0.0
-            ? settings.ls.alpha_primal * std::pow(-result.fullstep_dec, settings.ls.s_phi)
+            ? alpha_primal_test * std::pow(-result.fullstep_dec, settings.ls.s_phi)
             : scalar_t(0.0);
     result.switching_rhs = std::pow(prim_res_k, settings.ls.s_theta);
     result.switching_condition =
         result.fullstep_dec < 0.0 && result.switching_lhs >= result.switching_rhs;
     result.armijo_target =
-        obj_k + settings.ls.armijo_dec_frac * settings.ls.alpha_primal * result.fullstep_dec;
+        obj_k + settings.ls.armijo_dec_frac * alpha_primal_test * result.fullstep_dec;
     result.armijo_cond_met = trial_kkt.barrier_objective.ls_objective <= result.armijo_target;
     result.flat_objective_eligible =
         allow_flat_objective &&
@@ -122,14 +181,16 @@ ns_sqp::filter_linesearch_data::evaluate_normal_filter_step(const std::vector<po
 ns_sqp::filter_linesearch_data::step_decision
 ns_sqp::filter_linesearch_data::try_step(const kkt_info &trial_kkt,
                                          const kkt_info &current_kkt,
-                                         settings_t &settings) {
+                                         settings_t &settings,
+                                         scalar_t alpha_primal_test) {
     auto log = [&]<typename... Args>(fmt::format_string<Args...> fmt_str, Args &&...args) {
         if (settings.verbose)
             fmt::print(fmt_str, std::forward<Args>(args)...);
     };
 
     const auto eval =
-        evaluate_normal_filter_step(points, trial_kkt, current_kkt, constr_vio_min, settings);
+        evaluate_normal_filter_step(points, trial_kkt, current_kkt, constr_vio_min,
+                                    settings, alpha_primal_test);
     const step_decision decision{
         .accept = eval.accepted,
         .update_filter = eval.accepted && (!eval.switching_condition || !eval.armijo_cond_met),
@@ -193,24 +254,29 @@ bool ns_sqp::outer_filter_accepts(const filter_linesearch_data &ls,
                                   const kkt_info &trial_kkt,
                                   const kkt_info &reference_kkt) {
     return filter_linesearch_data::evaluate_normal_filter_step(ls.points, trial_kkt, reference_kkt,
-                                                               ls.constr_vio_min, settings, false)
+                                                               ls.constr_vio_min, settings,
+                                                               settings.ls.alpha_primal, false)
         .accepted;
 }
 
 void ns_sqp::step_back_alpha(filter_linesearch_per_iter_data &ls) {
     if (settings.ls.backtrack_scheme == linesearch_setting::backtrack_scheme_t::geometric)
         settings.ls.alpha_primal *= settings.ls.backtrack_factor;
-    else
+    else {
+        const size_t grid_steps = settings.ls.max_steps == 0 ? 5 : settings.ls.max_steps;
         settings.ls.alpha_primal = std::max(
-            settings.ls.alpha_primal - ls.initial_alpha_primal / (settings.ls.max_steps + 1e-8),
+            settings.ls.alpha_primal - ls.initial_alpha_primal / (grid_steps + 1e-8),
             scalar_t(0.0));
+    }
     if (settings.ls.update_alpha_dual) {
         if (settings.ls.backtrack_scheme == linesearch_setting::backtrack_scheme_t::geometric)
             settings.ls.alpha_dual *= settings.ls.backtrack_factor;
-        else
+        else {
+            const size_t grid_steps = settings.ls.max_steps == 0 ? 5 : settings.ls.max_steps;
             settings.ls.alpha_dual = std::max(
-                settings.ls.alpha_dual - ls.initial_alpha_dual / (settings.ls.max_steps + 1e-8),
+                settings.ls.alpha_dual - ls.initial_alpha_dual / (grid_steps + 1e-8),
                 scalar_t(0.0));
+        }
     }
 }
 
@@ -223,7 +289,12 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
     };
 
     const scalar_t fullstep_dec = current_kkt.barrier_step.ls_objective_fullstep_dec;
-    ls.alpha_min = current_linesearch_alpha_min(ls);
+    const kkt_info &reference_kkt = ls.in_watchdog ? ls.watchdog_reference : current_kkt;
+    const scalar_t alpha_primal_test =
+        ls.in_watchdog ? ls.watchdog_alpha_primal_test : settings.ls.alpha_primal;
+    ls.alpha_min = ls.in_watchdog
+                       ? ls.initial_alpha_primal
+                       : current_linesearch_alpha_min(ls, reference_kkt);
 
     // Update best trial
     if (trial_point.prim_res < ls.best_trial.prim_res || trial_point.objective < ls.best_trial.objective) {
@@ -244,34 +315,56 @@ ns_sqp::line_search_action ns_sqp::filter_linesearch(filter_linesearch_data &ls,
         }
     }
 
-    const auto decision = ls.try_step(trial_kkt, current_kkt, settings);
+    const auto decision = ls.try_step(trial_kkt, reference_kkt, settings,
+                                      alpha_primal_test);
 
     if (decision.accept) {
         if (decision.update_filter)
-            ls.update_filter(current_kkt, settings);
+            ls.update_filter(reference_kkt, settings);
+        if (ls.in_watchdog) {
+            if (settings.verbose)
+                fmt::print("  watchdog accepted the trial against its reference point\n");
+            stop_watchdog(ls);
+        } else if (ls.step_cnt == 0) {
+            ls.watchdog_shortened_iter = 0;
+        } else {
+            ++ls.watchdog_shortened_iter;
+        }
         return line_search_action::accept;
+    }
+
+    if (ls.in_watchdog) {
+        ++ls.watchdog_trial_iter;
+        if (ls.watchdog_trial_iter <= settings.ls.watchdog_trial_iter_max) {
+            if (settings.verbose)
+                fmt::print("  watchdog provisionally accepts rejected full step ({}/{})\n",
+                           ls.watchdog_trial_iter,
+                           settings.ls.watchdog_trial_iter_max);
+            return line_search_action::accept;
+        }
+        if (settings.verbose)
+            fmt::print("  watchdog exhausted; restoring reference iterate\n");
+        return line_search_action::watchdog_rollback;
     }
 
     const scalar_t current_primal = current_kkt.primal.res_l1;
 
-    if (settings.ls.max_steps > ls.step_cnt) {
+    const size_t effective_max_steps =
+        settings.ls.max_steps == 0 &&
+                settings.ls.backtrack_scheme ==
+                    linesearch_setting::backtrack_scheme_t::linspace
+            ? 5
+            : settings.ls.max_steps;
+    if (effective_max_steps == 0 || ls.step_cnt < effective_max_steps) {
         ls.step_cnt++;
         step_back_alpha(ls);
         if (settings.ls.alpha_primal <= ls.alpha_min) {
-            if (settings.in_restoration || current_kkt.primal.inf_res > settings.prim_tol) {
-                ls.stop = true;
-                ls.failure_reason = filter_linesearch_per_iter_data::failure_reason_t::tiny_step;
-                if (settings.verbose)
-                    fmt::print("  line search reached min step: alpha_p {:.3e} <= alpha_min {:.3e} with prim_res {:.3e}\n",
-                               settings.ls.alpha_primal, ls.alpha_min, current_primal);
-                return line_search_action::failure;
-            } else {
-                if (settings.verbose) {
-                    fmt::print("  line search reached min step: alpha_p {:.3e} <= alpha_min {:.3e} with prim_res {:.3e}\n",
-                               settings.ls.alpha_primal, ls.alpha_min, current_primal);
-                    fmt::print("   continuing because the current primal residual is within tolerance\n");
-                }
-            }
+            ls.stop = true;
+            ls.failure_reason = filter_linesearch_per_iter_data::failure_reason_t::tiny_step;
+            if (settings.verbose)
+                fmt::print("  line search reached min step: alpha_p {:.3e} <= alpha_min {:.3e} with prim_res {:.3e}\n",
+                           settings.ls.alpha_primal, ls.alpha_min, current_primal);
+            return line_search_action::failure;
         }
         if (settings.verbose)
             fmt::print("  backtrack, alpha_p: {:.3e}, alpha_d: {:.3e}\n",
@@ -346,7 +439,8 @@ ns_sqp::line_search_action ns_sqp::merit_linesearch(filter_linesearch_data &ls,
         return line_search_action::accept;
     }
 
-    if (settings.ls.max_steps > ls.step_cnt) {
+    const size_t effective_max_steps = settings.ls.max_steps == 0 ? 5 : settings.ls.max_steps;
+    if (effective_max_steps > ls.step_cnt) {
         ls.step_cnt++;
         step_back_alpha(ls);
         if (settings.verbose)

@@ -94,6 +94,8 @@ class ipm_constr : public ineq_constr {
     /// @brief restore the backed-up IPM trial state before the next line-search
   /// attempt
     void restore_trial_state(data_map_t &data) const override;
+    void backup_watchdog_state(data_map_t &data) const override;
+    void restore_watchdog_state(data_map_t &data) const override;
     void restoration_commit_dual_step(data_map_t &data, scalar_t alpha_dual) const override;
     void restoration_reset_bound_multipliers(data_map_t &data) const override;
     scalar_t search_penalty(const func_approx_data &data) const override;

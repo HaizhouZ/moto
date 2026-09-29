@@ -101,6 +101,10 @@ class soft_constr : public generic_constr {
     /// @brief restore the current line-search trial state
     /// @param data data map
     virtual void restore_trial_state(data_map_t &data) const {}
+    /// @brief persist state across provisional watchdog iterations
+    virtual void backup_watchdog_state(data_map_t &data) const {}
+    /// @brief restore state saved when the watchdog started
+    virtual void restore_watchdog_state(data_map_t &data) const {}
 
     /// @brief contribution to the phase original objective (for example exact
   /// penalties)

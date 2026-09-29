@@ -73,16 +73,22 @@ field_NUM: moto.field = moto.field.field_NUM
 field___undefined: moto.field = moto.field.field___undefined
 
 class ocp_base:
+    """
+    Finalizable collection of active model expressions and their field layout.
+    """
+
     @overload
     def add(self, exprs: Sequence[ moto.expr  | moto.var]) -> None:
-        """Add a list of expressions to the OCP problem"""
+        """
+        Add expressions by shared handle; this does not clone their symbolic implementation
+        """
 
     @overload
     def add(self, ex: moto.expr) -> None:
-        """Add an expression to the OCP problem"""
+        """Add one expression by shared handle"""
 
     def dim(self, field: moto.field) -> int:
-        """Get the dimension of the field"""
+        """Get the total active dimension assigned to a solver field"""
 
     def wait_until_ready(self) -> None:
         """Wait until all expressions in the OCP problem are ready"""
@@ -94,7 +100,7 @@ class ocp_base:
         """Print a summary of the OCP problem"""
 
 class ocp(ocp_base):
-    pass
+    """Internal finalized interval problem consumed by one solver node."""
 
 class sym_data:
     def __getitem__(self, arg: moto.var, /) -> Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C')]: ...

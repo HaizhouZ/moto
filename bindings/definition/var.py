@@ -17,11 +17,11 @@ class var(cs.SX):
         return self.__sym__
 
     def symbolic_integrate(self, x: cs.SX, dx: cs.SX) -> cs.SX:
-        """integrate from x with dx, i.e., x + dx"""
+        """Apply this symbol's manifold integration rule to symbolic values."""
         return self.__sym__.symbolic_integrate(x, dx)
 
     def symbolic_difference(self, x1: cs.SX, x0: cs.SX) -> cs.SX:
-        """difference from x0 to x1, i.e., x1 - x0"""
+        """Return the symbolic tangent displacement from ``x0`` to ``x1``."""
         return self.__sym__.symbolic_difference(x1, x0)
 
     def clone(self, name: str) -> "var":
@@ -31,11 +31,11 @@ class var(cs.SX):
     def integrate(
         self, x: np.ndarray, dx: np.ndarray, alpha: float = 1.0
     ) -> np.ndarray:
-        """integrate from x with dx, i.e., x + alpha * dx"""
+        """Numerically integrate ``x`` by ``alpha * dx`` on this symbol's manifold."""
         return self.__sym__.integrate(x, dx, alpha)
 
     def difference(self, x1: np.ndarray, x0: np.ndarray) -> np.ndarray:
-        """difference from x0 to x1, i.e., x1 - x0"""
+        """Return the numerical tangent displacement from ``x0`` to ``x1``."""
         return self.__sym__.difference(x1, x0)
 
     def finalize(self):
@@ -59,12 +59,12 @@ class var(cs.SX):
 
     @property
     def default_value(self):
-        """Default numeric value."""
+        """Value copied into each active node when its runtime storage is created."""
         return self.__sym__.default_value
 
     @default_value.setter
     def default_value(self, val):
-        """Set the default numeric value."""
+        """Set the node-construction default; this does not rewrite existing nodes."""
         self.__sym__.default_value = val
 
     @property

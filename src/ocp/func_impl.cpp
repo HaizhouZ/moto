@@ -148,23 +148,39 @@ void generic_func::hessian_impl(func_approx_data &data) const {
 void generic_func::load_external_impl(const std::string &path) {
     const std::string func_name =
         (gen_.task_ && !gen_.task_->func_name.empty()) ? gen_.task_->func_name : name_;
+    const auto artifact_path = [&](const auto &resolved) -> std::string {
+        return resolved && !resolved->empty() ? *resolved : path;
+    };
     const bool panel_hessian = !hess_panel_sp_.empty();
-    auto funcs = load_approx(func_name, true, order_ >= approx_order::first,
-                             order_ >= approx_order::second && !panel_hessian);
-    value = [eval = std::move(funcs[0])](func_approx_data &d) {
+    auto eval = ext_func(
+        func_name,
+        artifact_path(gen_.task_ ? gen_.task_->eval_artifact_dir : nullptr));
+    value = [eval = std::move(eval)](func_approx_data &d) {
         eval.invoke(d.in_arg_data(), d.v_);
     };
-    jacobian = [jac = std::move(funcs[1])](func_approx_data &d) {
-        jac.invoke(d.in_arg_data(), d.jac_);
-    };
+    if (order_ >= approx_order::first) {
+        auto jac = ext_func(
+            func_name + "_jac",
+            artifact_path(gen_.task_ ? gen_.task_->jac_artifact_dir : nullptr));
+        jacobian = [jac = std::move(jac)](func_approx_data &d) {
+            jac.invoke(d.in_arg_data(), d.jac_);
+        };
+    }
 
     if (panel_hessian) {
-        hessian = [hess = ext_func(func_name + "_hess_panel", path)](
+        hessian = [hess = ext_func(
+                       func_name + "_hess_panel",
+                       artifact_path(gen_.task_
+                                         ? gen_.task_->hess_panel_artifact_dir
+                                         : nullptr))](
                       func_approx_data &d) {
             hess.invoke(d.in_arg_data(), d.hess_panels_);
         };
-    } else {
-        hessian = [hess = std::move(funcs[2])](func_approx_data &d) {
+    } else if (order_ >= approx_order::second) {
+        auto hess = ext_func(
+            func_name + "_hess",
+            artifact_path(gen_.task_ ? gen_.task_->hess_artifact_dir : nullptr));
+        hessian = [hess = std::move(hess)](func_approx_data &d) {
             hess.invoke(d.in_arg_data(), d.lag_hess_);
         };
     }

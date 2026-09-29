@@ -1,6 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdlib>
+#include <chrono>
+#include <cmath>
+#include <filesystem>
 
 #include <moto/ocp/impl/func.hpp>
 #include <moto/ocp/impl/node_data.hpp>
@@ -151,6 +154,66 @@ TEST_CASE("analytic Jacobians are accepted by generic generated functions") {
     data.update_approximation(node_data::update_mode::eval_all, true);
     REQUIRE(data.dense().approx_[__eq_x].jac_[__x].dense().isApprox(
         (vector::LinSpaced(3, 2., 6.)).asDiagonal().toDenseMatrix()));
+}
+
+TEST_CASE("same-name generated artifacts coexist by content") {
+    auto [x, y] = sym::states("content_addressed_codegen_x", 1);
+    (void)y;
+    const auto cache_dir = std::filesystem::temp_directory_path() /
+        ("moto_content_addressed_codegen_" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()));
+
+    struct generated_case {
+        utils::shared<generic_constr> constraint;
+        ocp_ptr_t problem;
+        std::string eval_artifact_dir;
+        scalar_t value;
+    };
+    const auto build_case = [&](const cs::SX &expression) {
+        generated_case result;
+        result.constraint = generic_constr::create(
+            "content_addressed_same_name", expression,
+            approx_order::first);
+        result.constraint->get_codegen_task()->output_dir = cache_dir.string();
+        result.problem = stage_ocp::create();
+        result.problem->add(*result.constraint);
+        result.problem->wait_until_ready();
+        result.eval_artifact_dir =
+            *result.constraint->get_codegen_task()->eval_artifact_dir;
+
+        node_data data(result.problem);
+        data.sym_val()[x] << 3.;
+        data.update_approximation(node_data::update_mode::eval_all, true);
+        result.value = data.data(*result.constraint).v_(0);
+        return result;
+    };
+
+    const cs::SX x_sx = static_cast<const cs::SX &>(x);
+    const auto first = build_case(x_sx + scalar_t(1));
+    const auto first_library = std::filesystem::path(first.eval_artifact_dir) /
+                               "libcontent_addressed_same_name.so";
+    REQUIRE(std::filesystem::exists(first_library));
+    const auto first_write_time = std::filesystem::last_write_time(first_library);
+
+    const auto second = build_case(scalar_t(2) * x_sx + scalar_t(1));
+    const auto repeated = build_case(x_sx + scalar_t(1));
+
+    REQUIRE(std::abs(first.value - scalar_t(4)) < scalar_t(1e-12));
+    REQUIRE(std::abs(second.value - scalar_t(7)) < scalar_t(1e-12));
+    REQUIRE(std::abs(repeated.value - scalar_t(4)) < scalar_t(1e-12));
+    REQUIRE(first.eval_artifact_dir != second.eval_artifact_dir);
+    REQUIRE(repeated.eval_artifact_dir == first.eval_artifact_dir);
+    REQUIRE(std::filesystem::last_write_time(first_library) ==
+            first_write_time);
+
+    const auto identity_root = cache_dir / ".moto_artifacts" /
+                               "content_addressed_same_name";
+    size_t identity_count = 0;
+    for (const auto &entry : std::filesystem::directory_iterator(identity_root))
+        identity_count += entry.is_directory();
+    REQUIRE(identity_count == 2);
+
+    std::filesystem::remove_all(cache_dir);
 }
 
 TEST_CASE("analytic mixed Hessians preserve derivative orientation") {

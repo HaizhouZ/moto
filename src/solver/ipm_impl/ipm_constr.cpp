@@ -222,6 +222,25 @@ void ipm_constr::restore_trial_state(ipm::data_map_t &data) const {
     });
     refresh_box_state(d);
 }
+void ipm_constr::backup_watchdog_state(ipm::data_map_t &data) const {
+    auto &d = data.as<ipm_data>();
+    const auto &box = d.require_box_spec("ipm_constr::backup_watchdog_state");
+    for_each_box_side(
+        d, box, [](auto, box_pair_runtime &pair, ipm_side_data &, const box_mask &) {
+            pair.slack_watchdog_backup = pair.slack;
+            pair.multiplier_watchdog_backup = pair.multiplier;
+        });
+}
+void ipm_constr::restore_watchdog_state(ipm::data_map_t &data) const {
+    auto &d = data.as<ipm_data>();
+    const auto &box = d.require_box_spec("ipm_constr::restore_watchdog_state");
+    for_each_box_side(
+        d, box, [](auto, box_pair_runtime &pair, ipm_side_data &, const box_mask &) {
+            pair.slack = pair.slack_watchdog_backup;
+            pair.multiplier = pair.multiplier_watchdog_backup;
+        });
+    refresh_box_state(d);
+}
 void ipm_constr::restoration_commit_dual_step(data_map_t &data, scalar_t alpha_dual) const {
     auto &d = data.as<ipm_data>();
     const auto &box = d.require_box_spec("ipm_constr::restoration_commit_dual_step");

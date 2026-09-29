@@ -29,6 +29,7 @@ class pmm_constr : public soft_constr {
         vector jac_step_;           ///< reusable J * step scratch
     vector diag_scaling_;      ///< cached isotropic Schur scaling
         vector multiplier_backup_;  ///< backup of multiplier for line search trials
+        vector multiplier_watchdog_backup_; ///< persistent backup for watchdog rollback
         scalar_t rho_ = 1.0;        ///< dual penalty weight (copied from constraint at construction)
 
         approx_data(base::approx_data &&rhs, scalar_t rho);
@@ -54,6 +55,8 @@ class pmm_constr : public soft_constr {
     void backup_trial_state(data_map_t &data) const override final;
     /// @brief restore multiplier for the next line-search attempt
     void restore_trial_state(data_map_t &data) const override final;
+    void backup_watchdog_state(data_map_t &data) const override final;
+    void restore_watchdog_state(data_map_t &data) const override final;
     /// @brief apply: lambda += alpha*d_multiplier
     void apply_affine_step(data_map_t &data, workspace_data *cfg) const override final;
 

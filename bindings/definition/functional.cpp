@@ -138,67 +138,112 @@ struct type_caster<moto::var_inarg_list> {
 
 void register_submodule_functional(nb::module_ &m) {
     using namespace moto;
-    export_enum<moto::approx_order>(m);
+    export_enum<moto::approx_order>(
+        m,
+        "Derivative order requested from a function: value only, first order, "
+        "or exact second order.");
 
-    nb::class_<expr>(m, "expr")
-        .def("__bool__", &expr::operator bool)
+    nb::class_<expr>(
+        m, "expr",
+        "Identity-bearing symbolic model expression shared by copied handles.")
+        .def("__bool__", &expr::operator bool,
+             "Return whether this handle contains an expression")
         .def("__str__", [](const expr &self) {
             return fmt::format("expr({:p}, name={}, uid={}, dim={}, field={})",
                                static_cast<const void *>(&self), self.name(), self.uid(), self.dim(), self.field());
         })
-        .def_prop_ro("name", &expr::__get_name)
-        .def_prop_ro("field", &expr::__get_field)
-        .def_prop_ro("dim", &expr::__get_dim)
-        .def_prop_ro("uid", [](const expr &self) { return size_t(self.uid()); })
-        .def("finalize", [](expr &self, bool block_until_ready) { return self.finalize(block_until_ready); }, nb::arg("block_until_ready") = true)
-        .def_prop_ro("tdim", &expr::__get_tdim);
+        .def_prop_ro("name", &expr::__get_name, "Stable generated-function name")
+        .def_prop_ro("field", &expr::__get_field,
+                     "Solver storage role assigned to the expression")
+        .def_prop_ro("dim", &expr::__get_dim, "Output storage dimension")
+        .def_prop_ro("uid", [](const expr &self) { return size_t(self.uid()); },
+                     "Stable identity shared by copied handles")
+        .def("finalize", [](expr &self, bool block_until_ready) { return self.finalize(block_until_ready); },
+             nb::arg("block_until_ready") = true,
+             "Finalize dependencies and generated callbacks. Graph realization normally calls this automatically")
+        .def_prop_ro("tdim", &expr::__get_tdim,
+                     "Output tangent dimension, which may differ from dim on manifolds");
 
-    nb::class_<sym, expr>(m, "sym")
+    nb::class_<sym, expr>(
+        m, "sym",
+        "Registered Moto symbol with a CasADi SX value, field role, identity, "
+        "and node-initialization default.")
         .def("__str__", [](const sym &v) { return fmt::format("sym(name='{}', dim={}, field={}, uid={})",
                                                               v.name(), v.dim(), v.field(), v.uid()); })
-        .def_prop_rw("default_value", &sym::__get_default_value, &sym::__set_default_value)
-        .def_prop_ro("sx", [](sym &v) { return (cs::SX &)v; }, nb::rv_policy::reference_internal)
+        .def_prop_rw("default_value", &sym::__get_default_value, &sym::__set_default_value,
+                     "Default copied into active node storage when the graph is first realized; a scalar broadcasts to the symbol dimension")
+        .def_prop_ro("sx", [](sym &v) { return (cs::SX &)v; }, nb::rv_policy::reference_internal,
+                     "Underlying CasADi SX expression used to author formulas")
         .def("clone", nb::overload_cast<const std::string &>(&sym::clone, nb::const_),
              nb::arg("name"), "Clone into an independent symbol with a fresh uid")
-        .def("symbolic_integrate", [](const sym &self, const cs::SX &x, const cs::SX &dx) { return self.symbolic_integrate(x, dx); }, nb::arg("x"), nb::arg("dx"))
+        .def("symbolic_integrate", [](const sym &self, const cs::SX &x, const cs::SX &dx) { return self.symbolic_integrate(x, dx); },
+             nb::arg("x"), nb::arg("dx"),
+             "Apply the symbol's manifold integration rule to symbolic values")
         .def("symbolic_difference", [](const sym &self, const cs::SX &x1, const cs::SX &x0) { return self.symbolic_difference(x1, x0); }, nb::arg("x1"), nb::arg("x0"), "difference from x0 to x1, i.e., x1 - x0")
-        .def("integrate", [](const sym &self, moto::vector_ref x, moto::vector_ref dx, moto::scalar_t alpha) { 
+        .def("integrate", [](const sym &self, moto::vector_ref x, moto::vector_ref dx, moto::scalar_t alpha) {
             vector tmp(self.dim());
             self.integrate(x, dx, tmp, alpha);
-            return tmp; }, nb::arg("x"), nb::arg("dx"), nb::arg("alpha") = 1.0)
-        .def("difference", [](const sym &self, moto::vector_ref x1, moto::vector_ref x0) { 
+            return tmp; }, nb::arg("x"), nb::arg("dx"), nb::arg("alpha") = 1.0,
+             "Numerically integrate x by alpha times a tangent increment")
+        .def("difference", [](const sym &self, moto::vector_ref x1, moto::vector_ref x0) {
             vector tmp(self.tdim());
             self.difference(x1, x0, tmp);
-            return tmp; }, nb::arg("x1"), nb::arg("x0"))
-        .def_static("symbol", &sym::symbol, nb::arg("name"), nb::arg("dim") = 1, nb::arg("field") = field_t::__undefined, nb::arg("default_val") = nb::none())
-        .def_static("states", &sym::states, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
-        .def_static("inputs", &sym::inputs, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
-        .def_static("params", &sym::params, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
-        .def_static("usr_var", &sym::usr_var, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none());
+            return tmp; }, nb::arg("x1"), nb::arg("x0"),
+             "Return the numerical tangent displacement from x0 to x1")
+        .def_static("symbol", &sym::symbol, nb::arg("name"), nb::arg("dim") = 1,
+                    nb::arg("field") = field_t::__undefined, nb::arg("default_val") = nb::none(),
+                    "Create a registered symbol in an explicitly selected field")
+        .def_static("states", &sym::states, nb::arg("name"), nb::arg("dim") = 1,
+                    nb::arg("default_val") = nb::none(),
+                    "Create the paired current-state and interval-terminal-state symbols (x, xn) with one shared default")
+        .def_static("inputs", &sym::inputs, nb::arg("name"), nb::arg("dim") = 1,
+                    nb::arg("default_val") = nb::none(),
+                    "Create an interval input decision variable")
+        .def_static("params", &sym::params, nb::arg("name"), nb::arg("dim") = 1,
+                    nb::arg("default_val") = nb::none(),
+                    "Create node-local numeric parameters that can change without regenerating derivatives")
+        .def_static("usr_var", &sym::usr_var, nb::arg("name"), nb::arg("dim") = 1,
+                    nb::arg("default_val") = nb::none(),
+                    "Create a user-defined nonstandard storage symbol for advanced extensions");
 
-    nb::class_<generic_func, expr>(m, "func")
-        .def_prop_ro("in_args", [](generic_func &self) -> auto & { return static_cast<const std::vector<var> &>(self.in_args()); }, nb::rv_policy::reference_internal)
-        .def_rw("value", &generic_func::value)
-        .def_rw("jacobian", &generic_func::jacobian)
-        .def_rw("hessian", &generic_func::hessian)
-        .def_prop_ro("order", &generic_func::__get_order)
+    nb::class_<generic_func, expr>(
+        m, "func",
+        "Finalizable symbolic function with inferred symbol arguments and generated value and derivative callbacks.")
+        .def_prop_ro("in_args", [](generic_func &self) -> auto & { return static_cast<const std::vector<var> &>(self.in_args()); },
+                     nb::rv_policy::reference_internal,
+                     "Active input symbols inferred from the symbolic output plus any explicit arguments")
+        .def_rw("value", &generic_func::value,
+                "Low-level runtime value callback; normally generated from the symbolic expression")
+        .def_rw("jacobian", &generic_func::jacobian,
+                "Low-level runtime Jacobian callback; normally generated automatically")
+        .def_rw("hessian", &generic_func::hessian,
+                "Low-level runtime Hessian callback; normally generated automatically")
+        .def_prop_ro("order", &generic_func::__get_order,
+                     "Highest derivative order requested for this function")
         .def("__str__", [](const generic_func &f) { return fmt::format("func(name='{}', uid={}, order={}, dim={}, field={})",
                                                                        f.name(), f.uid(), f.order(), f.dim(), f.field()); })
-        .def("enable_if_all", [](generic_func &self, const expr_inarg_list &args) { self.enable_if_all(args); }, nb::arg("args"))
-        .def("disable_if_any", [](generic_func &self, const expr_inarg_list &args) { self.disable_if_any(args); }, nb::arg("args"))
-        .def("enable_if_any", [](generic_func &self, const expr_inarg_list &args) { self.enable_if_any(args); }, nb::arg("args"))
-        .def("add_argument", [](generic_func &self, py_var_inarg_wrapper v) { self.add_argument((sym &)v); }, nb::arg("arg"))
-        .def("add_arguments", [](generic_func &self, const var_inarg_list &args) { self.add_arguments(args); })
+        .def("enable_if_all", [](generic_func &self, const expr_inarg_list &args) { self.enable_if_all(args); },
+             nb::arg("args"), "Enable this function in a stage only when every listed expression is active")
+        .def("disable_if_any", [](generic_func &self, const expr_inarg_list &args) { self.disable_if_any(args); },
+             nb::arg("args"), "Disable this function in a stage when any listed expression is inactive")
+        .def("enable_if_any", [](generic_func &self, const expr_inarg_list &args) { self.enable_if_any(args); },
+             nb::arg("args"), "Enable this function in a stage when at least one listed expression is active")
+        .def("add_argument", [](generic_func &self, py_var_inarg_wrapper v) { self.add_argument((sym &)v); },
+             nb::arg("arg"), "Add an explicit symbol argument before finalization; ordinary SX dependencies are inferred automatically")
+        .def("add_arguments", [](generic_func &self, const var_inarg_list &args) { self.add_arguments(args); },
+             nb::arg("args"), "Add explicit symbol arguments before finalization; ordinary SX dependencies are inferred automatically")
         .def("set_analytic_jacobian",
              [](generic_func &self, py_var_inarg_wrapper arg,
                 const cs::SX &jacobian) {
                  self.set_analytic_jacobian((sym &)arg, jacobian);
-             }, nb::arg("arg"), nb::arg("jacobian"))
+             }, nb::arg("arg"), nb::arg("jacobian"),
+             "Provide an analytic output Jacobian with respect to one symbol, replacing automatic differentiation for that block")
         .def("set_analytic_hessian",
              [](generic_func &self, py_var_inarg_wrapper arg0,
                 py_var_inarg_wrapper arg1, const cs::SX &hessian) {
                  self.set_analytic_hessian((sym &)arg0, (sym &)arg1, hessian);
-             }, nb::arg("arg0"), nb::arg("arg1"), nb::arg("hessian"))
+             }, nb::arg("arg0"), nb::arg("arg1"), nb::arg("hessian"),
+             "Provide an analytic Hessian block, replacing automatic differentiation for that argument pair")
         .def("remap_arguments",
              [](generic_func &self, const py_remap &remap) {
                  return ready_func(self.remap_arguments(cast_remap(remap)));
@@ -249,7 +294,9 @@ void register_submodule_functional(nb::module_ &m) {
             nb::arg("remap"),
             "Low-level complete-symbol remap that reuses this generated implementation");
 
-    nb::class_<generic_constr, generic_func>(m, "constr")
+    nb::class_<generic_constr, generic_func>(
+        m, "constr",
+        "Hard equality constraint. Plain outputs are residuals constrained to zero; ``lhs == rhs`` is normalized to ``lhs - rhs == 0``.")
         .def_static(
             "create",
             [](const std::string &name, const cs::SX &out, approx_order order, field_t field) {
@@ -257,33 +304,43 @@ void register_submodule_functional(nb::module_ &m) {
                     generic_constr::create(name, out, order, field));
             },
             nb::arg("name"), nb::arg("out"), nb::arg("order") = approx_order::first,
-            nb::arg("field") = field_t::__undefined)
+            nb::arg("field") = field_t::__undefined,
+            "Create a hard equality from a residual or CasADi equality relation. Symbol arguments and the solver field are inferred")
         .def_static(
             "create",
             [](const std::string &name, approx_order order, size_t dim, field_t field) {
                 return std::make_shared<generic_constr>(name, order, dim, field);
             },
-            nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined)
+            nb::arg("name"), nb::arg("order") = approx_order::first,
+            nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined,
+            "Allocate a dimension-only equality for an advanced custom runtime implementation")
         .def(
             "cast_soft",
             [](generic_constr &self, const std::string &type_name) {
                 return std::shared_ptr<generic_constr>(self.cast_soft(type_name));
             },
-            nb::arg("type_name") = "pmm_constr");
+            nb::arg("type_name") = "pmm_constr",
+            "Convert this equality to a soft PMM constraint before adding it to a stage");
 
-    auto lifted_class = nb::class_<generic_lifted, generic_constr>(m, "lifted");
-    nb::class_<lifted_symbolic_partition>(lifted_class, "partition")
-        .def_ro("name", &lifted_symbolic_partition::name)
-        .def_ro("uid", &lifted_symbolic_partition::uid)
-        .def_ro("source_uid", &lifted_symbolic_partition::source_uid)
-        .def_ro("field", &lifted_symbolic_partition::field)
-        .def_ro("offset", &lifted_symbolic_partition::offset)
-        .def_ro("size", &lifted_symbolic_partition::size);
-    nb::class_<lifted_symbolic_block>(lifted_class, "block")
+    auto lifted_class = nb::class_<generic_lifted, generic_constr>(
+        m, "lifted",
+        "Dynamics group that eliminates its predicted-state direction and optional user-selected lifted variables in the local QP.");
+    nb::class_<lifted_symbolic_partition>(
+        lifted_class, "partition",
+        "Named row or column partition in a lifted elimination system.")
+        .def_ro("name", &lifted_symbolic_partition::name, "Expression or symbol name")
+        .def_ro("uid", &lifted_symbolic_partition::uid, "Identity used in this elimination graph")
+        .def_ro("source_uid", &lifted_symbolic_partition::source_uid, "Identity of the authored source handle")
+        .def_ro("field", &lifted_symbolic_partition::field, "Solver field assigned to the partition")
+        .def_ro("offset", &lifted_symbolic_partition::offset, "Starting row or column in the packed system")
+        .def_ro("size", &lifted_symbolic_partition::size, "Partition dimension");
+    nb::class_<lifted_symbolic_block>(
+        lifted_class, "block",
+        "Shaped MX Jacobian block exposed to an elimination-graph builder; structural zeros keep their full shape.")
         .def_prop_ro("mx",
                      [](const lifted_symbolic_block &block) {
                          return block.value;
-                     })
+                     }, "CasADi MX value of this block")
         .def(
             "param",
             [](const lifted_symbolic_block &block,
@@ -293,9 +350,11 @@ void register_submodule_functional(nb::module_ &m) {
                     nb::cast<sym::default_val_t>(default_value), name, dim);
             },
             nb::arg("default_val") = nb::none(), nb::arg("name") = "",
-            nb::arg("dim") = 1)
+            nb::arg("dim") = 1,
+            "Create or reuse a node-local elimination parameter associated with this block")
         .def("rows", &lifted_symbolic_block::rows,
-             nb::arg("begin"), nb::arg("end"))
+             nb::arg("begin"), nb::arg("end"),
+             "Return a row slice while preserving elimination metadata")
         .def(
             "add_diag",
             [](const lifted_symbolic_block &block, const nb::handle &value,
@@ -308,76 +367,100 @@ void register_submodule_functional(nb::module_ &m) {
                 return block.add_diag(*parameter);
             },
             nb::arg("parameter"), nb::arg("name") = "",
-            nb::arg("dim") = 1);
-    nb::class_<lifted_symbolic_factor>(lifted_class, "factor")
+            nb::arg("dim") = 1,
+            "Add a scalar or vector parameter to the block diagonal and return the resulting MX matrix");
+    nb::class_<lifted_symbolic_factor>(
+        lifted_class, "factor",
+        "Reusable symbolic factorization handle; repeated solves share one runtime factorization.")
         .def_prop_ro("matrix",
                      [](const lifted_symbolic_factor &factor) {
                          return factor.matrix;
-                     })
+                     }, "Matrix represented by this factorization")
         .def("solve", &lifted_symbolic_factor::solve,
-             nb::arg("rhs"));
-    nb::class_<lifted_symbolic_system>(lifted_class, "system")
+             nb::arg("rhs"),
+             "Solve the factored system for one or more right-hand sides");
+    nb::class_<lifted_symbolic_system>(
+        lifted_class, "system",
+        "Packed symbolic ``[dynamics; lifted equalities]`` system passed to a user elimination builder.")
         .def_prop_ro("dyn_residual",
-                     [](const lifted_symbolic_system &s) { return s.dyn_residual; })
+                     [](const lifted_symbolic_system &s) { return s.dyn_residual; },
+                     "Packed dynamics residual")
         .def_prop_ro("lift_residual",
-                     [](const lifted_symbolic_system &s) { return s.lift_residual; })
+                     [](const lifted_symbolic_system &s) { return s.lift_residual; },
+                     "Packed lifted-equality residual")
         .def_prop_ro("action_rhs",
-                     [](const lifted_symbolic_system &s) { return s.action_rhs; })
+                     [](const lifted_symbolic_system &s) { return s.action_rhs; },
+                     "Forward-action right-hand side used for recovery and refinement")
         .def("jac",
              [](const lifted_symbolic_system &system,
                 const generic_constr &equation,
                 py_var_inarg_wrapper variable) {
                  return system.jac(equation, (sym &)variable);
              },
-             nb::arg("equation"), nb::arg("variable"))
+             nb::arg("equation"), nb::arg("variable"),
+             "Return the Jacobian block selected by authored equation and variable handles")
         .def("jac",
              [](const lifted_symbolic_system &system,
                 const cs::SX &equation, py_var_inarg_wrapper variable) {
                  return system.jac(equation, (sym &)variable);
              },
-             nb::arg("equation"), nb::arg("variable"))
+             nb::arg("equation"), nb::arg("variable"),
+             "Return the Jacobian block of an SX equation with respect to a variable")
         .def("residual",
              [](const lifted_symbolic_system &system,
                 const generic_constr &equation) {
                  return system.residual(equation);
              },
-             nb::arg("equation"))
+             nb::arg("equation"), "Return the residual block for an authored constraint handle")
         .def("residual",
              [](const lifted_symbolic_system &system,
                 const std::string &equation) {
                  return system.residual(equation);
              },
-             nb::arg("equation"))
-        .def_ro("equations", &lifted_symbolic_system::equations)
-        .def_ro("variables", &lifted_symbolic_system::variables)
-        .def("h_l", &lifted_symbolic_system::h_l)
-        .def("h_x", &lifted_symbolic_system::h_x)
-        .def("h_u", &lifted_symbolic_system::h_u)
-        .def("h", &lifted_symbolic_system::h)
+             nb::arg("equation"), "Return a residual block by its expression name")
+        .def_ro("equations", &lifted_symbolic_system::equations,
+                "Packed dynamics and lifted-equality row partitions")
+        .def_ro("variables", &lifted_symbolic_system::variables,
+                "Packed predicted-state and lifted-variable column partitions")
+        .def("h_l", &lifted_symbolic_system::h_l, "Return the Jacobian with respect to packed eliminated variables [y; l]")
+        .def("h_x", &lifted_symbolic_system::h_x, "Return the Jacobian with respect to the current state")
+        .def("h_u", &lifted_symbolic_system::h_u, "Return the Jacobian with respect to uneliminated interval inputs")
+        .def("h", &lifted_symbolic_system::h, "Return the packed residual [dyn; lift]")
         .def("solve", &lifted_symbolic_system::solve,
-             nb::arg("matrix"), nb::arg("spd") = false)
+             nb::arg("matrix"), nb::arg("spd") = false,
+             "Create a reusable symbolic factorization; set spd only for a symmetric positive-definite matrix")
         .def("eliminate", &lifted_symbolic_system::eliminate,
              nb::arg("solve"), nb::arg("intermediates") =
-                 std::vector<lifted_symbolic_intermediate>{});
-    nb::class_<lifted_symbolic_intermediate>(lifted_class, "intermediate")
+                 std::vector<lifted_symbolic_intermediate>{},
+             "Apply one unsigned inverse action to all required projection columns and return the completed elimination graph");
+    nb::class_<lifted_symbolic_intermediate>(
+        lifted_class, "intermediate",
+        "Named MX intermediate cached and exposed by a lifted elimination graph.")
         .def(nb::init<std::string, cs::MX>(), nb::arg("name"),
-             nb::arg("value"))
-        .def_rw("name", &lifted_symbolic_intermediate::name)
-        .def_rw("value", &lifted_symbolic_intermediate::value);
-    nb::class_<lifted_symbolic_projection>(lifted_class, "elimination")
+             nb::arg("value"), "Create a named symbolic intermediate")
+        .def_rw("name", &lifted_symbolic_intermediate::name, "Intermediate name")
+        .def_rw("value", &lifted_symbolic_intermediate::value, "Intermediate MX expression");
+    nb::class_<lifted_symbolic_projection>(
+        lifted_class, "elimination",
+        "Unsigned inverse responses returned by a lifted elimination-graph builder.")
         .def(nb::init<cs::MX, cs::MX, cs::MX,
                       std::vector<lifted_symbolic_intermediate>, cs::MX>(),
              nb::arg("response_x"), nb::arg("response_u"),
              nb::arg("response_residual"),
              nb::arg("intermediates"), nb::arg("response_action"))
-        .def_rw("response_x", &lifted_symbolic_projection::response_x)
-        .def_rw("response_u", &lifted_symbolic_projection::response_u)
+        .def_rw("response_x", &lifted_symbolic_projection::response_x,
+                "Response h_l^-1 h_x")
+        .def_rw("response_u", &lifted_symbolic_projection::response_u,
+                "Response h_l^-1 h_u")
         .def_rw("response_residual",
-                &lifted_symbolic_projection::response_residual)
+                &lifted_symbolic_projection::response_residual,
+                "Response h_l^-1 h")
         .def_rw("intermediates",
-                &lifted_symbolic_projection::intermediates)
+                &lifted_symbolic_projection::intermediates,
+                "Named symbolic intermediates to cache at runtime")
         .def_rw("response_action",
-                &lifted_symbolic_projection::response_action);
+                &lifted_symbolic_projection::response_action,
+                "Forward inverse action used for recovery and refinement");
     lifted_class
         .def(
             "with_elimination_graph",
@@ -408,21 +491,25 @@ void register_submodule_functional(nb::module_ &m) {
                 for (const constr &constraint : self.subconstraints())
                     result.emplace_back(constraint);
                 return result;
-            })
+            }, "Hard equalities owned by this coupled elimination group")
         .def_prop_ro(
             "lifted_args",
             [](generic_lifted &self) -> const std::vector<var> & {
                 return self.lifted_args();
             },
-            nb::rv_policy::reference_internal)
+            nb::rv_policy::reference_internal,
+            "Ordinary interval variables whose local QP directions are eliminated by this group")
         .def_prop_ro(
             "elimination_parameters",
             [](generic_lifted &self) -> const std::vector<var> & {
                 return self.elimination_parameters();
             },
-            nb::rv_policy::reference_internal);
+            nb::rv_policy::reference_internal,
+            "Node-local parameters created while authoring the elimination graph");
 
-    nb::class_<ineq_constr, generic_constr>(m, "ineq")
+    nb::class_<ineq_constr, generic_constr>(
+        m, "ineq",
+        "Hard inequality constraint handled by the interior-point method. Plain outputs mean residual <= 0; relational expressions are normalized automatically.")
         .def_static(
             "create",
             [](const std::string &name, const cs::SX &out, approx_order order, field_t field) {
@@ -430,13 +517,16 @@ void register_submodule_functional(nb::module_ &m) {
                     name, var_inarg_list{}, out, order, field));
             },
             nb::arg("name"), nb::arg("out"), nb::arg("order") = approx_order::first,
-            nb::arg("field") = field_t::__undefined)
+            nb::arg("field") = field_t::__undefined,
+            "Create an inequality from a residual or CasADi <, <=, >, or >= relation. Symbol arguments and the solver field are inferred")
         .def_static(
             "create",
             [](const std::string &name, approx_order order, size_t dim, field_t field) {
                 return std::shared_ptr<generic_constr>(ineq_constr::create(name, order, dim, field));
             },
-            nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined)
+            nb::arg("name"), nb::arg("order") = approx_order::first,
+            nb::arg("dim") = dim_tbd, nb::arg("field") = field_t::__undefined,
+            "Allocate a dimension-only inequality for an advanced custom runtime implementation")
         .def_static(
             "create",
             [](const std::string &name,
@@ -450,7 +540,8 @@ void register_submodule_functional(nb::module_ &m) {
                     cast_box_bound(ub), order, field));
             },
             nb::arg("name"), nb::arg("out"), nb::arg("lb"), nb::arg("ub"),
-            nb::arg("order") = approx_order::first, nb::arg("field") = field_t::__undefined)
+            nb::arg("order") = approx_order::first, nb::arg("field") = field_t::__undefined,
+            "Create elementwise lower and upper bounds on an arbitrary SX expression; bounds may be numeric or direct parameter symbols")
         .def_static(
             "bounds",
             [](const std::string &name,
@@ -470,12 +561,16 @@ void register_submodule_functional(nb::module_ &m) {
             },
             nb::arg("name"), nb::arg("value"), nb::arg("lb"), nb::arg("ub"),
             nb::arg("order") = approx_order::first, nb::arg("field") = field_t::__undefined,
-            "Create scalar or vector bounds directly on a variable");
+            "Create elementwise bounds directly on a variable. Scalar numeric bounds broadcast; vector bounds must match the variable dimension");
 
-    nb::class_<moto::pmm_constr, generic_constr>(m, "pmm_constr")
+    nb::class_<moto::pmm_constr, generic_constr>(
+        m, "pmm_constr",
+        "Soft equality constraint enforced by the proximal multiplier method.")
         .def_rw("rho", &moto::pmm_constr::rho, "Dual penalty weight for the proximal multiplier method");
 
-    nb::class_<generic_cost, generic_func>(m, "cost")
+    nb::class_<generic_cost, generic_func>(
+        m, "cost",
+        "Weighted tracking cost with node-local weight and reference parameters.")
         .def_static(
             "from_vector",
             [](const std::string &name, const cs::SX &value,
@@ -485,7 +580,18 @@ void register_submodule_functional(nb::module_ &m) {
                     cast_tracking_param(reference)));
             },
             nb::arg("name"), nb::arg("value"), nb::arg("weight") = 1.0,
-            nb::arg("reference") = 0.0)
+            nb::arg("reference") = 0.0,
+            R"doc(Create a weighted least-squares cost from a vector residual.
+
+The objective is ``0.5 * (value - reference).T * diag(weight) *
+(value - reference)``. Moto keeps the vector residual and automatically uses
+its weighted Gauss--Newton Hessian, avoiding exact second derivatives of a
+nonlinear residual. ``value`` must contain at least two elements.
+
+Numeric weights and references become node-local parameter symbols; scalars
+broadcast to the required dimension. Pass explicit ``moto.sym.params`` to
+share parameters between expressions. The resulting handles are available as
+``cost.weight`` and ``cost.reference``.)doc")
         .def_static(
             "from_scalar",
             [](const std::string &name, const cs::SX &value,
@@ -495,30 +601,52 @@ void register_submodule_functional(nb::module_ &m) {
                     cast_tracking_param(reference)));
             },
             nb::arg("name"), nb::arg("value"), nb::arg("weight") = 1.0,
-            nb::arg("reference") = 0.0)
-        .def_prop_ro("weight", &generic_cost::weight)
-        .def_prop_ro("reference", &generic_cost::reference);
+            nb::arg("reference") = 0.0,
+            R"doc(Create a scalar tracking cost using exact differentiation.
 
-    nb::class_<dense_dynamics, generic_dynamics>(m, "dense_dynamics")
+The scalar objective is ``0.5 * weight * (value - reference)**2``. Unlike
+``from_vector``, this produces a scalar cost expression and Moto uses its
+ordinary exact second-order approximation. For a nonlinear scalar residual,
+that exact Hessian can be indefinite; use ``from_vector`` when a
+Gauss--Newton residual model is intended.
+
+Numeric weight and reference values become node-local parameter symbols and
+remain adjustable through ``cost.weight`` and ``cost.reference``.)doc")
+        .def_prop_ro("weight", &generic_cost::weight,
+                     "Node-local diagonal weight parameter; change it through ``node.value[cost.weight]`` without recompiling")
+        .def_prop_ro("reference", &generic_cost::reference,
+                     "Node-local tracking reference; change it through ``node.value[cost.reference]`` without recompiling");
+
+    nb::class_<dense_dynamics, generic_dynamics>(
+        m, "dense_dynamics",
+        "General implicit dynamics residual projected at runtime by a dense LU factorization of its next-state Jacobian.")
         .def_static(
             "create",
             [](const std::string &name, const cs::SX &out, approx_order order) {
                 return std::make_shared<dense_dynamics>(name, out, order);
             },
-            nb::arg("name"), nb::arg("out"), nb::arg("order") = approx_order::first)
+            nb::arg("name"), nb::arg("out"), nb::arg("order") = approx_order::first,
+            "Create dense implicit dynamics h(x, u, xn) = 0. The Jacobian with respect to xn must be square and nonsingular at runtime")
         .def_static(
             "create",
             [](const std::string &name, approx_order order, size_t dim) {
                 return std::make_shared<dense_dynamics>(name, order, dim);
             },
-            nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd)
-        .def("mark_shared_inputs", &dense_dynamics::mark_shared_inputs, nb::arg("shared_inputs"));
+            nb::arg("name"), nb::arg("order") = approx_order::first, nb::arg("dim") = dim_tbd,
+            "Allocate dimension-only dense dynamics for an advanced custom runtime implementation")
+        .def("mark_shared_inputs", &dense_dynamics::mark_shared_inputs,
+             nb::arg("shared_inputs"),
+             "Mark input symbols whose projected Jacobian columns are shared with neighboring solver stages");
 
     auto euler = nb::class_<semi_implicit_euler, generic_dynamics>(
-        m, "semi_implicit_euler");
-    nb::enum_<semi_implicit_euler::state_t>(euler, "state")
-        .value("pos", semi_implicit_euler::state_t::pos)
-        .value("pos_vel", semi_implicit_euler::state_t::pos_vel);
+        m, "semi_implicit_euler",
+        "Structured dynamics using a pre-generated semi-implicit Euler projection instead of a dense next-state solve.");
+    nb::enum_<semi_implicit_euler::state_t>(
+        euler, "state", "State layout used by the structured Euler projection.")
+        .value("pos", semi_implicit_euler::state_t::pos,
+               "Position-only kinematic state")
+        .value("pos_vel", semi_implicit_euler::state_t::pos_vel,
+               "Complete position-and-velocity state with semi-implicit block structure");
     euler
         .def_static(
             "create",
@@ -529,7 +657,9 @@ void register_submodule_functional(nb::module_ &m) {
             },
             nb::arg("name"), nb::arg("out"),
             nb::arg("state") = semi_implicit_euler::state_t::pos_vel,
-            nb::arg("order") = approx_order::first)
+            nb::arg("order") = approx_order::first,
+            "Create structured Euler dynamics from a residual written on current x, interval u, and terminal xn")
         .def("mark_shared_inputs", &semi_implicit_euler::mark_shared_inputs,
-             nb::arg("shared_inputs"));
+             nb::arg("shared_inputs"),
+             "Mark input symbols whose projected Jacobian columns are shared with neighboring solver stages");
 }

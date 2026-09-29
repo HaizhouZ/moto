@@ -56,6 +56,8 @@ void backup_trial_state(node_data *data);
  * @param data data base
  */
 void restore_trial_state(node_data *data);
+void backup_watchdog_state(node_data *data);
+void restore_watchdog_state(node_data *data);
 /**
  * @brief prepare for the first-order primal correction and call to apply_corrector_step on each soft constraint
  * @details it will set prim_corr[__x] to zero and swap the active stage gradient with the
