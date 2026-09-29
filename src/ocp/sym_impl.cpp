@@ -142,9 +142,12 @@ void sym::finalize_impl() {
                 int_gen_task.func_name = name_ + "_integrate";
                 int_gen_task.sx_inputs = {*this, dx, step};
                 int_gen_task.sx_output = out;
-                workers.add(std::move(utils::cs_codegen::generate_and_compile(int_gen_task)
-                                          .add_callback([this, func_name = int_gen_task.func_name]() {
-                                              ext_func f(func_name);
+                auto int_jobs = utils::cs_codegen::generate_and_compile(int_gen_task);
+                auto int_artifact_dir = int_gen_task.eval_artifact_dir;
+                workers.add(std::move(int_jobs
+                                          .add_callback([this, func_name = int_gen_task.func_name,
+                                                         int_artifact_dir]() {
+                                              ext_func f(func_name, *int_artifact_dir);
                                               integrator_.reset(new std::function(
                                                   [f = std::move(f)](vector_ref x, vector_ref dx, vector_ref out, scalar_t alpha) {
                                                       std::vector<vector_ref> inputs = {x, dx, vector_ref(mapped_vector(&alpha, 1))};
@@ -167,9 +170,12 @@ void sym::finalize_impl() {
                 diff_gen_task.func_name = name_ + "_difference";
                 diff_gen_task.sx_inputs = {x1, x0};
                 diff_gen_task.sx_output = out;
-                workers.add(std::move(utils::cs_codegen::generate_and_compile(diff_gen_task)
-                                          .add_callback([this, func_name = diff_gen_task.func_name]() {
-                                              ext_func f(func_name);
+                auto diff_jobs = utils::cs_codegen::generate_and_compile(diff_gen_task);
+                auto diff_artifact_dir = diff_gen_task.eval_artifact_dir;
+                workers.add(std::move(diff_jobs
+                                          .add_callback([this, func_name = diff_gen_task.func_name,
+                                                         diff_artifact_dir]() {
+                                              ext_func f(func_name, *diff_artifact_dir);
                                               differencer_.reset(new std::function(
                                                   [f = std::move(f)](vector_ref x1, vector_ref x0, vector_ref out) {
                                                       std::vector<vector_ref> inputs = {x1, x0};

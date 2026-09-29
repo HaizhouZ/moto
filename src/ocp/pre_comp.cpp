@@ -404,7 +404,12 @@ void generic_pre_compute::load_external_impl(const std::string &path) {
         (gen_.task_ && !gen_.task_->func_name.empty())
             ? gen_.task_->func_name
             : name_;
-    ext_func eval(func_name, path);
+    const std::string artifact_path =
+        gen_.task_ && gen_.task_->eval_artifact_dir &&
+                !gen_.task_->eval_artifact_dir->empty()
+            ? *gen_.task_->eval_artifact_dir
+            : path;
+    ext_func eval(func_name, artifact_path);
     std::vector<size_t> output_indices;
     output_indices.reserve(runtime_outputs_.size());
     for (const var &output : runtime_outputs_) {
