@@ -69,6 +69,23 @@ sym::sym(const std::string &name, size_t dim, field_t type, default_val_t defaul
         throw std::runtime_error(fmt::format("Invalid field {} for symbolic variable {}", type, name));
     set_default_value(default_val);
 }
+void sym::validate_lifted_role() const {
+    if (field_ == __l)
+        return;
+    if (field_ != __u)
+        throw std::invalid_argument(fmt::format(
+            "Lifted variable {} must be an ordinary interval input, got {}",
+            name(), field::name(field_)));
+    if (finalized_)
+        throw std::logic_error(fmt::format(
+            "Cannot mark variable {} as lifted after it was finalized; "
+            "create the elimination group before adding expressions to a stage",
+            name()));
+}
+void sym::assign_lifted_role() {
+    validate_lifted_role();
+    field_ = __l;
+}
 var sym::clone(const std::string &name) const {
     if (field_ == __x || field_ == __y)
         return clone_states<sym>(name);

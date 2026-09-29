@@ -105,7 +105,7 @@ class PinocchioCasadiModel(cpin.Model):
             moto.sym.inputs(f"{self.name}_a", self.nv)
             if acceleration_control
             else (
-                moto.sym.lifted(f"{self.name}_a", self.nv)
+                moto.sym.inputs(f"{self.name}_a", self.nv)
                 if lifted_contact and lifted_acceleration
                 else (self.vn - self.v) / dt
             )
@@ -277,7 +277,7 @@ class ContactModel:
         self.jacobians = robot.frame_translational_jacobians(self.frame_ids)
         self.impulses = (
             [
-                (moto.sym.lifted if lifted_impulses else moto.sym.inputs)(
+                moto.sym.inputs(
                     f"{force_prefix}_{name}",
                     3,
                     default_val=np.asarray(force_default),
@@ -513,7 +513,7 @@ class ContactRobotModel(PinocchioCasadiModel):
                 self.rnea_residual = (
                     self.rnea - self.generalized_torque(self.tq) * self.dt
                 )
-                self.lifting = moto.lifted.create(
+                self.lifting = moto.constr.create(
                     f"{self.name}_rnea_contact_lifting",
                     cs.vcat(
                         [
@@ -521,7 +521,6 @@ class ContactRobotModel(PinocchioCasadiModel):
                             *contact_rows,
                         ]
                     ),
-                    [self.a, *self.contacts.impulses],
                     order=moto.approx_order.approx_order_first,
                 )
             else:
@@ -534,10 +533,9 @@ class ContactRobotModel(PinocchioCasadiModel):
                 self.dyn = moto.semi_implicit_euler.create(
                     f"{self.name}_lifted_rnea", dynamics_residual
                 )
-                self.lifting = moto.lifted.create(
+                self.lifting = moto.constr.create(
                     f"{self.name}_contact_lifting",
                     cs.vcat(contact_rows),
-                    self.contacts.impulses,
                     order=moto.approx_order.approx_order_first,
                 )
         elif not acceleration_control:

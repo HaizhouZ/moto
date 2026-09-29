@@ -12,7 +12,8 @@ The documentation is organized by task:
 - Model [manifold states and structured Euler dynamics](modeling/manifolds.md).
 - [Reuse shared symbolic work](advanced/symbolic_precompute.md) across costs,
   constraints, stages, and structurally equivalent scenes.
-- Supply [analytic derivatives](advanced/analytic_derivatives.md) or a
+- Supply [analytic derivatives](advanced/analytic_derivatives.md), or mark
+  ordinary variables and constraints for structured local elimination with a
   [custom lifted elimination graph](advanced/lifted_elimination.md).
 - Browse the generated [Python API](reference/python.md) and
   [C++ API](reference/cpp.md).

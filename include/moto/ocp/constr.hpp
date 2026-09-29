@@ -9,6 +9,7 @@
 #include <variant>
 
 namespace moto {
+class generic_dynamics;
 class generic_constr;                         ///< forward declaration
 using constr = utils::shared<generic_constr>; ///< generic constr holder
 
@@ -24,6 +25,7 @@ cs::SX normalize_constraint_expression(const cs::SX &out,
  * @brief constraint approximation with multipliers (and slack variables)
  */
 class generic_constr : public generic_func {
+    friend class generic_dynamics;
   public:
     struct residual_summary {
         scalar_t inf = 0.;
@@ -56,6 +58,10 @@ class generic_constr : public generic_func {
     };
 
   protected:
+    /// Assign the solver-internal lifted-equation role. Only an elimination
+    /// group may call this on an ordinary hard equality.
+    void validate_lifted_role() const;
+    void assign_lifted_role();
     /// @brief type hint for the constraint
     struct field_hint {
         utils::optional_bool is_eq = true; ///< true if equality constraint, false if inequality constraint, default is true

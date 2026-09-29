@@ -4,6 +4,23 @@
 #include <cassert>
 
 namespace moto {
+void generic_constr::validate_lifted_role() const {
+    if (field_ == __lift)
+        return;
+    if (finalized_)
+        throw std::logic_error(fmt::format(
+            "Cannot mark constraint {} as lifted after it was finalized; "
+            "create the elimination group before adding expressions to a stage",
+            name()));
+    if (field_ != __undefined && field_ != __eq_x && field_ != __eq_xu)
+        throw std::invalid_argument(fmt::format(
+            "Lifted constraint {} must be an ordinary hard equality, got {}",
+            name(), field::name(field_)));
+}
+void generic_constr::assign_lifted_role() {
+    validate_lifted_role();
+    field_ = __lift;
+}
 namespace {
 bool is_inequality_relation(casadi_int op) {
     return op == casadi::OP_LT || op == casadi::OP_LE;
@@ -112,8 +129,9 @@ void generic_constr::finalize_impl() {
                 _field = __dyn;
             else if (has_[__l])
                 throw std::runtime_error(fmt::format(
-                    "constraint {} contains lifted variables; construct it with "
-                    "moto.lifted.create() so its elimination group is explicit",
+                    "constraint {} contains variables owned by a lifted "
+                    "elimination group; pass this ordinary constraint in "
+                    "with_elimination_graph(..., constraints=[...])",
                     name_));
             else if (has_[__u] && !has_[__y])
                 _field = field_hint_.is_soft ? __eq_xu_soft : __eq_xu;

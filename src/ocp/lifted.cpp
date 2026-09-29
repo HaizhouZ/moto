@@ -585,19 +585,6 @@ lifted_symbolic_projection lifted_symbolic_system::eliminate(
     };
 }
 
-implicit_lifted::implicit_lifted(const std::string &name, const cs::SX &out,
-                                 const var_inarg_list &lifted_args,
-                                 approx_order order)
-    : generic_dynamics(name, out, order, __lift) {
-    mark_lifted(lifted_args);
-}
-
-lifted implicit_lifted::create(const std::string &name, const cs::SX &out,
-                               const var_inarg_list &lifted_args,
-                               approx_order order) {
-    return std::make_shared<implicit_lifted>(name, out, lifted_args, order);
-}
-
 void generic_dynamics::solve_stage_lifted_system(
     func_approx_data &, const matrix &, matrix &, bool) const {
     throw std::logic_error(
@@ -700,19 +687,34 @@ void generic_dynamics::install_elimination_graph(
         std::make_shared<elimination_parameter_state>();
 }
 
-lifted generic_dynamics::set_elimination_graph(
-    lifted_elimination_builder builder) const {
-    return with_elimination_graph(std::move(builder));
-}
-
 lifted generic_dynamics::with_elimination_graph(
     lifted_elimination_builder builder,
-    const std::vector<constr> &subconstraints) const {
+    const var_inarg_list &variables,
+    const std::vector<constr> &constraints) const {
     if (!builder)
         throw std::invalid_argument("lifted elimination graph builder is empty");
+    if (variables.empty())
+        throw std::invalid_argument(
+            "lifted elimination graph requires at least one selected variable");
+    if (constraints.empty())
+        throw std::invalid_argument(
+            "lifted elimination graph requires at least one selected constraint");
+    for (const sym &variable : variables)
+        variable.validate_lifted_role();
+    for (const constr &constraint : constraints) {
+        if (!constraint)
+            throw std::invalid_argument(
+                "lifted elimination graph constraint is null");
+        constraint->validate_lifted_role();
+    }
+    for (sym &variable : variables)
+        variable.assign_lifted_role();
+    for (const constr &constraint : constraints)
+        constraint->assign_lifted_role();
     auto result =
         std::make_shared<generated_lifted>(*this, std::move(builder));
-    for (const constr &constraint : subconstraints)
+    result->mark_lifted(variables);
+    for (const constr &constraint : constraints)
         result->add_subconstraint(constraint);
     return result;
 }
@@ -831,6 +833,9 @@ void generic_dynamics::finalize_impl() {
         for (const sym &arg : in_args_)
             if (arg.field() == __y)
                 predicted_states.push_back(arg);
+        for (const sym &arg : lifted_args_)
+            if (arg.field() == __l)
+                predicted_states.push_back(arg);
         set_lifted_arguments(predicted_states);
 
         var_list reordered;
@@ -854,11 +859,16 @@ void generic_dynamics::finalize_impl() {
                 "Lifted argument {} is not an argument of {}",
                 arg.name(), name()));
     }
-    if (lifted_tdim() != dim())
+    size_t predicted_tdim = 0;
+    for (const sym &arg : lifted_args_)
+        if (arg.field() == __y)
+            predicted_tdim += arg.tdim();
+    const size_t square_tdim = dynamics_group ? predicted_tdim : lifted_tdim();
+    if (square_tdim != dim())
         throw std::runtime_error(fmt::format(
             "Dynamics/lifting group {} requires a square lifted Jacobian: "
             "lifted tangent dimension={}, residual dimension={}",
-            name(), lifted_tdim(), dim()));
+            name(), square_tdim, dim()));
 
     if (dynamics_group) prepare_dynamics_codegen();
     generic_constr::finalize_impl();

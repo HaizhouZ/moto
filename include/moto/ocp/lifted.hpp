@@ -169,14 +169,13 @@ class generic_dynamics : public generic_constr {
     void mark_shared_inputs(const var_inarg_list &args);
     bool input_shared(const sym &s) const;
 
-    /// Return an ordinary generic_lifted expression whose dynamics interfaces
-    /// are implemented by the supplied MX elimination graph. The source
-    /// expression is not mutated. Parameters declared by symbolic blocks are
-    /// ordinary __p dependencies of the returned expression.
-    lifted set_elimination_graph(lifted_elimination_builder builder) const;
+    /// Return a dynamics group whose interfaces are implemented by the
+    /// supplied MX elimination graph. Selected ordinary handles retain their
+    /// identity and receive the solver-internal lifted storage role.
     lifted with_elimination_graph(
         lifted_elimination_builder builder,
-        const std::vector<constr> &subconstraints = {}) const;
+        const var_inarg_list &variables,
+        const std::vector<constr> &constraints) const;
     bool has_elimination_graph() const {
       return static_cast<bool>(elimination_builder_);
     }
@@ -242,38 +241,6 @@ class generic_dynamics : public generic_constr {
     void substitute(const sym &arg, const sym &rhs) override;
     void finalize_impl() override;
     virtual void prepare_dynamics_codegen() {}
-};
-
-/// CasADi-backed lifted equality group. Its residual rows are paired with the
-/// supplied lifted variables; the stage lifting operator owns elimination.
-class implicit_lifted : public generic_dynamics {
-  public:
-    struct approx_data : public generic_constr::approx_data {
-      explicit approx_data(generic_constr::approx_data &&rhs)
-          : generic_constr::approx_data(std::move(rhs)) {}
-    };
-
-    implicit_lifted(const std::string &name, const cs::SX &out,
-                    const var_inarg_list &lifted_args,
-                    approx_order order = approx_order::second);
-    static lifted create(const std::string &name, const cs::SX &out,
-                         const var_inarg_list &lifted_args,
-                         approx_order order = approx_order::second);
-
-    void compute_project_jacobians(func_approx_data &) const override {}
-    void compute_project_residual(func_approx_data &) const override {}
-    void apply_lifted_jacobian_inverse_transpose(
-        func_approx_data &, vector_ref, vector_ref) const override {
-        throw std::logic_error(
-            "implicit_lifted inverse action belongs to the stage lifting operator");
-    }
-    func_approx_data_ptr_t create_approx_data(
-        sym_data &primal, lag_data &raw, shared_data &shared) const override {
-      return func_approx_data_ptr_t(
-          make_approx<implicit_lifted>(primal, raw, shared));
-    }
-  protected:
-    clone_ptr clone() const override { return new implicit_lifted(*this); }
 };
 
 } // namespace moto

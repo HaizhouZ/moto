@@ -10,11 +10,11 @@ enum field_t : size_t {
     __x = 0,
     __u,
     __y,
-    __l,          // user-authored lifted primal variables
+    __l,          // internal storage for group-selected lifted inputs
     __s,          // solver-managed shared slack storage (non-primal)
     __p,          // non-decision parameters
     __dyn,        // dynamic model
-    __lift,       // grouped lifted-variable equality constraints
+    __lift,       // internal storage for group-selected equalities
     __eq_x,       // "state equality constraints"
     __eq_xu,      // "input-state equality constraints"
     __ineq_x,     // "state inequality constraints"

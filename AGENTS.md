@@ -140,7 +140,7 @@ Primary primal fields:
 - `__x`: current state
 - `__u`: interval input
 - `__y`: predicted next-state copy used by solver algebra
-- `__l`: explicit user-authored lifted primal variables
+- `__l`: internal storage for ordinary inputs selected by an elimination group
 
 Other symbol storage:
 
@@ -284,10 +284,14 @@ Do not put graph topology decisions into `generic_func::finalize_impl()` or
 
 ## Lifted Groups, Structured Euler, And Dense Dynamics
 
-`generic_dynamics` is the common dynamics/lifting group. Its active `__y`
-arguments and any explicitly marked `__l` arguments remain authored nonlinear
-primals, while their local QP directions are eliminated relative to `x/u`.
-Remap/substitution must preserve that lifted identity.
+`generic_dynamics` is the common dynamics/lifting group. Users create ordinary
+inputs and equalities, then select them through
+`with_elimination_graph(builder, variables, constraints)`. Selection assigns
+the internal `__l`/`__lift` storage roles without changing handle identity, so
+costs, bounds, warm starts, and activation continue using the original handles.
+There is no public `sym.lifted` or `lifted.create` authoring path. The active
+`__y` arguments and selected variables remain authored nonlinear primals while
+their local QP directions are eliminated relative to `x/u`.
 
 A stage with explicit `__l` owns grouped `__lift` subconstraints and must
 provide one MX elimination graph for the coupled rows `[__dyn; __lift]` and

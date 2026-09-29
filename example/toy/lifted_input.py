@@ -20,7 +20,7 @@ TARGET = 3.0
 def main():
     x, xn = moto.sym.states("lifted_demo_x", 1)
     u = moto.sym.inputs("lifted_demo_u", 1)
-    lifted = moto.sym.lifted("lifted_demo_l", 1)
+    lifted = moto.sym.inputs("lifted_demo_l", 1)
 
     # y - x - l = 0 and l - u = 0.  The QP keeps l and both equality
     # multipliers in its authored model, but eliminates l together with y in
@@ -30,8 +30,8 @@ def main():
         xn.sx - x.sx - lifted.sx,
         moto.semi_implicit_euler.state.pos,
     )
-    lifting = moto.lifted.create(
-        "lifted_demo_constraint", lifted.sx - u.sx, [lifted]
+    lifting = moto.constr.create(
+        "lifted_demo_constraint", lifted.sx - u.sx
     )
     def elimination(system):
         def solve(rhs):
@@ -39,7 +39,9 @@ def main():
 
         return system.eliminate(solve)
 
-    dynamics = dynamics.with_elimination_graph(elimination, [lifting])
+    dynamics = dynamics.with_elimination_graph(
+        elimination, variables=[lifted], constraints=[lifting]
+    )
 
     stage = moto.stage()
     stage.add(dynamics)
