@@ -2,7 +2,8 @@ name: Documentation
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -10,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pages-${{ github.ref }}
+  group: pages
   cancel-in-progress: true
 
 jobs:
@@ -19,6 +20,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -33,24 +36,43 @@ jobs:
           sudo apt-get install --yes doxygen graphviz
           python -m pip install --requirement docs/requirements.txt
 
-      - name: Build tutorials and Python stub reference
+      - name: Validate current tutorials and Python stub reference
         run: sphinx-build -W --keep-going -b html docs/site docs/_build/html
 
-      - name: Build Doxygen C++ reference
+      - name: Validate current Doxygen C++ reference
         run: |
           cmake -E make_directory docs/_build/html/cpp
           doxygen docs/Doxyfile.pages
 
+      - name: Exercise versioned documentation assembly
+        if: github.event_name == 'pull_request'
+        run: |
+          python docs/build_versions.py \
+            --output docs/_build/versioned-smoke \
+            --branches dev \
+            --minimum-tag v999.0 \
+            --default-ref dev \
+            --base-path /moto/
+
+      - name: Build versioned documentation site
+        if: github.event_name != 'pull_request'
+        run: |
+          python docs/build_versions.py \
+            --output docs/_build/html \
+            --base-path /moto/
+
       - name: Configure GitHub Pages
+        if: github.event_name != 'pull_request'
         uses: actions/configure-pages@v5
 
       - name: Upload GitHub Pages artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v4
         with:
           path: docs/_build/html
 
   deploy:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     permissions:

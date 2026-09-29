@@ -1,0 +1,35 @@
+{% if moto_doc_versions %}
+<div class="moto-version-selector">
+  <style>
+    .moto-version-selector { padding: .75rem 1rem .5rem; }
+    .moto-version-selector label {
+      display: block; margin-bottom: .35rem; font-size: .75rem; font-weight: 600;
+    }
+    .moto-version-selector select { width: 100%; padding: .35rem .5rem; }
+  </style>
+  <label for="moto-doc-version">Documentation version</label>
+  <select id="moto-doc-version" aria-label="Documentation version">
+    {% for item in moto_doc_versions %}
+    <option value="{{ item.url }}"{% if item.name == moto_doc_current %} selected{% endif %}>{{ item.label }}</option>
+    {% endfor %}
+  </select>
+</div>
+<script>
+(() => {
+  const selector = document.getElementById("moto-doc-version");
+  if (!selector) return;
+
+  selector.addEventListener("change", () => {
+    const currentRoot = {{ moto_doc_current_url | tojson }};
+    const pathname = window.location.pathname;
+    const offset = pathname.indexOf(currentRoot);
+    const relativePage = offset >= 0
+      ? pathname.slice(offset + currentRoot.length)
+      : "";
+    window.location.assign(
+      selector.value + relativePage + window.location.search + window.location.hash
+    );
+  });
+})();
+</script>
+{% endif %}
