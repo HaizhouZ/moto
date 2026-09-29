@@ -55,7 +55,7 @@ class cost(func):
     @property
     def reference(self) -> var: ...
 
-class dense_dynamics(lifted):
+class dense_dynamics(dynamics):
     """Public API type ``moto.dense_dynamics``."""
 
     @overload
@@ -67,6 +67,158 @@ class dense_dynamics(lifted):
     def create(name: str, order: approx_order = approx_order.approx_order_first, dim: int = 0) -> dense_dynamics: ...
 
     def mark_shared_inputs(self, shared_inputs: Sequence[var]) -> None: ...
+
+class dynamics(constr):
+    """Public API type ``moto.dynamics``."""
+
+    class partition:
+        """Public API type ``moto.dynamics.partition``."""
+
+        @property
+        def name(self) -> str: ...
+
+        @property
+        def uid(self) -> int: ...
+
+        @property
+        def source_uid(self) -> int: ...
+
+        @property
+        def field(self) -> field: ...
+
+        @property
+        def offset(self) -> int: ...
+
+        @property
+        def size(self) -> int: ...
+
+    class block:
+        """Public API type ``moto.dynamics.block``."""
+
+        @property
+        def mx(self) -> casadi.MX: ...
+
+        def param(self, default_val: object | None = None, name: str = '', dim: int = 1) -> var: ...
+
+        def rows(self, begin: int, end: int) -> dynamics.block: ...
+
+        def add_diag(self, parameter: object, name: str = '', dim: int = 1) -> casadi.MX: ...
+
+    class factor:
+        """Public API type ``moto.dynamics.factor``."""
+
+        @property
+        def matrix(self) -> casadi.MX: ...
+
+        def solve(self, rhs: casadi.MX) -> casadi.MX: ...
+
+    class system:
+        """Public API type ``moto.dynamics.system``."""
+
+        @property
+        def dyn_residual(self) -> casadi.MX: ...
+
+        @property
+        def lift_residual(self) -> casadi.MX: ...
+
+        @property
+        def action_rhs(self) -> casadi.MX: ...
+
+        @overload
+        def jac(self, equation: constr, variable: var) -> dynamics.block: ...
+
+        @overload
+        def jac(self, equation: casadi.SX, variable: var) -> dynamics.block: ...
+
+        @overload
+        def residual(self, equation: constr) -> casadi.MX: ...
+
+        @overload
+        def residual(self, equation: str) -> casadi.MX: ...
+
+        @property
+        def equations(self) -> list[dynamics.partition]: ...
+
+        @property
+        def variables(self) -> list[dynamics.partition]: ...
+
+        def h_l(self) -> casadi.MX: ...
+
+        def h_x(self) -> casadi.MX: ...
+
+        def h_u(self) -> casadi.MX: ...
+
+        def h(self) -> casadi.MX: ...
+
+        def solve(self, matrix: casadi.MX, spd: bool = False) -> dynamics.factor: ...
+
+        def eliminate(self, solve: Callable[[casadi.MX], casadi.MX], intermediates: Sequence[dynamics.intermediate] = []) -> dynamics.elimination: ...
+
+    class intermediate:
+        """Public API type ``moto.dynamics.intermediate``."""
+
+        def __init__(self, name: str, value: casadi.MX) -> None: ...
+
+        @property
+        def name(self) -> str: ...
+
+        @name.setter
+        def name(self, arg: str, /) -> None: ...
+
+        @property
+        def value(self) -> casadi.MX: ...
+
+        @value.setter
+        def value(self, arg: casadi.MX, /) -> None: ...
+
+    class elimination:
+        """Public API type ``moto.dynamics.elimination``."""
+
+        def __init__(self, response_x: casadi.MX, response_u: casadi.MX, response_residual: casadi.MX, intermediates: Sequence[dynamics.intermediate], response_action: casadi.MX) -> None: ...
+
+        @property
+        def response_x(self) -> casadi.MX: ...
+
+        @response_x.setter
+        def response_x(self, arg: casadi.MX, /) -> None: ...
+
+        @property
+        def response_u(self) -> casadi.MX: ...
+
+        @response_u.setter
+        def response_u(self, arg: casadi.MX, /) -> None: ...
+
+        @property
+        def response_residual(self) -> casadi.MX: ...
+
+        @response_residual.setter
+        def response_residual(self, arg: casadi.MX, /) -> None: ...
+
+        @property
+        def intermediates(self) -> list[dynamics.intermediate]: ...
+
+        @intermediates.setter
+        def intermediates(self, arg: Sequence[dynamics.intermediate], /) -> None: ...
+
+        @property
+        def response_action(self) -> casadi.MX: ...
+
+        @response_action.setter
+        def response_action(self, arg: casadi.MX, /) -> None: ...
+
+    def with_elimination_graph(self, builder: Callable[[system], elimination], variables: Sequence[var], constraints: Sequence[constr]) -> dynamics:
+        """
+        Return a dynamics group whose selected ordinary interval inputs and hard equalities are marked for lifted local elimination. Configure the group before adding any selected handle to a stage. The original handles remain valid for costs, bounds, warm starts, and activation.
+        """
+
+    @property
+    def subconstraints(self) -> list[constr]: ...
+
+    @property
+    def lifted_args(self) -> list[var]: ...
+
+    @property
+    def elimination_parameters(self) -> list[var]: ...
 
 class endpoint:
     """Public API type ``moto.endpoint``."""
@@ -222,162 +374,6 @@ class ineq(constr):
     def bounds(name: str, value: var, lb: object, ub: object, order: approx_order = approx_order.approx_order_first, field: field = field.field___undefined) -> constr:
         """Create scalar or vector bounds directly on a variable"""
 
-class lifted(constr):
-    """Public API type ``moto.lifted``."""
-
-    class partition:
-        """Public API type ``moto.lifted.partition``."""
-
-        @property
-        def name(self) -> str: ...
-
-        @property
-        def uid(self) -> int: ...
-
-        @property
-        def source_uid(self) -> int: ...
-
-        @property
-        def field(self) -> field: ...
-
-        @property
-        def offset(self) -> int: ...
-
-        @property
-        def size(self) -> int: ...
-
-    class block:
-        """Public API type ``moto.lifted.block``."""
-
-        @property
-        def mx(self) -> casadi.MX: ...
-
-        def param(self, default_val: object | None = None, name: str = '', dim: int = 1) -> var: ...
-
-        def rows(self, begin: int, end: int) -> lifted.block: ...
-
-        def add_diag(self, parameter: object, name: str = '', dim: int = 1) -> casadi.MX: ...
-
-    class factor:
-        """Public API type ``moto.lifted.factor``."""
-
-        @property
-        def matrix(self) -> casadi.MX: ...
-
-        def solve(self, rhs: casadi.MX) -> casadi.MX: ...
-
-    class system:
-        """Public API type ``moto.lifted.system``."""
-
-        @property
-        def dyn_residual(self) -> casadi.MX: ...
-
-        @property
-        def lift_residual(self) -> casadi.MX: ...
-
-        @property
-        def action_rhs(self) -> casadi.MX: ...
-
-        @overload
-        def jac(self, equation: constr, variable: var) -> lifted.block: ...
-
-        @overload
-        def jac(self, equation: casadi.SX, variable: var) -> lifted.block: ...
-
-        @overload
-        def residual(self, equation: constr) -> casadi.MX: ...
-
-        @overload
-        def residual(self, equation: str) -> casadi.MX: ...
-
-        @property
-        def equations(self) -> list[lifted.partition]: ...
-
-        @property
-        def variables(self) -> list[lifted.partition]: ...
-
-        def h_l(self) -> casadi.MX: ...
-
-        def h_x(self) -> casadi.MX: ...
-
-        def h_u(self) -> casadi.MX: ...
-
-        def h(self) -> casadi.MX: ...
-
-        def solve(self, matrix: casadi.MX, spd: bool = False) -> lifted.factor: ...
-
-        def eliminate(self, solve: Callable[[casadi.MX], casadi.MX], intermediates: Sequence[lifted.intermediate] = []) -> lifted.elimination: ...
-
-    class intermediate:
-        """Public API type ``moto.lifted.intermediate``."""
-
-        def __init__(self, name: str, value: casadi.MX) -> None: ...
-
-        @property
-        def name(self) -> str: ...
-
-        @name.setter
-        def name(self, arg: str, /) -> None: ...
-
-        @property
-        def value(self) -> casadi.MX: ...
-
-        @value.setter
-        def value(self, arg: casadi.MX, /) -> None: ...
-
-    class elimination:
-        """Public API type ``moto.lifted.elimination``."""
-
-        def __init__(self, response_x: casadi.MX, response_u: casadi.MX, response_residual: casadi.MX, intermediates: Sequence[lifted.intermediate], response_action: casadi.MX) -> None: ...
-
-        @property
-        def response_x(self) -> casadi.MX: ...
-
-        @response_x.setter
-        def response_x(self, arg: casadi.MX, /) -> None: ...
-
-        @property
-        def response_u(self) -> casadi.MX: ...
-
-        @response_u.setter
-        def response_u(self, arg: casadi.MX, /) -> None: ...
-
-        @property
-        def response_residual(self) -> casadi.MX: ...
-
-        @response_residual.setter
-        def response_residual(self, arg: casadi.MX, /) -> None: ...
-
-        @property
-        def intermediates(self) -> list[lifted.intermediate]: ...
-
-        @intermediates.setter
-        def intermediates(self, arg: Sequence[lifted.intermediate], /) -> None: ...
-
-        @property
-        def response_action(self) -> casadi.MX: ...
-
-        @response_action.setter
-        def response_action(self, arg: casadi.MX, /) -> None: ...
-
-    @staticmethod
-    def create(name: str, out: casadi.SX, lifted_args: Sequence[var], order: approx_order = approx_order.approx_order_second) -> lifted: ...
-
-    def with_elimination_graph(self, builder: Callable[[system], elimination], subconstraints: Sequence[constr] = []) -> lifted: ...
-
-    def set_elimination_graph(self, builder: Callable[[system], elimination]) -> lifted: ...
-
-    def add_subconstraint(self, constraint: constr) -> None: ...
-
-    @property
-    def subconstraints(self) -> list[constr]: ...
-
-    @property
-    def lifted_args(self) -> list[var]: ...
-
-    @property
-    def elimination_parameters(self) -> list[var]: ...
-
 class pmm_constr(constr):
     """Public API type ``moto.pmm_constr``."""
 
@@ -429,7 +425,7 @@ class precompute(moto_pywrap.custom_func):
                 reuses its value and derivative caches.
         """
 
-class semi_implicit_euler(lifted):
+class semi_implicit_euler(dynamics):
     """Public API type ``moto.semi_implicit_euler``."""
 
     class state(enum.Enum):
@@ -1536,9 +1532,6 @@ class sym(expr):
     def inputs(name: str, dim: int = 1, default_val: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C')] | float | None = None) -> var: ...
 
     @staticmethod
-    def lifted(name: str, dim: int = 1, default_val: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C')] | float | None = None) -> var: ...
-
-    @staticmethod
     def params(name: str, dim: int = 1, default_val: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C')] | float | None = None) -> var: ...
 
     @staticmethod
@@ -1603,4 +1596,4 @@ class var(casadi.casadi.SX):
     def sx(self):
         """Underlying CasADi SX expression."""
 
-__all__: list = ['__version__', 'approx_order', 'casadi_manifold', 'constr', 'cost', 'dense_dynamics', 'endpoint', 'expr', 'field', 'func', 'ineq', 'lifted', 'pmm_constr', 'precompute', 'semi_implicit_euler', 'sqp', 'stage', 'stage_ocp', 'sym', 'var']
+__all__: list = ['__version__', 'approx_order', 'casadi_manifold', 'constr', 'cost', 'dense_dynamics', 'dynamics', 'endpoint', 'expr', 'field', 'func', 'ineq', 'pmm_constr', 'precompute', 'semi_implicit_euler', 'sqp', 'stage', 'stage_ocp', 'sym', 'var']

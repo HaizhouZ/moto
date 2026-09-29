@@ -201,6 +201,8 @@ def configure_lifted_contact_elimination(robot, regularization=1e-9):
         return system.eliminate(solve)
 
     robot.dyn = robot.dyn.with_elimination_graph(
-        elimination, [robot.lifting]
+        elimination,
+        variables=[robot.a, *robot.contacts.impulses],
+        constraints=[robot.lifting],
     )
     return robot.dyn

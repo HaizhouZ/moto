@@ -10,6 +10,7 @@
 
 namespace moto {
 class sym;
+class generic_dynamics;
 namespace cs = casadi;
 /**
  * @brief pointer wrapper of symbolic expressions like primal variables or parameters
@@ -49,6 +50,7 @@ class sym : public expr, public cs::SX {
     using default_val_none_t = std::monostate;
 
   protected:
+    friend class generic_dynamics;
     vector default_value_;
     var dual_;
     void finalize_impl() override;
@@ -120,15 +122,16 @@ class sym : public expr, public cs::SX {
         y->add_dep(x);
     }
 
+    /// Assign the solver-internal lifted role to an ordinary interval input.
+    /// This is intentionally only reachable through an elimination group.
+    void validate_lifted_role() const;
+    void assign_lifted_role();
+
   public:
     auto get_next_name() const { return name_ + next_suffix_; } ///< get the name of the next state variable
     /// @brief make a symbolic input
     static var inputs(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
         return global_registry::track(std::make_shared<sym>(name, dim, __u, default_val));
-    }
-    /// @brief make an explicit lifted primal variable
-    static var lifted(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {
-        return global_registry::track(std::make_shared<sym>(name, dim, __l, default_val));
     }
     /// @brief make a symbolic parameter
     static var params(const std::string &name, size_t dim = 1, default_val_t default_val = default_val_none_t()) {

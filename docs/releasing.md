@@ -40,3 +40,16 @@ import, runtime-codegen, and CMake-consumer tests pass.
 The first conda-forge release targets Linux. macOS and Windows require a
 portable replacement for the POSIX runtime compilation, locking, dynamic
 library naming, and loading paths before those platforms can be enabled.
+
+## Versioned documentation
+
+The documentation workflow publishes `main`, `dev`, and semantic release tags
+starting at `v2.3` into one GitHub Pages artifact. Each version's tutorials,
+Python API reference, and Doxygen C++ reference are built from the same commit.
+The site root redirects to `main`, and every version provides a selector for
+the other published refs.
+
+The workflow requires a full Git checkout because `docs/build_versions.py`
+uses temporary detached worktrees. A release tag is published automatically
+when it contains the current documentation tree; feature branches are not
+published.

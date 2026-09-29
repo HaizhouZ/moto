@@ -90,7 +90,7 @@ struct fixture {
 } // namespace
 
 TEST_CASE("generic lifted groups declare arbitrary primal lifted arguments") {
-  auto lifted_input = sym::lifted("generic_lifted_l", 2);
+  auto lifted_input = sym::symbol("generic_lifted_l", 2, __l);
   auto free_input = sym::inputs("generic_lifted_u", 1);
   const cs::SX &sl = lifted_input, &su = free_input;
   const cs::SX residual = sl + cs::SX::vertcat({su, 2. * su});
@@ -107,7 +107,7 @@ TEST_CASE("generic lifted groups declare arbitrary primal lifted arguments") {
   REQUIRE(group->is_lifted(lifted_input));
   REQUIRE_FALSE(group->is_lifted(free_input));
 
-  auto remapped_lifted = sym::lifted("generic_lifted_l_remapped", 2);
+  auto remapped_lifted = sym::symbol("generic_lifted_l_remapped", 2, __l);
   auto remapped_handle = group->remap_arguments(
       {{lifted_input, remapped_lifted}});
   const auto *remapped = dynamic_cast<const mock_lifted *>(
@@ -116,7 +116,7 @@ TEST_CASE("generic lifted groups declare arbitrary primal lifted arguments") {
   REQUIRE(remapped->is_lifted(remapped_lifted));
   REQUIRE_FALSE(remapped->is_lifted(lifted_input));
 
-  auto invalid_lifted = sym::lifted("generic_lifted_invalid", 1);
+  auto invalid_lifted = sym::symbol("generic_lifted_invalid", 1, __l);
   const cs::SX &si = invalid_lifted;
   auto invalid = std::make_shared<mock_lifted>(
       "generic_lifted_non_square", cs::SX::vertcat({si, si}),
@@ -131,7 +131,7 @@ TEST_CASE("generic lifted groups declare arbitrary primal lifted arguments") {
 TEST_CASE("lifted MX elimination graph preserves zero blocks and parameters") {
   auto [x, y] = sym::states("lifted_graph_x", 2);
   auto u = sym::inputs("lifted_graph_u", 2);
-  auto l = sym::lifted("lifted_graph_l", 2);
+  auto l = sym::inputs("lifted_graph_l", 2);
   var regularization;
   const cs::SX &sx = x, &sy = y, &su = u, &sl = l;
   const cs::SX dynamics_equation = sy - sx - sl;
@@ -141,9 +141,8 @@ TEST_CASE("lifted MX elimination graph preserves zero blocks and parameters") {
       "lifted_graph_dynamics", dynamics_equation,
       semi_implicit_euler::state_t::pos, approx_order::first);
   const dynamics source = dyn;
-  auto group = std::make_shared<implicit_lifted>(
-      "lifted_graph_constraint", group_equation,
-      var_inarg_list{l}, approx_order::first);
+  auto group = generic_constr::create(
+      "lifted_graph_constraint", group_equation, approx_order::first);
 
   bool saw_shaped_zero = false;
   dyn = dyn->with_elimination_graph(
@@ -175,7 +174,7 @@ TEST_CASE("lifted MX elimination graph preserves zero blocks and parameters") {
         };
         return system.eliminate(
             solve, {{"regularized_lift_l", regularized_lift_l}});
-      }, {group});
+      }, var_inarg_list{l}, std::vector<constr>{group});
 
   REQUIRE(dyn.get() != source.get());
   REQUIRE_FALSE(source->has_elimination_graph());
@@ -293,14 +292,13 @@ TEST_CASE("lifted MX elimination graph preserves zero blocks and parameters") {
 TEST_CASE("lifted graph artifact identity includes elimination algebra") {
   auto [x, y] = sym::states("lifted_identity_x", 2);
   auto u = sym::inputs("lifted_identity_u", 2);
-  auto l = sym::lifted("lifted_identity_l", 2);
+  auto l = sym::inputs("lifted_identity_l", 2);
   const cs::SX &sx = x, &sy = y, &su = u, &sl = l;
   dynamics source = std::make_shared<semi_implicit_euler>(
       "lifted_identity_dynamics", sy - sx - sl,
       semi_implicit_euler::state_t::pos, approx_order::first);
-  auto constraint = std::make_shared<implicit_lifted>(
-      "lifted_identity_constraint", sy - su, var_inarg_list{l},
-      approx_order::first);
+  auto constraint = generic_constr::create(
+      "lifted_identity_constraint", sy - su, approx_order::first);
   const auto make_problem = [&](scalar_t response_scale) {
     dynamics generated = source->with_elimination_graph(
         [response_scale](const lifted_symbolic_system &system) {
@@ -309,7 +307,7 @@ TEST_CASE("lifted graph artifact identity includes elimination algebra") {
             return response_scale * factor.solve(rhs);
           };
           return system.eliminate(solve);
-        }, {constraint});
+        }, var_inarg_list{l}, std::vector<constr>{constraint});
     auto problem = ocp::create();
     problem->add(*generated);
     problem->wait_until_ready();
@@ -332,21 +330,20 @@ TEST_CASE("integrated lifted presolve retains overlapping state Hessians") {
   auto [x, y] = sym::states("lifted_presolve_x");
   auto u = sym::inputs("lifted_presolve_u");
   auto extra_u = sym::inputs("lifted_presolve_extra_u", 2);
-  auto l = sym::lifted("lifted_presolve_l");
+  auto l = sym::inputs("lifted_presolve_l");
   const cs::SX &sx = x, &sy = y, &su = u, &seu = extra_u, &sl = l;
   dynamics dyn = std::make_shared<semi_implicit_euler>(
       "lifted_presolve_dyn", sy - sx - sl - seu(0) - 2. * seu(1),
       semi_implicit_euler::state_t::pos, approx_order::first);
-  auto lifting = std::make_shared<implicit_lifted>(
-      "lifted_presolve_constraint", sl - su, var_inarg_list{l},
-      approx_order::first);
+  auto lifting = generic_constr::create(
+      "lifted_presolve_constraint", sl - su, approx_order::first);
   dyn = dyn->with_elimination_graph(
       [](const lifted_symbolic_system &system) {
         const auto factor = system.solve(system.h_l());
         return system.eliminate(
             [&](const cs::MX &rhs) { return factor.solve(rhs); });
       },
-      {lifting});
+      var_inarg_list{l}, std::vector<constr>{lifting});
   auto state_0 = generic_cost::from_scalar(
       "lifted_presolve_state_0", var_inarg_list{},
       3. * (sx - 1.) * (sx - 1.));
@@ -402,20 +399,18 @@ TEST_CASE("lifted groups filter inactive registered subconstraints") {
   using namespace moto;
 
   auto [x, y] = sym::states("active_lifted_x", 2);
-  auto l0 = sym::lifted("active_lifted_l0", 1);
-  auto l1 = sym::lifted("active_lifted_l1", 1);
+  auto l0 = sym::inputs("active_lifted_l0", 1);
+  auto l1 = sym::inputs("active_lifted_l1", 1);
   const cs::SX &sx = x, &sy = y, &sl0 = l0, &sl1 = l1;
   dynamics source = std::make_shared<dense_dynamics>(
       "active_lifted_dynamics",
       cs::SX::vertcat({sy(0) - sx(0) - sl0,
                        sy(1) - sx(1) - sl1}),
       approx_order::first);
-  constr c0 = std::make_shared<implicit_lifted>(
-      "active_lifted_c0", sy(0), var_inarg_list{l0},
-      approx_order::first);
-  constr c1 = std::make_shared<implicit_lifted>(
-      "active_lifted_c1", sy(1), var_inarg_list{l1},
-      approx_order::first);
+  constr c0 = generic_constr::create(
+      "active_lifted_c0", sy(0), approx_order::first);
+  constr c1 = generic_constr::create(
+      "active_lifted_c1", sy(1), approx_order::first);
   c0->enable_if_all({l0});
   c1->enable_if_all({l1});
 
@@ -424,7 +419,7 @@ TEST_CASE("lifted groups filter inactive registered subconstraints") {
         const auto factor = system.solve(system.h_l());
         return system.eliminate(
             [&](const cs::MX &rhs) { return factor.solve(rhs); });
-      }, std::vector<constr>{c0, c1});
+      }, var_inarg_list{l0, l1}, std::vector<constr>{c0, c1});
 
   auto stage = stage_ocp::create();
   stage->add(*group);

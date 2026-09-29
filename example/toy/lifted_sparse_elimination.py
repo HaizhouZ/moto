@@ -19,7 +19,7 @@ DIM = 8
 def main():
     x, y = moto.sym.states("sparse_schur_x", DIM)
     u = moto.sym.inputs("sparse_schur_u", DIM)
-    lifted = moto.sym.lifted("sparse_schur_l", DIM)
+    lifted = moto.sym.inputs("sparse_schur_l", DIM)
 
     dynamics_residual = y.sx - x.sx - u.sx
     dynamics = moto.semi_implicit_euler.create(
@@ -28,8 +28,8 @@ def main():
         moto.semi_implicit_euler.state.pos,
     )
     constraint_residual = lifted.sx - y.sx
-    constraint = moto.lifted.create(
-        "sparse_schur_constraint", constraint_residual, [lifted]
+    constraint = moto.constr.create(
+        "sparse_schur_constraint", constraint_residual
     )
 
     def elimination(system):
@@ -55,7 +55,9 @@ def main():
 
         return system.eliminate(solve)
 
-    dynamics = dynamics.with_elimination_graph(elimination, [constraint])
+    dynamics = dynamics.with_elimination_graph(
+        elimination, variables=[lifted], constraints=[constraint]
+    )
 
     stage = moto.stage()
     stage.add(dynamics)

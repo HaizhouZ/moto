@@ -123,7 +123,7 @@ TEST_CASE("relational equality and inequality expressions become residuals") {
 
 TEST_CASE("inequalities involving lifted variables are interval constraints") {
     auto [x, y] = sym::states("lifted_inequality_x", 2);
-    auto l = sym::lifted("lifted_inequality_l", 2);
+    auto l = sym::symbol("lifted_inequality_l", 2, __l);
     (void)x;
     auto inequality = ineq_constr::create(
         "lifted_inequality", var_inarg_list{},

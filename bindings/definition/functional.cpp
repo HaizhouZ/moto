@@ -173,7 +173,6 @@ void register_submodule_functional(nb::module_ &m) {
         .def_static("symbol", &sym::symbol, nb::arg("name"), nb::arg("dim") = 1, nb::arg("field") = field_t::__undefined, nb::arg("default_val") = nb::none())
         .def_static("states", &sym::states, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
         .def_static("inputs", &sym::inputs, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
-        .def_static("lifted", &sym::lifted, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
         .def_static("params", &sym::params, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none())
         .def_static("usr_var", &sym::usr_var, nb::arg("name"), nb::arg("dim") = 1, nb::arg("default_val") = nb::none());
 
@@ -380,47 +379,27 @@ void register_submodule_functional(nb::module_ &m) {
         .def_rw("response_action",
                 &lifted_symbolic_projection::response_action);
     lifted_class
-        .def_static(
-            "create",
-            [](const std::string &name, const cs::SX &out,
-               const var_inarg_list &lifted_args, approx_order order) {
-                return std::shared_ptr<generic_lifted>(
-                    std::make_shared<implicit_lifted>(name, out, lifted_args,
-                                                      order));
-            },
-            nb::arg("name"), nb::arg("out"), nb::arg("lifted_args"),
-            nb::arg("order") = approx_order::second)
         .def(
             "with_elimination_graph",
             [](generic_lifted &self, lifted_elimination_builder builder,
+               const var_inarg_list &variables,
                const std::vector<std::shared_ptr<generic_constr>>
-                   &subconstraints) {
+                   &constraints) {
                 std::vector<constr> owned;
-                owned.reserve(subconstraints.size());
-                for (const auto &constraint : subconstraints)
+                owned.reserve(constraints.size());
+                for (const auto &constraint : constraints)
                     owned.emplace_back(constraint);
                 lifted result = self.with_elimination_graph(
-                    std::move(builder), owned);
+                    std::move(builder), variables, owned);
                 return std::shared_ptr<generic_dynamics>(result);
             },
             nb::arg("builder"),
-            nb::arg("subconstraints") =
-                std::vector<std::shared_ptr<generic_constr>>{})
-        .def(
-            "set_elimination_graph",
-            [](generic_lifted &self, lifted_elimination_builder builder) {
-                lifted result =
-                    self.set_elimination_graph(std::move(builder));
-                return std::shared_ptr<generic_dynamics>(result);
-            },
-            nb::arg("builder"))
-        .def(
-            "add_subconstraint",
-            [](generic_dynamics &self,
-               const std::shared_ptr<generic_constr> &constraint) {
-                self.add_subconstraint(constraint);
-            },
-            nb::arg("constraint"))
+            nb::arg("variables"), nb::arg("constraints"),
+            "Return a dynamics group whose selected ordinary interval inputs "
+            "and hard equalities are marked for lifted local elimination. "
+            "Configure the group before adding any selected handle to a "
+            "stage. The original handles remain valid for costs, bounds, "
+            "warm starts, and activation.")
         .def_prop_ro(
             "subconstraints",
             [](generic_dynamics &self) {

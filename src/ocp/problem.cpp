@@ -446,6 +446,10 @@ void ocp_base::build_linear_profile() {
     }
 
     if (tdim(__l) && dim(__dyn) && dim(__lift)) {
+        if (dim(__dyn) + dim(__lift) != tdim(__y) + tdim(__l))
+            throw std::runtime_error(fmt::format(
+                "lifted elimination system must be square: equations={}, variables={}",
+                dim(__dyn) + dim(__lift), tdim(__y) + tdim(__l)));
         const generic_dynamics *owner = nullptr;
         for (const generic_func &entry : exprs(__dyn)) {
             const auto *candidate =
@@ -1003,7 +1007,7 @@ bool stage_ocp::validate_stage_term(const expr_handle &ex, std::string *reason) 
     if (func == nullptr) {
         return true;
     }
-    if (is_pure_y_func(*func)) {
+    if (ex->field() != __lift && is_pure_y_func(*func)) {
         if (reason != nullptr) {
             *reason = "pure y-only terms should be written on x and added through stage.ed.add(...)";
         }
