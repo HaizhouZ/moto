@@ -1,10 +1,20 @@
 cmake_minimum_required(VERSION 3.10.0)
-project(moto)
+
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" MOTO_VERSION LIMIT_COUNT 1)
+if(NOT MOTO_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+  message(FATAL_ERROR "VERSION must contain one semantic version such as 2.3.0")
+endif()
+project(moto VERSION "${MOTO_VERSION}" LANGUAGES CXX)
 
 list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 if(POLICY CMP0148)
   cmake_policy(SET CMP0148 OLD)
+endif()
+
+if(NOT Python_EXECUTABLE AND DEFINED ENV{CONDA_PREFIX})
+  set(Python_ROOT_DIR "$ENV{CONDA_PREFIX}")
+  set(Python_FIND_STRATEGY LOCATION)
 endif()
 
 include(cmake/depHelpers.cmake)
@@ -73,6 +83,14 @@ file(GLOB_RECURSE SRC_FILES src/core/*.cpp src/ocp/*.cpp src/utils/*.cpp src/sol
 
 add_library(${PROJECT_NAME} SHARED ${SRC_FILES})
 target_add_deps(${PROJECT_NAME})
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+set_target_properties(${PROJECT_NAME} PROPERTIES
+  VERSION ${PROJECT_VERSION}
+  SOVERSION ${PROJECT_VERSION_MAJOR}
+)
+if(UNIX)
+  set_target_properties(${PROJECT_NAME} PROPERTIES INSTALL_RPATH "$ORIGIN")
+endif()
 set(RELEASE_FILE_LIST src/utils/codegen.cpp)
 set_source_files_properties(${RELEASE_FILE_LIST} PROPERTIES
     COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O3>"
@@ -88,6 +106,13 @@ if (BUILD_MULTIBODY MATCHES ON)
   add_library(moto_multibody SHARED ${MB_SRC_FILES})
   # add_project_dependency(pinocchio REQUIRED)
   target_add_deps(moto_multibody)
+  set_target_properties(moto_multibody PROPERTIES
+    VERSION ${PROJECT_VERSION}
+    SOVERSION ${PROJECT_VERSION_MAJOR}
+  )
+  if(UNIX)
+    set_target_properties(moto_multibody PROPERTIES INSTALL_RPATH "$ORIGIN")
+  endif()
   # target_compile_definitions(moto_multibody PUBLIC MOTO_WITH_PINOCCHIO COAL_DISABLE_HPP_FCL_WARNINGS)
   # target_link_libraries(moto_multibody PUBLIC ${PROJECT_NAME} pinocchio::pinocchio_parsers)
   list(APPEND PLUGIN_LIBS moto_multibody)
@@ -99,5 +124,6 @@ include(cmake/installHelpers.cmake)
 add_subdirectory(bindings)
 
 include(CTest)
-enable_testing()
-add_subdirectory(unittests)
+if(BUILD_TESTING)
+  add_subdirectory(unittests)
+endif()

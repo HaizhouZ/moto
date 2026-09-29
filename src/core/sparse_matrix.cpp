@@ -1,6 +1,8 @@
 #include <moto/core/linear_backend.hpp>
 #include <moto/core/sparse_matrix.hpp>
 
+#include <cassert>
+
 
 namespace moto {
 sparse_layout_plan

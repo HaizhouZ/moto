@@ -1,6 +1,7 @@
 #include <moto/solver/restoration/resto_overlay.hpp>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <moto/ocp/impl/node_data.hpp>
 #include <moto/solver/ineq_soft.hpp>

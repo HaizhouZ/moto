@@ -47,7 +47,7 @@ function(add_moto_python_test name script)
     set_tests_properties(
         ${name}
         PROPERTIES
-        ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}:$ENV{LD_LIBRARY_PATH};OMP_NUM_THREADS=1"
+        ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}:$ENV{LD_LIBRARY_PATH};PYTHONPATH=${CMAKE_BINARY_DIR}/bindings/python_test_package:$ENV{PYTHONPATH};OMP_NUM_THREADS=1"
     )
 endfunction()
 

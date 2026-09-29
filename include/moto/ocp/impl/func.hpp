@@ -4,6 +4,8 @@
 #include <moto/core/field_layout_store.hpp>
 #include <moto/ocp/impl/func_data.hpp>
 #include <moto/utils/movable_ptr.hpp>
+
+#include <cassert>
 #include <map>
 #include <memory>
 #include <optional>

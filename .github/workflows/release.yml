@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "VERSION must contain a three-component version such as 2.3.0" >&2
+            exit 1
+          fi
+
+          tag="v${version}"
+          if [[ "$version" =~ ^([0-9]+\.[0-9]+)\.0$ ]]; then
+            tag="v${BASH_REMATCH[1]}"
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Require a successful build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          build_state="$(
+            gh run list \
+              --workflow build.yml \
+              --commit "$GITHUB_SHA" \
+              --limit 1 \
+              --json status,conclusion \
+              --jq 'if length == 0 then "missing" else .[0].status + ":" + (.[0].conclusion // "") end'
+          )"
+          if [[ "$build_state" != "completed:success" ]]; then
+            echo "Release requires a successful Build run for $GITHUB_SHA; found $build_state" >&2
+            exit 1
+          fi
+
+      - name: Ensure release does not already exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists without a release" >&2
+            exit 1
+          fi
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: >-
+          gh release create "$TAG"
+          --target "$GITHUB_SHA"
+          --title "Moto $VERSION"
+          --generate-notes
+          --fail-on-no-commits

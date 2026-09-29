@@ -4,6 +4,8 @@
 #include <blasfeo.h>
 #include <moto/core/fwd.hpp>
 
+#include <cassert>
+
 namespace moto {
 namespace utils {
 template <typename T>

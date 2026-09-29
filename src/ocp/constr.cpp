@@ -1,6 +1,8 @@
 #include <moto/ocp/constr.hpp>
 #include <moto/ocp/problem.hpp>
 
+#include <cassert>
+
 namespace moto {
 namespace {
 bool is_inequality_relation(casadi_int op) {

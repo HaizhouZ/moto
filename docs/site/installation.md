@@ -15,13 +15,14 @@ Moto requires:
 Create a conda environment containing the C++ and Python dependencies:
 
 ```bash
-conda create -n moto python=3.11 casadi eigen magic_enum fmt re2 nanobind \
+conda create -n moto python=3.11 cxx-compiler casadi eigen magic_enum fmt re2 nanobind \
+  typing-extensions \
   nlohmann_json pinocchio example-robot-data \
   example-robot-data-loaders mujoco libblasfeo -c conda-forge
 conda activate moto
 python -m pip install "viser[urdf]"
 
-export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
 ```
 
 ## Build and install
@@ -41,6 +42,25 @@ ctest --test-dir build --output-on-failure -j4
 Wait for `moto_pywrap` to finish linking before importing `moto` from Python.
 A first example run may also compile CasADi and linear-backend artifacts, so it
 should not be used as a hot solver benchmark.
+
+## Runtime-generated code
+
+Moto generates and compiles specialized C++ kernels while a model is being
+prepared. In an activated conda environment it uses `CXX` and finds Eigen below
+`$CONDA_PREFIX/include/eigen3`. The `cxx-compiler` and `eigen` packages must
+therefore remain installed at runtime, not only while Moto itself is built.
+
+For a non-conda toolchain, select explicit paths when necessary:
+
+```bash
+export MOTO_CXX_COMPILER=/opt/toolchain/bin/c++
+export MOTO_EIGEN_INCLUDE_DIR=/opt/eigen/include/eigen3
+```
+
+`MOTO_CXX_COMPILER` must name one executable rather than a shell command with
+additional arguments. Generated artifacts include the resolved compiler and
+Eigen path in their cache identity, so changing either setting triggers a safe
+recompile.
 
 ## BLASFEO discovery
 

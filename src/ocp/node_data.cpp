@@ -5,6 +5,8 @@
 #include <moto/solver/data_base.hpp>
 #include <moto/core/linear_backend.hpp>
 
+#include <cassert>
+
 namespace moto {
 struct node_linear_plan {
   struct condensation_phase {

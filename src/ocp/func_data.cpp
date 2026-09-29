@@ -3,6 +3,8 @@
 #include <moto/ocp/problem.hpp>
 #include <moto/utils/codegen.hpp>
 
+#include <cassert>
+
 namespace moto {
 void shared_data::add(size_t uid, func_arg_map_ptr_t &&data) { data_.try_emplace(uid, std::move(data)); }
 

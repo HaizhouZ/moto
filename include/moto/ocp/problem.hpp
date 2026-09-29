@@ -2,6 +2,7 @@
 #define __MOTO_PROBLEM_HPP__
 
 #include <array>
+#include <cassert>
 #include <memory>
 #include <string>
 #include <type_traits>

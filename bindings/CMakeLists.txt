@@ -57,9 +57,34 @@ set(PYTHON_BINDING_FILES
 nanobind_add_module(${PYTHON_MODULE_NAME} NB_STATIC ${BINDING_FILES} setup_bindings.cpp)
 target_link_libraries(${PYTHON_MODULE_NAME} PRIVATE ${PROJECT_NAME} ${PLUGIN_LIBS})
 target_include_directories(${PYTHON_MODULE_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(${PYTHON_MODULE_NAME} PRIVATE MOTO_VERSION="${PROJECT_VERSION}")
+if(APPLE)
+  set_target_properties(${PYTHON_MODULE_NAME} PROPERTIES
+    INSTALL_RPATH "@loader_path/../../..")
+elseif(UNIX)
+  set_target_properties(${PYTHON_MODULE_NAME} PROPERTIES
+    INSTALL_RPATH "$ORIGIN/../../..")
+endif()
 if(BUILD_MULTIBODY)
   target_compile_definitions(${PYTHON_MODULE_NAME} PRIVATE MOTO_BUILD_MULTIBODY)
 endif()
+
+set(PYTHON_TEST_STAGE_ROOT ${CMAKE_CURRENT_BINARY_DIR}/python_test_package)
+set(PYTHON_TEST_STAGE_DIR ${PYTHON_TEST_STAGE_ROOT}/${PROJECT_NAME})
+set(PYTHON_TEST_STAGE_DEFINITION_DIR ${PYTHON_TEST_STAGE_DIR}/definition)
+file(MAKE_DIRECTORY ${PYTHON_TEST_STAGE_DEFINITION_DIR})
+configure_file(package_init.py ${PYTHON_TEST_STAGE_DIR}/__init__.py COPYONLY)
+foreach(binding_file IN LISTS PYTHON_BINDING_FILES)
+  configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/${binding_file}
+    ${PYTHON_TEST_STAGE_DIR}/${binding_file}
+    COPYONLY)
+endforeach()
+add_custom_command(TARGET ${PYTHON_MODULE_NAME} POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          $<TARGET_FILE:${PYTHON_MODULE_NAME}>
+          ${PYTHON_TEST_STAGE_DIR}/$<TARGET_FILE_NAME:${PYTHON_MODULE_NAME}>
+  VERBATIM)
 
 install(TARGETS ${PYTHON_MODULE_NAME}
         LIBRARY DESTINATION ${PYTHON_SITE_INSTALL}/${PROJECT_NAME})

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cassert>
 #include <cstdlib>
 #include <map>
 #include <moto/core/external_function.hpp>

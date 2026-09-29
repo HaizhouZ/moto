@@ -1,6 +1,8 @@
 #include <moto/ocp/problem.hpp>
 #include <moto/solver/ineq_soft.hpp>
 #include <moto/solver/ipm/ipm_constr.hpp>
+
+#include <cassert>
 namespace moto {
 namespace solver {
 

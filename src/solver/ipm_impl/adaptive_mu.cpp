@@ -1,5 +1,7 @@
 #include <moto/solver/ipm/ipm_config.hpp>
 
+#include <cassert>
+
 namespace moto {
 namespace solver {
 void ipm_config::adaptive_mu_update(worker &ipm_worker) {
