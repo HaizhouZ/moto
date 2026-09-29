@@ -4,28 +4,26 @@
 semantic versions without a `v` prefix, for example `2.3.0`. CMake, the Python
 extension, and the installed CMake package version are derived from this file.
 
-Git tags and GitHub releases add the prefix:
+Git tags and GitHub releases add the prefix. For compatibility with the
+existing release convention, a zero patch component is omitted from the tag:
 
 ```text
 VERSION: 2.3.0
-tag:     v2.3.0
-release: v2.3.0
+tag:     v2.3
+release: Moto 2.3.0
 ```
 
 ## Upstream release
 
-1. Update `VERSION` on `dev` and run the Release build and test suite.
-2. Merge the release commit to `main`.
-3. Tag the exact `main` commit and push the tag:
+1. Update `VERSION` on `dev` and push the release commit.
+2. Wait for the `Build` workflow on that exact commit to pass.
+3. Open GitHub Actions, select `Release`, choose the `dev` branch, and run the
+   workflow. It reads `VERSION`, creates the tag, and publishes the GitHub
+   release with generated notes.
 
-   ```bash
-   version="$(tr -d '[:space:]' < VERSION)"
-   git tag -a "v${version}" -m "Moto ${version}"
-   git push origin main "v${version}"
-   ```
-
-4. Create the GitHub release from that tag. Do not retarget or replace a
-   published tag; release a new patch version instead.
+The workflow refuses to publish when the matching build has not passed or the
+tag/release already exists. Do not retarget or replace a published tag; release
+a new patch version instead.
 
 ## conda-forge release
 
