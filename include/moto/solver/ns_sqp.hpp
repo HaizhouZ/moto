@@ -107,7 +107,7 @@ struct ns_sqp {
 
     struct linesearch_setting : public solver::linesearch_config {
         bool enabled = true;       ///< whether to use line search
-        size_t max_steps = 5;      ///< max line search steps
+        size_t max_steps = 0;      ///< optional safety cap; zero uses only alpha_min
         enum class failure_backup_strategy : size_t {
             min_step,   ///< reset to the minimum step size
             best_trial, ///< reset to the best trial so far
@@ -135,6 +135,9 @@ struct ns_sqp {
         scalar_t armijo_dec_frac = 1e-4;     ///< Sufficient decrease tolerance (eta in Armijo condition), smaller -> more strict decrease requirement
         scalar_t s_phi = 2.3;                ///< IPOPT switching condition exponent on objective decrease (s_phi in IPOPT paper)
         scalar_t s_theta = 1.1;              ///< IPOPT switching condition exponent on constraint violation (s_theta in IPOPT paper)
+        scalar_t alpha_min_frac = 5e-2;       ///< IPOPT gamma_alpha safety factor for the computed minimum step
+        size_t watchdog_shortened_iter_trigger = 10; ///< consecutive shortened accepted steps before starting the watchdog; zero disables it
+        size_t watchdog_trial_iter_max = 3;   ///< provisional watchdog iterations before restoring the reference iterate
         scalar_t merit_sigma = 1.0;          ///< merit_backtracking weight on ||dual residual||^2 relative to ||constraint violation||^2
 
         // Flat-objective accept: accept when the directional derivative is negligibly small,
@@ -252,6 +255,10 @@ struct ns_sqp {
         data(data &&rhs) = default;
         void backup_trial_state() override;
         void restore_trial_state() override;
+        void backup_watchdog_state();
+        void restore_watchdog_state();
+        array_type<vector, primal_fields> watchdog_prim_state_bak;
+        array_type<vector, constr_fields> watchdog_dual_state_bak;
         /// row scale applied to each constraint field (empty ⟹ scaling not yet applied)
         array_type<vector, constr_fields> scale_c_;
         /// scale applied to each primal field's cost gradient
@@ -576,16 +583,25 @@ struct ns_sqp {
         std::vector<point> points;                                           ///< filter for accepting line search steps
         scalar_t constr_vio_min = std::numeric_limits<scalar_t>::infinity(); ///< constraint violation bound for switching condition in line search
 
+        bool in_watchdog = false;
+        size_t watchdog_shortened_iter = 0;
+        size_t watchdog_trial_iter = 0;
+        scalar_t watchdog_alpha_primal_test = 1.;
+        scalar_t watchdog_mu = 0.;
+        kkt_info watchdog_reference;
+
         void update_filter(const kkt_info &kkt, settings_t &settings);
         static normal_filter_eval_result evaluate_normal_filter_step(const std::vector<point> &filter_points,
                                                                      const kkt_info &trial_kkt,
                                                                      const kkt_info &current_kkt,
                                                                      scalar_t constr_vio_min,
                                                                      const settings_t &settings,
+                                                                     scalar_t alpha_primal_test,
                                                                      bool allow_flat_objective = true);
         step_decision try_step(const kkt_info &trial_kkt,
                                const kkt_info &current_kkt,
-                               settings_t &settings);
+                               settings_t &settings,
+                               scalar_t alpha_primal_test);
 
         /***** merit backtracking part (used when settings.ls.method == merit_backtracking) *****/
         scalar_t merit_fullstep = std::numeric_limits<scalar_t>::infinity(); ///< merit value at full step (alpha=1), for directional derivative estimate
@@ -607,6 +623,7 @@ struct ns_sqp {
         accept,
         backtrack,
         failure,
+        watchdog_rollback,
     };
 
     struct iteration_context {
@@ -617,7 +634,11 @@ struct ns_sqp {
     };
 
     void step_back_alpha(filter_linesearch_per_iter_data &ls);
-    scalar_t current_linesearch_alpha_min(const filter_linesearch_per_iter_data &ls) const;
+    scalar_t current_linesearch_alpha_min(const filter_linesearch_data &ls,
+                                          const kkt_info &current_kkt) const;
+    void start_watchdog(filter_linesearch_data &ls, const iteration_context &ctx);
+    void stop_watchdog(filter_linesearch_data &ls);
+    void restore_watchdog_reference(filter_linesearch_data &ls, kkt_info &current);
     line_search_action filter_linesearch(filter_linesearch_data &ls,
                                          const kkt_info &trial_kkt,
                                          const kkt_info &current_kkt);

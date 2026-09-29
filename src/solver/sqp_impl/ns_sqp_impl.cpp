@@ -127,6 +127,22 @@ void ns_sqp::data::restore_trial_state() {
     solver::ineq_soft::restore_trial_state(this);
 }
 
+void ns_sqp::data::backup_watchdog_state() {
+    for (auto field : primal_fields)
+        watchdog_prim_state_bak[field] = ns_riccati_data::sym_->value_[field];
+    for (auto field : constr_fields)
+        watchdog_dual_state_bak[field] = ns_riccati_data::dense_->dual_[field];
+    solver::ineq_soft::backup_watchdog_state(this);
+}
+
+void ns_sqp::data::restore_watchdog_state() {
+    for (auto field : primal_fields)
+        ns_riccati_data::sym_->value_[field] = watchdog_prim_state_bak[field];
+    for (auto field : constr_fields)
+        ns_riccati_data::dense_->dual_[field] = watchdog_dual_state_bak[field];
+    solver::ineq_soft::restore_watchdog_state(this);
+}
+
 ns_sqp::scoped_profile::scoped_profile(ns_sqp *owner_, profile_phase phase_)
     : owner(owner_), phase(phase_), start(profile_clock::now()) {}
 
@@ -467,18 +483,16 @@ ns_sqp::line_search_action ns_sqp::handle_globalization_failure(filter_linesearc
         return line_search_action::accept;
     }
 
-    if (ls.failure_reason == filter_linesearch_per_iter_data::failure_reason_t::tiny_step) {
-        auto &graph = active_data();
-        solver::for_each(solver::par, graph, [this](data *d) {
-            d->restore_trial_state();
-            d->update_approximation(node_data::update_mode::eval_all, true);
-        });
-        update_primal_info(ctx.current, point_value_mask::primal | point_value_mask::barrier_objective);
-        update_stat_info(ctx.current);
-        return line_search_action::failure;
-    }
-
-    throw std::runtime_error("Line-search failed after exhausting max_steps");
+    auto &graph = active_data();
+    solver::for_each(solver::par, graph, [this](data *d) {
+        d->restore_trial_state();
+        d->update_approximation(node_data::update_mode::eval_all, true);
+    });
+    update_primal_info(ctx.current,
+                       point_value_mask::primal |
+                           point_value_mask::barrier_objective);
+    update_stat_info(ctx.current);
+    return line_search_action::failure;
 }
 
 ns_sqp::line_search_action ns_sqp::run_globalization(filter_linesearch_data &ls, iteration_context &ctx) {
@@ -499,6 +513,8 @@ ns_sqp::line_search_action ns_sqp::run_globalization(filter_linesearch_data &ls,
             break;
         case line_search_action::failure:
             return handle_globalization_failure(ls, ctx);
+        case line_search_action::watchdog_rollback:
+            return ctx.action;
         }
     }
 }
@@ -510,13 +526,64 @@ ns_sqp::line_search_action ns_sqp::sqp_iter(filter_linesearch_data &ls, kkt_info
         .current = kkt_current, // must do this because prepare_globalization will only update the step info
     };
     if (!compute_safe_direction(ctx, do_scaling, do_refinement, gauss_newton)) {
-        ls.reset_per_iter_data();
-        return line_search_action::failure;
+        if (!ls.in_watchdog) {
+            ls.reset_per_iter_data();
+            return line_search_action::failure;
+        }
+        if (settings.verbose)
+            fmt::print("  direction failed during watchdog; restoring reference iterate\n");
+        restore_watchdog_reference(ls, ctx.current);
+        kkt_current = ctx.current;
+        ctx.trial = {};
+        ctx.mu_changed = false;
+        if (!compute_safe_direction(ctx, do_scaling, do_refinement,
+                                    gauss_newton)) {
+            ls.reset_per_iter_data();
+            return line_search_action::failure;
+        }
+        prepare_globalization(ls, ctx);
+        kkt_info current_backup = ctx.current;
+        ls.step_cnt = 1;
+        step_back_alpha(ls);
+        const line_search_action action = run_globalization(ls, ctx);
+        kkt_current = action == line_search_action::failure
+                          ? current_backup
+                          : ctx.current;
+        return action;
+    }
+    if (ls.in_watchdog &&
+        (ctx.mu_changed || settings.ipm.mu != ls.watchdog_mu)) {
+        if (settings.verbose)
+            fmt::print("  barrier parameter changed; cancelling watchdog\n");
+        stop_watchdog(ls);
     }
     kkt_info current_backup;
     prepare_globalization(ls, ctx);
+    if (settings.ls.method == linesearch_setting::search_method::filter &&
+        !settings.in_restoration && !ls.in_watchdog &&
+        settings.ls.watchdog_shortened_iter_trigger > 0 &&
+        ls.watchdog_shortened_iter >=
+            settings.ls.watchdog_shortened_iter_trigger) {
+        start_watchdog(ls, ctx);
+    }
     current_backup = ctx.current;
     line_search_action action = run_globalization(ls, ctx);
+    if (action == line_search_action::watchdog_rollback) {
+        restore_watchdog_reference(ls, ctx.current);
+        current_backup = ctx.current;
+        ctx.trial = {};
+        ctx.action = line_search_action::accept;
+        ctx.mu_changed = false;
+        if (!compute_safe_direction(ctx, do_scaling, do_refinement,
+                                    gauss_newton)) {
+            kkt_current = current_backup;
+            return line_search_action::failure;
+        }
+        prepare_globalization(ls, ctx);
+        ls.step_cnt = 1;
+        step_back_alpha(ls);
+        action = run_globalization(ls, ctx);
+    }
     if (action == line_search_action::failure)
         kkt_current = current_backup;
     else

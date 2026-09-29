@@ -119,7 +119,7 @@ void register_submodule_ns_sqp(nb::module_ &m) {
 
     nb::class_<ns_sqp::linesearch_setting, solver::linesearch_config> ls_setting(sqp, "linesearch_setting");
     ls_setting.def_rw("enabled", &ns_sqp::linesearch_setting::enabled, "Whether to use line search")
-        .def_rw("max_steps", &ns_sqp::linesearch_setting::max_steps, "Maximum number of line search steps")
+        .def_rw("max_steps", &ns_sqp::linesearch_setting::max_steps, "Optional maximum number of backtracking reductions; zero uses the computed minimum step only")
         .def_rw("failure_strategy", &ns_sqp::linesearch_setting::failure_strategy, "Line search failure backup strategy")
         .def_rw("on_failure", &ns_sqp::linesearch_setting::on_failure, "Action to take after line search exhausts max_steps")
         .def_rw("method", &ns_sqp::linesearch_setting::method, "Line search method: filter (default) or merit_backtracking")
@@ -129,6 +129,9 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("armijo_dec_frac", &ns_sqp::linesearch_setting::armijo_dec_frac, "Sufficient decrease tolerance (eta in Armijo condition), smaller -> more strict decrease requirement")
         .def_rw("s_phi", &ns_sqp::linesearch_setting::s_phi, "IPOPT switching condition exponent on objective decrease (s_phi in IPOPT paper, Section 3.3)")
         .def_rw("s_theta", &ns_sqp::linesearch_setting::s_theta, "IPOPT switching condition exponent on constraint violation (s_theta in IPOPT paper, Section 3.3)")
+        .def_rw("alpha_min_frac", &ns_sqp::linesearch_setting::alpha_min_frac, "IPOPT gamma_alpha safety factor for the computed minimum filter step (default: 0.05)")
+        .def_rw("watchdog_shortened_iter_trigger", &ns_sqp::linesearch_setting::watchdog_shortened_iter_trigger, "Consecutive accepted shortened steps before starting the IPOPT watchdog; zero disables it (default: 10)")
+        .def_rw("watchdog_trial_iter_max", &ns_sqp::linesearch_setting::watchdog_trial_iter_max, "Maximum provisional watchdog iterations before restoring its reference iterate (default: 3)")
         .def_rw("merit_sigma", &ns_sqp::linesearch_setting::merit_sigma, "Merit backtracking: weight on ||dual residual||^2 relative to ||constraint violation||^2 (default 1.0)")
         .def_rw("enable_flat_obj_accept", &ns_sqp::linesearch_setting::enable_flat_obj_accept, "Accept step when objective is flat, iterate is nearly feasible, and step is non-trivial")
         .def_rw("flat_obj_dec_tol", &ns_sqp::linesearch_setting::flat_obj_dec_tol, "Absolute full-step decrease below which the objective is considered flat")
