@@ -47,8 +47,14 @@ html_context.update({
     "moto_doc_current": _moto_os.environ["MOTO_DOC_CURRENT"],
     "moto_doc_current_url": _moto_os.environ["MOTO_DOC_CURRENT_URL"],
 })
+html_title = "Moto Documentation — " + _moto_os.environ["MOTO_DOC_CURRENT_LABEL"]
 html_theme_options = dict(globals().get("html_theme_options", {}) or {})
 html_theme_options["source_branch"] = _moto_os.environ["MOTO_DOC_SOURCE_REF"]
+html_theme_options["announcement"] = (
+    "Documentation version: <strong>"
+    + _moto_os.environ["MOTO_DOC_CURRENT_LABEL"]
+    + "</strong>"
+)
 html_baseurl = _moto_os.environ["MOTO_DOC_BASE_URL"]
 """
 
@@ -183,6 +189,7 @@ def build_ref(
             {
                 "MOTO_DOC_VERSIONS": json.dumps(versions),
                 "MOTO_DOC_CURRENT": ref["name"],
+                "MOTO_DOC_CURRENT_LABEL": ref["label"],
                 "MOTO_DOC_CURRENT_URL": current_url,
                 "MOTO_DOC_SOURCE_REF": ref["source"],
                 "MOTO_DOC_BASE_URL": f"https://haizhouz.github.io{current_url}",
@@ -208,6 +215,7 @@ def build_ref(
         config.write_text(
             f"@INCLUDE = {worktree / 'docs/Doxyfile.pages'}\n"
             f"OUTPUT_DIRECTORY = {destination / 'cpp'}\n"
+            f"PROJECT_NUMBER = {ref['label']}\n"
             f"WARN_LOGFILE = {warnings / (ref['name'] + '.log')}\n",
             encoding="utf-8",
         )
@@ -216,20 +224,47 @@ def build_ref(
         run(["git", "worktree", "remove", "--force", str(worktree)], repository)
 
 
-def write_root(output: Path, versions: list[dict], default_ref: str) -> None:
-    target = f"{default_ref}/"
-    output.joinpath("index.html").write_text(
+def redirect_page(target: str) -> str:
+    escaped = html.escape(target, quote=True)
+    encoded = json.dumps(target)
+    return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
-        f'<meta http-equiv="refresh" content="0; url={html.escape(target)}">'
-        f'<link rel="canonical" href="{html.escape(target)}">'
+        f'<meta http-equiv="refresh" content="0; url={escaped}">'
+        f'<link rel="canonical" href="{escaped}">'
         "<title>Moto documentation</title></head><body>"
-        f'<a href="{html.escape(target)}">Open Moto documentation</a>'
-        "</body></html>\n",
-        encoding="utf-8",
+        f'<a href="{escaped}">Open Moto documentation</a>'
+        "<script>location.replace("
+        f"{encoded} + location.search + location.hash"
+        ");</script>"
+        "</body></html>\n"
     )
+
+
+def write_legacy_redirects(output: Path, default_ref: str, base_path: str) -> None:
+    default_root = output / default_ref
+    for source in default_root.rglob("*.html"):
+        relative = source.relative_to(default_root)
+        if relative.parts[0] == "cpp" and relative != Path("cpp/index.html"):
+            continue
+        destination = output / relative
+        if destination.exists():
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(
+            redirect_page(f"{base_path}{default_ref}/{relative.as_posix()}"),
+            encoding="utf-8",
+        )
+
+
+def write_root(
+    output: Path, versions: list[dict], default_ref: str, base_path: str
+) -> None:
+    target = f"{base_path}{default_ref}/"
+    output.joinpath("index.html").write_text(redirect_page(target), encoding="utf-8")
     output.joinpath("versions.json").write_text(
         json.dumps(versions, indent=2) + "\n", encoding="utf-8"
     )
+    write_legacy_redirects(output, default_ref, base_path)
     output.joinpath(".nojekyll").touch()
 
 
@@ -269,7 +304,7 @@ def main() -> None:
                 build_ref(repository, Path(path), output, ref, versions, base_path)
         finally:
             run(["git", "worktree", "prune"], repository)
-    write_root(output, versions, arguments.default_ref)
+    write_root(output, versions, arguments.default_ref, base_path)
     print(f"Versioned documentation written to {output}")
 
 
