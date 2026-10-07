@@ -2927,8 +2927,9 @@ translate_casadi_mx_graph(const casadi::Function &function,
 
 casadi_mx_graph_instance::casadi_mx_graph_instance(
     std::shared_ptr<const casadi_mx_graph_plan> input_plan,
-    std::vector<sparse_matrix> *external_workspace)
-    : plan(std::move(input_plan)) {
+    std::vector<sparse_matrix> *external_workspace,
+    const std::filesystem::path &directory)
+    : plan(std::move(input_plan)), cache_dir(directory) {
   if (!external_workspace) {
     owned_workspace = std::make_shared<std::vector<sparse_matrix>>();
     external_workspace = owned_workspace.get();
@@ -2939,6 +2940,7 @@ casadi_mx_graph_instance::casadi_mx_graph_instance(
     if (layout.allocate && !layout.local_entries) {
       workspace_slots.push_back(workspace->size());
       workspace->push_back(make_storage(layout));
+      workspace->back().bind_codegen_directory(cache_dir);
       workspace->back().setZero();
     } else {
       workspace_slots.push_back(no_value);

@@ -390,6 +390,11 @@ void generic_func::apply_argument_remap(const normalized_remap &remap,
 expr_handle generic_func::remap_clone(const normalized_remap &remap,
                                       std::string_view context,
                                       size_t problem_uid) {
+    std::vector<expr *> targets;
+    targets.reserve(remap.entries.size());
+    for (const auto &[_, entry] : remap.entries)
+        targets.push_back(entry.second.get());
+    bind_codegen_graph(codegen(), targets);
     if (!finalized() && !finalize())
         throw std::runtime_error(fmt::format(
             "func {} remap failed: source could not be finalized", name_));
@@ -404,7 +409,7 @@ expr_handle generic_func::remap_clone(const normalized_remap &remap,
         remapped_func.source_argument_uids_.push_back(arg.uid());
     remapped_func.apply_argument_remap(remap, context, problem_uid);
     for (expr &dependency : remapped_func.dep_) {
-        if (!dependency.finalize())
+        if (!dependency.finalize(false, codegen()))
             throw std::runtime_error(fmt::format(
                 "func {} remap failed: dependency {} could not be finalized",
                 name_, dependency.name()));
@@ -547,6 +552,7 @@ void generic_func::finalize_impl() {
     }
     if (gen_.task_ && !gen_.task_->sx_output.is_empty()) {
         utils::cs_codegen::task &t = *gen_.task_;
+        t.output_dir = codegen()->output_dir().string();
         if (uses_precompute_chain_rule_ &&
             order_ >= approx_order::second && !t.gauss_newton) {
             throw std::runtime_error(fmt::format(

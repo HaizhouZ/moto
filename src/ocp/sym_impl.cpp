@@ -139,6 +139,7 @@ void sym::finalize_impl() {
                 has_non_trivial_integration_ = true;
                 dual_->has_non_trivial_integration_ = true;
                 utils::cs_codegen::task int_gen_task;
+                int_gen_task.output_dir = codegen()->output_dir().string();
                 int_gen_task.func_name = name_ + "_integrate";
                 int_gen_task.sx_inputs = {*this, dx, step};
                 int_gen_task.sx_output = out;
@@ -167,6 +168,7 @@ void sym::finalize_impl() {
                 has_non_trivial_difference_ = true;
                 dual_->has_non_trivial_difference_ = true;
                 utils::cs_codegen::task diff_gen_task;
+                diff_gen_task.output_dir = codegen()->output_dir().string();
                 diff_gen_task.func_name = name_ + "_difference";
                 diff_gen_task.sx_inputs = {x1, x0};
                 diff_gen_task.sx_output = out;

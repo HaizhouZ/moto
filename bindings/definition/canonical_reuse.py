@@ -1,4 +1,4 @@
-"""Process-wide canonical symbolic reuse for the Python modeling API."""
+"""Canonical symbolic reuse within each code generation directory."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def _key_and_name(prefix, identity):
     return (safe_prefix, identity), f"{safe_prefix}_{digest}"
 
 
-def install_canonical_reuse(precompute_type, function_type):
+def install_canonical_reuse(precompute_type, function_type, context_type):
     """Attach canonical lazy-reuse operations to the native public types."""
 
     def canonical_precompute(
@@ -46,6 +46,8 @@ def install_canonical_reuse(precompute_type, function_type):
         identity: object,
         inputs: Iterable[object],
         output_factory: Callable[[], Iterable[object]],
+        *,
+        codegen=None,
     ) -> tuple[object, ...]:
         """Create once per structural identity and return remapped value caches.
 
@@ -54,12 +56,15 @@ def install_canonical_reuse(precompute_type, function_type):
         canonical generated precompute on ``inputs`` while Moto allocates and
         reuses its value and derivative caches.
         """
+        codegen = context_type() if codegen is None else codegen
         key, name = _key_and_name(prefix, identity)
+        key = (codegen.output_dir, key)
         current_inputs = tuple(inputs)
         with _reuse_lock:
             source = _precompute_sources.get(key)
             if source is None:
                 producer = precompute_type.create(name, list(output_factory()))
+                producer._bind_codegen(codegen)
                 source = _PrecomputeSource(producer, current_inputs)
                 _precompute_sources[key] = source
                 return tuple(producer.outputs)
@@ -79,9 +84,13 @@ def install_canonical_reuse(precompute_type, function_type):
         identity: object,
         symbols: Iterable[object],
         function_factory: Callable[[str], object],
+        *,
+        codegen=None,
     ) -> object:
         """Create once, then remap one canonical generated function."""
+        codegen = context_type() if codegen is None else codegen
         key, name = _key_and_name(prefix, identity)
+        key = (codegen.output_dir, key)
         current_symbols = tuple(symbols)
         with _reuse_lock:
             source = _function_sources.get(key)
@@ -92,6 +101,7 @@ def install_canonical_reuse(precompute_type, function_type):
                         f"canonical function factory returned {function.name}; "
                         f"expected {name}"
                     )
+                function._bind_codegen(codegen)
                 source = _FunctionSource(function, current_symbols)
                 _function_sources[key] = source
                 return function

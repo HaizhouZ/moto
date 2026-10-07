@@ -151,10 +151,12 @@ void append_graph_outputs(const cs::MX &value,
 
 } // namespace
 
-ocp_base::ocp_base() { uid_.set_inc(); }
+ocp_base::ocp_base(codegen_context_ptr codegen)
+    : codegen_(resolve_codegen(std::move(codegen))) { uid_.set_inc(); }
 
 ocp_base::ocp_base(const ocp_base &rhs)
     : field_layout_store<expr_list>(rhs),
+      codegen_(rhs.codegen_),
       finalized_(rhs.finalized_),
       uid_(rhs.uid_),
       disabled_expr_(rhs.disabled_expr_),
@@ -184,7 +186,7 @@ bool ocp_base::add_impl(expr_handle ex) {
     }
     size_t _uid = ex->uid();
     if (!contains(*ex)) {
-        if (!ex->finalize()) {
+        if (!ex->finalize(false, codegen_)) {
             throw std::runtime_error(fmt::format("cannot finalize expr {} uid {}", ex->name(), ex->uid()));
         }
         const auto &dep = ex->dep();
@@ -725,7 +727,7 @@ void ocp_base::build_linear_profile() {
                 lifted_graph_input_binding::kind::parameter,
                 __undefined, __undefined, 0, {}, 0, 0, parameter});
             if (contains(*parameter)) continue;
-            if (!parameter->finalize())
+            if (!parameter->finalize(false, codegen_))
                 throw std::runtime_error(fmt::format(
                     "cannot finalize lifted elimination parameter {} uid {}",
                     parameter->name(), parameter->uid()));

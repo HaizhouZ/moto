@@ -174,8 +174,7 @@ TEST_CASE("same-name generated artifacts coexist by content") {
         result.constraint = generic_constr::create(
             "content_addressed_same_name", expression,
             approx_order::first);
-        result.constraint->get_codegen_task()->output_dir = cache_dir.string();
-        result.problem = stage_ocp::create();
+        result.problem = stage_ocp::create(std::make_shared<codegen_context>(cache_dir));
         result.problem->add(*result.constraint);
         result.problem->wait_until_ready();
         result.eval_artifact_dir =

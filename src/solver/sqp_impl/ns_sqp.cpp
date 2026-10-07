@@ -25,8 +25,9 @@ bool same_equality_init_cfg(const solver::equality_init::equality_init_overlay_s
 }
 } // namespace
 
-ns_sqp::ns_sqp(size_t n_jobs)
-    : graph_n_jobs_(normalize_parallel_jobs(n_jobs)),
+ns_sqp::ns_sqp(size_t n_jobs, codegen_context_ptr codegen)
+    : model_graph_(std::move(codegen)),
+      graph_n_jobs_(normalize_parallel_jobs(n_jobs)),
       solver_runtime_(graph_n_jobs_),
       restoration_runtime_(graph_n_jobs_),
       equality_init_runtime_(graph_n_jobs_) {
@@ -70,7 +71,7 @@ ocp_ptr_t ns_sqp::build_initial_state_virtual_stage(const ocp_ptr_t &first_stage
         throw std::runtime_error("initial state optimization requires the first stage to have x state variables");
     }
 
-    auto virtual_stage = ocp::create();
+    auto virtual_stage = ocp::create(codegen());
     virtual_stage->set_automatic_reorder_primal(true);
 
     var_list dyn_args;

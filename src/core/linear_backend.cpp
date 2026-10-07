@@ -30,6 +30,13 @@ namespace moto::linear_backend {
 namespace {
 
 constexpr std::string_view symbol_name = "moto_linear_jit_kernel";
+std::filesystem::path absolute_cache_dir(const std::filesystem::path &path) {
+  return std::filesystem::weakly_canonical(std::filesystem::absolute(path));
+}
+std::string cache_identity(const std::filesystem::path &directory,
+                           const std::string &signature) {
+  return absolute_cache_dir(directory).string() + std::string(1, '\0') + signature;
+}
 std::mutex compile_mutex;
 std::unordered_map<std::string, void *> loaded_kernels;
 std::unordered_map<std::string, std::shared_ptr<std::mutex>> compile_locks;
@@ -429,8 +436,9 @@ condensation_pairs(const condensation_spec &spec) {
 }
 
 void *compile_source(const std::string &source,
-                     const std::filesystem::path &cache_dir,
+                     const std::filesystem::path &requested_cache_dir,
                      std::string_view optimization = "-O3") {
+  const auto cache_dir = absolute_cache_dir(requested_cache_dir);
   const auto toolchain = utils::runtime_compile_toolchain_config();
   const std::string key = utils::compute_md5_from_bytes(
       optimization == "-O3"
@@ -438,15 +446,16 @@ void *compile_source(const std::string &source,
           : source + "\n:moto-jit-optimization:" +
                 std::string(optimization) + "\n:moto-jit-toolchain:" +
                 toolchain.fingerprint());
+  const auto memory_key = cache_identity(cache_dir, key);
   const auto cpp = cache_dir / (key + ".cpp");
   const auto lib = cache_dir / ("lib" + key + ".so");
   const auto tmp = cache_dir / ("lib" + key + ".so.tmp");
   std::shared_ptr<std::mutex> key_mutex;
   {
     std::lock_guard lock(compile_mutex);
-    if (auto it = loaded_kernels.find(key); it != loaded_kernels.end())
+    if (auto it = loaded_kernels.find(memory_key); it != loaded_kernels.end())
       return it->second;
-    auto &slot = compile_locks[key];
+    auto &slot = compile_locks[memory_key];
     if (!slot)
       slot = std::make_shared<std::mutex>();
     key_mutex = slot;
@@ -454,7 +463,7 @@ void *compile_source(const std::string &source,
   std::lock_guard key_lock(*key_mutex);
   {
     std::lock_guard lock(compile_mutex);
-    if (auto it = loaded_kernels.find(key); it != loaded_kernels.end())
+    if (auto it = loaded_kernels.find(memory_key); it != loaded_kernels.end())
       return it->second;
   }
   {
@@ -491,7 +500,7 @@ void *compile_source(const std::string &source,
   void *function = load_from_shared(lib.string(), std::string(symbol_name));
   {
     std::lock_guard lock(compile_mutex);
-    loaded_kernels.emplace(key, function);
+    loaded_kernels.emplace(memory_key, function);
   }
   return function;
 }
@@ -1531,7 +1540,7 @@ compile_batch_product(batch_product_spec spec,
                 << panel.storage_offset << ',' << panel.storage_rows << ';';
     signature << '|';
   }
-  const auto key = signature.str();
+  const auto key = cache_identity(cache_dir, signature.str());
   {
     std::lock_guard lock(batch_mutex);
     if (auto found = batch_kernels.find(key); found != batch_kernels.end())
@@ -1578,7 +1587,7 @@ graph_kernel graph_kernel::instantiate(
     std::vector<sparse_matrix> *workspace) const {
   if (!instance_) return {};
   return graph_kernel(std::make_unique<detail::casadi_mx_graph_instance>(
-      instance_->plan, workspace));
+      instance_->plan, workspace, instance_->cache_dir));
 }
 
 void graph_kernel::operator()(std::span<scalar_t *> pointers) const {
@@ -1625,8 +1634,9 @@ graph_kernel compile_graph(
     const std::vector<std::vector<casadi::MX>> &output_entries,
     std::span<const matrix_layout> input_layouts,
     std::vector<sparse_matrix> *workspace,
-    const std::filesystem::path &cache_dir,
+    const std::filesystem::path &requested_cache_dir,
     std::span<const casadi::MX> spd_factors) {
+  const auto cache_dir = absolute_cache_dir(requested_cache_dir);
   std::vector<casadi::MX> raw_outputs;
   std::vector<size_t> entry_outputs;
   for (const auto &entry : output_entries) {
@@ -1676,16 +1686,17 @@ graph_kernel compile_graph(
                     std::to_string(panel.storage_rows);
   }
   const std::string key = utils::compute_md5_from_bytes(serialized);
+  const auto memory_key = cache_identity(cache_dir, key);
   std::shared_ptr<const detail::casadi_mx_graph_plan> plan;
   std::shared_ptr<std::mutex> key_mutex;
   {
     std::lock_guard lock(graph_mutex);
-    if (auto found = graph_plans.find(key); found != graph_plans.end())
+    if (auto found = graph_plans.find(memory_key); found != graph_plans.end())
       plan = found->second.lock();
     if (plan)
       return graph_kernel(std::make_unique<detail::casadi_mx_graph_instance>(
-          std::move(plan), workspace));
-    auto &slot = graph_compile_locks[key];
+          std::move(plan), workspace, cache_dir));
+    auto &slot = graph_compile_locks[memory_key];
     if (!slot)
       slot = std::make_shared<std::mutex>();
     key_mutex = slot;
@@ -1693,7 +1704,7 @@ graph_kernel compile_graph(
   std::lock_guard key_lock(*key_mutex);
   {
     std::lock_guard lock(graph_mutex);
-    if (auto found = graph_plans.find(key); found != graph_plans.end())
+    if (auto found = graph_plans.find(memory_key); found != graph_plans.end())
       plan = found->second.lock();
   }
   if (!plan) {
@@ -1752,10 +1763,10 @@ graph_kernel compile_graph(
           spd_factors.size(), plan_cache);
     }
     std::lock_guard lock(graph_mutex);
-    graph_plans[key] = plan;
+    graph_plans[memory_key] = plan;
   }
   return graph_kernel(std::make_unique<detail::casadi_mx_graph_instance>(
-      std::move(plan), workspace));
+      std::move(plan), workspace, cache_dir));
 }
 struct cached_product {
   product_op op;
@@ -2035,7 +2046,7 @@ void run_product(const ::moto::sparse_matrix &sparse, product_op op,
                     .out_rows = out_rows,
                     .out_cols = out_cols,
                     .sign = sign};
-  auto kernel = compile_product(std::move(spec));
+  auto kernel = compile_product(std::move(spec), sparse.linear_codegen_dir());
   if (out)
     kernel(pointers, other, out);
   cache.products.push_back({op, sign, other_rows, other_cols, out_rows,
@@ -2049,6 +2060,15 @@ void prepare_products(std::span<const product_request> requests) {
     cached_product entry;
   };
   std::vector<pending> missing;
+  std::filesystem::path cache_dir;
+  for (const auto &r : requests) {
+    if (!r.sparse) continue;
+    const auto &directory = r.sparse->linear_codegen_dir();
+    if (cache_dir.empty()) cache_dir = directory;
+    else if (cache_dir != directory)
+      throw std::invalid_argument("product batch mixes codegen directories '" +
+          cache_dir.string() + "' and '" + directory.string() + "'");
+  }
   for (const auto &r : requests) {
     if (!r.sparse || r.sparse->is_empty() || !r.other_rows || !r.other_cols ||
         !r.out_rows || !r.out_cols)
@@ -2103,7 +2123,7 @@ void prepare_products(std::span<const product_request> requests) {
   source << "}; return f[i]; }\n";
   using registry_type = void *(*)(size_t);
   auto registry = reinterpret_cast<registry_type>(
-      compile_source(source.str(), "gen/linear_backend"));
+      compile_source(source.str(), cache_dir));
   for (size_t i = 0; i < missing.size(); ++i) {
     auto &item = missing[i];
     item.entry.kernel = product_kernel(
@@ -2235,6 +2255,10 @@ std::string emit_sparse_product_source(const matrix_layout &lhs,
 void run_sparse_product(const sparse_matrix &sparse, const sparse_matrix &other,
                         product_op op, scalar_t sign, scalar_t *out,
                         size_t out_rows, size_t out_cols) {
+  if (sparse.linear_codegen_dir() != other.linear_codegen_dir())
+    throw std::invalid_argument("sparse product mixes codegen directories '" +
+        sparse.linear_codegen_dir().string() + "' and '" +
+        other.linear_codegen_dir().string() + "'");
   if (!sparse.jit_cache_)
     sparse.jit_cache_ = std::make_shared<matrix_cache>();
   auto &cache = *sparse.jit_cache_;
@@ -2263,7 +2287,7 @@ void run_sparse_product(const sparse_matrix &sparse, const sparse_matrix &other,
   pointers.push_back(out);
   const auto source = emit_sparse_product_source(a, b, lhs_t, sign, out_rows);
   auto function = reinterpret_cast<batch_product_kernel::function_type>(
-      compile_source(source, "gen/linear_backend"));
+      compile_source(source, sparse.linear_codegen_dir()));
   batch_product_kernel kernel(pointers.size(), function);
   if (out)
     kernel(pointers);
@@ -2368,7 +2392,7 @@ void run_dense_write(const sparse_matrix &sparse, scalar_t *out,
   }
   source << "}\n";
   auto function = reinterpret_cast<batch_product_kernel::function_type>(
-      compile_source(source.str(), "gen/linear_backend"));
+      compile_source(source.str(), sparse.linear_codegen_dir()));
   batch_product_kernel kernel(pointers.size(), function);
   if (out)
     kernel(pointers);
@@ -2459,7 +2483,7 @@ batch_product_kernel compile_batch_jacobian_product(
                 << p.col_offset << ',' << p.rows << ',' << p.cols << ';';
     signature << '|';
   }
-  const auto key = signature.str();
+  const auto key = cache_identity(cache_dir, signature.str());
   {
     std::lock_guard lock(batch_mutex);
     if (auto found = jacobian_product_kernels.find(key);
@@ -2628,7 +2652,7 @@ compile_batch_condensation(batch_condensation_spec spec,
       signature << i << ',' << j << ';';
     signature << '|';
   }
-  const auto key = signature.str();
+  const auto key = cache_identity(cache_dir, signature.str());
   {
     std::lock_guard lock(batch_mutex);
     if (auto found = condensation_kernels.find(key);

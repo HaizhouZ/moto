@@ -1,5 +1,6 @@
 from collections.abc import Callable, Iterable, Iterator, Sequence
 import enum
+import os
 from typing import Annotated, overload
 
 import casadi
@@ -57,6 +58,19 @@ class constr(func):
         """
         Convert this equality to a soft PMM constraint before adding it to a stage
         """
+
+class codegen_context:
+    """Immutable directory ownership shared by stages and solvers."""
+
+    def __init__(self, output_dir: str | os.PathLike = 'gen') -> None: ...
+
+    @property
+    def output_dir(self) -> str:
+        """Absolute generated artifact directory"""
+
+    @property
+    def linear_dir(self) -> str:
+        """Absolute linear kernel directory"""
 
 class cost(func):
     """
@@ -385,7 +399,10 @@ class expr:
     def uid(self) -> int:
         """Stable identity shared by copied handles"""
 
-    def finalize(self, block_until_ready: bool = True) -> bool:
+    @property
+    def codegen(self) -> codegen_context | None: ...
+
+    def finalize(self, block_until_ready: bool = True, *, codegen: codegen_context | None = None) -> bool:
         """
         Finalize dependencies and generated callbacks. Graph realization normally calls this automatically
         """
@@ -525,7 +542,7 @@ class func(expr):
         """Reuse the cached function for this remap"""
 
     @staticmethod
-    def canonical(prefix: str, identity: object, symbols: Iterable[object], function_factory: Callable[[str], object]) -> object:
+    def canonical(prefix: str, identity: object, symbols: Iterable[object], function_factory: Callable[[str], object], *, codegen=None) -> object:
         """Create once, then remap one canonical generated function."""
 
 class ineq(constr):
@@ -601,7 +618,7 @@ class precompute(moto_pywrap.custom_func):
         """
 
     @staticmethod
-    def canonical(prefix: str, identity: object, inputs: Iterable[object], output_factory: Callable[[], Iterable[object]]) -> tuple[object, ...]:
+    def canonical(prefix: str, identity: object, inputs: Iterable[object], output_factory: Callable[[], Iterable[object]], *, codegen=None) -> tuple[object, ...]:
         """
         Create once per structural identity and return remapped value caches.
 
@@ -641,7 +658,7 @@ class semi_implicit_euler(dynamics):
 class sqp:
     """Stage-structured nonlinear OCP model and nonsmooth SQP solver."""
 
-    def __init__(self, n_job: int = 4) -> None:
+    def __init__(self, n_job: int = 4, *, codegen: codegen_context | None = None) -> None:
         """Constructor for the SQP solver with a specified number of jobs"""
 
     class stage_list:
@@ -716,6 +733,9 @@ class sqp:
 
         def remove(self, arg: stage_ocp, /) -> None:
             """Remove first occurrence of `arg`."""
+
+    @property
+    def codegen(self) -> codegen_context: ...
 
     @property
     def st(self) -> endpoint:
@@ -1743,7 +1763,7 @@ class stage_ocp(moto_pywrap.ocp):
     """
 
     @staticmethod
-    def create() -> stage_ocp:
+    def create(codegen: codegen_context | None = None) -> stage_ocp:
         """
         Create an empty authored interval stage; prefer the public ``moto.stage()`` helper
         """
@@ -1850,8 +1870,8 @@ class sym(expr):
         Create a user-defined nonstandard storage symbol for advanced extensions
         """
 
-def stage() -> stage_ocp:
-    """Create an authored OCP stage."""
+def stage(*, codegen=None) -> stage_ocp:
+    """Create an authored OCP stage using an optional codegen context."""
 
 class var(casadi.casadi.SX):
     """A CasADi expression carrying a registered moto symbol."""
@@ -1880,8 +1900,12 @@ class var(casadi.casadi.SX):
     def difference(self, x1: numpy.ndarray, x0: numpy.ndarray) -> numpy.ndarray:
         """Return the numerical tangent displacement from ``x0`` to ``x1``."""
 
-    def finalize(self):
-        """Finalize the underlying symbol."""
+    def finalize(self, block_until_ready=True, *, codegen=None):
+        """Finalize the underlying symbol in its chosen codegen context."""
+
+    @property
+    def codegen(self):
+        """Bound codegen context, or None before binding."""
 
     @property
     def name(self):
@@ -1915,4 +1939,4 @@ class var(casadi.casadi.SX):
     def sx(self):
         """Underlying CasADi SX expression."""
 
-__all__: list = ['__version__', 'approx_order', 'casadi_manifold', 'constr', 'cost', 'dense_dynamics', 'dynamics', 'endpoint', 'expr', 'field', 'func', 'ineq', 'pmm_constr', 'precompute', 'semi_implicit_euler', 'sqp', 'stage', 'stage_ocp', 'sym', 'var']
+__all__: list = ['__version__', 'approx_order', 'casadi_manifold', 'codegen_context', 'constr', 'cost', 'dense_dynamics', 'dynamics', 'endpoint', 'expr', 'field', 'func', 'ineq', 'pmm_constr', 'precompute', 'semi_implicit_euler', 'sqp', 'stage', 'stage_ocp', 'sym', 'var']

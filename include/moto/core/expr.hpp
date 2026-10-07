@@ -2,12 +2,14 @@
 #define __EXPRESSION_BASE__
 
 #include <condition_variable>
+#include <moto/core/codegen_context.hpp>
 #include <moto/core/fields.hpp>
 #include <moto/utils/optional_boolean.hpp>
 #include <moto/utils/shared.hpp>
 #include <moto/utils/unique_id.hpp>
 
 #include <cassert>
+#include <span>
 
 namespace moto {
 class expr;                              // forward declaration of expr
@@ -45,6 +47,7 @@ class expr : public std::enable_shared_from_this<expr>, public utils::clone_base
     };
 
     bool finalized_ = false;
+    codegen_context_ptr codegen_;
 
     std::string name_;
     size_t dim_ = 0;
@@ -63,6 +66,11 @@ class expr : public std::enable_shared_from_this<expr>, public utils::clone_base
     void set_ready_status(bool ready); ///< set the ready state and notify condition variable
 
     expr(const expr &rhs); ///< copy constructor
+
+    /// Validate this expression and any additional roots as one transaction,
+    /// then bind and return their dependency-first order for finalization.
+    std::vector<expr *> bind_codegen_graph(
+        codegen_context_ptr context, std::span<expr *const> additional_roots = {});
 
   public:
     auto &name() { return name_; }
@@ -129,7 +137,10 @@ class expr : public std::enable_shared_from_this<expr>, public utils::clone_base
     [[nodiscard]]
     auto make_vec(const scalar_t *ptr) const { return mapped_const_vector(ptr, dim_); }
 
-    bool finalize(bool block_until_ready = false); ///< finalize the expression, set ready status
+    const codegen_context_ptr &codegen() const { return codegen_; }
+    /// Bind the complete dependency graph before any compilation is dispatched.
+    void bind_codegen(codegen_context_ptr context);
+    bool finalize(bool block_until_ready = false, codegen_context_ptr codegen = {});
 
     virtual bool wait_until_ready() const; ///< wait until the expression is ready
 

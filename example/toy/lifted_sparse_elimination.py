@@ -16,7 +16,7 @@ import moto
 DIM = 8
 
 
-def main():
+def main(*, codegen=None):
     x, y = moto.sym.states("sparse_schur_x", DIM)
     u = moto.sym.inputs("sparse_schur_u", DIM)
     lifted = moto.sym.inputs("sparse_schur_l", DIM)
@@ -59,15 +59,16 @@ def main():
         elimination, variables=[lifted], constraints=[constraint]
     )
 
-    stage = moto.stage()
+    stage = moto.stage(codegen=codegen)
     stage.add(dynamics)
-    sqp = moto.sqp(n_job=1)
+    sqp = moto.sqp(n_job=1, codegen=codegen)
     sqp.stages.extend([stage.copy() for _ in range(2)])
     _ = sqp.nodes
 
     parameters = dynamics.elimination_parameters
     assert len(parameters) == 1
     assert parameters[0].default_value[0] == 1e-6
+    return sqp
 
 
 if __name__ == "__main__":

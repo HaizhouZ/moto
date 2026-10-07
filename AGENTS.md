@@ -262,6 +262,14 @@ by forcing a full-state bound vector.
 
 ## Finalization And Code Generation
 
+`codegen_context` fixes an absolute artifact root shared by stages and solvers.
+Expressions bind their complete dependency graph before finalization; copies,
+remaps, composition, and solver overlays preserve ownership. Reject mixed roots
+instead of rebinding compiled expressions. Runtime sparse matrices retain their
+linear-kernel directory for lazy compilation. All implementation caches include
+the directory in their keys; keep content-based artifact names independent of
+the root. Never select a context using process-wide state or `chdir`.
+
 Expression finalization establishes dimensions, dependencies, derivative
 sparsity, and generated callbacks. Problem finalization then:
 

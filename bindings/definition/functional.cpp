@@ -158,8 +158,14 @@ void register_submodule_functional(nb::module_ &m) {
         .def_prop_ro("dim", &expr::__get_dim, "Output storage dimension")
         .def_prop_ro("uid", [](const expr &self) { return size_t(self.uid()); },
                      "Stable identity shared by copied handles")
-        .def("finalize", [](expr &self, bool block_until_ready) { return self.finalize(block_until_ready); },
-             nb::arg("block_until_ready") = true,
+        .def_prop_ro("codegen", &expr::codegen,
+                     nb::sig("def codegen(self) -> codegen_context | None"))
+        .def("_bind_codegen", &expr::bind_codegen, nb::arg("codegen"))
+        .def("finalize", [](expr &self, bool block_until_ready, codegen_context_ptr codegen) {
+                 return self.finalize(block_until_ready, std::move(codegen));
+             },
+             nb::arg("block_until_ready") = true, nb::kw_only(),
+             nb::arg("codegen") = nb::none(),
              "Finalize dependencies and generated callbacks. Graph realization normally calls this automatically")
         .def_prop_ro("tdim", &expr::__get_tdim,
                      "Output tangent dimension, which may differ from dim on manifolds");

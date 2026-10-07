@@ -18,6 +18,7 @@ void *compile_casadi_mx_graph_source(const std::string &source,
 
 struct casadi_mx_graph_instance {
   std::shared_ptr<const casadi_mx_graph_plan> plan;
+  const std::filesystem::path cache_dir;
   std::shared_ptr<std::vector<sparse_matrix>> owned_workspace;
   std::vector<sparse_matrix> *workspace = nullptr;
   std::vector<size_t> workspace_slots;
@@ -30,7 +31,8 @@ struct casadi_mx_graph_instance {
   mutable void *whole_kernel_state = nullptr;
 
   casadi_mx_graph_instance(std::shared_ptr<const casadi_mx_graph_plan> plan,
-                           std::vector<sparse_matrix> *workspace);
+                           std::vector<sparse_matrix> *workspace,
+                           const std::filesystem::path &cache_dir);
   ~casadi_mx_graph_instance();
   void run(size_t entry, std::span<scalar_t *> pointers) const;
 };

@@ -10,7 +10,7 @@ if str(_REPO_ROOT) not in sys.path:
 import moto
 import numpy as np
 
-def main():
+def main(*, codegen=None):
     x, xn = moto.sym.states("restoration_demo_x", 1)
     u = moto.sym.inputs("restoration_demo_u", 1)
 
@@ -22,8 +22,8 @@ def main():
         "restoration_demo_tracking", u, weight=50.0, reference=0.5
     )
 
-    sqp = moto.sqp(n_job=1)
-    stage = moto.stage()
+    sqp = moto.sqp(n_job=1, codegen=codegen)
+    stage = moto.stage(codegen=codegen)
     stage.add(dynamics)
     stage.add(tracking)
     sqp.stages.extend([stage.copy() for _ in range(2)])

@@ -56,6 +56,42 @@ Accessing `sqp.nodes` realizes the authored graph. Finish ordinary model edits
 before that point. Later structural edits are supported, but the next
 `sqp.nodes` access must reconcile runtime storage.
 
+## Choose a code generation directory
+
+Use one immutable context for the stages and solvers belonging to a task:
+
+```python
+from pathlib import Path
+
+codegen = moto.codegen_context(Path("solvers") / "pick_place")
+stage = moto.stage(codegen=codegen)
+stage.add([dyn, running, u_box])  # Use fresh expressions for this directory.
+sqp = moto.sqp(n_job=1, codegen=codegen)
+sqp.stages.extend([stage.copy() for _ in range(12)])
+sqp.ed.add(terminal)
+print(sqp.codegen.output_dir)
+```
+
+Create fresh expressions for this example if the earlier example has already
+run: adding an expression to a stage binds its dependencies and may start
+compilation immediately. Copies and endpoint remaps retain that directory.
+Reusing bound expressions or stages with another directory raises `ValueError`;
+build a fresh model for the other task. Several solvers can share one context,
+and separately constructed contexts pointing to the same directory are compatible.
+
+The context resolves its directory to an absolute path when created, creates
+missing directories, and cannot be changed. Generated functions live beneath
+`output_dir/.moto_artifacts/`; linear kernels live in `codegen.linear_dir`, which
+is `output_dir/linear_backend/`. Background jobs and lazy runtime compilation
+keep these paths even if the working directory later changes. Identical models
+in different roots populate each root independently; content-based reuse still
+applies within each root.
+
+Omitting `codegen` preserves the default `gen/`, resolved when the stage or
+solver is created. For standalone expressions, call
+`expression.finalize(codegen=codegen)` before remapping or numerical use.
+Canonical function and precompute helpers also accept `codegen=codegen`.
+
 ## Defaults, initial guesses, and parameters
 
 `states`, `inputs`, and `params` accept `default_val`. Moto copies that value

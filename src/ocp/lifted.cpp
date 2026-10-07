@@ -302,7 +302,7 @@ void generated_lifted::prepare_graph(data &local) const {
             {program.action_output},
             {program.transpose_output}},
         graph_input_layouts,
-        &local.lag_data_->lifted_graph_workspace_, "gen/linear_backend",
+        &local.lag_data_->lifted_graph_workspace_, local.lag_data_->prob_->codegen()->linear_dir(),
         program.spd_factors);
     if (local.graph_pointers.size() != local.graph.pointer_count() ||
         local.graph.entry_count() != 3)

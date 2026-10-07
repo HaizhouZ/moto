@@ -14,7 +14,8 @@ class graph_composer;
 
 class graph_model {
   public:
-    graph_model();
+    explicit graph_model(codegen_context_ptr codegen = {});
+    const auto &codegen() const { return codegen_; }
 
     node_view st() const;
     node_view ed() const;
@@ -40,8 +41,9 @@ class graph_model {
     topology_snapshot snapshot() const;
     size_t revision() const;
     void synchronize_topology_locked() const;
-    stage_ocp_ptr_t start_stage_ = stage_ocp::create();
-    stage_ocp_ptr_t end_stage_ = stage_ocp::create();
+    codegen_context_ptr codegen_;
+    stage_ocp_ptr_t start_stage_;
+    stage_ocp_ptr_t end_stage_;
     std::vector<stage_ocp_ptr_t> stages_;
     mutable std::shared_ptr<const std::vector<stage_ref>> topology_cache_;
     mutable stage_ref start_cache_, end_cache_;

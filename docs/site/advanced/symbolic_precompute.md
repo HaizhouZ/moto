@@ -126,9 +126,16 @@ features_a = cached_robot_features(q_a, ("two_dof",))
 features_b = cached_robot_features(q_b, ("two_dof",))
 ```
 
-For the first `(prefix, identity)` pair, `output_factory` authors and compiles
-the canonical source. Later calls with the same identity do not evaluate the
-factory; Moto instantiates the source on the current inputs.
+For the first `(directory, prefix, identity)` key, `output_factory` authors the
+canonical source. Later calls with the same key do not evaluate the factory;
+Moto instantiates the source on the current inputs. Compilation occurs on
+finalization, including when an implementation must be ready for remapping.
+
+Both `moto.precompute.canonical(...)` and `moto.func.canonical(...)` accept a
+keyword-only `codegen` context. Pass the same context used by the consuming
+stage and solver. Each directory has independent canonical sources; omitting
+the context selects the current working directory's `gen/`. The generated
+function names and structural identity rules are unchanged.
 
 The identity must be hashable and must describe every structural property that
 changes the symbolic graph: dimensions, model or frame layout, selected

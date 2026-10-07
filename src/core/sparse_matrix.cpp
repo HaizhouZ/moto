@@ -174,6 +174,8 @@ sparse_matrix::sparse_matrix(const sparse_matrix &other) { *this = other; }
 
 sparse_matrix &sparse_matrix::operator=(const sparse_matrix &other) {
   if (this == &other) return *this;
+  if (!other.codegen_dir_.empty())
+    bind_resolved_codegen_directory(other.codegen_dir_);
   jit_cache_.reset();
   if (this->is_empty()) {
     rows_ = other.rows_;

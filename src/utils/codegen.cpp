@@ -505,7 +505,7 @@ void run(std::string func_name,
     task::artifact_dir_ptr resolved_artifact_dir) {
     // CasADi first emits one temporary name-based source.  Serialize that
     // temporary slot; persistent binaries are content-addressed below.
-    auto func_mutex = get_func_mutex(func_name);
+    auto func_mutex = get_func_mutex(output_dir + std::string(1, '\0') + func_name);
     std::lock_guard<std::mutex> func_lock(*func_mutex);
     fs::create_directories(output_dir);
     process_file_lock process_lock(fs::path(output_dir) / (func_name + ".lock"));
@@ -972,9 +972,11 @@ void task::finalize(job_list &jobs_) {
 }
 // Public entry point to start code generation
 job_list generate_and_compile(task &_task) {
+    _task.output_dir = fs::weakly_canonical(fs::absolute(_task.output_dir)).string();
     job_list jobs_tmp;
     _task.finalize(jobs_tmp);
     if (_task.extra_task) {
+        _task.extra_task->output_dir = _task.output_dir;
         _task.extra_task->finalize(jobs_tmp);
     }
     // std::lock_guard<std::mutex> lock(impl::mutex_);

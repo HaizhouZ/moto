@@ -16,8 +16,10 @@ void register_submodule_ns_sqp(nb::module_ &m) {
     m.attr("ns_sqp_impl") = sqp;
     nb::bind_vector<std::vector<stage_ocp_ptr_t>>(
         sqp, "stage_list", "Mutable ordered collection of authored OCP stages.");
-    sqp.def(nb::init<size_t>(), nb::arg("n_job") = 4,
+    sqp.def(nb::init<size_t, codegen_context_ptr>(), nb::arg("n_job") = 4,
+            nb::kw_only(), nb::arg("codegen") = nb::none(),
             "Constructor for the SQP solver with a specified number of jobs")
+        .def_prop_ro("codegen", &ns_sqp::codegen)
         .def_prop_ro("st", [](ns_sqp &self) { return self.st(); }, "Initial graph boundary")
         .def_prop_ro("ed", [](ns_sqp &self) { return self.ed(); }, "Graph terminal boundary")
         .def_prop_ro(

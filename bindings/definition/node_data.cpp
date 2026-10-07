@@ -1,5 +1,6 @@
 #include <moto/ocp/impl/node_data.hpp>
 #include <nanobind/stl/variant.h>
+#include <nanobind/stl/filesystem.h>
 #include <type_cast.hpp>
 #include <variant>
 
@@ -18,9 +19,20 @@ moto::ocp_base::active_status_config active_status(
 
 void register_submodule_node_data(nb::module_ &m) {
     using namespace moto;
+    nb::class_<codegen_context>(m, "codegen_context",
+        "Immutable directory ownership shared by stages and solvers.")
+        .def(nb::init<const std::filesystem::path &>(),
+             nb::arg("output_dir") = "gen")
+        .def_prop_ro("output_dir", [](const codegen_context &self) {
+            return self.output_dir().string();
+        }, "Absolute generated artifact directory")
+        .def_prop_ro("linear_dir", [](const codegen_context &self) {
+            return self.linear_dir().string();
+        }, "Absolute linear kernel directory");
     nb::class_<ocp_base>(
         m, "ocp_base",
         "Finalizable collection of active model expressions and their field layout.")
+        .def_prop_ro("codegen", &ocp_base::codegen)
         .def("add", [](ocp_base &self, expr_inarg_list &&exprs) { self.add(exprs); },
              nb::arg("exprs"), "Add expressions by shared handle; this does not clone their symbolic implementation")
         .def("add", [](ocp_base &self, expr_handle ex) { self.add(std::move(ex)); },
@@ -45,7 +57,7 @@ void register_submodule_node_data(nb::module_ &m) {
     nb::class_<stage_ocp, ocp>(
         m, "stage_ocp",
         "Authored interval stage containing dynamics, path terms, and start/end boundary views.")
-        .def_static("create", &stage_ocp::create,
+        .def_static("create", &stage_ocp::create, nb::arg("codegen") = nb::none(),
                     "Create an empty authored interval stage; prefer the public ``moto.stage()`` helper")
         .def("copy", [](const stage_ocp &self,
                          const expr_inarg_list &disable,

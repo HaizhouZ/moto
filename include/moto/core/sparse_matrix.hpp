@@ -2,6 +2,7 @@
 #define MOTO_CORE_SPARSE_MATRIX_HPP
 
 #include <moto/core/sparse_panel.hpp>
+#include <moto/core/codegen_context.hpp>
 
 #include <span>
 
@@ -10,6 +11,33 @@ namespace linear_backend {
 struct matrix_cache;
 }
 struct sparse_matrix {
+private:
+  mutable std::filesystem::path codegen_dir_;
+  /// Internal callers already own a resolved directory; never consult the
+  /// filesystem when binding from a context or copying runtime matrices.
+  void bind_resolved_codegen_directory(const std::filesystem::path &directory) {
+    if (codegen_dir_ == directory) return;
+    if (!codegen_dir_.empty())
+      throw std::invalid_argument("sparse matrix uses codegen directory '" +
+          codegen_dir_.string() + "', but requested '" + directory.string() +
+          "'; create a fresh model for a different directory");
+    codegen_dir_ = directory;
+  }
+public:
+  /// Runtime matrices keep their directory even when kernels compile lazily.
+  void bind_codegen_directory(const std::filesystem::path &directory) {
+    bind_resolved_codegen_directory(std::filesystem::weakly_canonical(
+        std::filesystem::absolute(directory)));
+  }
+  void bind_codegen(const codegen_context_ptr &context) {
+    bind_resolved_codegen_directory(context->linear_dir());
+  }
+  const std::filesystem::path &linear_codegen_dir() const {
+    if (codegen_dir_.empty())
+      codegen_dir_ = std::filesystem::weakly_canonical(
+          std::filesystem::absolute("gen/linear_backend"));
+    return codegen_dir_;
+  }
   mutable std::shared_ptr<linear_backend::matrix_cache> jit_cache_;
   size_t rows_ = 0;
   size_t cols_ = 0;

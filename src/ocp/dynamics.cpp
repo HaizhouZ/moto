@@ -15,6 +15,8 @@ generic_dynamics::approx_data::approx_data(base::approx_data &&rhs,
     dyn_proj_ = &lag_data_->dynamics_data_;
     const auto &dyn = static_cast<const generic_dynamics &>(func_);
     auto &prob = *lag_data_->prob_;
+    proj_l_x_.bind_codegen(prob.codegen());
+    proj_l_u_.bind_codegen(prob.codegen());
     const size_t f_st = prob.get_expr_start(func_);
     if (const size_t nl = prob.tdim(__l); nl && dyn.owns_stage_elimination()) {
         const auto &profile = prob.linear_profile();
@@ -31,6 +33,7 @@ generic_dynamics::approx_data::approx_data(base::approx_data &&rhs,
             if (!inserted)
                 throw std::logic_error(
                     "duplicate lifted intermediate runtime storage");
+            it->second.bind_codegen(prob.codegen());
             it->second.resize(spec.rows, spec.cols);
             it->second.plan(spec.layout);
         }

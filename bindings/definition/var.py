@@ -38,9 +38,14 @@ class var(cs.SX):
         """Return the numerical tangent displacement from ``x0`` to ``x1``."""
         return self.__sym__.difference(x1, x0)
 
-    def finalize(self):
-        """Finalize the underlying symbol."""
-        self.__sym__.finalize()
+    def finalize(self, block_until_ready=True, *, codegen=None):
+        """Finalize the underlying symbol in its chosen codegen context."""
+        return self.__sym__.finalize(block_until_ready, codegen=codegen)
+
+    @property
+    def codegen(self):
+        """Bound codegen context, or None before binding."""
+        return self.__sym__.codegen
 
     @property
     def name(self):

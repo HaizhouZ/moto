@@ -2,6 +2,7 @@ PUBLIC_BINDINGS = {
     "approx_order": "approx_order",
     "casadi_manifold": "casadi_manifold",
     "constr": "constr",
+    "codegen_context": "codegen_context",
     "cost": "cost",
     "dense_dynamics": "dense_dynamics",
     "dynamics": "lifted",
@@ -76,9 +77,9 @@ def export_public_bindings(extension, namespace):
                 publish_type(binding, public_name)
             namespace[public_name] = binding
 
-    def stage():
-        """Create an authored OCP stage."""
-        return extension.stage_ocp.create()
+    def stage(*, codegen=None):
+        """Create an authored OCP stage using an optional codegen context."""
+        return extension.stage_ocp.create(codegen=codegen)
 
     stage.__module__ = "moto"
     stage.__annotations__["return"] = extension.stage_ocp

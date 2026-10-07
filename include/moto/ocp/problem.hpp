@@ -108,7 +108,8 @@ class ocp_base : protected field_layout_store<expr_list> {
     };
 
   protected:
-    ocp_base();
+    explicit ocp_base(codegen_context_ptr codegen = {});
+    codegen_context_ptr codegen_;
     ocp_base(const ocp_base &rhs);
     ~ocp_base();
     bool add_impl(expr_handle);
@@ -137,6 +138,7 @@ class ocp_base : protected field_layout_store<expr_list> {
     }
 
   public:
+    const auto &codegen() const { return codegen_; }
     const auto &uid() const { return uid_; }
     const expr_list &exprs(size_t f) const;
     size_t pos(const expr &ex) const;
@@ -204,11 +206,13 @@ class ocp_base : protected field_layout_store<expr_list> {
 
 class ocp : public ocp_base {
   protected:
-    ocp() = default;
+    explicit ocp(codegen_context_ptr codegen = {}) : ocp_base(std::move(codegen)) {}
     ocp(const ocp &rhs) = default;
 
   public:
-    static auto create() { return std::shared_ptr<ocp>(new ocp()); }
+    static auto create(codegen_context_ptr codegen = {}) {
+        return std::shared_ptr<ocp>(new ocp(std::move(codegen)));
+    }
     ocp_ptr_t copy(const active_status_config &config = {}) const;
 
   protected:
@@ -220,7 +224,7 @@ class stage_ocp : public ocp, public std::enable_shared_from_this<stage_ocp> {
     friend class graph_composer;
 
   protected:
-    stage_ocp() = default;
+    explicit stage_ocp(codegen_context_ptr codegen = {}) : ocp(std::move(codegen)) {}
     stage_ocp(const stage_ocp &rhs);
 
   private:
@@ -237,7 +241,9 @@ class stage_ocp : public ocp, public std::enable_shared_from_this<stage_ocp> {
     void on_modified() override;
 
   public:
-    static auto create() { return std::shared_ptr<stage_ocp>(new stage_ocp()); }
+    static auto create(codegen_context_ptr codegen = {}) {
+        return std::shared_ptr<stage_ocp>(new stage_ocp(std::move(codegen)));
+    }
     /// Independent stage container sharing immutable expression handles.
     stage_ocp_ptr_t copy(const active_status_config &config = {}) const;
     bool accepts_term(const expr_handle &ex, std::string *reason = nullptr) const override;

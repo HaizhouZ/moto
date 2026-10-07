@@ -6,6 +6,17 @@ namespace moto {
 
 lag_data::lag_data(ocp *prob) : prob_(prob) {
     prob->wait_until_ready();
+    for (auto f : constr_fields)
+        for (auto p : primal_fields)
+            approx_[f].jac_[p].bind_codegen(prob->codegen());
+    dynamics_data_.proj_f_x_.bind_codegen(prob->codegen());
+    dynamics_data_.proj_f_u_.bind_codegen(prob->codegen());
+    for (size_t i = 0; i < field::num_prim; ++i)
+        for (size_t j = 0; j < field::num_prim; ++j) {
+            lag_hess_[i][j].bind_codegen(prob->codegen());
+            hessian_modification_[i][j].bind_codegen(prob->codegen());
+            constraint_hess_[i][j].bind_codegen(prob->codegen());
+        }
     const auto &profile = prob_->linear_profile();
     for (auto i : constr_fields) {
         if (prob_->exprs(i).empty()) {

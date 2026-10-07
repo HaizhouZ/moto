@@ -245,7 +245,7 @@ void node_data::prepare_soft_condensation(bool hessian) {
           batch.constraints.push_back(std::move(spec));
         });
     if (!batch.constraints.empty())
-      phase.kernel = linear_backend::compile_batch_condensation(std::move(batch));
+      phase.kernel = linear_backend::compile_batch_condensation(std::move(batch), prob_->codegen()->linear_dir());
     phase.built = true;
   }
 }
@@ -285,7 +285,7 @@ void node_data::prepare_constraint_gradient() {
     }
     if (!batch.products.empty())
       plan.constraint_gradient =
-          linear_backend::compile_batch_product(std::move(batch));
+          linear_backend::compile_batch_product(std::move(batch), prob_->codegen()->linear_dir());
     plan.gradient_built = true;
   }
 }
@@ -326,7 +326,7 @@ void node_data::prepare_soft_jacobian_steps() {
         });
     if (!products.empty())
       plan.jacobian_steps =
-          linear_backend::compile_batch_jacobian_product(std::move(products));
+          linear_backend::compile_batch_jacobian_product(std::move(products), prob_->codegen()->linear_dir());
     plan.jacobian_steps_built = true;
   }
 }
@@ -366,7 +366,7 @@ void node_data::prepare_scaling_plan() const {
                             pointers.end());
     }
     if (!layout.panels.empty()) {
-      auto kernels = linear_backend::compile_rowwise(std::move(layout));
+      auto kernels = linear_backend::compile_rowwise(std::move(layout), prob_->codegen()->linear_dir());
       phase.scale = std::move(kernels.scale);
       phase.inf_norm = std::move(kernels.inf_norm);
       phase.scaled_inf_norm = std::move(kernels.scaled_inf_norm);

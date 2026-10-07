@@ -12,6 +12,6 @@ from .definition.var import var  # noqa: E402,F401
 _publish_type(var, "var")
 from .definition.canonical_reuse import install_canonical_reuse as _install_canonical_reuse  # noqa: E402
 
-_install_canonical_reuse(precompute, func)
+_install_canonical_reuse(precompute, func, codegen_context)
 
 __all__ = sorted((*_PUBLIC_BINDINGS, "__version__", "stage", "var"))

@@ -131,6 +131,7 @@ void append_lifted_outputs(ns_riccati_data &d,
 
 struct nsp_layout_signature {
     size_t nx = 0, nu = 0, ny = 0, nl = 0;
+    std::string codegen_directory;
     std::string lifted_artifact_identity;
     std::vector<linear_backend::matrix_layout> inputs;
     bool operator==(const nsp_layout_signature &) const = default;
@@ -145,6 +146,8 @@ struct nsp_layout_signature_hash {
         combine(value.nu);
         combine(value.ny);
         combine(value.nl);
+        for (const unsigned char c : value.codegen_directory)
+            combine(c);
         for (const unsigned char c : value.lifted_artifact_identity)
             combine(c);
         for (const auto &layout : value.inputs) {
@@ -167,6 +170,7 @@ struct nsp_layout_signature_hash {
 
 nsp_layout_signature presolve_layout_signature(ns_riccati_data &d) {
     nsp_layout_signature result{d.nx, d.nu, d.ny, d.nl};
+    result.codegen_directory = d.dense_->prob_->codegen()->linear_dir().string();
     if (const auto &program =
             d.dense_->prob_->linear_profile().lifted_program) {
         result.lifted_artifact_identity = program->artifact_identity;
@@ -300,7 +304,7 @@ linear_backend::graph_kernel build_unconstrained_presolve_graph(
             : "nsp_unconstrained_presolve_v4";
     return compile_graph(artifact_identity,
                          inputs, entries, layouts, nullptr,
-                         "gen/linear_backend",
+                         d.dense_->prob_->codegen()->linear_dir(),
                          lifted_program
                              ? std::span<const casadi::MX>(
                                    lifted_program->spd_factors)
@@ -390,6 +394,8 @@ void ns_riccati_data::prepare_lifting_operator() {
             dense_->prob_->dim(__dyn), ny_local, lift_rows, nl));
 
     auto &op = lifting_;
+    op.empty_l_x.bind_codegen(dense_->prob_->codegen());
+    op.empty_l_u.bind_codegen(dense_->prob_->codegen());
     op.ny = ny_local;
     op.nl = nl;
     full_data_->for_each(__dyn, [&](const generic_dynamics &group,

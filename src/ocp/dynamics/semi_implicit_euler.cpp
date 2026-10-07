@@ -115,6 +115,7 @@ semi_implicit_euler::approx_data::approx_data(generic_constr::approx_data &&rhs)
           block.rows, block.cols, block.pattern));
     }
   }
+  inverse_.bind_codegen(prob.codegen());
   inverse_.resize(func_.dim(), func_.dim());
   for (const sp_info &block : dyn.inverse_panels_)
     jac_.push_back(inverse_.insert(block.row_offset, block.col_offset,
@@ -122,11 +123,11 @@ semi_implicit_euler::approx_data::approx_data(generic_constr::approx_data &&rhs)
   inverse_pointers_ = linear_backend::panel_pointers(inverse_);
   residual_ = linear_backend::compile_product(
       {linear_backend::describe(inverse_), linear_backend::product_op::times,
-       func_.dim(), 1, func_.dim(), 1});
+       func_.dim(), 1, func_.dim(), 1}, prob.codegen()->linear_dir());
   transpose_ = linear_backend::compile_product(
       {linear_backend::describe(inverse_),
        linear_backend::product_op::transpose_times, func_.dim(), 1,
-       func_.dim(), 1});
+       func_.dim(), 1}, prob.codegen()->linear_dir());
 }
 
 void semi_implicit_euler::compute_project_jacobians(func_approx_data &data) const {

@@ -90,7 +90,7 @@ ocp_ptr_t graph_composer::compose_stage(
     const graph_model::topology_snapshot &topology, size_t index) const {
     const auto &record = (*topology.stages)[index];
     const size_t count = topology.stages->size();
-    auto composed = ocp::create();
+    auto composed = ocp::create(record.stage->codegen());
     composed->set_allow_inconsistent_dynamics(record.stage->allow_inconsistent_dynamics());
     composed->set_automatic_reorder_primal(record.stage->automatic_reorder_primal());
 

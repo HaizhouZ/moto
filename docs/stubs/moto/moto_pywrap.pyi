@@ -9,6 +9,7 @@ import moto
 from moto import (
     approx_order as approx_order,
     casadi_manifold as casadi_manifold,
+    codegen_context as codegen_context,
     constr as constr,
     cost as cost,
     dense_dynamics as dense_dynamics,
@@ -76,6 +77,9 @@ class ocp_base:
     """
     Finalizable collection of active model expressions and their field layout.
     """
+
+    @property
+    def codegen(self) -> moto.codegen_context: ...
 
     @overload
     def add(self, exprs: Sequence[ moto.expr  | moto.var]) -> None:

@@ -378,7 +378,8 @@ struct ns_sqp {
         node_type &operator=(node_type &&rhs) noexcept = default;
     };
 
-    ns_sqp(size_t n_jobs = MAX_THREADS);
+    ns_sqp(size_t n_jobs = MAX_THREADS, codegen_context_ptr codegen = {});
+    const auto &codegen() const { return model_graph_.codegen(); }
     ns_sqp(const ns_sqp &) = delete;
     ~ns_sqp() = default;
     size_t n_jobs() const noexcept { return graph_n_jobs_; }

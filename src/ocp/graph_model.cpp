@@ -4,8 +4,11 @@
 
 namespace moto {
 
-graph_model::graph_model()
-    : topology_cache_(std::make_shared<const std::vector<stage_ref>>()),
+graph_model::graph_model(codegen_context_ptr codegen)
+    : codegen_(resolve_codegen(std::move(codegen))),
+      start_stage_(stage_ocp::create(codegen_)),
+      end_stage_(stage_ocp::create(codegen_)),
+      topology_cache_(std::make_shared<const std::vector<stage_ref>>()),
       start_cache_{start_stage_, start_stage_->composition_identity()},
       end_cache_{end_stage_, end_stage_->composition_identity()} {}
 
@@ -39,6 +42,7 @@ void graph_model::synchronize_topology_locked() const {
         if (!stage) {
             throw std::invalid_argument("sqp.stages expects non-null stages");
         }
+        stage->codegen()->require_compatible(*codegen_, "sqp stage");
         unique.push_back(stage.get());
         replacement->push_back({stage, stage->composition_identity()});
     }
