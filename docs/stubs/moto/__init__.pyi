@@ -1287,6 +1287,15 @@ class sqp:
 
     search_method_merit_backtracking: search_method = search_method.search_method_merit_backtracking
 
+    class equality_projection_backend(enum.Enum):
+        """
+        Complete-pivot LU backend for hard-equality nullspace projection and multiplier recovery.
+        """
+
+        eigen = 0
+
+        panel_lu = 1
+
     class initial_state_mode(enum.Enum):
         """Whether the initial state is fixed or optimized."""
 
@@ -1342,6 +1351,15 @@ class sqp:
 
         @initial_state.setter
         def initial_state(self, arg: sqp.initial_state_mode, /) -> None: ...
+
+        @property
+        def equality_projection(self) -> equality_projection_backend:
+            """
+            Hard-equality projection: eigen (default) or panel_lu (owned BLASFEO complete-pivot LU). Reuses one factor for nullspace, particular and multiplier solves; changes apply at the next factorization. Does not select a dynamics or Cholesky backend.
+            """
+
+        @equality_projection.setter
+        def equality_projection(self, arg: sqp.equality_projection_backend, /) -> None: ...
 
         @property
         def ls(self) -> linesearch_setting:

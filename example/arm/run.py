@@ -221,9 +221,16 @@ def main():
     parser.add_argument(
         "--max-iter", type=int, default=100, help="maximum SQP iterations"
     )
+    parser.add_argument(
+        "--equality-projection", choices=("eigen", "panel_lu"), default="eigen",
+        help="hard-equality projection backend (does not change dynamics)",
+    )
     args = parser.parse_args()
 
     sqp, model, ur5, cfg, nodes = build_sqp(n_job=args.n_job)
+    sqp.settings.equality_projection = getattr(
+        moto.sqp.equality_projection_backend, args.equality_projection
+    )
 
     import time
 

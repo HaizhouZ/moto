@@ -97,5 +97,16 @@ The root must contain `include/blasfeo.h` and either
 `lib/libblasfeo.so` or `lib/libblasfeo.a`. Installed Moto packages ship the
 same finder, so downstream CMake projects can use `find_package(moto REQUIRED)`.
 
+When multiple BLASFEO versions are installed, select its exported CMake package
+explicitly, for example `-Dblasfeo_DIR=/opt/blasfeo/share/cmake/blasfeo` (the
+directory containing `blasfeoConfig.cmake`). The optional SQP `panel_lu`
+projection backend supports conda BLASFEO without requiring a master build:
+pivot search uses a no-copy Eigen reduction, not BLASFEO's version-dependent
+vector norm. Updates and triangular solves use public BLASFEO interfaces.
+With a shared build, also ensure the runtime loader selects that same library,
+rather than an older copy earlier in `LD_LIBRARY_PATH`. A position-independent
+static BLASFEO build avoids that runtime ambiguity without changing Moto's
+backend selection.
+
 Compiler architecture flags should be consistent across Moto, CasADi,
 Pinocchio, and BLASFEO. GCC 13.2+ is recommended for Zen 4 AVX-512.

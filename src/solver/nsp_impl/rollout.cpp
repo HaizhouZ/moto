@@ -84,7 +84,7 @@ void generic_solver::finalize_dual_newton_step(ns_riccati_data *cur) {
         // fmt::print("y_0_p_K: \n{}\n", nsp.y_0_p_K);
         // fmt::print("d_lbd_f: \n{}\n", d.d_lbd_f.transpose());
         // fmt::print("d_lbd_s_c_pre_solve: \n{}\n", d.d_lbd_s_c_pre_solve.transpose());
-        d.d_lbd_s_c.noalias() = nsp.lu_eq_.transpose().solve(d.d_lbd_s_c_pre_solve);
+        nsp.lu_eq_.transpose_solve(d.d_lbd_s_c_pre_solve, d.d_lbd_s_c);
         // fmt::print("pre solve hard constr multipliers: {}\n", d.d_lbd_s_c_pre_solve.transpose());
 
         size_t cur_idx = 0;

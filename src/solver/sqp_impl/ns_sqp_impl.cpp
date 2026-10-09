@@ -319,6 +319,7 @@ void ns_sqp::solve_direction(iteration_context &ctx, bool do_scaling, bool gauss
         auto ns_factor_profile = profile_scope(profile_phase::ns_factorization);
         detail_timed_block_start("ns factorization");
         solver::for_each(solver::par, graph, [this, gauss_newton](data *d) {
+            d->equality_projection = settings.equality_projection;
             riccati_solver_.ns_factorization(d, gauss_newton);
         });
         detail_timed_block_end("ns factorization");

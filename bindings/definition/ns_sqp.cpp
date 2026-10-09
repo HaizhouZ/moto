@@ -185,6 +185,11 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         sqp, "Step-size sequence used during line-search backtracking.");
     moto::export_enum<ns_sqp::linesearch_setting::search_method>(
         sqp, "Globalization method used to accept or reject SQP steps.");
+    nb::enum_<ns_sqp::equality_projection_backend>(
+        sqp, "equality_projection_backend",
+        "Complete-pivot LU backend for hard-equality nullspace projection and multiplier recovery.")
+        .value("eigen", ns_sqp::equality_projection_backend::eigen)
+        .value("panel_lu", ns_sqp::equality_projection_backend::panel_lu);
     nb::enum_<ns_sqp::initial_state_mode>(
         sqp, "initial_state_mode",
         "Whether the initial state is fixed or optimized.")
@@ -211,6 +216,9 @@ void register_submodule_ns_sqp(nb::module_ &m) {
         .def_rw("initial_state", &ns_sqp::settings_t::initial_state,
                 nb::for_getter(nb::sig("def initial_state(self) -> initial_state_mode")),
                 "Initial-state treatment: fixed (default) or optimized through an internal virtual stage")
+        .def_rw("equality_projection", &ns_sqp::settings_t::equality_projection,
+                nb::for_getter(nb::sig("def equality_projection(self) -> equality_projection_backend")),
+                "Hard-equality projection: eigen (default) or panel_lu (owned BLASFEO complete-pivot LU). Reuses one factor for nullspace, particular and multiplier solves; changes apply at the next factorization. Does not select a dynamics or Cholesky backend.")
         .def_prop_ro("ls", [](ns_sqp::settings_t &self) -> auto & { return self.ls; },
                      nb::sig("def ls(self) -> linesearch_setting"), "Line search settings")
         .def_rw("scaling", &ns_sqp::settings_t::scaling,

@@ -282,6 +282,33 @@ Costs support scalar and vector construction through `cost.from_scalar(...)`
 and `cost.from_vector(...)`. Inequality boxes use `ineq.bounds(...)`, including
 bounds on a selected symbol or subvector.
 
+## Hard-equality projection backend
+
+Eigen `FullPivLU` remains the default. To use the panel-major complete-pivot LU
+backend for hard-equality projection:
+
+```python
+sqp.settings.equality_projection = moto.sqp.equality_projection_backend.panel_lu
+# Restore the default:
+sqp.settings.equality_projection = moto.sqp.equality_projection_backend.eigen
+```
+
+The selected backend factors each stage's hard-equality geometry once and reuses
+it for particular solutions, the input nullspace and multiplier recovery,
+including correction solves. Changes apply at the next factorization; no model
+rebuild or derivative generation is needed. This option does not change the
+dynamics solver, Cholesky, globalization or regularization. The panel backend
+uses BLASFEO's configured routines, not a forced hardware target. It is rank
+revealing but does not promise an orthonormal nullspace, minimum-norm solutions
+or bitwise equality with Eigen near numerical rank boundaries. Benchmark your
+own stage dimensions; backend speed is not an end-to-end SQP speedup guarantee.
+Small matrices can still factor more slowly than Eigen even when the complete
+projection workflow is faster because of the reused triangular solves.
+Conda BLASFEO is sufficient: pivot search uses a no-copy Eigen reduction and
+does not depend on a newer BLASFEO vector norm. Matrix updates and triangular
+solves still use the public BLASFEO interfaces. When several installations
+exist, point CMake's `blasfeo_DIR` at the intended exported package.
+
 ## Worker limits
 
 Set both process and solver limits before constructing the solver:

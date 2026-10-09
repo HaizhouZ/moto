@@ -83,6 +83,10 @@ def main(*, lifted_contact_default=False):
         action="store_true",
         default=os.getenv("MOTO_PROFILE_SQP") is not None,
     )
+    parser.add_argument(
+        "--equality-projection", choices=("eigen", "panel_lu"), default="eigen",
+        help="hard-equality projection backend (does not change dynamics)",
+    )
     args = parser.parse_args()
     if args.acceleration_control and (
         args.explicit_rnea_contact or args.lifted_acceleration
@@ -199,6 +203,9 @@ def main(*, lifted_contact_default=False):
                 f"y={prob.dim(moto.field.field___y)}"
             )
     sqp.settings.ipm.mu0 = 1.0
+    sqp.settings.equality_projection = getattr(
+        moto.sqp.equality_projection_backend, args.equality_projection
+    )
     sqp.settings.ipm.mu_method = moto.sqp.adaptive_mu_t.monotonic_decrease
     sqp.settings.ipm_conditional_corrector = True
     sqp.settings.prim_tol = 1e-3

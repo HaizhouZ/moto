@@ -4,6 +4,7 @@
 #include <moto/solver/data_base.hpp>
 #include <Eigen/Cholesky>
 #include <Eigen/LU>
+#include <moto/solver/ns_riccati/hard_equality_factor.hpp>
 #include <moto/utils/blasfeo_factorizer/blasfeo_llt.hpp>
 #include <memory>
 #include <unordered_map>
@@ -65,11 +66,13 @@ struct MOTO_ALIGN_NO_SHARING ns_riccati_data : public data_base {
         matrix y_y_K;                    ///< same as @ref y_y_k
         vector l_y_k;                    ///< lifted-primal particular solution
         matrix l_y_K;                    ///< lifted-primal state sensitivity
-        Eigen::FullPivLU<matrix> lu_eq_; ///< LU factorizer of the eq constraints
+        hard_equality_factor lu_eq_; ///< Captured projection factor and backend
         // Eigen::LLT<matrix> llt_ns_;      ///< LLT solver of the projected hessian
         utils::blasfeo_llt llt_ns_; ///< LLT solver of the projected hessian
         size_t rank{0};             ///< rank of the equality constraints, 0 if unconstrained, ncstr if fully constrained
     } nsp_;
+
+    equality_projection_backend equality_projection = equality_projection_backend::eigen;
 
     node_data *full_data_;
     std::shared_ptr<nsp_linear_plan> linear_plan_;

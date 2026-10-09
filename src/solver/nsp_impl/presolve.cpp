@@ -27,7 +27,7 @@ void generic_solver::ns_factorization_correction(ns_riccati_data *cur) {
     } else {
         nsp.s_c_stacked_0_k.conservativeResize(d.ncstr);
         d.build_lifted_hard_geometry(nullptr, nullptr, &nsp.s_c_stacked_0_k);
-        nsp.u_y_k.noalias() = nsp.lu_eq_.solve(nsp.s_c_stacked_0_k);
+        nsp.lu_eq_.solve(nsp.s_c_stacked_0_k, nsp.u_y_k);
     }
     d.update_lifted_basis_k();
 
@@ -80,7 +80,7 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
     if (d.ncstr) {
         nsp.s_c_stacked.conservativeResize(d.ncstr, d.nu);
         d.build_lifted_hard_geometry(&nsp.s_c_stacked, nullptr, nullptr);
-        nsp.lu_eq_.compute(nsp.s_c_stacked);
+        nsp.lu_eq_.compute(nsp.s_c_stacked, d.equality_projection);
         nsp.rank = nsp.lu_eq_.rank();
     }
 
@@ -91,7 +91,7 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
         nsp.Z_u.resize(d.nu, 0);
     } else {
         d.rank_status_ = rank_status::constrained;
-        nsp.Z_u = nsp.lu_eq_.kernel();
+        nsp.lu_eq_.kernel(nsp.Z_u);
     }
 
     const size_t nz =
@@ -109,7 +109,7 @@ void generic_solver::ns_factorization(ns_riccati_data *cur, bool gauss_newton) {
         nsp.u_y_K.setZero();
     } else {
         d.build_lifted_hard_geometry(nullptr, &nsp.s_c_stacked_0_K, nullptr);
-        nsp.u_y_K.noalias() = nsp.lu_eq_.solve(nsp.s_c_stacked_0_K);
+        nsp.lu_eq_.solve(nsp.s_c_stacked_0_K, nsp.u_y_K);
     }
     if (!integrated_presolve || verify_graph)
         d.update_lifted_basis_K();

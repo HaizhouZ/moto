@@ -178,6 +178,9 @@ struct ns_sqp {
         }();
     };
 
+    /// Backend for stage-local hard-equality projection, not dynamics or Cholesky.
+    using equality_projection_backend = solver::ns_riccati::equality_projection_backend;
+
     enum class initial_state_mode : size_t {
         fixed,
         optimized,
@@ -217,6 +220,8 @@ struct ns_sqp {
         restoration_settings &restoration;
         equality_multiplier_init_settings &eq_init;
         initial_state_mode initial_state = initial_state_mode::fixed;
+        /// Reused complete-pivot LU for nullspace and multiplier recovery.
+        equality_projection_backend equality_projection = equality_projection_backend::eigen;
         double prim_tol = 1e-6; ///< primal feasibility tolerance
         double dual_tol = 1e-4; ///< dual feasibility tolerance
         double comp_tol = 1e-6; ///< complementarity feasibility tolerance
