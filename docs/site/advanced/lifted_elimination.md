@@ -114,6 +114,29 @@ $$
 because the nullspace solver owns that sign. Preserve RHS row and column
 dimensions.
 
+## Reusable matrix solves
+
+Use `system.solve(matrix)` to create a reusable factor, then apply it to each
+right-hand side:
+
+```python
+factor = system.solve(matrix)
+response = factor.solve(rhs)
+```
+
+For a matrix known to be symmetric positive definite, use
+`system.solve(matrix, spd=True)`. This is a mathematical declaration, not a
+request for automatic regularization; a failed Cholesky factorization raises
+an error.
+
+Equivalent matrix solves share their factorization within one graph
+linearization. Larger blocks (dimension greater than three) use BLASFEO
+row-pivot LU or Cholesky; scalar and fixed-size 2x2/3x3 helpers retain their
+existing paths. Factors and RHS workspace belong to the graph instance and
+reuse allocated capacity across iterations. No additional SQP setting is
+needed; `settings.equality_projection` controls ordinary hard-equality
+projection separately, not these elimination-graph solves.
+
 ## Regularization parameters
 
 Regularize an otherwise absent square block inside the builder:

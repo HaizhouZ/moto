@@ -5,13 +5,14 @@
 #include <moto/core/external_function.hpp>
 #include <moto/core/sparse_matrix.hpp>
 #include <moto/utils/codegen.hpp>
+#include <moto/utils/blasfeo_factorizer/blasfeo_buffer.hpp>
 #include <utils/runtime_compiler.hpp>
 
-#include <Eigen/Cholesky>
 #include <Eigen/LU>
 
 #include <algorithm>
 #include <bit>
+#include <cmath>
 #include <dlfcn.h>
 #include <fstream>
 #include <iomanip>
@@ -509,30 +510,100 @@ void *detail::compile_casadi_mx_graph_source(
 namespace {
 struct graph_factor_state {
   struct factor {
-    Eigen::PartialPivLU<matrix> lu;
-    Eigen::LLT<matrix> llt;
-    bool spd = false;
+    utils::blasfeo_buffer lu, transposed, rhs;
+    utils::blasfeo_vec_buffer vector_rhs;
+    std::vector<int> pivots;
+    std::vector<double> identity;
+    size_t n = 0;
+    bool spd = false, transpose_ready = false;
 
-    void compute(const Eigen::Ref<const matrix> &value, bool use_spd) {
+    void compute(const double *value, size_t size, bool use_spd) {
+      n = size;
       spd = use_spd;
+      transpose_ready = false;
+      lu.resize(n, n);
+      blasfeo_pack_dmat(n, n, const_cast<double *>(value), n,
+                       &lu.data_, 0, 0);
       if (spd) {
-        llt.compute(value);
-        if (llt.info() != Eigen::Success)
-          throw std::runtime_error(
-              "declared SPD graph factor is not positive definite");
+        blasfeo_dpotrf_l(n, &lu.data_, 0, 0, &lu.data_, 0, 0);
+        for (size_t i = 0; i < n; ++i) {
+          const double pivot = BLASFEO_DMATEL(&lu.data_, i, i);
+          if (!(pivot > 0.) || !std::isfinite(pivot))
+            throw std::runtime_error(
+                "declared SPD graph factor is not positive definite");
+        }
       } else {
-        lu.compute(value);
+        pivots.resize(n);
+        blasfeo_dgetrf_rp(n, n, &lu.data_, 0, 0, &lu.data_, 0, 0,
+                         pivots.data());
       }
     }
-    matrix inverse() const {
+    void prepare_transpose() {
+      if (transpose_ready) return;
+      transposed.resize(n, n);
       if (spd)
-        return llt.solve(matrix::Identity(llt.rows(), llt.cols()));
-      return lu.inverse();
+        blasfeo_dtrtr_l(n, &lu.data_, 0, 0, &transposed.data_, 0, 0);
+      else
+        blasfeo_dgetr(n, n, &lu.data_, 0, 0, &transposed.data_, 0, 0);
+      transpose_ready = true;
+    }
+    void solve(bool transpose, const double *b, size_t cols,
+               size_t leading, double *x, size_t output_leading) {
+      // Own the packed RHS before writing output, including in-place calls.
+      if (cols == 1) {
+        vector_rhs.resize(n, 1);
+        auto &v = vector_rhs.data_;
+        blasfeo_pack_dvec(n, const_cast<double *>(b), 1, &v, 0);
+        if (spd) {
+          blasfeo_dtrsv_lnn(n, &lu.data_, 0, 0, &v, 0, &v, 0);
+          blasfeo_dtrsv_ltn(n, &lu.data_, 0, 0, &v, 0, &v, 0);
+        } else if (transpose) {
+          blasfeo_dtrsv_utn(n, &lu.data_, 0, 0, &v, 0, &v, 0);
+          blasfeo_dtrsv_ltu(n, &lu.data_, 0, 0, &v, 0, &v, 0);
+          blasfeo_dvecpei(n, pivots.data(), &v, 0);
+        } else {
+          blasfeo_dvecpe(n, pivots.data(), &v, 0);
+          blasfeo_dtrsv_lnu(n, &lu.data_, 0, 0, &v, 0, &v, 0);
+          blasfeo_dtrsv_unn(n, &lu.data_, 0, 0, &v, 0, &v, 0);
+        }
+        blasfeo_unpack_dvec(n, &v, 0, x, 1);
+        return;
+      }
+      rhs.resize(n, cols);
+      auto &r = rhs.data_;
+      blasfeo_pack_dmat(n, cols, const_cast<double *>(b), leading, &r, 0, 0);
+      if (spd) {
+        prepare_transpose();
+        blasfeo_dtrsm_llnn(n, cols, 1., &lu.data_, 0, 0, &r, 0, 0, &r, 0, 0);
+        blasfeo_dtrsm_lunn(n, cols, 1., &transposed.data_, 0, 0, &r, 0, 0,
+                         &r, 0, 0);
+      } else if (transpose) {
+        prepare_transpose();
+        blasfeo_dtrsm_llnn(n, cols, 1., &transposed.data_, 0, 0, &r, 0, 0,
+                         &r, 0, 0);
+        blasfeo_dtrsm_lunu(n, cols, 1., &transposed.data_, 0, 0, &r, 0, 0,
+                         &r, 0, 0);
+        blasfeo_drowpei(n, pivots.data(), &r);
+      } else {
+        blasfeo_drowpe(n, pivots.data(), &r);
+        blasfeo_dtrsm_llnu(n, cols, 1., &lu.data_, 0, 0, &r, 0, 0, &r, 0, 0);
+        blasfeo_dtrsm_lunn(n, cols, 1., &lu.data_, 0, 0, &r, 0, 0, &r, 0, 0);
+      }
+      blasfeo_unpack_dmat(n, cols, &r, 0, 0, x, output_leading);
+    }
+    void inverse(double *output) {
+      if (identity.size() != n * n) {
+        identity.assign(n * n, 0.);
+        for (size_t i = 0; i < n; ++i) identity[i + i * n] = 1.;
+      }
+      solve(false, identity.data(), n, n, output, n);
     }
   };
   size_t epoch = 1;
   std::vector<size_t> factor_epoch;
-  std::vector<factor> factors;
+  // Lazy slot ownership avoids copying packed buffers and keeps scratch local
+  // to this graph instance, not shared thread-local state.
+  std::vector<std::unique_ptr<factor>> factors;
   explicit graph_factor_state(size_t count)
       : factor_epoch(count), factors(count) {}
 };
@@ -654,30 +725,26 @@ extern "C" __attribute__((visibility("default"))) void moto_graph_factor(
     void *opaque, size_t slot, bool spd, const double *a, size_t n) {
   auto &state = *static_cast<graph_factor_state *>(opaque);
   if (state.factor_epoch[slot] == state.epoch) return;
-  const Eigen::Map<const matrix> value(a, n, n);
-  state.factors[slot].compute(value, spd);
+  if (!state.factors[slot])
+    state.factors[slot] = std::make_unique<graph_factor_state::factor>();
+  state.factors[slot]->compute(a, n, spd);
   state.factor_epoch[slot] = state.epoch;
 }
 
 extern "C" __attribute__((visibility("default"))) void moto_graph_inverse(
     void *opaque, size_t slot, double *output, size_t n) {
-  auto &factor = static_cast<graph_factor_state *>(opaque)->factors[slot];
-  Eigen::Map<matrix> inverse(output, n, n);
-  inverse = factor.inverse();
+  auto &factor = *static_cast<graph_factor_state *>(opaque)->factors[slot];
+  assert(factor.n == n);
+  factor.inverse(output);
 }
 
 extern "C" __attribute__((visibility("default"))) void moto_graph_solve(
     void *opaque, size_t slot, bool transpose, const double *rhs, size_t n,
     size_t cols, size_t rhs_leading, double *output,
     size_t output_leading) {
-  auto &factor = static_cast<graph_factor_state *>(opaque)->factors[slot];
-  Eigen::Map<const matrix, Eigen::Unaligned, Eigen::OuterStride<>> b(
-      rhs, n, cols, Eigen::OuterStride<>(rhs_leading));
-  Eigen::Map<matrix, Eigen::Unaligned, Eigen::OuterStride<>> x(
-      output, n, cols, Eigen::OuterStride<>(output_leading));
-  if (factor.spd) x = factor.llt.solve(b);
-  else if (transpose) x = factor.lu.transpose().solve(b);
-  else x = factor.lu.solve(b);
+  auto &factor = *static_cast<graph_factor_state *>(opaque)->factors[slot];
+  assert(factor.n == n);
+  factor.solve(transpose, rhs, cols, rhs_leading, output, output_leading);
 }
 
 template <int Alignment = Eigen::Unaligned>

@@ -12,8 +12,82 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
+#include <memory>
+
+// Internal generated-graph helper ABI; tests exercise the compiled numerical
+// owner directly without introducing a public modeling API.
+extern "C" {
+void *moto_graph_factor_state_create(size_t);
+void moto_graph_factor_state_destroy(void *);
+void moto_graph_factor_next_epoch(void *);
+void moto_graph_factor(void *, size_t, bool, const double *, size_t);
+void moto_graph_solve(void *, size_t, bool, const double *, size_t, size_t,
+                      size_t, double *, size_t);
+void moto_graph_inverse(void *, size_t, double *, size_t);
+}
 
 namespace moto::linear_backend {
+
+TEST_CASE("graph dense factors reuse epochs and preserve strided solve storage") {
+  const auto state = std::unique_ptr<void, decltype(&moto_graph_factor_state_destroy)>(
+      moto_graph_factor_state_create(1), moto_graph_factor_state_destroy);
+  for (const size_t n : {4, 12, 18, 5}) {
+    for (const bool spd : {false, true}) {
+      const matrix seed = matrix::Random(n, n);
+      matrix a = spd ? matrix(seed * seed.transpose() + matrix::Identity(n, n))
+                     : matrix(seed + 2. * n * matrix::Identity(n, n));
+      if (!spd) a.row(0).swap(a.row(n - 1));
+      moto_graph_factor_next_epoch(state.get());
+      moto_graph_factor(state.get(), 0, spd, a.data(), n);
+      matrix changed = 2. * a;
+      moto_graph_factor(state.get(), 0, spd, changed.data(), n);
+      for (const size_t cols : {1, 3, 37}) {
+        for (const bool transpose : {false, true}) {
+          const matrix b = matrix::Random(n, cols);
+          matrix packed = matrix::Constant(n + 4, cols, -13.);
+          packed.topRows(n) = b;
+          matrix output = matrix::Constant(n + 7, cols, -17.);
+          moto_graph_solve(state.get(), 0, transpose, packed.data(), n, cols,
+                           n + 4, output.data(), n + 7);
+          const matrix action = transpose ? matrix(a.transpose()) : a;
+          const matrix x = output.topRows(n);
+          REQUIRE(x.isApprox(action.partialPivLu().solve(b), 1e-12));
+          REQUIRE((output.bottomRows(7).array() == -17.).all());
+          moto_graph_solve(state.get(), 0, transpose, packed.data(), n, cols,
+                           n + 4, packed.data(), n + 4);
+          REQUIRE(packed.topRows(n).isApprox(x, 1e-12));
+          REQUIRE((packed.bottomRows(4).array() == -13.).all());
+        }
+      }
+      matrix inverse(n, n);
+      moto_graph_inverse(state.get(), 0, inverse.data(), n);
+      REQUIRE((a * inverse).isApprox(matrix::Identity(n, n), 1e-12));
+      moto_graph_factor_next_epoch(state.get());
+      moto_graph_factor(state.get(), 0, spd, changed.data(), n);
+      moto_graph_inverse(state.get(), 0, inverse.data(), n);
+      REQUIRE((changed * inverse).isApprox(matrix::Identity(n, n), 1e-12));
+    }
+  }
+}
+
+TEST_CASE("graph Cholesky rejects invalid SPD declarations and can refresh") {
+  const auto state = std::unique_ptr<void, decltype(&moto_graph_factor_state_destroy)>(
+      moto_graph_factor_state_create(1), moto_graph_factor_state_destroy);
+  for (const double pivot : {0., -1., std::numeric_limits<double>::quiet_NaN()}) {
+    matrix a = matrix::Identity(5, 5);
+    a(0, 0) = pivot;
+    moto_graph_factor_next_epoch(state.get());
+    REQUIRE_THROWS_AS(moto_graph_factor(state.get(), 0, true, a.data(), 5),
+                      std::runtime_error);
+    a.setIdentity();
+    moto_graph_factor(state.get(), 0, true, a.data(), 5);
+    const vector b = vector::LinSpaced(5, 1., 2.);
+    vector x(5);
+    moto_graph_solve(state.get(), 0, false, b.data(), 5, 1, 5, x.data(), 5);
+    REQUIRE(x.isApprox(b, 1e-12));
+  }
+}
 
 TEST_CASE("sparse induced norms match dense assembly") {
   const auto check = [](const sparse_matrix &sparse) {
